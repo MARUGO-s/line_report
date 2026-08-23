@@ -1252,6 +1252,30 @@
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
       z-index: 45;
     }
+    .sticker-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 0 0 10px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .sticker-tabs::-webkit-scrollbar { display: none; }
+    .sticker-tab {
+      flex: 0 0 auto;
+      min-width: 104px;
+      min-height: 38px;
+      padding: 8px 16px;
+      border: 0;
+      border-radius: 19px;
+      background: #eee;
+      color: #444;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .sticker-tab.active { background: var(--line-green); color: #fff; }
     .sticker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
     .sticker-option { border: 0; border-radius: 10px; background: #f4f4f4; padding: 6px; cursor: pointer; color: #222; }
     .sticker-option:hover { background: #e8f8ee; }
@@ -2401,7 +2425,12 @@
     let currentMessages = [];
     let stickerCatalog = [];
     let stickerCatalogLoaded = false;
-    const STICKER_CATALOG_CACHE_KEY = 'mtalk-sticker-catalog-v2';
+    let activeStickerCategory = 'emotion';
+    const STICKER_CATEGORIES = [
+      { id: 'emotion', label: '感情' },
+      { id: 'symbol', label: '漫符・記号' },
+    ];
+    const STICKER_CATALOG_CACHE_KEY = 'mtalk-sticker-catalog-v3';
     const STICKER_CATALOG_CACHE_MS = 24 * 60 * 60 * 1000;
     let historyExhausted = false;
     let loadingHistory = false;
@@ -6149,7 +6178,7 @@
 
     async function refreshStickerCatalog() {
       const { data, error } = await sb.from('chat_stickers')
-        .select('id,label,asset_path,sort_order')
+        .select('id,label,asset_path,sort_order,category')
         .eq('is_active', true)
         .order('sort_order');
       if (error) throw error;
@@ -6183,7 +6212,17 @@
     function renderStickerPicker() {
       const picker = $('stickerPicker');
       if (!picker) return;
-      picker.innerHTML = `<div class="sticker-grid">${stickerCatalog.map((sticker) => `
+      const visibleStickers = stickerCatalog.filter((sticker) => (sticker.category || 'emotion') === activeStickerCategory);
+      picker.innerHTML = `
+        <div class="sticker-tabs" role="tablist" aria-label="イラストのカテゴリ">
+          ${STICKER_CATEGORIES.map((category) => `
+            <button class="sticker-tab ${category.id === activeStickerCategory ? 'active' : ''}" type="button"
+              role="tab" aria-selected="${category.id === activeStickerCategory}" data-sticker-category="${category.id}">
+              ${category.label}
+            </button>
+          `).join('')}
+        </div>
+        <div class="sticker-grid">${visibleStickers.map((sticker) => `
         <button class="sticker-option" type="button" data-sticker-id="${escapeHtml(sticker.id)}" title="${escapeHtml(sticker.label)}">
           <img src="${escapeHtml(sticker.asset_path)}" alt="" loading="lazy" decoding="async"><span>${escapeHtml(sticker.label)}</span>
         </button>
@@ -7185,6 +7224,12 @@
     $('messages').addEventListener('scroll', closeMessageMenu, { passive: true });
 
     $('stickerPicker').addEventListener('click', (e) => {
+      const category = e.target.closest('[data-sticker-category]');
+      if (category) {
+        activeStickerCategory = category.dataset.stickerCategory;
+        renderStickerPicker();
+        return;
+      }
       const button = e.target.closest('[data-sticker-id]');
       if (button) sendSticker(button.dataset.stickerId);
     });
