@@ -46,6 +46,7 @@ type ChatMessageRow = {
   content: string
   created_at: string
   mentions: string[] | null
+  is_silent?: boolean | null
   chat_groups: {
     group_name: string
     is_direct: boolean
@@ -213,7 +214,7 @@ async function loadMessage(
 ): Promise<ChatMessageRow | null> {
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id, group_id, user_id, username, content, created_at, mentions, chat_groups(group_name, is_direct)")
+    .select("id, group_id, user_id, username, content, created_at, mentions, is_silent, chat_groups(group_name, is_direct)")
     .eq("id", messageId)
     .maybeSingle()
   if (error) throw new Error(`message load failed: ${error.message}`)
@@ -599,6 +600,17 @@ async function handleDispatch(
   if (!message) return json({ ok: false, error: "Message not found." }, 404)
   if (actorUserId && message.user_id !== actorUserId) {
     return json({ ok: false, error: "Only the message sender can dispatch its notification." }, 403)
+  }
+
+  if (message.is_silent === true) {
+    await supabase.from("chat_push_dispatches").upsert({
+      message_id: messageId,
+      completed_at: new Date().toISOString(),
+      sent_count: 0,
+      failure_count: 0,
+      last_error: null,
+    }, { onConflict: "message_id" })
+    return json({ ok: true, message_id: messageId, sent: 0, failed: 0, silent: true }, 200)
   }
 
   const { data: claimed, error: claimError } = await supabase.rpc(

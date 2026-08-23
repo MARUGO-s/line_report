@@ -1802,6 +1802,37 @@
       background: #e8f8d8;
     }
 
+    .silent-toggle-btn {
+      flex-shrink: 0;
+      height: 38px;
+      width: 38px;
+      padding: 0;
+      border: 1px solid #c8c8c8;
+      border-radius: 50%;
+      background: #fff;
+      color: #555;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+      transition: all 0.15s ease;
+    }
+    .silent-toggle-btn:hover { background: #f4f4f4; }
+    .silent-toggle-btn.active {
+      color: #d90429;
+      border-color: #ffccd5;
+      background: #fff0f2;
+    }
+    .silent-mark {
+      font-size: 12px;
+      color: #8a94a6;
+      display: inline-flex;
+      align-items: center;
+      margin-left: 2px;
+    }
+
     .schedule-bar {
       padding: 6px 12px;
       background: #eef6ff;
@@ -2147,6 +2178,7 @@
       .input-area .send-btn,
       .input-area .attach-btn { width: 44px; height: 44px; }
       .input-area .schedule-btn { height: 36px; padding: 0 8px; font-size: 11px; }
+      .input-area .silent-toggle-btn { width: 36px; height: 36px; font-size: 14px; }
       .fab { right: 16px; bottom: 16px; }
       .new-group-pop { right: 8px; bottom: 80px; width: calc(100% - 16px); }
       .login-screen {
@@ -2338,11 +2370,12 @@
         </button>
         <button class="attach-btn sticker-trigger-btn" type="button" onclick="toggleStickerPicker()" title="感情イラスト" aria-label="感情イラスト">☺</button>
         <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
+        <button class="silent-toggle-btn" id="silentToggleBtn" type="button" onclick="toggleSilentSend()" title="通知ありで送信（OFF）" aria-label="通知ありで送信">🔔</button>
         <button class="schedule-btn" type="button" onclick="openTextScheduleSend()" title="予約配信" aria-label="予約配信">予約配信</button>
         <button class="send-btn" type="button" onclick="sendMessage()" aria-label="送信">➤</button>
       </div>
       <div class="composer-menu" id="composerMenu">
-        <button class="composer-menu-btn" type="button" onclick="sendSearchFromMenu()">検索</button>
+        <button class="composer-menu-btn" id="composerSearchBtn" type="button" onclick="openSearchLauncher()">検索</button>
         <button class="composer-menu-btn" id="composerScheduleBtn" type="button" onclick="openReservationSchedule()">予約・予定</button>
         <button class="composer-menu-btn" id="composerSettingsBtn" type="button" onclick="openRoomSettings()">設定</button>
       </div>
@@ -2351,6 +2384,25 @@
       <div class="chat-drop-card">画像をドロップして送信</div>
     </div>
     <div class="chat-toast hidden" id="chatToast"></div>
+  </div>
+
+  <div class="invite-overlay hidden" id="searchLauncherOverlay" onclick="if (event.target === this) closeSearchLauncher()">
+    <div class="invite-sheet" role="dialog" aria-label="検索・便利メニュー">
+      <h2>検索・メニュー</h2>
+      <p class="schedule-hint">トークに投稿せず、あなただけで検索・閲覧できます</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+        <button class="invite-copy" type="button" onclick="triggerMessageSearchFromLauncher()" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px;font-weight:700;">
+          <span>🔍</span><span>トーク履歴・メッセージ検索</span>
+        </button>
+        <button class="invite-share" type="button" onclick="triggerScheduleFromLauncher()" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px;font-weight:700;">
+          <span>📅</span><span>予定・予約カレンダーを開く</span>
+        </button>
+        <button class="send-mode-now" type="button" onclick="triggerMediaFromLauncher()" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px;font-weight:700;background:#4f46e5;color:#fff;border:none;border-radius:10px;">
+          <span>📁</span><span>写真・メディアライブラリ</span>
+        </button>
+      </div>
+      <button class="invite-close" type="button" onclick="closeSearchLauncher()">閉じる</button>
+    </div>
   </div>
 
   <div class="invite-overlay hidden" id="sendModeOverlay" onclick="if (event.target === this) closeSendMode()">
@@ -2608,7 +2660,8 @@
     let selectGroupSeq = 0;
     const MESSAGE_PAGE_SIZE = 50;
     const MESSAGE_COLUMNS =
-      'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
+      'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, is_silent, created_at';
+    let isSilentSendActive = false;
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key';
     const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at';
@@ -6169,6 +6222,7 @@
           <div class="message-meta">
             ${isOwn ? '' : `<span class="username">${escapeHtml(speakerName(msg.user_id, msg.username))}</span>`}
             <span>${formatTime(msg.created_at)}</span>
+            ${msg.is_silent ? '<span class="silent-mark" title="通知なしで送信されました">🔕</span>' : ''}
             ${isOwn ? readMarkHtml(msg) : ''}
           </div>
         </div>
@@ -6881,7 +6935,8 @@
           kind: 'sticker',
           payload: { v: 1, kind: 'sticker', sticker: { id: stickerId, display } },
           reply_to_id: replyTarget ? replyTarget.id : null,
-          mentions: collectMentions(messageText)
+          mentions: collectMentions(messageText),
+          is_silent: isSilentSendActive === true
         }).select(MESSAGE_COLUMNS).single();
         if (error) throw error;
         clearReplyTarget();
@@ -7022,7 +7077,8 @@
             username: currentUser.username,
             content: '[画像]',
             kind: 'image',
-            payload: { v: 1, kind: 'image', image: { path: image.path, w: image.width, h: image.height } }
+            payload: { v: 1, kind: 'image', image: { path: image.path, w: image.width, h: image.height } },
+            is_silent: isSilentSendActive === true
           })
           .select(MESSAGE_COLUMNS)
           .single();
@@ -7194,7 +7250,8 @@
             group_id: currentGroupId,
             user_id: currentUser.id,
             username: currentUser.username,
-            content
+            content,
+            is_silent: isSilentSendActive === true
           })
           .select(MESSAGE_COLUMNS)
           .single();
@@ -7229,7 +7286,8 @@
             username: currentUser.username,
             content: text,
             reply_to_id: withReply && replyTarget ? replyTarget.id : null,
-            mentions: collectMentions(text)
+            mentions: collectMentions(text),
+            is_silent: isSilentSendActive === true
           })
           .select(MESSAGE_COLUMNS)
           .single();
@@ -7270,8 +7328,49 @@
       }
     }
 
-    function sendSearchFromMenu() {
-      sendChatText('検索', { withReply: false });
+    function toggleSilentSend() {
+      isSilentSendActive = !isSilentSendActive;
+      renderSilentSendState();
+      showChatToast(isSilentSendActive ? '🔕 通知なし（サイレント）ON' : '🔔 通常通知 ON');
+    }
+
+    function renderSilentSendState() {
+      const btn = $('silentToggleBtn');
+      if (!btn) return;
+      btn.classList.toggle('active', isSilentSendActive);
+      btn.textContent = isSilentSendActive ? '🔕' : '🔔';
+      btn.title = isSilentSendActive ? '通知なしで送信（ON）' : '通知ありで送信（OFF）';
+      btn.setAttribute('aria-label', btn.title);
+    }
+
+    function openSearchLauncher() {
+      $('searchLauncherOverlay')?.classList.remove('hidden');
+    }
+
+    function closeSearchLauncher() {
+      $('searchLauncherOverlay')?.classList.add('hidden');
+    }
+
+    function triggerMessageSearchFromLauncher() {
+      closeSearchLauncher();
+      const searchInput = $('talkSearch');
+      if (searchInput) {
+        if (talkTab !== 'all') {
+          switchTalkTab('all');
+        }
+        searchInput.focus();
+        searchInput.select();
+      }
+    }
+
+    function triggerScheduleFromLauncher() {
+      closeSearchLauncher();
+      openReservationSchedule();
+    }
+
+    function triggerMediaFromLauncher() {
+      closeSearchLauncher();
+      window.open('media_library.html', '_blank', 'noopener,noreferrer');
     }
 
     function pad2(n) {
