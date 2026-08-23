@@ -2131,13 +2131,13 @@
       }
       .login-container { max-height: 100%; overflow-y: auto; }
       .invite-overlay {
-        position: fixed !important;
-        z-index: 99999 !important;
+        position: absolute;
         padding:
           var(--mobile-safe-top)
           var(--mobile-safe-right)
           var(--mobile-safe-bottom)
           var(--mobile-safe-left);
+        z-index: 99999 !important;
       }
       .invite-sheet {
         max-height: 85vh !important;
