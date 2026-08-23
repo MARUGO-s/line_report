@@ -651,7 +651,56 @@
       });
   }
 
+  // 予定配信リマインドスロットの変更・保存
+  function saveCalendarReminderSlots(){
+    var firstSlot = calendarReminder.slots[0] || { hour: 19, minute: 0 };
+    savePatch({
+      calendar_reminder_slots: calendarReminder.slots,
+      calendar_tomorrow_reminder_hour: firstSlot.hour,
+      calendar_tomorrow_reminder_minute: firstSlot.minute
+    });
+  }
+
+  function rerenderCalendarReminderSlots(){
+    var container = document.querySelector('.calendar-reminder-slots-container');
+    if (!container) return;
+    container.outerHTML = tomorrowReminderControlHtml();
+  }
+
   el('list').addEventListener('click', function(e){
+    var addBtn = e.target.closest('.reminder-slot-add-btn');
+    if (addBtn){
+      e.preventDefault();
+      if (calendarReminder.slots.length < 3){
+        var nextId = 'slot_' + (calendarReminder.slots.length + 1);
+        var defaultTarget = calendarReminder.slots.length === 1 ? 'today' : 'tomorrow';
+        var defaultHour = calendarReminder.slots.length === 1 ? 8 : 12;
+        var defaultMinute = calendarReminder.slots.length === 1 ? 30 : 0;
+        calendarReminder.slots.push({
+          id: nextId,
+          target: defaultTarget,
+          hour: defaultHour,
+          minute: defaultMinute,
+          enabled: true
+        });
+        saveCalendarReminderSlots();
+        rerenderCalendarReminderSlots();
+      }
+      return;
+    }
+    var delBtn = e.target.closest('.reminder-slot-del-btn');
+    if (delBtn){
+      e.preventDefault();
+      var sidx = Number(delBtn.dataset.slotIdx);
+      if (calendarReminder.slots.length > 1 && !isNaN(sidx) && calendarReminder.slots[sidx]){
+        calendarReminder.slots.splice(sidx, 1);
+        // ID を slot_1.. 再番号付け
+        calendarReminder.slots.forEach(function(s, idx){ s.id = 'slot_' + (idx + 1); });
+        saveCalendarReminderSlots();
+        rerenderCalendarReminderSlots();
+      }
+      return;
+    }
     var head = e.target.closest('[data-toggle]');
     if(head){
       var sec = head.closest('.sec');
@@ -661,6 +710,41 @@
     }
   });
   el('list').addEventListener('change', function(e){
+    var remEnableInp = e.target.closest('input.reminder-slot-enable');
+    if (remEnableInp){
+      var sidx = Number(remEnableInp.dataset.slotIdx);
+      if (calendarReminder.slots[sidx]){
+        calendarReminder.slots[sidx].enabled = remEnableInp.checked;
+        saveCalendarReminderSlots();
+      }
+      return;
+    }
+    var remTargetSel = e.target.closest('select.reminder-slot-target');
+    if (remTargetSel){
+      var sidx = Number(remTargetSel.dataset.slotIdx);
+      if (calendarReminder.slots[sidx]){
+        calendarReminder.slots[sidx].target = remTargetSel.value === 'today' ? 'today' : 'tomorrow';
+        saveCalendarReminderSlots();
+      }
+      return;
+    }
+    var remTimeInp = e.target.closest('input.reminder-slot-time');
+    if (remTimeInp){
+      var sidx = Number(remTimeInp.dataset.slotIdx);
+      var mt = /^(\d{1,2}):(\d{2})$/.exec(String(remTimeInp.value||''));
+      if (calendarReminder.slots[sidx]){
+        if (!mt){
+          remTimeInp.value = pad2(calendarReminder.slots[sidx].hour)+':'+pad2(calendarReminder.slots[sidx].minute);
+          return;
+        }
+        var rh = Math.min(23, Math.max(0, parseInt(mt[1], 10)));
+        var rm = Math.min(59, Math.max(0, parseInt(mt[2], 10)));
+        calendarReminder.slots[sidx].hour = rh;
+        calendarReminder.slots[sidx].minute = rm;
+        saveCalendarReminderSlots();
+      }
+      return;
+    }
     var domeSel = e.target.closest('select.dome-sel');
     if (domeSel){
       var kind = domeSel.dataset.dome; var val = parseInt(domeSel.value, 10);
@@ -720,59 +804,6 @@
       savePatch({ today_reservation_alert_hour: th, today_reservation_alert_minute: tm });
       return;
     }
-    // 予定配信リマインドスロットの変更・保存
-    function saveCalendarReminderSlots(){
-      var firstSlot = calendarReminder.slots[0] || { hour: 19, minute: 0 };
-      savePatch({
-        calendar_reminder_slots: calendarReminder.slots,
-        calendar_tomorrow_reminder_hour: firstSlot.hour,
-        calendar_tomorrow_reminder_minute: firstSlot.minute
-      });
-    }
-
-    function rerenderCalendarReminderSlots(){
-      var container = document.querySelector('.calendar-reminder-slots-container');
-      if (!container) return;
-      var parent = container.parentElement;
-      if (!parent) return;
-      parent.innerHTML = tomorrowReminderControlHtml();
-    }
-
-    var remEnableInp = e.target.closest('input.reminder-slot-enable');
-    if (remEnableInp){
-      var sidx = Number(remEnableInp.dataset.slotIdx);
-      if (calendarReminder.slots[sidx]){
-        calendarReminder.slots[sidx].enabled = remEnableInp.checked;
-        saveCalendarReminderSlots();
-      }
-      return;
-    }
-    var remTargetSel = e.target.closest('select.reminder-slot-target');
-    if (remTargetSel){
-      var sidx = Number(remTargetSel.dataset.slotIdx);
-      if (calendarReminder.slots[sidx]){
-        calendarReminder.slots[sidx].target = remTargetSel.value === 'today' ? 'today' : 'tomorrow';
-        saveCalendarReminderSlots();
-      }
-      return;
-    }
-    var remTimeInp = e.target.closest('input.reminder-slot-time');
-    if (remTimeInp){
-      var sidx = Number(remTimeInp.dataset.slotIdx);
-      var mt = /^(\d{1,2}):(\d{2})$/.exec(String(remTimeInp.value||''));
-      if (calendarReminder.slots[sidx]){
-        if (!mt){
-          remTimeInp.value = pad2(calendarReminder.slots[sidx].hour)+':'+pad2(calendarReminder.slots[sidx].minute);
-          return;
-        }
-        var rh = Math.min(23, Math.max(0, parseInt(mt[1], 10)));
-        var rm = Math.min(59, Math.max(0, parseInt(mt[2], 10)));
-        calendarReminder.slots[sidx].hour = rh;
-        calendarReminder.slots[sidx].minute = rm;
-        saveCalendarReminderSlots();
-      }
-      return;
-    }
     var inp = e.target.closest('input[type=checkbox]');
     if(!inp) return;
     var sec = SECTIONS.find(function(s){ return s.id===inp.dataset.sec; });
@@ -780,40 +811,6 @@
     item.on = inp.checked;
     updateSummary();
     saveField(item.key, inp.checked, inp, item);
-  });
-
-  document.addEventListener('click', function(e){
-    var addBtn = e.target.closest('.reminder-slot-add-btn');
-    if (addBtn){
-      if (calendarReminder.slots.length < 3){
-        var nextId = 'slot_' + (calendarReminder.slots.length + 1);
-        var defaultTarget = calendarReminder.slots.length === 1 ? 'today' : 'tomorrow';
-        var defaultHour = calendarReminder.slots.length === 1 ? 8 : 12;
-        var defaultMinute = calendarReminder.slots.length === 1 ? 30 : 0;
-        calendarReminder.slots.push({
-          id: nextId,
-          target: defaultTarget,
-          hour: defaultHour,
-          minute: defaultMinute,
-          enabled: true
-        });
-        saveCalendarReminderSlots();
-        rerenderCalendarReminderSlots();
-      }
-      return;
-    }
-    var delBtn = e.target.closest('.reminder-slot-del-btn');
-    if (delBtn){
-      var sidx = Number(delBtn.dataset.slotIdx);
-      if (calendarReminder.slots.length > 1 && !isNaN(sidx) && calendarReminder.slots[sidx]){
-        calendarReminder.slots.splice(sidx, 1);
-        // ID を slot_1.. 再番号付け
-        calendarReminder.slots.forEach(function(s, idx){ s.id = 'slot_' + (idx + 1); });
-        saveCalendarReminderSlots();
-        rerenderCalendarReminderSlots();
-      }
-      return;
-    }
   });
 
   var expandBtn = el('expandAll');
