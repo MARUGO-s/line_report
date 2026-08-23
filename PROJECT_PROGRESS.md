@@ -1132,3 +1132,7 @@ New records are appended below.
 
 - Root cause: `selectGroup()` は最新50件を取得しても、検索・途中ジャンプ由来の `viewHasLatest=false` を `true` へ戻していなかった。そのため最新データ取得後も「最新へ」が残り、画面が途中位置として扱われていた。
 - Fix: 最新ページ取得成功時に `viewHasLatest=true` と `followNewMessages=true` を必ず設定し、差分がなくても最下部スクロールとボタン更新を実行する。
+### 2026-08-23 - iOSホーム画面版へ余白修正を強制反映
+
+- Cause: `chat.html` を更新しても `chat-sw.js` のキャッシュ世代がv50のままで、iOSホーム画面版が開いたまま古い画面ロジックを保持する場合があった。
+- Fix: チャットキャッシュをv51へ更新。新Service Workerの有効化時に表示中の `chat.html` を再ナビゲーションし、最新状態リセット修正を確実に読み込ませる。
