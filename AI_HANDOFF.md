@@ -8,12 +8,14 @@
 - Supabase production project: `hocbnifuactbvmyjraxy`
 - Main surfaces: static GitHub Pages, `admin-api`, store-scoped `line-webhook`, cron Functions, Postgres/RLS, private `line-media` Storage.
 
-## Active handoff — M-talk管理画面の次期改善（2026-08-24）
+## Active handoff — M-talk管理画面の次期改善（2026-08-24 / 2026-08-25更新）
 
 ### 次のAIが最初に知ること
 
 - ユーザーは、実装済みのM-talk専用管理画面を土台に、追加すると便利な管理機能を次のAIへ引き継ぎたい。
-- 現行の管理・権限機能は本番反映済み。次の改善候補は**提案段階で、まだ未実装**。
+- 2026-08-24時点の管理・権限機能は本番反映済み。
+- **推奨3点セット（権限テンプレート／ユーザー別アクセス一覧／監査ログ復元）はローカル実装済み・本番未反映。**
+  詳細は下の「2026-08-25 実装済み（ローカル）」を読む。優先度4以降は未着手。
 - 作業対象は必ず `/Users/yoshito/Library/CloudStorage/Dropbox/web/line_report-main`。古いアーカイブ側を編集しない。
 - 引き継ぎ開始コミットは `eef3c09`（`feat(chat): add M-talk admin permissions`）。このコミットは`main`へpush済み。
 - 管理画面: `https://marugo-s.github.io/line_report/chat-admin.html`
@@ -33,9 +35,9 @@
 
 | 優先 | 機能 | 目的 |
 | --- | --- | --- |
-| 1 | 権限テンプレート・一括設定 | 「閲覧のみ」「一般」「ルーム管理者」などを複数ユーザー／ルームへ安全に適用する |
-| 2 | ユーザー別アクセス一覧 | 1人を選び、全参加ルームと4権限、実際に利用不可となる理由を一画面で確認する |
-| 3 | 監査ログから元に戻す | 誤変更を差分確認後に安全に復元する |
+| 1 | 権限テンプレート・一括設定 | **ローカル実装済み・未反映** |
+| 2 | ユーザー別アクセス一覧 | **ローカル実装済み・未反映** |
+| 3 | 監査ログから元に戻す | **ローカル実装済み・未反映** |
 | 4 | M-talk専用管理者 | LINE Report全体の管理権限を渡さず、M-talk全体または指定ルームだけを管理させる |
 | 5 | 期限付きルーム権限 | 指定日時まで閲覧のみ／送信停止などを設定し、DB判定で自動解除する |
 | 6 | 新規ユーザー承認制 | 登録直後を承認待ちにし、所属先と初期テンプレートを管理者が決定する |
@@ -44,9 +46,63 @@
 | 9 | 通報・モデレーション | 投稿の通報、管理者による論理非表示、理由記録、復元を行う |
 | 10 | 権限変更通知 | 停止・閲覧専用等の理由と期限を対象ユーザーへ通知する |
 
-### 推奨する最初の実装範囲
+### 2026-08-25 実装済み（ローカル）／本番未反映
 
-最初は次の3機能を一つの改善単位として扱う。日常の管理工数と誤設定を最も減らせる。
+推奨3点セットを1つの改善単位として実装した。**まだ commit / push しておらず、本番のDB・Functions・Pagesには入っていない。**
+
+追加・変更したもの:
+
+- `supabase/migrations/20260825010000_chat_admin_templates_access_revert.sql`（新規）
+  - `chat_admin_normalize_member_permissions`: ルーム4権限の正規化を1か所へ集約。既存の
+    `chat_admin_update_member_permissions` もこの関数を通すよう `create or replace` した（署名は不変）。
+  - `chat_permission_templates`: 組込3件（`viewer` / `member` / `room_admin`）。service_role専用。
+  - `chat_admin_apply_room_template`: 一括適用。`dry_run`はプレビュー専用、上限100件、
+    Botと論理削除済みユーザーはスキップ、書き込みは既存の単体更新RPCへ委譲。
+  - `chat_admin_user_effective_access`: 実効アクセスと拒否理由コード、ページネーション。
+  - `chat_admin_audit_log.source_audit_id` と `chat_admin_revert_audit`: ホワイトリスト＋409競合検出＋二重復元防止。
+- `supabase/functions/admin-api/index.ts`: `/chat-admin/templates`、`/chat-admin/templates/apply`、
+  `/chat-admin/users/:id/access`、`/chat-admin/audit/:id/revert` を本部専用ブロック内へ追加。
+  `dry_run`の既定はtrue。`40001`は409へ。`/chat-admin/state` の監査ログへ `revertible` を付与。
+- `public/chat-admin.html`: テンプレート適用バー＋プレビュー、ユーザー別アクセスダイアログ
+  （ルーム名・店舗・種別・権限状態で絞り込み）、監査ログの「元に戻す」＋差分ダイアログ。
+  メンバー表に一括適用の対象を選ぶチェックボックス列を追加。
+- `tests/chat_admin_templates.test.mjs`（新規、`test:chat`へ登録済み）。
+- `docs/CHAT-ADMIN-PERMISSIONS.md` に設計を追記（正本）。
+
+ローカル検証の結果:
+
+- `npm run test:chat` 66/66成功（従来57 + 新規9）。
+- `npm run check` 成功。`deno check supabase/functions/chat-push/index.ts` 成功。
+  `admin-api/index.ts` の `deno check` エラー数は変更前後とも184で、新規コード起因の型エラーはなし。
+- `git diff --check` クリーン。
+- `./scripts/local-line-report-pages.sh` でPC(1280) / 390px / 320px を実画面確認済み。
+  行内ボタンの折返し、テンプレートバーの高さ、差分表の列幅を修正済み。
+
+実DB試験（2026-08-25・本番hocbn・`BEGIN → 適用 → 試験 → ROLLBACK` を1トランザクションで実行）:
+
+- **42アサーションすべて成功**。想定外の例外なし。
+- ROLLBACK後の確認: テーブル・列・関数いずれも残存0、`chat_admin_audit_log` 0件、
+  参加行57件のまま、`can_view=false` の行0、`supabase_migrations` 未記録、残留トランザクション0。
+- 権限: 新4RPCすべて `anon=false / authenticated=false / service_role=true`。
+  `chat_permission_templates` はRLS有効・policyなし・anon/authenticatedはSELECT不可。
+- 挙動: dry_runは行も監査ログも書かない／viewer適用と`can_view=false`カスケード／
+  1対1に`room_admin`を適用しても招待・管理はfalse／Botは`skipped`で変更0件／
+  実効アクセスが`room_view_denied`を返す／復元で値が戻り`audit_revert`が`source_audit_id`付きで残る。
+- 拒否: 二重復元、ホワイトリスト外(`template_apply`)の復元、対象未指定、不明テンプレート。
+- 競合: 後から更新済みの復元は本実行・dry_runとも `40001`。
+- 攻撃試験: `set local role anon` / `authenticated` から新3RPC・テンプレート表・監査ログの
+  すべてが `42501` で拒否。
+
+Advisors（適用前ベースライン・security）: 209件 / ERROR 1（`foodcourt_daily_features` の
+SECURITY DEFINER view。本件と無関係の既存）/ WARN 54 / INFO 154。
+`chat_admin_audit_log` の `rls_enabled_no_policy` は INFO で、service-role専用という意図的な構成。
+反映後は `chat_permission_templates` の同種INFOが1件増えるのが想定どおりで、
+新規のWARN/ERRORは出ない見込み（新4RPCはanon/authenticatedへEXECUTEを渡していないため）。
+
+**未実施**: commit / push、Pages・migration・Functionsの反映確認、反映後のAdvisors比較、
+`PROJECT_PROGRESS.md` と `docs/店舗運用修正記録.md` への記録。
+
+### 実装内容の要点（設計判断）
 
 #### 1. 権限テンプレート・一括設定
 
@@ -102,6 +158,8 @@
 
 ### 主に確認・変更するファイル
 
+- `supabase/migrations/20260825010000_chat_admin_templates_access_revert.sql`: 2026-08-25追加分の基準。
+- `tests/chat_admin_templates.test.mjs`: テンプレート／アクセス一覧／復元の契約テスト。
 - `public/chat-admin.html`: 管理UI、ユーザー／ルーム／監査画面。
 - `public/chat.html`: 利用者側の権限反映、停止理由、Realtime再評価。
 - `supabase/functions/admin-api/index.ts`: `/chat-admin/*`管理APIと認証スコープ。
@@ -153,7 +211,9 @@ npm run knowledge:check
 
 ### 次のAIがユーザーへ最初に確認すること
 
-- 最初の実装を、推奨どおり`権限テンプレート＋ユーザー別一覧＋監査ログ復元`の3点セットで進めるか。
+- 2026-08-25のローカル実装を、実DB試験のうえ本番へ反映してよいか。
+- 一括適用の上限は100件。2026-08-25の本番実測（全参加行57、1ルーム最大3人、
+  1ユーザー最大27ルーム）に対する被害範囲の制限として設定した。利用者が増えたら見直す。
 - M-talk専用管理者を誰へ委任したいか。本部全体、店舗責任者、指定ルーム管理者のどれが必要か。
 - 新規登録を現在どおり即時有効にするか、承認待ちへ変えるか。
 

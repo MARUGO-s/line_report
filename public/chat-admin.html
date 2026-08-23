@@ -65,7 +65,7 @@
     .tools { display:flex; align-items:center; gap:8px; min-width:min(420px,55%); }
     .tools input { min-width:0; }
     .table-wrap { overflow:auto; }
-    table { width:100%; border-collapse:collapse; min-width:760px; }
+    table { width:100%; border-collapse:collapse; min-width:860px; }
     th,td { padding:12px 14px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; font-size:13px; }
     th { position:sticky; top:0; z-index:1; color:var(--muted); background:var(--surface); font-size:11px; letter-spacing:.03em; }
     tbody tr:hover { background:var(--surface2); }
@@ -79,7 +79,7 @@
     .badge.warn { color:var(--warn); background:rgba(245,158,11,.12); }
     .badge.danger { color:var(--danger); background:rgba(240,82,82,.12); }
     .row-actions { display:flex; justify-content:flex-end; gap:6px; }
-    .row-actions .btn { min-height:32px; padding:5px 9px; font-size:12px; }
+    .row-actions .btn { min-height:32px; padding:5px 9px; font-size:12px; white-space:nowrap; }
     .empty { padding:34px 18px; color:var(--muted); text-align:center; }
     .tabs { display:flex; gap:7px; flex-wrap:wrap; }
     .tab { border:1px solid var(--line); border-radius:999px; padding:7px 12px; background:transparent; color:var(--muted); }
@@ -93,16 +93,20 @@
     .room-detail { min-width:0; padding:18px; }
     .room-detail h3 { margin:0 0 6px; }
     .room-detail > p { color:var(--muted); font-size:12px; }
-    .perm-grid { display:grid; grid-template-columns:minmax(160px,1fr) repeat(4,72px) 70px; align-items:center; gap:5px; min-width:560px; }
+    .perm-grid { display:grid; grid-template-columns:36px minmax(160px,1fr) repeat(4,72px) 84px; align-items:center; gap:5px; min-width:620px; }
     .perm-head { color:var(--muted); font-size:11px; text-align:center; padding:8px 4px; }
     .member-row { display:contents; }
     .member-cell { padding:10px 6px; border-top:1px solid var(--line); }
     .member-cell.center { text-align:center; }
     .member-cell input { width:18px; height:18px; accent-color:var(--accent); }
+    .member-cell .btn { min-height:32px; padding:6px 10px; font-size:12px; white-space:nowrap; }
     .member-name { display:flex; align-items:center; gap:8px; min-width:0; }
     .member-name .avatar { width:30px; height:30px; font-size:12px; }
     .audit-list { max-height:430px; overflow:auto; }
-    .audit { display:grid; grid-template-columns:165px 160px minmax(180px,1fr) minmax(220px,1.5fr); gap:10px; padding:11px 15px; border-bottom:1px solid var(--line); font-size:12px; }
+    .audit { display:grid; grid-template-columns:158px 148px minmax(150px,1fr) minmax(200px,1.4fr) 96px; gap:10px; align-items:center; padding:11px 15px; border-bottom:1px solid var(--line); font-size:12px; }
+    .audit-action { text-align:right; }
+    .audit-action .btn { min-height:30px; padding:4px 9px; font-size:12px; }
+    .audit-diff { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .audit span:first-child,.audit span:nth-child(2) { color:var(--muted); }
     dialog { width:min(620px,calc(100% - 24px)); border:1px solid var(--line); border-radius:18px; padding:0; color:var(--text); background:var(--surface); box-shadow:var(--shadow); }
     dialog::backdrop { background:rgba(0,0,0,.62); }
@@ -114,6 +118,22 @@
     .switch { display:flex; align-items:center; gap:9px; padding:11px; border:1px solid var(--line); border-radius:10px; background:var(--surface2); }
     .switch input { width:18px; height:18px; accent-color:var(--accent); }
     .switch span { font-size:13px; font-weight:650; }
+    .template-bar { display:flex; align-items:flex-end; flex-wrap:wrap; gap:10px; margin:0 0 14px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--surface2); }
+    .tb-field { display:grid; gap:5px; color:var(--muted); font-size:12px; font-weight:650; min-width:170px; }
+    .template-bar small { flex:1 1 200px; color:var(--muted); font-size:12px; line-height:1.5; }
+    .diff-table { width:100%; border-collapse:collapse; min-width:560px; font-size:12px; }
+    .diff-table th:first-child,.diff-table td:first-child { min-width:136px; }
+    .diff-table th:nth-child(2),.diff-table td:nth-child(2) { min-width:118px; }
+    .diff-table th,.diff-table td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    .diff-table th { color:var(--muted); font-size:11px; }
+    .diff-table tr.changed { background:rgba(59,130,246,.09); }
+    .diff-table td.perm-cell { white-space:nowrap; }
+    .reason-list { display:flex; flex-wrap:wrap; gap:5px; }
+    .dialog-note { flex:1 1 auto; color:var(--muted); font-size:12px; }
+    .dialog-body .table-wrap { max-height:min(52vh,430px); }
+    .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; margin:0 0 14px; font-size:13px; }
+    .kv dt { color:var(--muted); }
+    .kv dd { margin:0; }
     .toast { position:fixed; right:18px; bottom:18px; z-index:100; max-width:min(420px,calc(100% - 36px)); padding:12px 15px; border-radius:11px; color:#fff; background:#263547; box-shadow:var(--shadow); }
     .toast.error { background:#9d2d2d; }
     @media (max-width:1120px) { .summary { grid-template-columns:repeat(3,1fr); } .app { grid-template-columns:205px minmax(0,1fr); } }
@@ -134,7 +154,11 @@
       .room-layout { display:block; }
       .room-list { border-right:0; border-bottom:1px solid var(--line); max-height:280px; }
       .audit { grid-template-columns:110px 1fr; }
-      .audit span:nth-child(3),.audit span:nth-child(4) { grid-column:1/-1; }
+      .audit > :nth-child(n+3) { grid-column:1/-1; }
+      .audit-action { text-align:left; }
+      .template-bar { flex-direction:column; align-items:stretch; }
+      .tb-field { min-width:0; }
+      .template-bar small { flex:0 0 auto; }
       .switches { grid-template-columns:1fr; }
     }
   </style>
@@ -214,6 +238,23 @@
       <div class="dialog-foot"><button class="btn ghost-danger" id="removeUserBtn" type="button">ユーザーを削除</button><button class="btn" id="restoreUserBtn" type="button">ユーザーを復元</button><button class="btn primary" id="saveUserBtn" type="submit">保存</button></div>
     </form>
   </dialog>
+  <dialog id="templateDialog">
+    <div class="dialog-head"><h3>権限テンプレートの適用</h3><button class="btn" type="button" data-close="templateDialog">閉じる</button></div>
+    <div class="dialog-body"><div id="templatePreview"></div></div>
+    <div class="dialog-foot"><span class="dialog-note" id="templateNote"></span><button class="btn primary" id="templateApplyBtn" type="button">この内容で適用</button></div>
+  </dialog>
+
+  <dialog id="accessDialog">
+    <div class="dialog-head"><h3>ユーザー別アクセス</h3><button class="btn" type="button" data-close="accessDialog">閉じる</button></div>
+    <div class="dialog-body"><div id="accessBody"></div></div>
+  </dialog>
+
+  <dialog id="revertDialog">
+    <div class="dialog-head"><h3>監査ログから元に戻す</h3><button class="btn" type="button" data-close="revertDialog">閉じる</button></div>
+    <div class="dialog-body"><div id="revertBody"></div></div>
+    <div class="dialog-foot"><span class="dialog-note">現在値が操作直後と一致するときだけ復元します。</span><button class="btn primary" id="revertApplyBtn" type="button">この内容で復元</button></div>
+  </dialog>
+
   <div class="toast hidden" id="toast" role="status"></div>
 
   <script src="pages-config.js"></script>
@@ -227,7 +268,10 @@
     const PROJECT_URL = PAGES.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
     const ADMIN_SURFACE = PAGES.ADMIN_SURFACE || 'line_report';
     const $ = (id) => document.getElementById(id);
-    const state = { users: [], rooms: [], audit: [], summary: {}, selectedUser: null, selectedRoomId: null, roomTab: 'all', loading: false, busyDepth: 0 };
+    const state = { users: [], rooms: [], audit: [], summary: {}, selectedUser: null, selectedRoomId: null, roomTab: 'all', loading: false, busyDepth: 0,
+      templates: [], templateKey: '', templateScope: 'room', selectedMembers: new Set(), maxTargets: 100,
+      revertibleActions: [], templatePreview: null, revertPreview: null,
+      accessData: null, accessQuery: '', accessKind: 'all', accessStatus: 'all' };
 
     function token() { return AUTH ? AUTH.getToken() : ''; }
     function apiUrl(path) { return PAGES.adminApiUrl(path, PROJECT_URL); }
@@ -243,7 +287,7 @@
       state.busyDepth = Math.max(0, state.busyDepth + (value ? 1 : -1));
       state.loading = state.busyDepth > 0;
       document.querySelector('.app').inert = state.loading;
-      $('userDialog').inert = state.loading;
+      document.querySelectorAll('dialog').forEach((dialog) => { dialog.inert = state.loading; });
       document.body.classList.toggle('is-busy', state.loading);
     }
 
@@ -266,10 +310,14 @@
     function clearSensitiveState() {
       state.users = []; state.rooms = []; state.audit = []; state.summary = {};
       state.selectedUser = null; state.selectedRoomId = null;
-      if ($('userDialog').open) $('userDialog').close();
+      state.templates = []; state.templateKey = ''; state.templateScope = 'room'; state.selectedMembers = new Set();
+      state.templatePreview = null; state.revertPreview = null; state.revertibleActions = [];
+      state.accessData = null; state.accessQuery = ''; state.accessKind = 'all'; state.accessStatus = 'all';
+      document.querySelectorAll('dialog').forEach((dialog) => { if (dialog.open) dialog.close(); });
       $('summaryGrid').replaceChildren(); $('userRows').replaceChildren(); $('roomRows').replaceChildren(); $('auditRows').replaceChildren();
       $('roomDetail').innerHTML = '<div class="empty">左からルームを選択してください</div>';
       $('dialogPerson').replaceChildren(); $('tokenInput').value = '';
+      $('templatePreview').replaceChildren(); $('accessBody').replaceChildren(); $('revertBody').replaceChildren(); $('templateNote').textContent = '';
       $('userSearch').value = ''; $('roomSearch').value = ''; $('userStatus').value = 'all';
     }
 
@@ -288,7 +336,15 @@
         state.rooms = Array.isArray(body.rooms) ? body.rooms : [];
         state.audit = Array.isArray(body.audit_logs) ? body.audit_logs : [];
         state.summary = body.summary || {};
+        state.revertibleActions = Array.isArray(body.revertible_actions) ? body.revertible_actions : [];
         if (state.selectedRoomId && !state.rooms.some((room) => Number(room.id) === Number(state.selectedRoomId))) state.selectedRoomId = null;
+        if (!state.templates.length) {
+          try {
+            const catalog = await api('/chat-admin/templates');
+            state.templates = Array.isArray(catalog.templates) ? catalog.templates : [];
+            state.maxTargets = Number(catalog.max_targets) || state.maxTargets;
+          } catch (_) { state.templates = []; }
+        }
         renderAll(); showDashboard();
       } finally { setBusy(false); }
     }
@@ -309,7 +365,7 @@
         return '<tr><td><div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (locked ? ' <span class="badge">Bot</span>' : '') + '</strong><small>' + escapeHtml(user.id) + '</small></div></div></td>' +
           '<td>' + statusBadge(user) + (access.restriction_reason ? '<small style="display:block;margin-top:4px;color:var(--muted)">' + escapeHtml(access.restriction_reason) + '</small>' : '') + '</td>' +
           '<td>' + Number(user.room_count || 0) + '</td><td>' + boolBadge(access.can_start_direct) + '</td><td>' + boolBadge(access.can_create_group) + '</td><td>' + boolBadge(access.can_browse_users) + '</td>' +
-          '<td><div class="row-actions"><button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '" ' + (locked ? 'disabled title="Botは変更できません"' : '') + '>' + (deleted ? '復元' : '権限設定') + '</button>' + (!locked && !deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '') + '</div></td></tr>';
+          '<td><div class="row-actions"><button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button><button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '" ' + (locked ? 'disabled title="Botは変更できません"' : '') + '>' + (deleted ? '復元' : '権限設定') + '</button>' + (!locked && !deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '') + '</div></td></tr>';
       }).join('') : '<tr><td colspan="7" class="empty">該当するユーザーはいません</td></tr>';
     }
     function boolBadge(value) { return value === false ? '<span class="badge danger">不可</span>' : '<span class="badge ok">可</span>'; }
@@ -329,11 +385,11 @@
       const members = Array.isArray(room.members) ? room.members : [];
       const rows = members.length ? members.map((member) => {
         const locked = member.is_bot === true; const user = {username:member.username,icon_url:member.icon_url};
-        return '<div class="member-row" data-member-id="' + escapeHtml(member.user_id) + '"><div class="member-cell"><div class="member-name">' + avatarHtml(user) + '<div><strong>' + escapeHtml(member.username || '不明なユーザー') + '</strong>' + (locked ? '<span class="badge">Bot</span>' : '') + (member.user_deleted_at ? '<span class="badge danger">削除済み</span>' : '') + '</div></div></div>' +
+        return '<div class="member-row" data-member-id="' + escapeHtml(member.user_id) + '"><label class="member-cell center"><input type="checkbox" data-member-select="' + escapeHtml(member.user_id) + '"' + (state.selectedMembers.has(member.user_id) ? ' checked' : '') + (locked ? ' disabled' : '') + '></label><div class="member-cell"><div class="member-name">' + avatarHtml(user) + '<div><strong>' + escapeHtml(member.username || '不明なユーザー') + '</strong>' + (locked ? '<span class="badge">Bot</span>' : '') + (member.user_deleted_at ? '<span class="badge danger">削除済み</span>' : '') + '</div></div></div>' +
           memberPermission('can_view',member,locked,room.is_direct) + memberPermission('can_send',member,locked,room.is_direct) + memberPermission('can_invite',member,locked,room.is_direct) + memberPermission('can_manage',member,locked,room.is_direct) +
           '<div class="member-cell center"><button class="btn ghost-danger" type="button" data-remove-member="' + escapeHtml(member.user_id) + '" ' + (locked || room.is_direct ? 'disabled title="1対1とBotはアクセス解除できません"' : '') + '>解除</button></div></div>';
       }).join('') : '<div class="empty" style="grid-column:1/-1">メンバーはいません</div>';
-      $('roomDetail').innerHTML = '<h3>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + room.id + ' / ' + members.length + '人</p><div class="table-wrap"><div class="perm-grid"><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
+      $('roomDetail').innerHTML = '<h3>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + Number(room.id) + ' / ' + members.length + '人</p>' + templateBarHtml(room) + '<div class="table-wrap"><div class="perm-grid"><div class="perm-head"></div><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
     }
     function memberPermission(name,member,locked,isDirect) { const unavailable = locked || (isDirect && (name === 'can_invite' || name === 'can_manage')) || (name !== 'can_view' && member.can_view !== true); return '<label class="member-cell center" title="' + name + '"><input type="checkbox" data-member-permission="' + name + '" ' + (member[name] === true ? 'checked' : '') + (unavailable ? ' disabled' : '') + '></label>'; }
 
@@ -341,7 +397,11 @@
       $('auditRows').innerHTML = state.audit.length ? state.audit.map((item) => {
         const before = item.before_state == null ? '—' : JSON.stringify(item.before_state);
         const after = item.after_state == null ? '—' : JSON.stringify(item.after_state);
-        return '<div class="audit"><span>' + formatDate(item.created_at) + '</span><span>' + escapeHtml(item.actor || 'system') + '</span><strong>' + escapeHtml(item.action || '') + '</strong><span>' + escapeHtml(before + ' → ' + after) + '</span></div>';
+        const diff = before + ' → ' + after;
+        const revertCell = item.revertible === true
+          ? '<button class="btn" type="button" data-revert-audit="' + Number(item.id) + '">元に戻す</button>'
+          : (item.source_audit_id ? '<span class="badge">復元操作</span>' : '—');
+        return '<div class="audit"><span>' + formatDate(item.created_at) + '</span><span>' + escapeHtml(item.actor || 'system') + '</span><strong>' + escapeHtml(actionLabel(item.action)) + '</strong><span class="audit-diff" title="' + escapeHtml(diff) + '">' + escapeHtml(diff) + '</span><span class="audit-action">' + revertCell + '</span></div>';
       }).join('') : '<div class="empty">監査ログはありません</div>';
     }
     function renderAll() { renderSummary(); renderUsers(); renderRooms(); renderAudit(); }
@@ -394,19 +454,207 @@
       if (!confirm(member.username + ' の「' + (room.group_name || 'このルーム') + '」へのアクセスを解除しますか？\n履歴は保持され、権限を再設定すれば復元できます。')) return;
       await mutate('/chat-admin/rooms/' + room.id + '/members/' + encodeURIComponent(userId), {method:'DELETE'}, 'ルームへのアクセスを解除しました');
     }
-    async function mutate(path,options,message) { setBusy(true); try { await api(path,options); await loadState(); toast(message,false); } catch (error) { if (error.status === 409) { await loadState().catch(() => {}); if ($('userDialog').open) $('userDialog').close(); } toast(error.message || String(error),true); throw error; } finally { setBusy(false); } }
+    const PERMISSION_KEYS = ['can_view','can_send','can_invite','can_manage'];
+    const PERMISSION_LABELS = {can_view:'閲覧',can_send:'送信',can_invite:'招待',can_manage:'管理'};
+    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元'};
+    const REASON_LABELS = {user_deleted:'M-talkから削除済み',user_disabled:'全体で利用停止中',user_restricted:'期限付きで停止中',room_view_denied:'このルームは閲覧不可',room_send_denied:'送信不可',room_invite_denied:'招待不可',room_manage_denied:'管理不可',room_direct_locked:'1対1のため招待・管理は不可',room_trashed:'ルームがゴミ箱にある'};
+    function actionLabel(value) { return ACTION_LABELS[String(value || '')] || String(value || ''); }
+    function permText(perms) { return PERMISSION_KEYS.map((key) => PERMISSION_LABELS[key] + (perms && perms[key] === true ? '○' : '×')).join(' '); }
+    function displayValue(value) { if (value === true) return '可'; if (value === false) return '不可'; if (value == null || value === '') return '—'; return String(value); }
+    function currentRoom() { return state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId)) || null; }
+    function selectedTemplate() { return state.templates.find((item) => item.key === state.templateKey) || null; }
+
+    function templateBarHtml() {
+      if (!state.templates.length) return '';
+      const options = state.templates.map((item) => '<option value="' + escapeHtml(item.key) + '"' + (item.key === state.templateKey ? ' selected' : '') + '>' + escapeHtml(item.label) + '</option>').join('');
+      const template = selectedTemplate();
+      const hint = template
+        ? (permText(template) + (template.description ? ' ／ ' + template.description : ''))
+        : '選んだテンプレートの4権限へ参加者を揃えます。Botと削除済みユーザーは対象外です。1対1では招待・管理を付与しません。';
+      return '<div class="template-bar">' +
+        '<label class="tb-field">権限テンプレート<select id="templateSelect"><option value="">選択してください</option>' + options + '</select></label>' +
+        '<label class="tb-field">対象<select id="templateScope"><option value="room"' + (state.templateScope === 'room' ? ' selected' : '') + '>このルームの全員</option><option value="selected"' + (state.templateScope === 'selected' ? ' selected' : '') + '>チェックしたメンバー</option></select></label>' +
+        '<button class="btn" id="templatePreviewBtn" type="button">変更内容を確認</button>' +
+        '<small>' + escapeHtml(hint) + '</small></div>';
+    }
+
+    async function previewTemplate() {
+      const room = currentRoom(); if (!room) return;
+      const select = $('templateSelect'); const scope = $('templateScope');
+      const key = String(select ? select.value : '').trim();
+      if (!key) { toast('権限テンプレートを選択してください。', true); return; }
+      state.templateKey = key;
+      state.templateScope = scope ? scope.value : 'room';
+      const userIds = state.templateScope === 'selected' ? Array.from(state.selectedMembers) : [];
+      if (state.templateScope === 'selected' && !userIds.length) { toast('対象のメンバーをチェックしてください。', true); return; }
+      const payload = {template_key:key, group_ids:[Number(room.id)], user_ids:userIds};
+      setBusy(true);
+      try {
+        const body = await api('/chat-admin/templates/apply', {method:'POST', body:JSON.stringify(Object.assign({dry_run:true}, payload))});
+        state.templatePreview = {payload:payload, result:body.result || {}};
+        renderTemplatePreview();
+        $('templateDialog').showModal();
+      } finally { setBusy(false); }
+    }
+
+    function renderTemplatePreview() {
+      const preview = state.templatePreview; if (!preview) return;
+      const result = preview.result || {};
+      const rows = Array.isArray(result.preview) ? result.preview : [];
+      const skipped = Array.isArray(result.skipped) ? result.skipped : [];
+      const template = result.template || {};
+      const table = rows.length
+        ? '<div class="table-wrap"><table class="diff-table"><thead><tr><th>メンバー</th><th>ルーム</th><th>現在</th><th>適用後</th></tr></thead><tbody>' +
+          rows.map((row) => '<tr class="' + (row.changed ? 'changed' : '') + '"><td>' + escapeHtml(row.username || '不明なユーザー') + '</td><td>' + escapeHtml(row.group_name || ('ID ' + Number(row.group_id))) + (row.is_direct ? ' <span class="badge">1対1</span>' : '') + (row.room_trashed ? ' <span class="badge danger">ゴミ箱</span>' : '') + '</td><td class="perm-cell">' + escapeHtml(permText(row.before)) + '</td><td class="perm-cell">' + escapeHtml(permText(row.after)) + (row.changed ? '' : ' <span class="badge">変更なし</span>') + '</td></tr>').join('') +
+          '</tbody></table></div>'
+        : '<div class="empty">対象の参加者がいません</div>';
+      const skippedHtml = skipped.length
+        ? '<p style="color:var(--muted);font-size:12px;margin-top:12px">対象外: ' + skipped.map((row) => escapeHtml(String(row.username || row.user_id)) + '（' + (row.reason === 'bot' ? 'Bot' : '削除済み') + '）').join(' / ') + '</p>'
+        : '';
+      $('templatePreview').innerHTML = '<dl class="kv"><dt>テンプレート</dt><dd>' + escapeHtml(template.label || preview.payload.template_key) + '</dd><dt>権限</dt><dd>' + escapeHtml(permText(template)) + '</dd></dl>' + table + skippedHtml;
+      $('templateNote').textContent = '対象 ' + Number(result.target_count || 0) + '人 / 変更 ' + Number(result.change_count || 0) + '件（一括上限 ' + Number(result.max_targets || state.maxTargets) + '件）';
+      $('templateApplyBtn').disabled = Number(result.change_count || 0) === 0;
+    }
+
+    async function applyTemplate() {
+      const preview = state.templatePreview; if (!preview) return;
+      if (!confirm('プレビューの内容でルーム権限を一括適用します。よろしいですか？')) return;
+      await mutate('/chat-admin/templates/apply', {method:'POST', body:JSON.stringify(Object.assign({dry_run:false}, preview.payload))}, '権限テンプレートを適用しました');
+      state.templatePreview = null; state.selectedMembers = new Set();
+      if ($('templateDialog').open) $('templateDialog').close();
+      renderRooms();
+    }
+
+    async function openAccessDialog(userId) {
+      setBusy(true);
+      try {
+        const body = await api('/chat-admin/users/' + encodeURIComponent(userId) + '/access?limit=200&_ts=' + Date.now());
+        state.accessData = body; state.accessQuery = ''; state.accessKind = 'all'; state.accessStatus = 'all';
+        renderAccess(body);
+        $('accessDialog').showModal();
+      } finally { setBusy(false); }
+    }
+
+    function reasonBadges(reasons) {
+      const list = Array.isArray(reasons) ? reasons : [];
+      if (!list.length) return '<span class="badge ok">制限なし</span>';
+      return '<span class="reason-list">' + list.map((code) => '<span class="badge warn">' + escapeHtml(REASON_LABELS[code] || code) + '</span>').join('') + '</span>';
+    }
+
+    function accessRoomLabel(room) { return String(room.group_name || (room.is_direct ? '1対1トーク' : ('ID ' + Number(room.group_id)))); }
+    function filteredAccessRooms() {
+      const body = state.accessData || {};
+      const rooms = Array.isArray(body.rooms) ? body.rooms : [];
+      const query = state.accessQuery.trim().toLowerCase();
+      return rooms.filter((room) => {
+        if (state.accessKind !== 'all' && (state.accessKind === 'direct') !== (room.is_direct === true)) return false;
+        const reasons = Array.isArray(room.denial_reasons) ? room.denial_reasons : [];
+        if (state.accessStatus === 'restricted' && !reasons.length) return false;
+        if (state.accessStatus === 'ok' && reasons.length) return false;
+        if (state.accessStatus === 'trashed' && !room.trashed_at) return false;
+        if (!query) return true;
+        return accessRoomLabel(room).toLowerCase().includes(query)
+          || String(room.store_key || '').toLowerCase().includes(query)
+          || String(room.group_id).includes(query);
+      });
+    }
+    function renderAccessRooms() {
+      const rooms = filteredAccessRooms();
+      const html = rooms.length
+        ? '<div class="table-wrap"><table class="diff-table"><thead><tr><th>ルーム</th><th>付与</th><th>実効</th><th>利用できない理由</th></tr></thead><tbody>' +
+          rooms.map((room) => '<tr><td>' + escapeHtml(accessRoomLabel(room)) + '<br><small style="color:var(--muted)">' + (room.is_direct ? '1対1' : 'ルーム') + ' / ' + Number(room.member_count || 0) + '人' + (room.store_key ? ' / ' + escapeHtml(room.store_key) : '') + (room.trashed_at ? ' / ゴミ箱' : '') + '</small></td><td class="perm-cell">' + escapeHtml(permText(room.granted)) + '</td><td class="perm-cell">' + escapeHtml(permText(room.effective)) + '</td><td>' + reasonBadges(room.denial_reasons) + '</td></tr>').join('') +
+          '</tbody></table></div>'
+        : '<div class="empty">条件に合うルームはありません</div>';
+      const target = $('accessRooms');
+      if (target) target.innerHTML = html;
+    }
+
+    function renderAccess(body) {
+      const user = body.user || {}; const access = body.access || {}; const effective = body.effective || {};
+      const rooms = Array.isArray(body.rooms) ? body.rooms : [];
+      const total = Number(body.total_rooms || 0);
+      const globalReason = effective.blocked_reason ? (REASON_LABELS[effective.blocked_reason] || effective.blocked_reason) : '';
+      const head = '<div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (user.is_bot ? ' <span class="badge">Bot</span>' : '') + '</strong><small>' + escapeHtml(user.id || '') + '</small></div></div>' +
+        '<dl class="kv" style="margin-top:14px">' +
+        '<dt>M-talk全体</dt><dd>' + (effective.can_use_mtalk ? '<span class="badge ok">利用できる</span>' : '<span class="badge danger">利用できない</span> ' + escapeHtml(globalReason)) + '</dd>' +
+        '<dt>1対1 / ルーム作成 / ユーザー参照</dt><dd>' + boolBadge(access.can_start_direct) + ' ' + boolBadge(access.can_create_group) + ' ' + boolBadge(access.can_browse_users) + '</dd>' +
+        '<dt>停止理由</dt><dd>' + escapeHtml(access.restriction_reason || '—') + '</dd>' +
+        '<dt>停止期限</dt><dd>' + escapeHtml(formatDate(access.restricted_until)) + '</dd>' +
+        '<dt>参加ルーム</dt><dd>' + total + '件' + (rooms.length < total ? '（先頭' + rooms.length + '件を表示）' : '') + '</dd></dl>';
+      const filters = rooms.length
+        ? '<div class="template-bar" style="margin-top:14px">' +
+          '<label class="tb-field">ルーム名・店舗<input id="accessSearch" type="search" placeholder="ルーム名・店舗・IDで絞り込み" value="' + escapeHtml(state.accessQuery) + '"></label>' +
+          '<label class="tb-field">種別<select id="accessKind"><option value="all">すべて</option><option value="group">ルーム</option><option value="direct">1対1</option></select></label>' +
+          '<label class="tb-field">状態<select id="accessStatus"><option value="all">すべて</option><option value="ok">制限なし</option><option value="restricted">制限あり</option><option value="trashed">ゴミ箱</option></select></label></div>'
+        : '';
+      $('accessBody').innerHTML = head + filters + '<div id="accessRooms">' + (rooms.length ? '' : '<div class="empty">参加しているルームはありません</div>') + '</div>';
+      const kind = $('accessKind'); if (kind) kind.value = state.accessKind;
+      const status = $('accessStatus'); if (status) status.value = state.accessStatus;
+      if (rooms.length) renderAccessRooms();
+    }
+
+    async function openRevertDialog(auditId) {
+      setBusy(true);
+      try {
+        const body = await api('/chat-admin/audit/' + encodeURIComponent(Number(auditId)) + '/revert', {method:'POST', body:JSON.stringify({dry_run:true})});
+        state.revertPreview = {auditId:Number(auditId), result:body.result || {}};
+        renderRevert();
+        $('revertDialog').showModal();
+      } finally { setBusy(false); }
+    }
+
+    function renderRevert() {
+      const preview = state.revertPreview; if (!preview) return;
+      const result = preview.result || {}; const target = result.target || {};
+      const isMember = target.kind === 'member';
+      const current = result.current || {}; const restore = result.restore_to || {};
+      const rowsHtml = isMember
+        ? '<tr><td>ルーム権限</td><td class="perm-cell">' + escapeHtml(permText(current)) + '</td><td class="perm-cell">' + escapeHtml(permText(restore)) + '</td></tr>'
+        : ['access_enabled','can_start_direct','can_create_group','can_browse_users','restriction_reason','restricted_until','deleted_at']
+            .map((key) => '<tr class="' + (String(displayValue(current[key])) === String(displayValue(restore[key])) ? '' : 'changed') + '"><td>' + escapeHtml(key) + '</td><td>' + escapeHtml(displayValue(current[key])) + '</td><td>' + escapeHtml(displayValue(restore[key])) + '</td></tr>').join('');
+      $('revertBody').innerHTML = '<dl class="kv"><dt>操作</dt><dd>' + escapeHtml(actionLabel(result.action)) + '（監査ID ' + Number(result.audit_id || 0) + '）</dd>' +
+        '<dt>対象</dt><dd>' + escapeHtml(String(target.username || target.user_id || '')) + (isMember ? ' ／ ' + escapeHtml(String(target.group_name || ('ID ' + Number(target.group_id)))) : '') + '</dd></dl>' +
+        '<div class="table-wrap"><table class="diff-table"><thead><tr><th>項目</th><th>現在</th><th>復元後</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+    }
+
+    async function applyRevert() {
+      const preview = state.revertPreview; if (!preview) return;
+      if (!confirm('この監査ログの変更を元に戻します。よろしいですか？')) return;
+      await mutate('/chat-admin/audit/' + encodeURIComponent(preview.auditId) + '/revert', {method:'POST', body:JSON.stringify({dry_run:false})}, '監査ログの変更を元に戻しました');
+      state.revertPreview = null;
+      if ($('revertDialog').open) $('revertDialog').close();
+    }
+
+    async function mutate(path,options,message) { setBusy(true); try { await api(path,options); await loadState(); toast(message,false); } catch (error) { if (error.status === 409) { await loadState().catch(() => {}); document.querySelectorAll('dialog').forEach((dialog) => { if (dialog.open) dialog.close(); }); } toast(error.message || String(error),true); throw error; } finally { setBusy(false); } }
 
     $('loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const value = $('tokenInput').value.trim(); $('loginError').classList.add('hidden'); setBusy(true); try { await AUTH.loginWithToken(value,{sessionUrl:apiUrl('/auth/session'),adminSurface:ADMIN_SURFACE}); $('tokenInput').value=''; await loadState(); } catch (error) { showLogin(error.message || String(error)); } finally { setBusy(false); } });
     $('logoutBtn').addEventListener('click', async () => { try { await AUTH.logout({logoutUrl:apiUrl('/auth/logout'),adminSurface:ADMIN_SURFACE}); } finally { showLogin(); } });
     $('refreshBtn').addEventListener('click', () => loadState().catch((error) => toast(error.message,true)));
     $('userSearch').addEventListener('input', renderUsers); $('userStatus').addEventListener('change', renderUsers); $('roomSearch').addEventListener('input', renderRooms);
-    $('userRows').addEventListener('click', (event) => { const edit = event.target.closest('[data-edit-user]'); const toggle = event.target.closest('[data-toggle-access]'); if (edit) openUserDialog(edit.dataset.editUser); if (toggle) toggleUserAccess(toggle.dataset.toggleAccess).catch(() => {}); });
+    $('userRows').addEventListener('click', (event) => { const edit = event.target.closest('[data-edit-user]'); const toggle = event.target.closest('[data-toggle-access]'); const access = event.target.closest('[data-user-access]'); if (edit) openUserDialog(edit.dataset.editUser); if (toggle) toggleUserAccess(toggle.dataset.toggleAccess).catch(() => {}); if (access) openAccessDialog(access.dataset.userAccess).catch((error) => toast(error.message || String(error), true)); });
     $('roomTabs').addEventListener('click', (event) => { const tab = event.target.closest('[data-room-tab]'); if (!tab) return; state.roomTab=tab.dataset.roomTab; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item===tab)); renderRooms(); });
-    $('roomRows').addEventListener('click', (event) => { const row=event.target.closest('[data-room-id]'); if (!row) return; state.selectedRoomId=Number(row.dataset.roomId); renderRooms(); });
-    $('roomDetail').addEventListener('change', (event) => { if (event.target.matches('[data-member-permission]')) updateMember(event.target).catch(() => {}); });
-    $('roomDetail').addEventListener('click', (event) => { const button=event.target.closest('[data-remove-member]'); if (button) removeMember(button.dataset.removeMember).catch(() => {}); });
+    $('roomRows').addEventListener('click', (event) => { const row=event.target.closest('[data-room-id]'); if (!row) return; state.selectedRoomId=Number(row.dataset.roomId); state.selectedMembers=new Set(); renderRooms(); });
+    $('roomDetail').addEventListener('change', (event) => {
+      if (event.target.matches('[data-member-permission]')) { updateMember(event.target).catch(() => {}); return; }
+      if (event.target.matches('[data-member-select]')) { const id = event.target.dataset.memberSelect; if (event.target.checked) state.selectedMembers.add(id); else state.selectedMembers.delete(id); return; }
+      if (event.target.id === 'templateSelect') { state.templateKey = event.target.value; renderRoomDetail(); return; }
+      if (event.target.id === 'templateScope') { state.templateScope = event.target.value; }
+    });
+    $('roomDetail').addEventListener('click', (event) => {
+      const button=event.target.closest('[data-remove-member]'); if (button) { removeMember(button.dataset.removeMember).catch(() => {}); return; }
+      if (event.target.closest('#templatePreviewBtn')) previewTemplate().catch((error) => toast(error.message || String(error), true));
+    });
+    $('auditRows').addEventListener('click', (event) => { const button = event.target.closest('[data-revert-audit]'); if (button) openRevertDialog(button.dataset.revertAudit).catch((error) => toast(error.message || String(error), true)); });
+    $('accessBody').addEventListener('input', (event) => { if (event.target.id === 'accessSearch') { state.accessQuery = event.target.value; renderAccessRooms(); } });
+    $('accessBody').addEventListener('change', (event) => {
+      if (event.target.id === 'accessKind') { state.accessKind = event.target.value; renderAccessRooms(); return; }
+      if (event.target.id === 'accessStatus') { state.accessStatus = event.target.value; renderAccessRooms(); }
+    });
+    $('templateApplyBtn').addEventListener('click', () => applyTemplate().catch(() => {}));
+    $('revertApplyBtn').addEventListener('click', () => applyRevert().catch(() => {}));
     $('userForm').addEventListener('submit', (event) => saveUser(event).catch((error) => toast(error.message,true))); $('removeUserBtn').addEventListener('click', () => removeUser().catch((error) => toast(error.message,true))); $('restoreUserBtn').addEventListener('click', () => restoreUser().catch((error) => toast(error.message,true)));
     document.querySelectorAll('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => $('userDialog').close()));
+    document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => { const dialog = $(button.dataset.close); if (dialog && dialog.open) dialog.close(); }));
     document.querySelectorAll('[data-jump]').forEach((button) => button.addEventListener('click', () => { document.querySelectorAll('[data-jump]').forEach((item) => item.classList.toggle('active',item===button)); $(button.dataset.jump)?.scrollIntoView({behavior:'smooth',block:'start'}); }));
 
     (async function init() {

@@ -1559,6 +1559,42 @@ Deno.serve(async (req, info) => {
         return json(await fetchChatAdminState(supabase), 200)
       }
 
+      if (req.method === "GET" && path === "/chat-admin/templates") {
+        return json(await fetchChatAdminTemplates(supabase), 200)
+      }
+
+      if (req.method === "POST" && path === "/chat-admin/templates/apply") {
+        const body = await parseJson(workReq)
+        if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        return json(await applyChatAdminTemplate(supabase, body, actorLabel), 200)
+      }
+
+      const userAccessMatch = /^\/chat-admin\/users\/([0-9a-f-]{36})\/access$/i.exec(path)
+      if (userAccessMatch && req.method === "GET") {
+        const userId = userAccessMatch[1].toLowerCase()
+        if (!isUuid(userId)) throw { status: 400, message: "Invalid user_id." } satisfies AppError
+        return json(
+          await fetchChatAdminUserAccess(
+            supabase,
+            userId,
+            url.searchParams.get("limit"),
+            url.searchParams.get("offset"),
+          ),
+          200,
+        )
+      }
+
+      const auditRevertMatch = /^\/chat-admin\/audit\/(\d{1,18})\/revert$/.exec(path)
+      if (auditRevertMatch && req.method === "POST") {
+        const auditId = Number(auditRevertMatch[1])
+        if (!Number.isSafeInteger(auditId) || auditId <= 0) {
+          throw { status: 400, message: "Invalid audit id." } satisfies AppError
+        }
+        const body = await parseJson(workReq)
+        if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        return json(await revertChatAdminAudit(supabase, auditId, body, actorLabel), 200)
+      }
+
       const memberMatch = /^\/chat-admin\/rooms\/(\d+)\/members\/([0-9a-f-]{36})$/i.exec(path)
       if (memberMatch) {
         const groupId = Number(memberMatch[1])
@@ -4052,6 +4088,16 @@ function chatAdminExpectedTimestamp(value: unknown): string {
   return raw
 }
 
+// chat_admin_revert_audit のホワイトリストと同じ集合。復元不能な操作は含めない。
+const CHAT_ADMIN_REVERTIBLE_ACTIONS = new Set<string>([
+  "user_access_update",
+  "user_remove",
+  "member_permissions_update",
+  "member_remove",
+])
+// chat_admin_apply_room_template の上限と同じ。変更するときは両方そろえる。
+const CHAT_ADMIN_TEMPLATE_MAX_TARGETS = 100
+
 async function fetchChatAdminState(
   supabase: ReturnType<typeof createClient<any>>,
 ): Promise<Record<string, unknown>> {
@@ -4077,7 +4123,7 @@ async function fetchChatAdminState(
       .limit(20000),
     supabase
       .from("chat_admin_audit_log")
-      .select("id, actor, action, target_user_id, group_id, before_state, after_state, created_at")
+      .select("id, actor, action, target_user_id, group_id, before_state, after_state, created_at, source_audit_id")
       .order("created_at", { ascending: false })
       .limit(200),
   ])
@@ -4095,6 +4141,19 @@ async function fetchChatAdminState(
   const accessRows = (accessResult.data || []) as Array<Record<string, unknown>>
   const groupRows = (groupsResult.data || []) as Array<Record<string, unknown>>
   const memberRows = (membersResult.data || []) as Array<Record<string, unknown>>
+  const revertedAuditIds = new Set(
+    ((auditResult.data || []) as Array<Record<string, unknown>>)
+      .map((row) => Number(row.source_audit_id ?? 0))
+      .filter((value) => Number.isSafeInteger(value) && value > 0),
+  )
+  const auditRows = ((auditResult.data || []) as Array<Record<string, unknown>>).map((row) => ({
+    ...row,
+    // 復元可能な操作で、まだ復元されていないものだけUIへ「元に戻す」を出す。
+    revertible: CHAT_ADMIN_REVERTIBLE_ACTIONS.has(String(row.action ?? ""))
+      && row.before_state != null
+      && row.after_state != null
+      && !revertedAuditIds.has(Number(row.id ?? 0)),
+  }))
   const accessByUser = new Map(accessRows.map((row) => [String(row.user_id ?? ""), row]))
   const userById = new Map(userRows.map((row) => [String(row.id ?? ""), row]))
   const membersByGroup = new Map<string, Array<Record<string, unknown>>>()
@@ -4168,7 +4227,8 @@ async function fetchChatAdminState(
     },
     users,
     rooms,
-    audit_logs: auditResult.data || [],
+    audit_logs: auditRows,
+    revertible_actions: [...CHAT_ADMIN_REVERTIBLE_ACTIONS],
     generated_at: new Date().toISOString(),
   }
 }
@@ -4276,6 +4336,121 @@ async function removeChatAdminMember(
   })
   if (error) throw { status: 400, message: error.message } satisfies AppError
   return { ok: true }
+}
+
+// M-talk管理RPCの失敗を、競合(40001)なら409、それ以外は400として返す。
+function chatAdminRpcError(error: { code?: string | null; message?: string | null } | null): AppError {
+  const conflict = String(error?.code ?? "") === "40001"
+  return {
+    status: conflict ? 409 : 400,
+    message: conflict
+      ? "別の管理者が先に更新しました。再読み込みしてやり直してください。"
+      : String(error?.message ?? "M-talk管理操作に失敗しました。"),
+  }
+}
+
+function chatAdminIdList<T>(
+  value: unknown,
+  field: string,
+  parse: (item: unknown) => T | null,
+  max = CHAT_ADMIN_TEMPLATE_MAX_TARGETS,
+): T[] {
+  if (value == null) return []
+  if (!Array.isArray(value)) {
+    throw { status: 400, message: `${field} は配列で指定してください。` } satisfies AppError
+  }
+  if (value.length > max) {
+    throw { status: 400, message: `${field} は${max}件までです。` } satisfies AppError
+  }
+  const list: T[] = []
+  for (const item of value) {
+    const parsed = parse(item)
+    if (parsed === null) {
+      throw { status: 400, message: `${field} に不正な値が含まれています。` } satisfies AppError
+    }
+    list.push(parsed)
+  }
+  return [...new Set(list)]
+}
+
+async function fetchChatAdminTemplates(
+  supabase: ReturnType<typeof createClient<any>>,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .from("chat_permission_templates")
+    .select("key, label, description, can_view, can_send, can_invite, can_manage, is_builtin, sort_order")
+    .order("sort_order", { ascending: true })
+    .limit(200)
+  if (error) {
+    throw { status: 500, message: `権限テンプレートの取得に失敗しました: ${error.message}` } satisfies AppError
+  }
+  return { templates: data || [], max_targets: CHAT_ADMIN_TEMPLATE_MAX_TARGETS }
+}
+
+// dry_run は既定true。書き込むときだけ dry_run:false を明示させる。
+async function applyChatAdminTemplate(
+  supabase: ReturnType<typeof createClient<any>>,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const templateKey = String(body.template_key ?? "").trim()
+  if (!/^[a-z][a-z0-9_]{1,40}$/.test(templateKey)) {
+    throw { status: 400, message: "適用する権限テンプレートを選択してください。" } satisfies AppError
+  }
+  const groupIds = chatAdminIdList(body.group_ids, "group_ids", (item) => {
+    const value = Number(item)
+    return Number.isSafeInteger(value) && value > 0 ? value : null
+  })
+  const userIds = chatAdminIdList(body.user_ids, "user_ids", (item) => {
+    const value = String(item ?? "").trim().toLowerCase()
+    return isUuid(value) ? value : null
+  })
+  if (!groupIds.length && !userIds.length) {
+    throw { status: 400, message: "適用対象のルームまたはユーザーを指定してください。" } satisfies AppError
+  }
+  const dryRun = body.dry_run !== false
+  const { data, error } = await supabase.rpc("chat_admin_apply_room_template", {
+    p_group_ids: groupIds,
+    p_user_ids: userIds,
+    p_template_key: templateKey,
+    p_dry_run: dryRun,
+    p_actor: actor,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return { ok: true, dry_run: dryRun, result: data }
+}
+
+async function fetchChatAdminUserAccess(
+  supabase: ReturnType<typeof createClient<any>>,
+  userId: string,
+  limitParam: string | null,
+  offsetParam: string | null,
+): Promise<Record<string, unknown>> {
+  const limit = Math.min(Math.max(Number(limitParam ?? 100) || 100, 1), 500)
+  const offset = Math.max(Number(offsetParam ?? 0) || 0, 0)
+  const { data, error } = await supabase.rpc("chat_admin_user_effective_access", {
+    p_user_id: userId,
+    p_limit: limit,
+    p_offset: offset,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return (data ?? {}) as Record<string, unknown>
+}
+
+async function revertChatAdminAudit(
+  supabase: ReturnType<typeof createClient<any>>,
+  auditId: number,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const dryRun = body.dry_run !== false
+  const { data, error } = await supabase.rpc("chat_admin_revert_audit", {
+    p_audit_id: auditId,
+    p_dry_run: dryRun,
+    p_actor: actor,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return { ok: true, dry_run: dryRun, result: data }
 }
 
 async function authenticateChatMember(
