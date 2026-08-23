@@ -37,3 +37,10 @@ test('chat loads only the latest page, then paginates upward and caches room vie
   assert.match(chat, /const ROOM_VIEW_CACHE_LIMIT = 12/);
   assert.match(chat, /const roomViewCache = new Map\(\)/);
 });
+
+test('visible last message is pulled down to remove the gap above the composer', () => {
+  assert.match(chat, /function removeVisibleMessageBottomGap\(\)/);
+  assert.match(chat, /querySelector\('\.message:last-of-type'\)/);
+  assert.match(chat, /const gap = viewport\.bottom - last\.bottom - 16/);
+  assert.match(chat, /messages\.scrollTop \+= gap/);
+});
