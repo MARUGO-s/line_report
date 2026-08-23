@@ -1,5 +1,31 @@
 # LINE Report Project Progress
 
+### 2026-08-24 - M-talk管理に権限テンプレート・アクセス一覧・監査ログ復元を追加
+
+- Request: M-talk専用管理画面の日常運用で、一括設定・状況把握・誤操作の巻き戻しを楽にしたい。
+- Implementation: `chat_permission_templates`（閲覧のみ／一般メンバー／ルーム管理者）と
+  `chat_admin_apply_room_template`（`dry_run`はプレビュー専用・上限100件）、
+  `chat_admin_user_effective_access`（拒否理由コード付き）、
+  `chat_admin_revert_audit`（ホワイトリスト制・`source_audit_id`で二重復元防止）を追加。
+  `admin-api` に `/chat-admin/templates`・`/chat-admin/templates/apply`・
+  `/chat-admin/users/:id/access`・`/chat-admin/audit/:id/revert` を本部専用ブロック内へ追加した。
+- Safety: 4権限の正規化を `chat_admin_normalize_member_permissions` へ集約し、既存の
+  `chat_admin_update_member_permissions` もこれを通す。テンプレート適用の書き込み自体も
+  既存の単体更新RPCへ委譲するため、行ロック・制約・監査ログが単体操作と同一になり、
+  1対1の招待・管理禁止と `can_view=false` カスケードを迂回できない。書き込みは
+  `dry_run:false` を明示したときだけ。新RPCはすべて service_role 専用。
+- Verified: `test:chat` 67/67、本番でトランザクション適用→42試験→ROLLBACK、
+  反映後にmigration記録・関数権限・Pages 200・未認証API 401・Edge Functions ACTIVE を確認。
+- Migration: `20260825010000_chat_admin_templates_access_revert.sql`。
+  ファイル名の日付が実施日より1日進んでいるが、適用済みのため改名しない。
+
+### 2026-08-24 - 正規化関数のsearch_pathを固定
+
+- Symptom: 上記の反映後、Supabase Advisors に `function_search_path_mutable` が1件増えた。
+- Cause: `chat_admin_normalize_member_permissions` にだけ `set search_path = public` を付け忘れた。
+- Fix: `20260825020000_chat_admin_normalize_search_path.sql` で判定ロジックを変えずに
+  search_path を固定。実行権限は service_role 専用のまま。
+
 ### 2026-08-23 - 短い履歴の中央空白を解消
 
 - Symptom: スマホで表示中のメッセージが少ないと、最後のメッセージと入力欄の間が大きな空白になっていた。
