@@ -42,7 +42,5 @@ test('visible last message is pulled down to remove the gap above the composer',
   assert.match(chat, /function removeVisibleMessageBottomGap\(\)/);
   assert.match(chat, /querySelector\('\.message:last-of-type'\)/);
   assert.match(chat, /const gap = viewport\.bottom - last\.bottom - 16/);
-  assert.match(chat, /main\.classList\.add\('compact-message-gap'\)/);
-  assert.match(chat, /--compact-messages-height/);
-  assert.match(chat, /\.main-content\.compact-message-gap \.input-area/);
+  assert.match(chat, /messages\.scrollTop \+= gap/);
 });

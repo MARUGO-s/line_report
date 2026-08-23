@@ -2074,20 +2074,6 @@
         padding: 6px 8px 0 !important;
         flex-shrink: 0;
       }
-      body.chat-open .main-content.compact-message-gap {
-        padding-bottom: 0;
-      }
-      body.chat-open .main-content.compact-message-gap .messages-wrap {
-        flex: 0 0 var(--compact-messages-height, 120px);
-        height: var(--compact-messages-height, 120px);
-      }
-      body.chat-open .main-content.compact-message-gap .input-area {
-        position: relative !important;
-        left: auto;
-        right: auto;
-        bottom: auto;
-        width: 100%;
-      }
       .composer-menu { padding: 0; }
       .composer-menu-btn { height: 36px; min-height: 36px; }
       .input-area .send-btn,
@@ -5559,26 +5545,17 @@
       el.scrollTop = el.scrollHeight;
     }
 
-    // 読み込み済みの最後の発言が見えているのに下側だけ空いている場合、
-    // スマホではメッセージ領域そのものを縮め、入力欄を発言の直下へ置く。
+    // 読み込み済みの最後の発言が見えているのに下側だけ空いている場合は、
+    // その発言を入力欄の直上へ寄せる。途中の履歴を読んでいる場合は動かさない。
     function removeVisibleMessageBottomGap() {
       const messages = $('messages');
-      const main = $('mainContent');
       const lastMessage = messages?.querySelector('.message:last-of-type');
-      if (!messages || !main || !lastMessage) return;
+      if (!messages || !lastMessage) return;
       const viewport = messages.getBoundingClientRect();
       const last = lastMessage.getBoundingClientRect();
       if (last.bottom <= viewport.top || last.bottom > viewport.bottom) return;
       const gap = viewport.bottom - last.bottom - 16;
-      if (gap <= 8) return;
-      if (isMobileLayout()) {
-        const compactHeight = Math.max(72, Math.ceil(last.bottom - viewport.top + 16));
-        main.style.setProperty('--compact-messages-height', `${compactHeight}px`);
-        main.classList.add('compact-message-gap');
-        resizeComposer();
-        return;
-      }
-      messages.scrollTop += gap;
+      if (gap > 8) messages.scrollTop += gap;
     }
 
     // 自分が送った感情イラストは、画像の読み込みで高さが確定した後も
@@ -5770,8 +5747,6 @@
 
     function renderMessageList() {
       const el = $('messages');
-      $('mainContent')?.classList.remove('compact-message-gap');
-      $('mainContent')?.style.removeProperty('--compact-messages-height');
       el.innerHTML = '';
       let lastDay = '';
       currentMessages.forEach((msg) => {
