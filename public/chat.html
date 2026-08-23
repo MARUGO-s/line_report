@@ -868,24 +868,32 @@
     }
     .push-restore-bar.hidden { display: none !important; }
 
+    body.modal-open .input-area {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+
     .invite-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.45);
-      z-index: 100;
-      display: flex;
-      align-items: flex-end;
-      justify-content: center;
+      position: fixed !important;
+      inset: 0 !important;
+      background: rgba(0, 0, 0, 0.6) !important;
+      z-index: 99999 !important;
+      display: flex !important;
+      align-items: flex-end !important;
+      justify-content: center !important;
     }
     .invite-sheet {
-      width: 100%;
-      max-width: 520px;
-      max-height: 86vh;
-      overflow: auto;
-      background: #fff;
-      color: #111;
-      border-radius: 18px 18px 0 0;
-      padding: 16px 16px 24px;
+      width: 100% !important;
+      max-width: 520px !important;
+      max-height: 85vh !important;
+      overflow-y: auto !important;
+      background: #fff !important;
+      color: #111 !important;
+      border-radius: 18px 18px 0 0 !important;
+      padding: 20px 20px 36px !important;
+      margin-bottom: env(safe-area-inset-bottom, 0px) !important;
+      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35) !important;
     }
     .invite-sheet h2 { font-size: 17px; margin-bottom: 12px; }
     .invite-sheet .user-row {
@@ -2123,8 +2131,8 @@
       }
       .login-container { max-height: 100%; overflow-y: auto; }
       .invite-overlay {
-        position: fixed;
-        z-index: 100;
+        position: fixed !important;
+        z-index: 99999 !important;
         padding:
           var(--mobile-safe-top)
           var(--mobile-safe-right)
@@ -2132,9 +2140,9 @@
           var(--mobile-safe-left);
       }
       .invite-sheet {
-        max-height: 100%;
-        border-radius: 18px;
-        padding-bottom: 24px;
+        max-height: 85vh !important;
+        border-radius: 18px 18px 0 0 !important;
+        padding-bottom: max(32px, env(safe-area-inset-bottom, 32px)) !important;
       }
       input[type="text"],
       input[type="email"],
@@ -7002,11 +7010,13 @@
           : 'この画像を今すぐ送りますか？ 予約配信も選べます。';
       }
       $('sendModeOverlay').classList.remove('hidden');
+      document.body.classList.add('modal-open');
     }
 
     function closeSendMode() {
       const overlay = $('sendModeOverlay');
       if (overlay) overlay.classList.add('hidden');
+      document.body.classList.remove('modal-open');
       if (!$('scheduleOverlay') || $('scheduleOverlay').classList.contains('hidden')) {
         pendingSendFiles = [];
         scheduleTarget = 'text';
@@ -7018,6 +7028,7 @@
       pendingSendFiles = [];
       scheduleTarget = 'text';
       $('sendModeOverlay').classList.add('hidden');
+      document.body.classList.remove('modal-open');
       for (const file of files) await sendChatImage(file);
     }
 
@@ -7336,11 +7347,13 @@
       }
       renderSchedulePendingList();
       $('scheduleOverlay').classList.remove('hidden');
+      document.body.classList.add('modal-open');
     }
 
     function closeScheduleSend() {
       const overlay = $('scheduleOverlay');
       if (overlay) overlay.classList.add('hidden');
+      document.body.classList.remove('modal-open');
       pendingSendFiles = [];
       scheduleTarget = 'text';
     }
