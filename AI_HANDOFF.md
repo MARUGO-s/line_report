@@ -8,14 +8,14 @@
 - Supabase production project: `hocbnifuactbvmyjraxy`
 - Main surfaces: static GitHub Pages, `admin-api`, store-scoped `line-webhook`, cron Functions, Postgres/RLS, private `line-media` Storage.
 
-## Active handoff — M-talk管理画面の次期改善（2026-08-24 / 2026-08-25更新）
+## Active handoff — M-talk管理画面の次期改善（2026-08-24 / 2026-08-24更新）
 
 ### 次のAIが最初に知ること
 
 - ユーザーは、実装済みのM-talk専用管理画面を土台に、追加すると便利な管理機能を次のAIへ引き継ぎたい。
 - 2026-08-24時点の管理・権限機能は本番反映済み。
-- **推奨3点セット（権限テンプレート／ユーザー別アクセス一覧／監査ログ復元）はローカル実装済み・本番未反映。**
-  詳細は下の「2026-08-25 実装済み（ローカル）」を読む。優先度4以降は未着手。
+- **推奨3点セット（権限テンプレート／ユーザー別アクセス一覧／監査ログ復元）は本番反映済み（2026-08-24）。**
+  詳細は下の「2026-08-24 実装・反映」を読む。優先度4以降は未着手。
 - 作業対象は必ず `/Users/yoshito/Library/CloudStorage/Dropbox/web/line_report-main`。古いアーカイブ側を編集しない。
 - 引き継ぎ開始コミットは `eef3c09`（`feat(chat): add M-talk admin permissions`）。このコミットは`main`へpush済み。
 - 管理画面: `https://marugo-s.github.io/line_report/chat-admin.html`
@@ -35,9 +35,9 @@
 
 | 優先 | 機能 | 目的 |
 | --- | --- | --- |
-| 1 | 権限テンプレート・一括設定 | **ローカル実装済み・未反映** |
-| 2 | ユーザー別アクセス一覧 | **ローカル実装済み・未反映** |
-| 3 | 監査ログから元に戻す | **ローカル実装済み・未反映** |
+| 1 | 権限テンプレート・一括設定 | **本番反映済み（2026-08-24）** |
+| 2 | ユーザー別アクセス一覧 | **本番反映済み（2026-08-24）** |
+| 3 | 監査ログから元に戻す | **本番反映済み（2026-08-24）** |
 | 4 | M-talk専用管理者 | LINE Report全体の管理権限を渡さず、M-talk全体または指定ルームだけを管理させる |
 | 5 | 期限付きルーム権限 | 指定日時まで閲覧のみ／送信停止などを設定し、DB判定で自動解除する |
 | 6 | 新規ユーザー承認制 | 登録直後を承認待ちにし、所属先と初期テンプレートを管理者が決定する |
@@ -46,9 +46,10 @@
 | 9 | 通報・モデレーション | 投稿の通報、管理者による論理非表示、理由記録、復元を行う |
 | 10 | 権限変更通知 | 停止・閲覧専用等の理由と期限を対象ユーザーへ通知する |
 
-### 2026-08-25 実装済み（ローカル）／本番未反映
+### 2026-08-24 実装・本番反映
 
-推奨3点セットを1つの改善単位として実装した。**まだ commit / push しておらず、本番のDB・Functions・Pagesには入っていない。**
+推奨3点セットを1つの改善単位として実装し、本番へ反映済み。
+PR [#161](https://github.com/MARUGO-s/line_report/pull/161)、コミット `52d5312`。
 
 追加・変更したもの:
 
@@ -78,7 +79,7 @@
 - `./scripts/local-line-report-pages.sh` でPC(1280) / 390px / 320px を実画面確認済み。
   行内ボタンの折返し、テンプレートバーの高さ、差分表の列幅を修正済み。
 
-実DB試験（2026-08-25・本番hocbn・`BEGIN → 適用 → 試験 → ROLLBACK` を1トランザクションで実行）:
+実DB試験（2026-08-24・本番hocbn・`BEGIN → 適用 → 試験 → ROLLBACK` を1トランザクションで実行）:
 
 - **42アサーションすべて成功**。想定外の例外なし。
 - ROLLBACK後の確認: テーブル・列・関数いずれも残存0、`chat_admin_audit_log` 0件、
@@ -99,8 +100,28 @@ SECURITY DEFINER view。本件と無関係の既存）/ WARN 54 / INFO 154。
 反映後は `chat_permission_templates` の同種INFOが1件増えるのが想定どおりで、
 新規のWARN/ERRORは出ない見込み（新4RPCはanon/authenticatedへEXECUTEを渡していないため）。
 
-**未実施**: commit / push、Pages・migration・Functionsの反映確認、反映後のAdvisors比較、
-`PROJECT_PROGRESS.md` と `docs/店舗運用修正記録.md` への記録。
+反映結果（2026-08-24）:
+
+- Deploy Edge Functions `32655472145` 成功、Deploy GitHub Pages `32655472135` 成功。
+- migration `20260825010000` 適用済み（`supabase_migrations` の最新）。
+- 本番の新4RPCは `anon=false / authenticated=false / service_role=true`。
+  `chat_permission_templates` はRLS有効・policyなし・組込3件。
+- Pages `chat-admin.html` HTTP 200 で新UI（テンプレート／アクセス／復元）を配信中。
+  未認証の `/chat-admin/templates`・`/chat-admin/state`・`/chat-admin/audit/1/revert` は401、
+  不正トークンでの `POST /chat-admin/templates/apply` も401。
+- `admin-api` v1005 ACTIVE、`chat-push` v123 ACTIVE。
+- 既存データは無変化（参加行57件、`can_view=false` の行0、監査ログ0件）。
+
+反映後のAdvisors差分（209 → 211）:
+
+- `chat_permission_templates` の `rls_enabled_no_policy`（INFO）＝ service-role専用の意図的な構成。
+- `chat_admin_normalize_member_permissions` の `function_search_path_mutable`（WARN）
+  ＝ **付け忘れ**。`20260825020000_chat_admin_normalize_search_path.sql` で修正した
+  （判定ロジックは不変、実行権限も service_role 専用のまま）。
+
+**注意**: migration `20260825010000` / `20260825020000` はファイル名の日付が実施日
+（2026-08-24 JST）より1日進んでいる。適用済みのため改名しない。次に追加する
+chat系 migration は `20260825020000` より後の版番号にすること。
 
 ### 実装内容の要点（設計判断）
 
@@ -158,7 +179,7 @@ SECURITY DEFINER view。本件と無関係の既存）/ WARN 54 / INFO 154。
 
 ### 主に確認・変更するファイル
 
-- `supabase/migrations/20260825010000_chat_admin_templates_access_revert.sql`: 2026-08-25追加分の基準。
+- `supabase/migrations/20260825010000_chat_admin_templates_access_revert.sql`: 2026-08-24追加分の基準。
 - `tests/chat_admin_templates.test.mjs`: テンプレート／アクセス一覧／復元の契約テスト。
 - `public/chat-admin.html`: 管理UI、ユーザー／ルーム／監査画面。
 - `public/chat.html`: 利用者側の権限反映、停止理由、Realtime再評価。
@@ -211,8 +232,8 @@ npm run knowledge:check
 
 ### 次のAIがユーザーへ最初に確認すること
 
-- 2026-08-25のローカル実装を、実DB試験のうえ本番へ反映してよいか。
-- 一括適用の上限は100件。2026-08-25の本番実測（全参加行57、1ルーム最大3人、
+- 2026-08-24のローカル実装を、実DB試験のうえ本番へ反映してよいか。
+- 一括適用の上限は100件。2026-08-24の本番実測（全参加行57、1ルーム最大3人、
   1ユーザー最大27ルーム）に対する被害範囲の制限として設定した。利用者が増えたら見直す。
 - M-talk専用管理者を誰へ委任したいか。本部全体、店舗責任者、指定ルーム管理者のどれが必要か。
 - 新規登録を現在どおり即時有効にするか、承認待ちへ変えるか。

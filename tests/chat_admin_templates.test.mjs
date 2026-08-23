@@ -6,6 +6,7 @@ import vm from "node:vm"
 const root = new URL("..", import.meta.url)
 const read = (relative) => readFile(new URL(relative, root), "utf8")
 const MIGRATION = "supabase/migrations/20260825010000_chat_admin_templates_access_revert.sql"
+const SEARCH_PATH_FIX = "supabase/migrations/20260825020000_chat_admin_normalize_search_path.sql"
 
 function functionDefinition(sql, name) {
   const start = sql.search(new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${name}\\s*\\(`, "i"))
@@ -74,6 +75,40 @@ test("template apply previews without writing, caps targets, and delegates each 
   assert.match(apply, /'template_apply'/)
   assert.match(apply, /'dry_run', v_dry/)
   assert.match(apply, /order by gm\.group_id, gm\.user_id/i)
+})
+
+test("every chat_admin function pins its search_path", async () => {
+  const sources = [await read(MIGRATION), await read(SEARCH_PATH_FIX)].join("\n")
+
+  // 最終的な定義が search_path を固定していること。Advisors の
+  // function_search_path_mutable を再発させない。
+  for (const fn of [
+    "chat_admin_normalize_member_permissions",
+    "chat_admin_apply_room_template",
+    "chat_admin_user_effective_access",
+    "chat_admin_revert_audit",
+    "chat_admin_update_member_permissions",
+  ]) {
+    const defs = [...sources.matchAll(
+      new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${fn}\\s*\\([\\s\\S]*?\\bas\\s+\\$[a-z0-9_]*\\$`, "gi"),
+    )].map((m) => m[0])
+    assert.ok(defs.length > 0, `${fn} must be defined`)
+    const last = defs[defs.length - 1]
+    assert.match(last, /set\s+search_path\s*=\s*public/i, `${fn} must pin search_path`)
+  }
+})
+
+test("the search_path fix keeps the normalization logic identical", async () => {
+  const before = await read(MIGRATION)
+  const after = await read(SEARCH_PATH_FIX)
+  const body = (sql) => {
+    const m = /create\s+or\s+replace\s+function\s+public\.chat_admin_normalize_member_permissions[\s\S]*?\bas\s+\$fn\$([\s\S]*?)\$fn\$/i.exec(sql)
+    assert.ok(m, "normalize function body must be found")
+    return m[1].replace(/\s+/g, " ").trim()
+  }
+  assert.equal(body(after), body(before), "the fix must not change the permission logic")
+  assert.match(after, /revoke all on function public\.chat_admin_normalize_member_permissions[\s\S]*from public, anon, authenticated/i)
+  assert.match(after, /grant execute on function public\.chat_admin_normalize_member_permissions[\s\S]*to service_role/i)
 })
 
 test("the bulk-apply cap is the same number in SQL and in the admin API", async () => {
