@@ -40,9 +40,11 @@ test('chat loads only the latest page, then paginates upward and caches room vie
 
 test('reaching the end of an intermediate search window automatically loads latest messages', () => {
   assert.match(chat, /function resolveUnloadedLatestGap\(\)/);
-  assert.match(chat, /querySelector\('\.message:last-of-type'\)/);
+  assert.match(chat, /currentMessages\.at\(-1\)\?\.id/);
+  assert.match(chat, /querySelector\(`\.message\[data-message-id="\$\{lastMessageId\}"\]`\)/);
   assert.match(chat, /const gap = viewport\.bottom - last\.bottom - 16/);
-  assert.match(chat, /if \(gap > 8\) void jumpToLatest\(\)/);
+  assert.match(chat, /if \(viewHasLatest\) \{[\s\S]*?followNewMessages = true;[\s\S]*?scrollMessagesToBottom\(\);[\s\S]*?updateJumpLatestButton\(\);/);
+  assert.match(chat, /void jumpToLatest\(\);/);
   assert.match(chat, /!viewHasLatest && distanceFromBottom < 80/);
   assert.match(chat, /if \(jumpingToLatest\) return/);
   assert.match(chat, /function watchStickerLayout\(root\)/);
@@ -51,4 +53,15 @@ test('reaching the end of an intermediate search window automatically loads late
   assert.match(chat, /watchStickerLayout\(el\)/);
   assert.match(chat, /この問い合わせは常に最新ページを取得している/);
   assert.match(chat, /viewHasLatest = true;\s*followNewMessages = true;[\s\S]*?scrollMessagesToBottom\(\);\s*updateJumpLatestButton\(\);/);
+});
+
+test('mobile composer height stays synchronized before the latest button is needed', () => {
+  assert.match(chat, /function measureComposerInset\(\)[\s\S]*?mainRect\.bottom - composerRect\.top/);
+  assert.match(chat, /--chat-composer-height', `\$\{measureComposerInset\(\)\}px`/);
+  assert.match(chat, /function syncComposerForGroup\(group\)[\s\S]*?syncChatViewport\(\);/);
+  assert.match(chat, /if \(viewHasLatest && followNewMessages\) scrollMessagesToBottom\(\);\s*else resolveUnloadedLatestGap\(\);\s*const focused/);
+  assert.doesNotMatch(chat, /const focused = \$\('messageInput'\);[\s\S]{0,260}?messages\.scrollTop = messages\.scrollHeight/);
+  assert.match(chat, /function resizeComposer\(\)[\s\S]*?input\.style\.height = [\s\S]*?syncChatViewport\(\);/);
+  assert.match(chat, /composerResizeObserver = new ResizeObserver\(\(\) => syncChatViewport\(\)\)/);
+  assert.match(chat, /composerResizeObserver\.observe\(\$\('inputArea'\)\)/);
 });

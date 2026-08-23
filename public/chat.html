@@ -2475,6 +2475,7 @@
     let pushTesting = false;
     let pendingOpenGroupId = null;
     let chatViewportFrame = 0;
+    let composerResizeObserver = null;
     // 開いているトークの読み込み済みメッセージ（created_at 昇順）。
     let currentMessages = [];
     let stickerCatalog = [];
@@ -2615,10 +2616,23 @@
     const PUSH_TEST_PENDING_KEY = 'mtalk_push_test_pending_v1';
     const AVATAR_COLORS = ['#7ac943', '#4fc3f7', '#ff8a65', '#ba68c8', '#ffd54f', '#4db6ac', '#f06292', '#7986cb'];
 
+    function measureComposerInset() {
+      const composer = $('inputArea');
+      const main = document.querySelector('.main-content');
+      if (!composer || composer.classList.contains('hidden') || !main) return 0;
+      const mainRect = main.getBoundingClientRect();
+      const composerRect = composer.getBoundingClientRect();
+      // 入力欄は fixed で下へずらす場合があるため、offsetHeight ではなく
+      // メイン領域へ実際に重なっている高さを予約する。
+      return Math.max(0, Math.min(mainRect.height, Math.round(mainRect.bottom - composerRect.top)));
+    }
+
     function syncChatViewport(keepComposerVisible = false) {
       const isMobileLayout = window.matchMedia('(max-width: 768px), (max-height: 600px) and (pointer: coarse)').matches;
       const root = document.documentElement;
       if (!isMobileLayout) {
+        if (chatViewportFrame) cancelAnimationFrame(chatViewportFrame);
+        chatViewportFrame = 0;
         root.style.removeProperty('--chat-viewport-height');
         root.style.removeProperty('--chat-viewport-top');
         root.style.removeProperty('--chat-composer-height');
@@ -2639,22 +2653,17 @@
       root.style.setProperty('--chat-viewport-height', `${viewportHeight}px`);
       root.style.setProperty('--chat-viewport-top', `${viewportTop}px`);
       root.style.setProperty('--chat-bottom-gap', `${extraBottom}px`);
-      const composer = $('inputArea');
-      if (composer && !composer.classList.contains('hidden')) {
-        root.style.setProperty('--chat-composer-height', `${Math.max(1, Math.round(composer.offsetHeight))}px`);
-      }
+      root.style.setProperty('--chat-composer-height', `${measureComposerInset()}px`);
 
       if (chatViewportFrame) cancelAnimationFrame(chatViewportFrame);
       chatViewportFrame = requestAnimationFrame(() => {
         chatViewportFrame = 0;
-        const composerEl = $('inputArea');
-        if (composerEl && !composerEl.classList.contains('hidden')) {
-          root.style.setProperty('--chat-composer-height', `${Math.max(1, Math.round(composerEl.offsetHeight))}px`);
-        }
+        root.style.setProperty('--chat-composer-height', `${measureComposerInset()}px`);
+        // 入力欄の高さや位置が変わっても、最新追従中なら入力欄の直上を保つ。
+        if (viewHasLatest && followNewMessages) scrollMessagesToBottom();
+        else resolveUnloadedLatestGap();
         const focused = $('messageInput');
         if (!focused || (!keepComposerVisible && document.activeElement !== focused)) return;
-        const messages = $('messages');
-        if (messages) messages.scrollTop = messages.scrollHeight;
         focused.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
     }
@@ -4929,6 +4938,9 @@
         closeScheduleSend();
         closeSendMode();
       }
+      // 初回は入力欄が hidden の状態で viewport 計測が走るため、
+      // 表示状態を切り替えた後の実寸で予約領域を更新する。
+      syncChatViewport();
     }
 
     async function trashTalk(group) {
@@ -5556,15 +5568,28 @@
     // 末尾の先に未読込メッセージがある状態で止まると、DOM上には続きがないため
     // 入力欄まで空白になる。「最新へ」と同じ再読込を自動で行い、その空白を作らない。
     function resolveUnloadedLatestGap() {
-      if (viewHasLatest || jumpingToLatest) return;
+      if (jumpingToLatest) return;
       const messages = $('messages');
-      const lastMessage = messages?.querySelector('.message:last-of-type');
+      const lastMessageId = currentMessages.at(-1)?.id;
+      const lastMessage = lastMessageId
+        ? messages?.querySelector(`.message[data-message-id="${lastMessageId}"]`)
+        : null;
       if (!messages || !lastMessage) return;
       const viewport = messages.getBoundingClientRect();
       const last = lastMessage.getBoundingClientRect();
       if (last.bottom <= viewport.top || last.bottom > viewport.bottom) return;
       const gap = viewport.bottom - last.bottom - 16;
-      if (gap > 8) void jumpToLatest();
+      if (gap <= 8) return;
+      if (viewHasLatest) {
+        // 最新データはあるが、画像読込などで追従だけ外れた状態。
+        // 「最新へ」で行われる入力欄再計測も実行してから最下部へ戻す。
+        followNewMessages = true;
+        syncChatViewport();
+        scrollMessagesToBottom();
+        updateJumpLatestButton();
+        return;
+      }
+      void jumpToLatest();
     }
 
     // スタンプは遅延読み込みのため、初回描画時点では高さが未確定になる。
@@ -7059,6 +7084,9 @@
         }
       }
       input.style.height = `${Math.min(120, Math.max(40, input.scrollHeight, placeholderHeight))}px`;
+      // 複数行入力や文章内アイコンのプレビュー解除で入力欄が縮んだ時も、
+      // 固定入力欄用の予約高さをその場で更新する。
+      syncChatViewport();
     }
 
     function composingKey(e) {
@@ -7230,6 +7258,10 @@
     window.addEventListener('orientationchange', () => {
       setTimeout(() => syncChatViewport(), 100);
     });
+    if (window.ResizeObserver && $('inputArea')) {
+      composerResizeObserver = new ResizeObserver(() => syncChatViewport());
+      composerResizeObserver.observe($('inputArea'));
+    }
     document.addEventListener('gesturestart', preventMobileZoomGesture, { passive: false });
     document.addEventListener('gesturechange', preventMobileZoomGesture, { passive: false });
     document.addEventListener('gestureend', preventMobileZoomGesture, { passive: false });
