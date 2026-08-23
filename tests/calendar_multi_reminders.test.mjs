@@ -21,7 +21,7 @@ const roomSettings = await readFile(
   'utf8',
 );
 
-test('normalizeReminderSlots handles fallbacks, limits to 3 slots, and validates values', () => {
+test('normalizeReminderSlots handles fallbacks, limits to 5 slots, and validates values', () => {
   // 未設定時はフォールバック時刻（既定 19:00）で 1スロット生成
   const defSlots = normalizeReminderSlots(null, null, null);
   assert.equal(defSlots.length, 1);
@@ -36,20 +36,23 @@ test('normalizeReminderSlots handles fallbacks, limits to 3 slots, and validates
   assert.equal(customFallback[0].hour, 20);
   assert.equal(customFallback[0].minute, 30);
 
-  // 複数スロット（最大3件制限）
+  // 複数スロット（最大5件制限）
   const multiRaw = [
     { id: 'slot_1', target: 'tomorrow', hour: 19, minute: 0, enabled: true },
     { id: 'slot_2', target: 'today', hour: 8, minute: 30, enabled: true },
     { id: 'slot_3', target: 'today', hour: 12, minute: 0, enabled: false },
-    { id: 'slot_4', target: 'tomorrow', hour: 21, minute: 0, enabled: true }, // 4件目は無視される
+    { id: 'slot_4', target: 'tomorrow', hour: 21, minute: 0, enabled: true },
+    { id: 'slot_5', target: 'today', hour: 15, minute: 0, enabled: true },
+    { id: 'slot_6', target: 'tomorrow', hour: 22, minute: 0, enabled: true }, // 6件目は無視される
   ];
   const normalized = normalizeReminderSlots(multiRaw);
-  assert.equal(normalized.length, 3);
+  assert.equal(normalized.length, 5);
   assert.equal(normalized[0].target, 'tomorrow');
   assert.equal(normalized[1].target, 'today');
   assert.equal(normalized[1].hour, 8);
   assert.equal(normalized[1].minute, 30);
   assert.equal(normalized[2].enabled, false);
+  assert.equal(normalized[4].hour, 15);
 });
 
 test('buildReminderChatText and buildReminderChatCard adapt to today vs tomorrow target', () => {
@@ -92,7 +95,7 @@ test('migration and edge function support multi-slot cron and slot logging', () 
   assert.match(edgeCron, /slot_id: slotId/);
 });
 
-test('room settings UI renders and saves reminder slots up to 3', () => {
+test('room settings UI renders and saves reminder slots up to 5', () => {
   assert.match(roomSettings, /calendar_reminder_slots/);
   assert.match(roomSettings, /reminder-slot-target/);
   assert.match(roomSettings, /reminder-slot-time/);

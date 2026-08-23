@@ -306,7 +306,7 @@
     { id:'calendar', title:'予約・カレンダー', icon:'calendar', caption:'予約通知・カレンダー連携', items:[
       {key:'gmail_reservation_alert_enabled', t:'Gmail予約通知', d:'Gmailで受信した予約をLINEに通知します', extra:'gmailAlertInterval'},
       {key:'today_reservation_alert_enabled', t:'本日の予約状況配信', d:'毎日決まった時刻に、当日の予約一覧を1通で配信します（サイトのWebhook設定と同じ）', extra:'todayReservationAlert'},
-      {key:'calendar_tomorrow_reminder_enabled', t:'予定配信リマインダー', d:'毎日決まった時刻に、予定を自動配信します（最大3件までリマインド時刻を設定可能）', extra:'tomorrowReminder'},
+      {key:'calendar_tomorrow_reminder_enabled', t:'予定配信リマインダー', d:'毎日決まった時刻に、予定を自動配信します（最大5件までリマインド時刻を設定可能）', extra:'tomorrowReminder'},
       {key:'calendar_ai_auto_create_enabled', t:'予定の自動登録', d:'予定をM-talkの予定カレンダーに自動登録します'},
       {key:'calendar_silent_auto_register_enabled', t:'無返信で自動登録', d:'返信せずに自動登録します'},
       {key:'calendar_low_confidence_confirm_reply_enabled', t:'低確度のときに確認返信', d:'自信が低いときは確認の返信をします'},
@@ -324,7 +324,7 @@
   var gmailAlertInterval = { minutes:1, anchorHour:10, anchorMinute:0 };
   // 本日の予約状況配信の時刻（NULL=既定 18:00）。
   var todayReservationAlert = { hour:18, minute:0 };
-  // 予定配信のリマインド設定スロット（最大3件）。
+  // 予定配信のリマインド設定スロット（最大5件）。
   var calendarReminder = {
     slots: [
       { id: 'slot_1', target: 'tomorrow', hour: 19, minute: 0, enabled: true }
@@ -428,7 +428,7 @@
         todayReservationAlert.hour   = (cfg.today_reservation_alert_hour   != null) ? Number(cfg.today_reservation_alert_hour)   : 18;
         todayReservationAlert.minute = (cfg.today_reservation_alert_minute != null) ? Number(cfg.today_reservation_alert_minute) : 0;
         if (Array.isArray(cfg.calendar_reminder_slots) && cfg.calendar_reminder_slots.length > 0) {
-          calendarReminder.slots = cfg.calendar_reminder_slots.slice(0, 3).map(function(s, idx){
+          calendarReminder.slots = cfg.calendar_reminder_slots.slice(0, 5).map(function(s, idx){
             return {
               id: String(s.id || ('slot_' + (idx + 1))),
               target: s.target === 'today' ? 'today' : 'tomorrow',
@@ -535,7 +535,7 @@
       + '</div>';
   }
 
-  // 予定配信のリマインド設定UI（最大3件のスロット）。
+  // 予定配信のリマインド設定UI（最大5件のスロット）。
   function tomorrowReminderControlHtml(){
     var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
     var btnStyle = 'padding:5px 10px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:12px;cursor:pointer;font-weight:700;';
@@ -543,7 +543,7 @@
 
     var html = '<div class="calendar-reminder-slots-container" style="padding:10px 16px 14px;display:flex;flex-direction:column;gap:10px;">'
       + '<div style="font-size:12px;color:#8a94a6;font-weight:700;display:flex;justify-content:space-between;align-items:center;">'
-      +   '<span>🕐 配信タイミング（最大3件まで設定可能）</span>'
+      +   '<span>🕐 配信タイミング（最大5件まで設定可能）</span>'
       + '</div>';
 
     calendarReminder.slots.forEach(function(slot, idx){
@@ -564,9 +564,9 @@
         + '</div>';
     });
 
-    if (calendarReminder.slots.length < 3) {
+    if (calendarReminder.slots.length < 5) {
       html += '<div>'
-        + '<button type="button" class="reminder-slot-add-btn" style="'+btnStyle+'">＋ リマインドを追加（残り'+(3 - calendarReminder.slots.length)+'件）</button>'
+        + '<button type="button" class="reminder-slot-add-btn" style="'+btnStyle+'">＋ リマインドを追加（残り'+(5 - calendarReminder.slots.length)+'件）</button>'
         + '</div>';
     }
 
@@ -671,7 +671,7 @@
     var addBtn = e.target.closest('.reminder-slot-add-btn');
     if (addBtn){
       e.preventDefault();
-      if (calendarReminder.slots.length < 3){
+      if (calendarReminder.slots.length < 5){
         var nextId = 'slot_' + (calendarReminder.slots.length + 1);
         var defaultTarget = calendarReminder.slots.length === 1 ? 'today' : 'tomorrow';
         var defaultHour = calendarReminder.slots.length === 1 ? 8 : 12;

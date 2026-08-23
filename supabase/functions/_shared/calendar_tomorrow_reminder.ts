@@ -2,7 +2,7 @@
 
 export const CALENDAR_TOMORROW_REMINDER_DEFAULTS = { hour: 19, minute: 0 }
 export const CALENDAR_TOMORROW_REMINDER_MAX_ITEMS = 20
-export const MAX_REMINDER_SLOTS = 3
+export const MAX_REMINDER_SLOTS = 5
 const MTALK_SCHEDULE_PAGE = "https://marugo-s.github.io/line_report/mtalk_schedule.html"
 
 export type CalendarReminderTarget = "tomorrow" | "today"
