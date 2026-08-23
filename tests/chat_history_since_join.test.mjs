@@ -45,4 +45,8 @@ test('reaching the end of an intermediate search window automatically loads late
   assert.match(chat, /if \(gap > 8\) void jumpToLatest\(\)/);
   assert.match(chat, /!viewHasLatest && distanceFromBottom < 80/);
   assert.match(chat, /if \(jumpingToLatest\) return/);
+  assert.match(chat, /function watchStickerLayout\(root\)/);
+  assert.match(chat, /image\.addEventListener\('load', settle, \{ once: true \}\)/);
+  assert.match(chat, /else resolveUnloadedLatestGap\(\)/);
+  assert.match(chat, /watchStickerLayout\(el\)/);
 });

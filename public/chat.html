@@ -5562,6 +5562,23 @@
       if (gap > 8) void jumpToLatest();
     }
 
+    // スタンプは遅延読み込みのため、初回描画時点では高さが未確定になる。
+    // 読み込み後に下端が動いたタイミングでも最新追従・未読込判定をやり直す。
+    function watchStickerLayout(root) {
+      const settle = () => requestAnimationFrame(() => {
+        if (viewHasLatest && followNewMessages) scrollMessagesToBottom();
+        else resolveUnloadedLatestGap();
+      });
+      root.querySelectorAll('img.msg-sticker').forEach((image) => {
+        if (image.complete) {
+          settle();
+          return;
+        }
+        image.addEventListener('load', settle, { once: true });
+        image.addEventListener('error', settle, { once: true });
+      });
+    }
+
     // 自分が送った感情イラストは、画像の読み込みで高さが確定した後も
     // 入力欄の裏へ隠れないよう、最新位置へ追従させる。
     function scrollSentStickerIntoView(messageId) {
@@ -5762,6 +5779,7 @@
         el.appendChild(buildMessageNode(msg));
       });
       hydrateMessageImages();
+      watchStickerLayout(el);
       requestAnimationFrame(resolveUnloadedLatestGap);
     }
 
@@ -5789,6 +5807,7 @@
       el.appendChild(buildMessageNode(msg));
 
       hydrateMessageImages();
+      watchStickerLayout(el);
       if (followNewMessages) scrollMessagesToBottom();
     }
 
