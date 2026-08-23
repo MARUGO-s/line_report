@@ -7313,7 +7313,13 @@
         <div class="schedule-pending-item">
           <div>
             <div>${escapeHtml(formatScheduleAt(row.send_at))}</div>
-            <div class="schedule-hint">${escapeHtml(row.kind === 'image' ? '[画像]' : String(row.content || '').slice(0, 80))}</div>
+            <div class="schedule-hint">${escapeHtml(
+              row.kind === 'image'
+                ? '[画像]'
+                : row.kind === 'sticker'
+                ? (row.content && row.content !== '[感情イラスト]' ? `[イラスト] ${row.content}` : '[感情イラスト]')
+                : String(row.content || '').slice(0, 80)
+            )}</div>
           </div>
           <button type="button" onclick="cancelScheduledMessage(${Number(row.id)})">取消</button>
         </div>
@@ -7341,9 +7347,16 @@
       }
       const hint = document.querySelector('#scheduleOverlay .schedule-hint');
       if (hint) {
-        hint.textContent = scheduleTarget === 'files'
-          ? '指定した日時になると、この画像が自動で送信されます。'
-          : '指定した日時になると、このルームへ自動で送信されます。';
+        if (scheduleTarget === 'files') {
+          hint.textContent = '指定した日時になると、この画像が自動で送信されます。';
+        } else if (pendingInlineSticker) {
+          const hasText = Boolean(($('messageInput')?.value || '').trim());
+          hint.textContent = hasText
+            ? '指定した日時になると、メッセージと感情イラストが自動で送信されます。'
+            : '指定した日時になると、感情イラストが自動で送信されます。';
+        } else {
+          hint.textContent = '指定した日時になると、このルームへ自動で送信されます。';
+        }
       }
       renderSchedulePendingList();
       $('scheduleOverlay').classList.remove('hidden');
@@ -7405,25 +7418,44 @@
       }
 
       const content = ($('messageInput').value || '').trim();
-      if (!content) {
-        alert('先にメッセージを入力してください');
+      const hasSticker = Boolean(pendingInlineSticker && pendingInlineSticker.id);
+
+      if (!content && !hasSticker) {
+        alert('メッセージを入力するか、感情イラストを選択してください');
         return;
       }
       try {
+        let p_kind = 'text';
+        let p_payload = null;
+        let finalContent = content;
+
+        if (hasSticker) {
+          p_kind = 'sticker';
+          const displayMode = content ? 'compact' : (stickerSendMode || 'large');
+          p_payload = { v: 1, kind: 'sticker', sticker: { id: pendingInlineSticker.id, display: displayMode } };
+          if (!finalContent) finalContent = '[感情イラスト]';
+        }
+
         const { error } = await sb.rpc('chat_schedule_message', {
           p_group_id: currentGroupId,
-          p_content: content.slice(0, 2000),
+          p_content: finalContent.slice(0, 2000),
           p_send_at: sendAt.toISOString(),
           p_reply_to_id: replyTarget ? replyTarget.id : null,
-          p_mentions: collectMentions(content)
+          p_mentions: collectMentions(content),
+          p_kind: p_kind,
+          p_payload: p_payload
         });
         if (error) throw error;
         $('messageInput').value = '';
+        clearInlineSticker();
         resizeComposer();
         clearReplyTarget();
         closeScheduleSend();
         await loadScheduledMessages();
-        showChatToast(`${formatScheduleAt(sendAt)} に予約しました`);
+        const toastMsg = hasSticker && content
+          ? `${formatScheduleAt(sendAt)} にメッセージとイラストを予約しました`
+          : (hasSticker ? `${formatScheduleAt(sendAt)} にイラストを予約しました` : `${formatScheduleAt(sendAt)} に予約しました`);
+        showChatToast(toastMsg);
       } catch (error) {
         console.error('Schedule send error:', error);
         alert(error.message || '予約に失敗しました');
@@ -7447,7 +7479,7 @@
       const input = $('messageInput');
       if (!input) return;
       const stickerButton = document.querySelector('.sticker-trigger-btn');
-      const hasMessage = Boolean(input.value.trim());
+      const hasMessage = Boolean(input.value.trim()) || Boolean(pendingInlineSticker);
       stickerButton?.classList.toggle('message-ready', hasMessage);
       if (stickerButton) {
         stickerButton.title = hasMessage ? 'アイコンを文章内に入れる' : '感情イラスト';
