@@ -24,6 +24,7 @@
 | メディア | https://marugo-s.github.io/line_report/media.html |
 | 会話検索 | https://marugo-s.github.io/line_report/message-search.html |
 | トーク | https://marugo-s.github.io/line_report/chat.html |
+| M-talk管理（本部管理者） | https://marugo-s.github.io/line_report/chat-admin.html |
 | 予約表 | https://marugo-s.github.io/line_report/reservation.html |
 | システムマップ | https://marugo-s.github.io/line_report/system-map.html |
 

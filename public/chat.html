@@ -400,7 +400,8 @@
       display: flex;
       flex-direction: column;
     }
-    .account-menu button {
+    .account-menu button,
+    .account-menu a {
       display: block;
       width: 100%;
       text-align: left;
@@ -410,8 +411,11 @@
       font-size: 15px;
       padding: 14px 16px;
       cursor: pointer;
+      text-decoration: none;
     }
-    .account-menu button + button {
+    .account-menu button + button,
+    .account-menu button + a,
+    .account-menu a + button {
       border-top: 1px solid #3a3a3c;
     }
     .account-menu-logout {
@@ -1650,6 +1654,21 @@
       gap: 6px;
       align-items: stretch;
     }
+    .read-only-notice {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border: 1px solid #d5d5d8;
+      border-radius: 14px;
+      background: #fff;
+      color: #666;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+    }
+    .input-area.composer-read-only > :not(.read-only-notice) { display: none !important; }
     .input-row {
       display: flex;
       gap: 8px;
@@ -1955,6 +1974,19 @@
       line-height: 1.6;
     }
 
+    .chat-access-blocked h2 { margin: 0 0 10px; text-align: center; }
+    .chat-access-blocked p { color: #c5c5ca; font-size: 13px; line-height: 1.65; text-align: center; }
+    .chat-access-blocked .access-reason {
+      margin: 14px 0;
+      padding: 12px;
+      border-radius: 10px;
+      background: rgba(255, 149, 0, 0.12);
+      color: #ffd18a;
+      text-align: left;
+      white-space: pre-wrap;
+    }
+    .chat-access-blocked .access-logout { margin-top: 12px; background: #3a3a3c; }
+
     .hidden { display: none !important; }
 
     @media (max-width: 768px), (max-height: 600px) and (pointer: coarse) {
@@ -2237,6 +2269,7 @@
     </div>
     <div class="schedule-bar hidden" id="scheduleBar"></div>
     <div class="input-area hidden" id="inputArea">
+      <div class="read-only-notice hidden" id="readOnlyNotice">このルームは閲覧専用です。メッセージは送信できません。</div>
       <div class="mention-pop hidden" id="mentionPop"></div>
       <div class="sticker-picker hidden" id="stickerPicker"></div>
       <div class="inline-sticker-preview hidden" id="inlineStickerPreview"></div>
@@ -2255,8 +2288,8 @@
       </div>
       <div class="composer-menu" id="composerMenu">
         <button class="composer-menu-btn" type="button" onclick="sendSearchFromMenu()">検索</button>
-        <button class="composer-menu-btn" type="button" onclick="openReservationSchedule()">予約・予定</button>
-        <button class="composer-menu-btn" type="button" onclick="openRoomSettings()">設定</button>
+        <button class="composer-menu-btn" id="composerScheduleBtn" type="button" onclick="openReservationSchedule()">予約・予定</button>
+        <button class="composer-menu-btn" id="composerSettingsBtn" type="button" onclick="openRoomSettings()">設定</button>
       </div>
     </div>
     <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
@@ -2309,6 +2342,7 @@
       <div class="account-menu-user" id="accountMenuUser"></div>
       <div class="account-menu-list">
         <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
+        <a href="./chat-admin.html" role="menuitem">M-talk管理</a>
         <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
       </div>
     </div>
@@ -2367,7 +2401,7 @@
       <input class="invite-search" id="inviteSearch" type="search" placeholder="名前で検索" oninput="renderInvitePeople()">
       <div id="invitePeopleList"></div>
       <button class="invite-reset" type="button" onclick="rotateInvite()">招待リンクを再発行</button>
-      <button class="invite-copy" type="button" onclick="openRoomSettings()">ルーム設定</button>
+      <button class="invite-copy" id="inviteRoomSettingsBtn" type="button" onclick="openRoomSettings()">ルーム設定</button>
       <button class="invite-leave" type="button" onclick="leaveCurrentRoom()">ルームを退出</button>
       <button class="invite-close" type="button" onclick="closeInvite()">閉じる</button>
     </div>
@@ -2418,6 +2452,14 @@
         <input type="text" id="usernameInput" placeholder="表示名" maxlength="50">
         <button onclick="createProfile()" id="profileBtn">はじめる</button>
       </div>
+
+      <div id="chatAccessBlocked" class="chat-access-blocked hidden">
+        <h2 id="chatAccessBlockedTitle">M-talkの利用が停止されています</h2>
+        <p>M-talk専用の管理設定により、現在はチャットを利用できません。</p>
+        <div id="chatAccessBlockedReason" class="access-reason hidden"></div>
+        <p id="chatAccessBlockedUntil" class="hidden"></p>
+        <button type="button" class="access-logout" onclick="logout()">ログアウト</button>
+      </div>
     </div>
   </div>
 
@@ -2439,6 +2481,9 @@
     });
 
     let currentUser = null;
+    let currentChatAccess = null;
+    let chatAccessExpiryTimer = null;
+    let currentRoomMembership = null;
     let currentGroupId = null;
     let scheduledMessages = [];
     let pendingSendFiles = [];
@@ -2511,6 +2556,7 @@
       'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, created_at';
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key';
+    const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at';
     const STORE_BOT_LOGOS = Object.freeze({
       marugo: 'icons/store-bots/marugo.svg',
       marugosecond: 'icons/store-bots/marugosecond.svg',
@@ -2802,6 +2848,116 @@
       }
     }
 
+    function chatAccessIsBlocked(access) {
+      if (!access || access.access_enabled !== true || access.deleted_at) return true;
+      if (!access.restricted_until) return false;
+      const until = new Date(access.restricted_until).getTime();
+      return Number.isFinite(until) && until > Date.now();
+    }
+
+    async function loadCurrentChatAccess() {
+      if (!currentUser) return null;
+      const { data, error } = await sb
+        .from('chat_user_access')
+        .select(CHAT_ACCESS_COLUMNS)
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+      if (error) throw error;
+      currentChatAccess = data || null;
+      return currentChatAccess;
+    }
+
+    function chatAccessAllows(capability) {
+      return !chatAccessIsBlocked(currentChatAccess) && currentChatAccess?.[capability] === true;
+    }
+
+    function currentGroup() {
+      return myGroups.find((group) => Number(group.id) === Number(currentGroupId)) || null;
+    }
+
+    function membershipFor(group) {
+      if (!group) return null;
+      if (Number(group.id) === Number(currentGroupId) && currentRoomMembership) return currentRoomMembership;
+      return group.membership || null;
+    }
+
+    function roomCapability(group, capability) {
+      const membership = membershipFor(group);
+      return !!(membership && membership.can_view === true && membership[capability] === true);
+    }
+
+    function canCurrentUserSend(group = currentGroup()) { return roomCapability(group, 'can_send'); }
+    function canCurrentUserInvite(group = currentGroup()) { return roomCapability(group, 'can_invite'); }
+    function canCurrentUserManage(group = currentGroup()) { return roomCapability(group, 'can_manage'); }
+
+    function requireCurrentRoomSend() {
+      if (canCurrentUserSend()) return true;
+      alert('このルームは閲覧専用です。メッセージは送信できません。');
+      return false;
+    }
+
+    function syncGlobalCapabilityUi() {
+      const canBrowse = chatAccessAllows('can_browse_users');
+      const canCreate = chatAccessAllows('can_create_group');
+      document.querySelectorAll('[data-tab="users"], [data-tab="bots"]').forEach((tab) => tab.classList.toggle('hidden', !canBrowse));
+      if (!canBrowse && (talkTab === 'users' || talkTab === 'bots')) setTalkTab('all');
+      if ($('fab')) $('fab').classList.toggle('hidden', !canCreate || !['all', 'groups'].includes(talkTab));
+      if (!canCreate && $('newGroupPop')) $('newGroupPop').classList.add('hidden');
+      if (!canBrowse) {
+        selectedUserIds = new Set();
+        if ($('userInviteBar')) $('userInviteBar').classList.add('hidden');
+        if ($('userInviteTarget')) closeUserInviteTarget();
+        if ($('forwardOverlay')) closeForward();
+      }
+    }
+
+    function hideChatAccessBlocked() {
+      if (chatAccessExpiryTimer) {
+        clearTimeout(chatAccessExpiryTimer);
+        chatAccessExpiryTimer = null;
+      }
+      if ($('chatAccessBlocked')) $('chatAccessBlocked').classList.add('hidden');
+    }
+
+    function scheduleChatAccessExpiryCheck() {
+      if (chatAccessExpiryTimer) clearTimeout(chatAccessExpiryTimer);
+      chatAccessExpiryTimer = null;
+      const until = currentChatAccess?.restricted_until
+        ? new Date(currentChatAccess.restricted_until).getTime()
+        : 0;
+      if (!Number.isFinite(until) || until <= Date.now()) return;
+      const delay = Math.min(until - Date.now() + 250, 2147483000);
+      chatAccessExpiryTimer = setTimeout(() => {
+        chatAccessExpiryTimer = null;
+        if (until > Date.now()) scheduleChatAccessExpiryCheck();
+        else handleCurrentChatAccessChange();
+      }, Math.max(250, delay));
+    }
+
+    function showChatAccessBlocked() {
+      const access = currentChatAccess || {};
+      $('loginForm').classList.add('hidden');
+      $('signupForm').classList.add('hidden');
+      $('profileForm').classList.add('hidden');
+      $('chatAccessBlocked').classList.remove('hidden');
+      $('loginScreen').classList.remove('hidden');
+      $('navRail').classList.add('hidden');
+      $('sidebar').classList.add('hidden');
+      $('mainContent').classList.add('hidden');
+      $('chatAccessBlockedTitle').textContent = access.deleted_at
+        ? 'M-talkのユーザー登録が削除されています'
+        : 'M-talkの利用が停止されています';
+      const reason = String(access.restriction_reason || '').trim();
+      $('chatAccessBlockedReason').textContent = reason;
+      $('chatAccessBlockedReason').classList.toggle('hidden', !reason);
+      const until = access.restricted_until && new Date(access.restricted_until).getTime() > Date.now()
+        ? `利用停止期限: ${new Date(access.restricted_until).toLocaleString('ja-JP')}`
+        : '';
+      $('chatAccessBlockedUntil').textContent = until;
+      $('chatAccessBlockedUntil').classList.toggle('hidden', !until);
+      scheduleChatAccessExpiryCheck();
+    }
+
     async function afterSignIn() {
       const { data: userData, error: userError } = await sb.auth.getUser();
       if (userError || !userData?.user) {
@@ -2831,6 +2987,18 @@
       }
 
       currentUser = data;
+      try {
+        await loadCurrentChatAccess();
+      } catch (accessError) {
+        console.error('M-talk access load error:', accessError);
+        showLoginError(`M-talk利用状態の取得に失敗しました: ${accessError.message || accessError}`);
+        return;
+      }
+      if (chatAccessIsBlocked(currentChatAccess)) {
+        showChatAccessBlocked();
+        subscribeRealtime();
+        return;
+      }
       startSession();
     }
 
@@ -2882,6 +3050,12 @@
 
         $('profileForm').classList.add('hidden');
         $('loginForm').classList.remove('hidden');
+        await loadCurrentChatAccess();
+        if (chatAccessIsBlocked(currentChatAccess)) {
+          showChatAccessBlocked();
+          subscribeRealtime();
+          return;
+        }
         startSession();
       } finally {
         $('profileBtn').disabled = false;
@@ -2890,6 +3064,7 @@
 
     function startSession() {
       renderUserAvatars();
+      hideChatAccessBlocked();
       $('loginScreen').classList.add('hidden');
       $('navRail').classList.remove('hidden');
       $('sidebar').classList.remove('hidden');
@@ -2899,6 +3074,7 @@
       warmImageAssets();
       void flushPushDiagnostics();
       void resumePendingPushTest();
+      syncGlobalCapabilityUi();
       loadGroups().then(async () => {
         await consumeInvite();
         await openRequestedGroup();
@@ -2935,6 +3111,9 @@
       channel = sb
         .channel('chat-global')
         .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'chat_user_access', filter: `user_id=eq.${currentUser.id}` },
+          () => handleCurrentChatAccessChange())
+        .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'chat_messages' },
           (payload) => handleIncomingMessage(payload.new))
         .on('postgres_changes',
@@ -2953,6 +3132,9 @@
             }
           })
         .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'chat_group_members' },
+          (payload) => handleMembershipChanged(payload.new))
+        .on('postgres_changes',
           { event: 'DELETE', schema: 'public', table: 'chat_group_members' },
           (payload) => handleMemberRemoved(payload.old))
         .on('postgres_changes',
@@ -2965,6 +3147,47 @@
           const ok = status === 'SUBSCRIBED';
           $('connectionStatus').classList.toggle('disconnected', !ok);
         });
+    }
+
+    async function handleCurrentChatAccessChange() {
+      try {
+        await loadCurrentChatAccess();
+        if (chatAccessIsBlocked(currentChatAccess)) {
+          closeInvite();
+          closeChat();
+          showChatAccessBlocked();
+          return;
+        }
+        const blockedPanelWasOpen = !$('chatAccessBlocked').classList.contains('hidden');
+        hideChatAccessBlocked();
+        if (blockedPanelWasOpen) startSession();
+        else {
+          syncGlobalCapabilityUi();
+          renderGroups();
+        }
+      } catch (error) {
+        console.error('M-talk access refresh error:', error);
+      }
+    }
+
+    async function handleMembershipChanged(row) {
+      if (!row || !currentUser) return;
+      const groupId = Number(row.group_id);
+      if (String(row.user_id) === String(currentUser.id)) {
+        if (groupId === Number(currentGroupId)) {
+          currentRoomMembership = row;
+          if (row.can_view !== true) {
+            closeInvite();
+            closeChat();
+          } else {
+            syncComposerForGroup(currentGroup());
+            paintChatHeader(currentGroup());
+          }
+        }
+        await loadGroups();
+        return;
+      }
+      if (groupId === Number(currentGroupId)) await loadGroupContext(currentGroupId);
     }
 
     // 他の人のリアクション増減を画面へ反映する。
@@ -3053,7 +3276,7 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('pinned_at, muted_at, hidden_at, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, trashed_at)')
+            .select('pinned_at, muted_at, hidden_at, can_view, can_send, can_invite, can_manage, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, trashed_at)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
             .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, trashed_at')
@@ -3064,11 +3287,20 @@
         if (allRes.error) throw allRes.error;
 
         const mine = (mineRes.data || [])
+          .filter((row) => row.can_view === true)
           .map((row) => row.chat_groups
             ? Object.assign({}, row.chat_groups, {
                 pinned_at: row.pinned_at || null,
                 muted_at: row.muted_at || null,
-                hidden_at: row.hidden_at || null
+                hidden_at: row.hidden_at || null,
+                membership: {
+                  user_id: currentUser.id,
+                  group_id: row.chat_groups.id,
+                  can_view: row.can_view === true,
+                  can_send: row.can_send === true,
+                  can_invite: row.can_invite === true,
+                  can_manage: row.can_manage === true
+                }
               })
             : null)
           .filter(Boolean);
@@ -3076,11 +3308,13 @@
 
         myGroups = mine;
         otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id) && !g.is_direct && !g.trashed_at);
+        if (currentGroupId && !mineIds.has(currentGroupId)) closeChat();
         await attachDirectPeers(myGroups);
         await loadLastMessages();
         await loadMemberCounts();
         renderGroups();
         loadUnread();
+        syncGlobalCapabilityUi();
       } catch (error) {
         console.error('Load groups error:', error);
       }
@@ -3626,6 +3860,10 @@
 
     async function registerDirectFriend(user) {
       if (!user || user.id === currentUser.id) return;
+      if (!chatAccessAllows('can_start_direct')) {
+        alert('1対1トークを開始する権限がありません');
+        return;
+      }
       try {
         const { data, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
         if (error) throw error;
@@ -3736,10 +3974,16 @@
       const query = (search.value || '').trim();
       if (tab === 'users' || tab === 'bots') renderMessageSearch('');
       else runMessageSearch(query);
+      syncGlobalCapabilityUi();
     }
 
     async function loadRegisteredUsers() {
       if (!currentUser) return;
+      if (!chatAccessAllows('can_browse_users')) {
+        registeredUsers = [];
+        renderGroups();
+        return;
+      }
       try {
         const { data, error } = await sb
           .from('chat_users')
@@ -3755,6 +3999,7 @@
     }
 
     function toggleUserSelect(userId) {
+      if (!chatAccessAllows('can_browse_users')) return;
       if (userId === currentUser.id) return;
       if (selectedUserIds.has(userId)) selectedUserIds.delete(userId);
       else selectedUserIds.add(userId);
@@ -3800,6 +4045,8 @@
           const talkBtn = document.createElement('button');
           talkBtn.className = 'join-btn';
           talkBtn.textContent = '1対1';
+          talkBtn.disabled = !chatAccessAllows('can_start_direct');
+          talkBtn.title = talkBtn.disabled ? '1対1トークを開始する権限がありません' : '';
           talkBtn.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
           row.appendChild(talkBtn);
           const inviteBtn = document.createElement('button');
@@ -3846,6 +4093,10 @@
 
     function openUserInviteTarget() {
       if (!selectedUserIds.size) return;
+      if (!chatAccessAllows('can_browse_users')) {
+        alert('登録ユーザーを参照する権限がありません');
+        return;
+      }
       const invitingBots = [...selectedUserIds].some((id) => (
         (registeredUsers || []).some((u) => u.id === id && isStoreBot(u))
       ));
@@ -3853,7 +4104,7 @@
       if (newGroupBtn) newGroupBtn.classList.toggle('hidden', invitingBots);
       const list = $('userInviteGroupList');
       list.innerHTML = '';
-      const rooms = myGroups.filter((group) => !group.is_direct);
+      const rooms = myGroups.filter((group) => !group.is_direct && canCurrentUserInvite(group));
       if (!rooms.length) {
         list.innerHTML = invitingBots
           ? '<div class="empty-note">招待できるルームがありません</div>'
@@ -3881,12 +4132,18 @@
         alert('1対1トークには招待できません');
         return;
       }
+      if (!canCurrentUserInvite(group)) {
+        alert('このルームへ招待する権限がありません');
+        return;
+      }
       try {
-        const rows = [...selectedUserIds]
+        const userIds = [...selectedUserIds]
           .filter((id) => (registeredUsers || []).some((u) => u.id === id && isDirectoryUser(u)))
-          .map((user_id) => ({ group_id: group.id, user_id }));
-        if (!rows.length) return;
-        const { error } = await sb.from('chat_group_members').upsert(rows, { onConflict: 'group_id,user_id' });
+        if (!userIds.length) return;
+        const { error } = await sb.rpc('chat_add_members', {
+          p_group_id: group.id,
+          p_user_ids: userIds
+        });
         if (error) throw error;
         selectedUserIds = new Set();
         closeUserInviteTarget();
@@ -3901,6 +4158,10 @@
 
     async function inviteSelectedToNewGroup() {
       if (!selectedUserIds.size) return;
+      if (!chatAccessAllows('can_create_group')) {
+        alert('グループを作成する権限がありません');
+        return;
+      }
       if ([...selectedUserIds].some((id) => (registeredUsers || []).some((u) => u.id === id && isBotUser(u)))) {
         alert('Botは新しいグループのメンバーにできません。既存のルームへ招待するか、1対1で話してください。');
         return;
@@ -3908,22 +4169,30 @@
       const name = prompt('新しいグループ名');
       if (!name || !name.trim()) return;
       try {
-        const { data, error } = await sb
-          .from('chat_groups')
-          .insert({ group_name: name.trim(), created_by: currentUser.id })
-          .select()
-          .single();
+        const memberIds = [...selectedUserIds]
+          .filter((id) => (registeredUsers || []).some((user) => user.id === id && isDirectoryUser(user)));
+        const { data, error } = await sb.rpc('chat_create_group', {
+          p_group_name: name.trim(),
+          p_member_ids: memberIds
+        });
         if (error) throw error;
-        await sb.from('chat_group_members')
-          .upsert({ group_id: data.id, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
+        const groupId = Number(data?.group_id ?? data?.id ?? data);
+        selectedUserIds = new Set();
         closeUserInviteTarget();
-        await inviteSelectedToGroup(data);
+        await loadGroups();
+        const group = myGroups.find((item) => Number(item.id) === groupId);
+        if (group) selectGroup(group);
+        renderRegisteredUsers();
       } catch (error) {
         alert(error.message || 'グループ作成に失敗しました');
       }
     }
 
     function toggleNewGroup() {
+      if (!chatAccessAllows('can_create_group')) {
+        alert('グループを作成する権限がありません');
+        return;
+      }
       $('newGroupPop').classList.toggle('hidden');
       if (!$('newGroupPop').classList.contains('hidden')) {
         $('newGroupInput').focus();
@@ -3975,7 +4244,12 @@
     function openRoomSettings(groupId) {
       const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
       if (!Number.isSafeInteger(id) || id <= 0) return;
-      if (isGroupTrashed(findMineGroup(id))) {
+      const group = findMineGroup(id);
+      if (!canCurrentUserManage(group)) {
+        alert('このルームを管理する権限がありません');
+        return;
+      }
+      if (isGroupTrashed(group)) {
         alert('ゴミ箱のルームは設定できません。復元してから開いてください。');
         return;
       }
@@ -3991,6 +4265,10 @@
     function openReservationSchedule(groupId, tab) {
       const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
       if (!Number.isSafeInteger(id) || id <= 0) return;
+      if (!canCurrentUserManage(findMineGroup(id))) {
+        alert('予定・予約を管理する権限がありません');
+        return;
+      }
       closeTalkContextMenu();
       const url = new URL('mtalk_schedule.html', window.location.href);
       url.searchParams.set('from', 'chat');
@@ -4006,9 +4284,14 @@
         alert('1対1トークには招待できません');
         return;
       }
+      if (!canCurrentUserInvite(current)) {
+        alert('このルームへ招待する権限がありません');
+        return;
+      }
       $('inviteOverlay').classList.remove('hidden');
       const leaveBtn = document.querySelector('.invite-leave');
       if (leaveBtn) leaveBtn.classList.toggle('hidden', !!(current && current.is_store_room));
+      if ($('inviteRoomSettingsBtn')) $('inviteRoomSettingsBtn').classList.toggle('hidden', !canCurrentUserManage(current));
       $('inviteUrl').value = '作成中...';
       $('inviteSearch').value = '';
       try {
@@ -4053,7 +4336,7 @@
         members.innerHTML = '<div class="empty-note">メンバーはいません</div>';
       } else {
         const current = myGroups.find((g) => Number(g.id) === Number(currentGroupId));
-        const canKick = current && !current.is_direct && String(current.created_by) === String(currentUser.id);
+        const canKick = current && !current.is_direct && canCurrentUserManage(current);
         inviteMembers.forEach((user) => {
           const row = document.createElement('div');
           row.className = 'invite-person';
@@ -4111,6 +4394,10 @@
 
     async function kickMember(user) {
       if (!currentGroupId || !user) return;
+      if (!canCurrentUserManage(currentGroup())) {
+        alert('メンバーを退出させる権限がありません');
+        return;
+      }
       if (!confirm(`${personName(user)} をルームから退出させますか？`)) return;
       try {
         const { error } = await sb.rpc('chat_kick_member', {
@@ -4139,9 +4426,15 @@
 
     async function inviteUser(user) {
       if (!currentGroupId || !user) return;
+      if (!canCurrentUserInvite(currentGroup())) {
+        alert('このルームへ招待する権限がありません');
+        return;
+      }
       try {
-        const { error } = await sb.from('chat_group_members')
-          .upsert({ group_id: currentGroupId, user_id: user.id }, { onConflict: 'group_id,user_id' });
+        const { error } = await sb.rpc('chat_add_members', {
+          p_group_id: currentGroupId,
+          p_user_ids: [user.id]
+        });
         if (error) throw error;
         await loadInviteLists();
         await loadGroupContext(currentGroupId);
@@ -4180,6 +4473,10 @@
 
     async function rotateInvite() {
       if (!currentGroupId) return;
+      if (!canCurrentUserInvite(currentGroup())) {
+        alert('招待リンクを再発行する権限がありません');
+        return;
+      }
       if (!confirm('今の招待リンクは使えなくなります。再発行しますか？')) return;
       try {
         const { data, error } = await sb.rpc('chat_rotate_invite', { p_group_id: currentGroupId });
@@ -4195,6 +4492,7 @@
     function closeChat() {
       if (currentGroupId) snapshotRoomView(currentGroupId);
       currentGroupId = null;
+      currentRoomMembership = null;
       hideMemberStrip();
       document.body.classList.remove('chat-open');
       $('placeholder').classList.remove('hidden');
@@ -4240,7 +4538,8 @@
       if (!group) return;
       $('chatGroupName').textContent = roomTitle(group);
       paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
-      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct);
+      if ($('chatGroupAvatar')) $('chatGroupAvatar').disabled = !canCurrentUserManage(group);
+      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct || !canCurrentUserInvite(group));
       // スマホ・タブレット幅ではPC専用のShift+Enter注釈を出さず、1行で読める文言にする。
       const compactComposer = isMobileLayout() || window.innerWidth <= 1024;
       if ($('messageInput') && roomHasStoreBot(group)) {
@@ -4434,6 +4733,10 @@
       closeUserIconPicker();
       if (iconPickerTarget === 'group') {
         if (!currentGroupId) return;
+        if (!canCurrentUserManage(currentGroup())) {
+          alert('ルームアイコンを変更する権限がありません');
+          return;
+        }
         try {
           await applyGroupIconUrl(currentGroupId, url);
         } catch (error) {
@@ -4461,6 +4764,10 @@
       const group = myGroups.find((g) => g.id === currentGroupId);
       if (group && group.is_direct) return;
       if (isGroupTrashed(group)) return;
+      if (!canCurrentUserManage(group)) {
+        alert('ルームアイコンを変更する権限がありません');
+        return;
+      }
       openPresetIconPicker('group');
     }
 
@@ -4480,6 +4787,7 @@
     }
 
     async function applyGroupIconUrl(groupId, url) {
+      if (!canCurrentUserManage(findMineGroup(groupId))) throw new Error('ルームアイコンを変更する権限がありません');
       const { error } = await sb.from('chat_groups').update({ icon_url: url }).eq('id', groupId);
       if (error) throw error;
       const apply = (list) => {
@@ -4610,6 +4918,7 @@
       }
 
       currentGroupId = groupId;
+      currentRoomMembership = group.membership || null;
       markGroupRead(groupId);
       document.body.classList.add('chat-open');
       syncChatViewport();
@@ -4751,11 +5060,11 @@
       const trashed = !!group.trashed_at;
       if ($('talkCtxPin')) $('talkCtxPin').classList.toggle('hidden', trashed);
       if ($('talkCtxMute')) $('talkCtxMute').classList.toggle('hidden', trashed);
-      if ($('talkCtxSettings')) $('talkCtxSettings').classList.toggle('hidden', trashed);
+      if ($('talkCtxSettings')) $('talkCtxSettings').classList.toggle('hidden', trashed || !canCurrentUserManage(group));
       if ($('talkCtxHide')) $('talkCtxHide').classList.toggle('hidden', trashed);
       if ($('talkCtxDelete')) $('talkCtxDelete').classList.toggle('hidden', trashed || !!group.is_store_room);
-      if ($('talkCtxTrash')) $('talkCtxTrash').classList.toggle('hidden', trashed || !canPurgeTalk(group));
-      if ($('talkCtxRestore')) $('talkCtxRestore').classList.toggle('hidden', !trashed || !canPurgeTalk(group));
+      if ($('talkCtxTrash')) $('talkCtxTrash').classList.toggle('hidden', trashed || !canTrashTalk(group));
+      if ($('talkCtxRestore')) $('talkCtxRestore').classList.toggle('hidden', !trashed || !canTrashTalk(group));
       if ($('talkCtxPurge')) $('talkCtxPurge').classList.toggle('hidden', !trashed || !canPurgeTalk(group));
       const overlay = $('talkContextMenu');
       const panel = $('talkContextPanel');
@@ -4920,23 +5229,36 @@
       return !!(group && group.trashed_at);
     }
 
+    function canTrashTalk(group) {
+      return !!(group && !group.is_store_room && currentUser && canCurrentUserManage(group));
+    }
+
     function canPurgeTalk(group) {
-      return !!(group && !group.is_store_room && currentUser && group.created_by === currentUser.id);
+      return !!(canTrashTalk(group) && group.created_by === currentUser.id);
     }
 
     function syncComposerForGroup(group) {
       const trashed = isGroupTrashed(group);
-      if ($('inputArea')) $('inputArea').classList.toggle('hidden', !group || trashed);
+      const canView = !!(group && membershipFor(group)?.can_view === true);
+      const readOnly = canView && !canCurrentUserSend(group);
+      if ($('inputArea')) {
+        $('inputArea').classList.toggle('hidden', !group || trashed || !canView);
+        $('inputArea').classList.toggle('composer-read-only', readOnly);
+      }
+      if ($('readOnlyNotice')) $('readOnlyNotice').classList.toggle('hidden', !readOnly);
       if ($('trashBanner')) $('trashBanner').classList.toggle('hidden', !trashed);
-      if ($('roomSettingsHeaderBtn')) $('roomSettingsHeaderBtn').classList.toggle('hidden', trashed);
-      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', trashed || !!(group && group.is_direct));
-      if (trashed && $('replyBar')) $('replyBar').classList.add('hidden');
-      if (trashed && $('scheduleBar')) $('scheduleBar').classList.add('hidden');
-      if ($('trashBannerRestore')) $('trashBannerRestore').classList.toggle('hidden', !canPurgeTalk(group));
+      if ($('roomSettingsHeaderBtn')) $('roomSettingsHeaderBtn').classList.toggle('hidden', trashed || !canCurrentUserManage(group));
+      if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', trashed || !!(group && group.is_direct) || !canCurrentUserInvite(group));
+      if ($('composerScheduleBtn')) $('composerScheduleBtn').classList.toggle('hidden', !canCurrentUserManage(group));
+      if ($('composerSettingsBtn')) $('composerSettingsBtn').classList.toggle('hidden', !canCurrentUserManage(group));
+      if ((trashed || readOnly) && $('replyBar')) $('replyBar').classList.add('hidden');
+      if ((trashed || readOnly) && $('scheduleBar')) $('scheduleBar').classList.add('hidden');
+      if ($('trashBannerRestore')) $('trashBannerRestore').classList.toggle('hidden', !canTrashTalk(group));
       if ($('trashBannerPurge')) $('trashBannerPurge').classList.toggle('hidden', !canPurgeTalk(group));
-      if (trashed) {
+      if (trashed || readOnly) {
         closeScheduleSend();
         closeSendMode();
+        $('stickerPicker')?.classList.add('hidden');
       }
       // 初回は入力欄が hidden の状態で viewport 計測が走るため、
       // 表示状態を切り替えた後の実寸で予約領域を更新する。
@@ -4944,8 +5266,8 @@
     }
 
     async function trashTalk(group) {
-      if (!canPurgeTalk(group)) {
-        alert('ゴミ箱へ移せるのは作成者だけです');
+      if (!canTrashTalk(group)) {
+        alert('ゴミ箱へ移す権限がありません');
         return;
       }
       if (!confirm('「' + roomTitle(group) + '」をゴミ箱へ移します。\nあとから復元できます。完全削除はゴミ箱から行います。')) {
@@ -4963,8 +5285,8 @@
     }
 
     async function restoreTalk(group) {
-      if (!canPurgeTalk(group)) {
-        alert('復元できるのは作成者だけです');
+      if (!canTrashTalk(group)) {
+        alert('ルームを復元する権限がありません');
         return;
       }
       const { error } = await sb.rpc('chat_restore_group', { p_group_id: group.id });
@@ -5068,7 +5390,7 @@
         wrap.innerHTML = `
           <div class="swipe-actions swipe-actions-left"></div>
           <div class="swipe-actions swipe-actions-right">
-            ${canPurgeTalk(group) ? '<button class="swipe-btn swipe-restore" type="button">復元</button><button class="swipe-btn swipe-delete" type="button">完全削除</button>' : ''}
+            ${canTrashTalk(group) ? '<button class="swipe-btn swipe-restore" type="button">復元</button>' : ''}${canPurgeTalk(group) ? '<button class="swipe-btn swipe-delete" type="button">完全削除</button>' : ''}
           </div>
         `;
         wrap.appendChild(front);
@@ -5208,6 +5530,8 @@
           const button = document.createElement('button');
           button.className = 'join-btn';
           button.textContent = '登録';
+          button.disabled = !chatAccessAllows('can_start_direct');
+          button.title = button.disabled ? '1対1トークを開始する権限がありません' : '';
           button.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
           row.appendChild(button);
           mineList.appendChild(row);
@@ -5229,21 +5553,23 @@
     async function createGroup() {
       const groupName = $('newGroupInput').value.trim();
       if (!groupName || !currentUser) return;
+      if (!chatAccessAllows('can_create_group')) {
+        alert('グループを作成する権限がありません');
+        return;
+      }
 
       try {
-        const { data, error } = await sb
-          .from('chat_groups')
-          .insert({ group_name: groupName, created_by: currentUser.id })
-          .select()
-          .single();
+        const { data, error } = await sb.rpc('chat_create_group', {
+          p_group_name: groupName,
+          p_member_ids: []
+        });
         if (error) throw error;
-
-        await sb.from('chat_group_members')
-          .upsert({ group_id: data.id, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
+        const groupId = Number(data?.group_id ?? data?.id ?? data);
 
         if (pendingGroupIconFile) {
           try {
-            data.icon_url = await saveGroupIcon(data.id, pendingGroupIconFile);
+            await loadGroups();
+            await saveGroupIcon(groupId, pendingGroupIconFile);
           } catch (iconError) {
             console.error('Group icon error:', iconError);
           }
@@ -5255,7 +5581,8 @@
         $('newGroupInput').value = '';
         $('newGroupPop').classList.add('hidden');
         await loadGroups();
-        selectGroup(data);
+        const group = myGroups.find((item) => Number(item.id) === groupId);
+        if (group) selectGroup(group);
       } catch (error) {
         console.error('Create group error:', error);
         alert(`グループ作成に失敗しました: ${error.message || error}`);
@@ -5263,18 +5590,8 @@
     }
 
     async function joinGroup(groupId) {
-      if (!currentUser) return;
-      try {
-        const { error } = await sb.from('chat_group_members')
-          .upsert({ group_id: groupId, user_id: currentUser.id }, { onConflict: 'group_id,user_id' });
-        if (error) throw error;
-
-        await loadGroups();
-        const group = myGroups.find((g) => g.id === groupId);
-        if (group) selectGroup(group);
-      } catch (error) {
-        console.error('Join group error:', error);
-      }
+      if (!currentUser || !groupId) return;
+      alert('グループへの参加にはメンバーから届いた招待リンクを使用してください');
     }
 
     function pruneRoomViewCache() {
@@ -5366,10 +5683,15 @@
     restoreSignedImageCache();
 
     async function selectGroup(group) {
+      if (!group || group.membership?.can_view !== true) {
+        await loadGroups();
+        return;
+      }
       if (currentGroupId && Number(currentGroupId) !== Number(group.id)) {
         snapshotRoomView(currentGroupId);
       }
       currentGroupId = group.id;
+      currentRoomMembership = group.membership || null;
       const seq = ++selectGroupSeq;
       if (group.hidden_at) {
         group.hidden_at = null;
@@ -5444,7 +5766,7 @@
       try {
         const [memberRes, readRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('user_id, chat_users(id, username, icon_url, is_bot, store_key)')
+            .select('user_id, can_view, can_send, can_invite, can_manage, chat_users(id, username, icon_url, is_bot, store_key)')
             .eq('group_id', groupId),
           sb.from('chat_read_states')
             .select('user_id, last_read_at')
@@ -5452,7 +5774,22 @@
         ]);
         if (memberRes.error) throw memberRes.error;
         if (readRes.error) throw readRes.error;
-        groupMembers = (memberRes.data || []).map((row) => row.chat_users).filter(Boolean);
+        const memberRows = memberRes.data || [];
+        groupMembers = memberRows.filter((row) => row.can_view === true).map((row) => row.chat_users).filter(Boolean);
+        const mine = memberRows.find((row) => String(row.user_id) === String(currentUser.id)) || null;
+        if (Number(groupId) === Number(currentGroupId)) {
+          currentRoomMembership = mine;
+          const group = currentGroup();
+          if (group && mine) group.membership = {
+            user_id: mine.user_id,
+            group_id: Number(groupId),
+            can_view: mine.can_view === true,
+            can_send: mine.can_send === true,
+            can_invite: mine.can_invite === true,
+            can_manage: mine.can_manage === true
+          };
+          syncComposerForGroup(group);
+        }
         groupReadStates = readRes.data || [];
       } catch (error) {
         console.error('Load group context error:', error);
@@ -5741,8 +6078,7 @@
       if (cards) {
         bodyHtml = cards.map(renderCard).join('');
       } else if (image) {
-        const ratio = (image.w && image.h) ? ` style="aspect-ratio:${image.w}/${image.h}"` : '';
-        bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像"${ratio} loading="lazy" decoding="async">`;
+        bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像" loading="lazy" decoding="async">`;
       } else if (sticker) {
         const stickerImage = `<img class="msg-sticker" src="${escapeHtml(sticker.path)}" alt="${escapeHtml(sticker.label || '感情イラスト')}" loading="lazy" decoding="async">`;
         const inlineText = compactSticker && !String(msg.content || '').startsWith('[感情イラスト]')
@@ -5785,6 +6121,14 @@
           <button class="msg-actions-btn" type="button" data-menu-for="${msg.id}" aria-label="操作">⋯</button>
         </div>
       `;
+      if (image) {
+        const width = safeImageDimension(image.w);
+        const height = safeImageDimension(image.h);
+        const imageElement = div.querySelector('.msg-image');
+        if (imageElement && width && height) {
+          imageElement.style.aspectRatio = `${width} / ${height}`;
+        }
+      }
       return div;
     }
 
@@ -5856,12 +6200,13 @@
       const menu = document.createElement('div');
       menu.className = 'msg-menu';
       const canDelete = currentUser && String(msg.user_id) === String(currentUser.id);
+      const canInteract = canCurrentUserSend();
       menu.innerHTML = `
-        <div class="msg-menu-emojis">
+        ${canInteract ? `<div class="msg-menu-emojis">
           ${REACTION_CHOICES.map((e) => `<button type="button" data-emoji="${escapeHtml(e)}">${escapeHtml(e)}</button>`).join('')}
-        </div>
+        </div>` : ''}
         <div class="msg-menu-actions">
-          <button class="msg-menu-reply" type="button" data-action="reply"><span class="msg-menu-action-icon">↩</span><span>返信</span></button>
+          ${canInteract ? '<button class="msg-menu-reply" type="button" data-action="reply"><span class="msg-menu-action-icon">↩</span><span>返信</span></button>' : ''}
           <button class="msg-menu-reply" type="button" data-action="copy"><span class="msg-menu-action-icon">⧉</span><span>コピー</span></button>
           <button class="msg-menu-reply" type="button" data-action="forward"><span class="msg-menu-action-icon">➜</span><span>転送</span></button>
           ${canDelete ? '<button class="msg-menu-reply msg-menu-delete" type="button" data-action="delete"><span class="msg-menu-action-icon">⌫</span><span>削除</span></button>' : ''}
@@ -5914,6 +6259,7 @@
     // --- リアクション ---
 
     async function toggleReaction(messageId, emoji) {
+      if (!requireCurrentRoomSend()) return;
       const list = reactionsByMessage.get(messageId) || [];
       const mine = list.find((r) => r.user_id === currentUser.id);
       const removing = mine && mine.emoji === emoji;
@@ -5973,6 +6319,7 @@
     // --- 返信 ---
 
     function setReplyTarget(msg) {
+      if (!requireCurrentRoomSend()) return;
       replyTarget = msg;
       $('replyBar').classList.remove('hidden');
       $('replyBarName').textContent = `${speakerName(msg.user_id, msg.username)} にリプライ`;
@@ -6029,6 +6376,10 @@
 
     async function openForward(msg) {
       if (!msg || !currentUser) return;
+      if (!chatAccessAllows('can_browse_users') || !chatAccessAllows('can_start_direct')) {
+        alert('転送先のユーザーを選ぶ権限がありません');
+        return;
+      }
       forwardMessage = msg;
       if (!registeredUsers.length) await loadRegisteredUsers();
       $('forwardSearch').value = '';
@@ -6122,12 +6473,18 @@
     async function forwardToUser(user) {
       const msg = forwardMessage;
       if (!msg || !user) return;
+      if (!chatAccessAllows('can_start_direct')) {
+        alert('1対1トークを開始する権限がありません');
+        return;
+      }
       closeForward();
       try {
         const { data: groupId, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
         if (error) throw error;
-        const inserted = await insertForwardedMessage(msg, groupId);
         await loadGroups();
+        const group = myGroups.find((item) => Number(item.id) === Number(groupId));
+        if (!canCurrentUserSend(group)) throw new Error('転送先のトークは閲覧専用です');
+        const inserted = await insertForwardedMessage(msg, groupId);
         if (inserted && inserted.id) dispatchPushForMessage(inserted.id);
         showNotice(`${user.username} に転送しました`);
       } catch (error) {
@@ -6308,6 +6665,12 @@
       try { return JSON.parse(text); } catch (_) { return null; }
     }
 
+    function safeImageDimension(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0 || number > 99999) return null;
+      return Math.trunc(number);
+    }
+
     function imageFromMessage(msg) {
       if (msg.kind !== 'image') return null;
       const payload = typeof msg.payload === 'string' ? safeParseJson(msg.payload) : msg.payload;
@@ -6397,6 +6760,7 @@
 
     async function toggleStickerPicker() {
       if (!currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomSend()) return;
       if (isGroupTrashed(findMineGroup(currentGroupId))) {
         alert('ゴミ箱のルームには送信できません。復元してから使ってください。');
         return;
@@ -6451,6 +6815,7 @@
 
     async function sendSticker(stickerId, display = 'large', messageText = '') {
       if (!currentGroupId || !currentUser || !stickerId) return;
+      if (!requireCurrentRoomSend()) return false;
       $('stickerPicker')?.classList.add('hidden');
       try {
         const { data, error } = await sb.from('chat_messages').insert({
@@ -6517,6 +6882,7 @@
 
     function pickChatImage() {
       if (!currentGroupId || uploadingImage) return;
+      if (!requireCurrentRoomSend()) return;
       if (isGroupTrashed(findMineGroup(currentGroupId))) {
         alert('ゴミ箱のルームには送信できません。復元してから使ってください。');
         return;
@@ -6586,6 +6952,7 @@
 
     async function sendChatImage(file) {
       if (!currentGroupId || !currentUser || uploadingImage) return;
+      if (!requireCurrentRoomSend()) return;
       uploadingImage = true;
       $('chatImageInput').disabled = true;
       const groupId = currentGroupId;
@@ -6625,6 +6992,7 @@
     function askSendModeForFiles(files) {
       const list = Array.from(files || []).filter(Boolean);
       if (!list.length || !currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomSend()) return;
       pendingSendFiles = list;
       const hint = $('sendModeHint');
       if (hint) {
@@ -6760,6 +7128,7 @@
     async function sendCardCommand(text) {
       const content = String(text || '').trim();
       if (!content || !currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomSend()) return;
       try {
         const { data, error } = await sb
           .from('chat_messages')
@@ -6787,6 +7156,7 @@
     async function sendChatText(content, options) {
       const text = String(content || '').trim();
       if (!text || !currentGroupId || !currentUser) return false;
+      if (!requireCurrentRoomSend()) return false;
       if (isGroupTrashed(findMineGroup(currentGroupId))) {
         alert('ゴミ箱のルームには送信できません。復元してから使ってください。');
         return false;
@@ -6823,6 +7193,7 @@
 
     async function sendMessage() {
       if (!currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomSend()) return;
       const input = $('messageInput');
       const content = input.value.trim();
       if (!content && !pendingInlineSticker) return;
@@ -6877,7 +7248,7 @@
 
     async function loadScheduledMessages() {
       const bar = $('scheduleBar');
-      if (!currentGroupId || !currentUser || isGroupTrashed(findMineGroup(currentGroupId))) {
+      if (!currentGroupId || !currentUser || !canCurrentUserSend() || isGroupTrashed(findMineGroup(currentGroupId))) {
         scheduledMessages = [];
         if (bar) bar.classList.add('hidden');
         return;
@@ -6945,6 +7316,7 @@
 
     function openScheduleSend() {
       if (!currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomSend()) return;
       if (isGroupTrashed(findMineGroup(currentGroupId))) {
         alert('ゴミ箱のルームには予約送信できません。復元してから使ってください。');
         return;
@@ -6974,6 +7346,7 @@
 
     async function confirmScheduleSend() {
       if (!currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomSend()) return;
       const raw = $('scheduleAtInput').value;
       const sendAt = raw ? new Date(raw) : null;
       if (!sendAt || isNaN(sendAt)) {
@@ -7156,7 +7529,13 @@
     }
 
     function resetToLogin() {
+      if (chatAccessExpiryTimer) {
+        clearTimeout(chatAccessExpiryTimer);
+        chatAccessExpiryTimer = null;
+      }
       currentUser = null;
+      currentChatAccess = null;
+      currentRoomMembership = null;
       currentGroupId = null;
       myGroups = [];
       otherGroups = [];
@@ -7177,6 +7556,7 @@
       $('loginScreen').classList.remove('hidden');
       $('profileForm').classList.add('hidden');
       $('signupForm').classList.add('hidden');
+      $('chatAccessBlocked').classList.add('hidden');
       $('loginForm').classList.remove('hidden');
       $('navRail').classList.add('hidden');
       $('sidebar').classList.add('hidden');
@@ -7356,12 +7736,12 @@
     });
 
     document.addEventListener('dragenter', (e) => {
-      if (!currentGroupId || !isFileDrag(e)) return;
+      if (!currentGroupId || !canCurrentUserSend() || !isFileDrag(e)) return;
       e.preventDefault();
       setChatDropActive(true);
     });
     document.addEventListener('dragover', (e) => {
-      if (!currentGroupId || !isFileDrag(e)) return;
+      if (!currentGroupId || !canCurrentUserSend() || !isFileDrag(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       setChatDropActive(true);
@@ -7374,7 +7754,7 @@
       if (!isFileDrag(e)) return;
       e.preventDefault();
       setChatDropActive(false);
-      if (!currentGroupId) return;
+      if (!currentGroupId || !canCurrentUserSend()) return;
       const files = imageFilesFromList(e.dataTransfer && e.dataTransfer.files);
       if (!files.length) {
         showNotice('画像（JPEG / PNG / WebP / GIF）をドロップしてください');
@@ -7389,7 +7769,7 @@
       const imageItem = items.find((item) => item.type && item.type.startsWith('image/'));
       if (!imageItem) return;
       const file = imageItem.getAsFile();
-      if (!file || !currentGroupId) return;
+      if (!file || !currentGroupId || !canCurrentUserSend()) return;
       e.preventDefault();
       askSendModeForFiles([file]);
     });

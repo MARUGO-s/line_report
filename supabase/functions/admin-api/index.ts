@@ -1546,6 +1546,61 @@ Deno.serve(async (req, info) => {
       return json({ success: true, revoked }, 200)
     }
 
+    // M-talk 専用管理。LINE/Bot 側の権限とは完全に分離し、本部のフル管理セッションだけを許可する。
+    // 店舗・ルーム・cron スコープからは到達できない（STORE_SCOPED_ALLOWED_PATHS にも含めない）。
+    if (path === "/chat-admin" || path.startsWith("/chat-admin/")) {
+      if (storeScope || roomScope || authResult.scopeKind !== null) {
+        return json({ error: "M-talk管理は本部管理者だけが利用できます。" }, 403)
+      }
+      const actor = actorFromAuth(authResult)
+      const actorLabel = `admin-api:${actor.actorKind}:${actor.actorLabel}`.slice(0, 200)
+
+      if (req.method === "GET" && path === "/chat-admin/state") {
+        return json(await fetchChatAdminState(supabase), 200)
+      }
+
+      const memberMatch = /^\/chat-admin\/rooms\/(\d+)\/members\/([0-9a-f-]{36})$/i.exec(path)
+      if (memberMatch) {
+        const groupId = Number(memberMatch[1])
+        const userId = memberMatch[2].toLowerCase()
+        if (!Number.isSafeInteger(groupId) || groupId <= 0 || !isUuid(userId)) {
+          throw { status: 400, message: "Invalid room member." } satisfies AppError
+        }
+        if (req.method === "PATCH") {
+          const body = await parseJson(workReq)
+          if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+          return json(await updateChatAdminMemberPermissions(supabase, groupId, userId, body, actorLabel), 200)
+        }
+        if (req.method === "DELETE") {
+          return json(await removeChatAdminMember(supabase, groupId, userId, actorLabel), 200)
+        }
+        throw { status: 405, message: "Method not allowed." } satisfies AppError
+      }
+
+      const userActionMatch = /^\/chat-admin\/users\/([0-9a-f-]{36})\/(remove|restore)$/i.exec(path)
+      if (userActionMatch && req.method === "POST") {
+        const userId = userActionMatch[1].toLowerCase()
+        if (!isUuid(userId)) throw { status: 400, message: "Invalid user_id." } satisfies AppError
+        if (userActionMatch[2].toLowerCase() === "remove") {
+          const body = await parseJson(workReq)
+          if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+          return json(await removeChatAdminUser(supabase, userId, body, actorLabel), 200)
+        }
+        return json(await restoreChatAdminUser(supabase, userId, actorLabel), 200)
+      }
+
+      const userMatch = /^\/chat-admin\/users\/([0-9a-f-]{36})$/i.exec(path)
+      if (userMatch && req.method === "PATCH") {
+        const userId = userMatch[1].toLowerCase()
+        if (!isUuid(userId)) throw { status: 400, message: "Invalid user_id." } satisfies AppError
+        const body = await parseJson(workReq)
+        if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        return json(await updateChatAdminUserAccess(supabase, userId, body, actorLabel), 200)
+      }
+
+      throw { status: 404, message: "M-talk管理APIが見つかりません。" } satisfies AppError
+    }
+
     // ── ルーム・セルフ設定（room_config スコープ専用。room_id は上のブロックでスコープへ強制済み）──
     if (req.method === "GET" && path === "/room-config") {
       const roomId = String(url.searchParams.get("room_id") ?? "").trim()
@@ -3967,10 +4022,267 @@ Deno.serve(async (req, info) => {
   }
 })
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function chatAdminOptionalBoolean(value: unknown, field: string): boolean | null {
+  if (value === undefined) return null
+  if (typeof value !== "boolean") {
+    throw { status: 400, message: `${field} must be boolean.` } satisfies AppError
+  }
+  return value
+}
+
+function chatAdminOptionalTimestamp(value: unknown, field: string): string | null {
+  if (value === null || String(value).trim() === "") return null
+  const parsed = new Date(String(value))
+  if (!Number.isFinite(parsed.getTime())) {
+    throw { status: 400, message: `${field} must be a valid timestamp or null.` } satisfies AppError
+  }
+  return parsed.toISOString()
+}
+
+function chatAdminExpectedTimestamp(value: unknown): string {
+  const raw = String(value ?? "").trim()
+  if (!raw || !Number.isFinite(new Date(raw).getTime())) {
+    throw { status: 400, message: "画面を再読み込みしてから保存してください。" } satisfies AppError
+  }
+  // DBのmicrosecondsを落とすと一致比較に失敗するため、検証後も元の文字列を渡す。
+  return raw
+}
+
+async function fetchChatAdminState(
+  supabase: ReturnType<typeof createClient<any>>,
+): Promise<Record<string, unknown>> {
+  const [usersResult, accessResult, groupsResult, membersResult, auditResult] = await Promise.all([
+    supabase
+      .from("chat_users")
+      .select("id, username, icon_url, created_at, is_bot, store_key")
+      .order("created_at", { ascending: true })
+      .limit(5000),
+    supabase
+      .from("chat_user_access")
+      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
+      .limit(5000),
+    supabase
+      .from("chat_groups")
+      .select("id, group_name, icon_url, created_by, created_at, is_direct, is_store_room, store_key, trashed_at")
+      .order("created_at", { ascending: false })
+      .limit(5000),
+    supabase
+      .from("chat_group_members")
+      .select("group_id, user_id, joined_at, can_view, can_send, can_invite, can_manage")
+      .order("joined_at", { ascending: true })
+      .limit(20000),
+    supabase
+      .from("chat_admin_audit_log")
+      .select("id, actor, action, target_user_id, group_id, before_state, after_state, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200),
+  ])
+
+  const failures = [usersResult.error, accessResult.error, groupsResult.error, membersResult.error, auditResult.error]
+    .filter(Boolean)
+  if (failures.length) {
+    throw {
+      status: 500,
+      message: `M-talk管理情報の取得に失敗しました: ${failures.map((error) => error?.message ?? "unknown").join(" / ")}`,
+    } satisfies AppError
+  }
+
+  const userRows = (usersResult.data || []) as Array<Record<string, unknown>>
+  const accessRows = (accessResult.data || []) as Array<Record<string, unknown>>
+  const groupRows = (groupsResult.data || []) as Array<Record<string, unknown>>
+  const memberRows = (membersResult.data || []) as Array<Record<string, unknown>>
+  const accessByUser = new Map(accessRows.map((row) => [String(row.user_id ?? ""), row]))
+  const userById = new Map(userRows.map((row) => [String(row.id ?? ""), row]))
+  const membersByGroup = new Map<string, Array<Record<string, unknown>>>()
+  const roomCounts = new Map<string, number>()
+
+  for (const row of memberRows) {
+    const groupId = String(row.group_id ?? "")
+    const userId = String(row.user_id ?? "")
+    if (!membersByGroup.has(groupId)) membersByGroup.set(groupId, [])
+    membersByGroup.get(groupId)?.push(row)
+    roomCounts.set(userId, (roomCounts.get(userId) ?? 0) + 1)
+  }
+
+  const users: Array<Record<string, unknown>> = userRows.map((row): Record<string, unknown> => {
+    const userId = String(row.id ?? "")
+    const access = accessByUser.get(userId) ?? {}
+    return {
+      ...row,
+      room_count: roomCounts.get(userId) ?? 0,
+      access: {
+        access_enabled: access.access_enabled !== false,
+        can_start_direct: access.can_start_direct !== false,
+        can_create_group: access.can_create_group !== false,
+        can_browse_users: access.can_browse_users !== false,
+        restriction_reason: access.restriction_reason ?? null,
+        restricted_until: access.restricted_until ?? null,
+        deleted_at: access.deleted_at ?? null,
+        updated_at: access.updated_at ?? null,
+        updated_by: access.updated_by ?? null,
+      },
+    }
+  }).sort((a, b) => String(a["username"] ?? "").localeCompare(String(b["username"] ?? ""), "ja"))
+
+  const rooms: Array<Record<string, unknown>> = groupRows.map((group): Record<string, unknown> => {
+    const groupId = String(group.id ?? "")
+    const members = (membersByGroup.get(groupId) ?? []).map((member) => {
+      const user = userById.get(String(member.user_id ?? "")) ?? {}
+      const access = accessByUser.get(String(member.user_id ?? "")) ?? {}
+      return {
+        ...member,
+        username: user.username ?? "不明なユーザー",
+        icon_url: user.icon_url ?? null,
+        is_bot: user.is_bot === true,
+        user_deleted_at: access.deleted_at ?? null,
+        user_access_enabled: access.access_enabled !== false,
+      }
+    })
+    return { ...group, members, member_count: members.length }
+  })
+
+  const now = Date.now()
+  const humanUsers = users.filter((user) => user["is_bot"] !== true)
+  const deletedUsers = humanUsers.filter((user) => Boolean((user.access as Record<string, unknown>).deleted_at))
+  const suspendedUsers = humanUsers.filter((user) => {
+    const access = user.access as Record<string, unknown>
+    if (access.deleted_at) return false
+    const restricted = access.restricted_until ? new Date(String(access.restricted_until)).getTime() > now : false
+    return access.access_enabled === false || restricted
+  })
+  const activeUsers = humanUsers.length - deletedUsers.length - suspendedUsers.length
+
+  return {
+    summary: {
+      active_users: activeUsers,
+      suspended_users: suspendedUsers.length,
+      deleted_users: deletedUsers.length,
+      bot_users: users.length - humanUsers.length,
+      group_rooms: rooms.filter((room) => room["is_direct"] !== true && !room["trashed_at"]).length,
+      direct_rooms: rooms.filter((room) => room["is_direct"] === true && !room["trashed_at"]).length,
+      trashed_rooms: rooms.filter((room) => Boolean(room["trashed_at"])).length,
+    },
+    users,
+    rooms,
+    audit_logs: auditResult.data || [],
+    generated_at: new Date().toISOString(),
+  }
+}
+
+async function updateChatAdminUserAccess(
+  supabase: ReturnType<typeof createClient<any>>,
+  userId: string,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const updateReason = Object.prototype.hasOwnProperty.call(body, "restriction_reason")
+  const updateUntil = Object.prototype.hasOwnProperty.call(body, "restricted_until")
+  const reason = updateReason ? (String(body.restriction_reason ?? "").trim() || null) : null
+  if (reason && reason.length > 500) {
+    throw { status: 400, message: "制限理由は500文字以内にしてください。" } satisfies AppError
+  }
+
+  const args = {
+    p_user_id: userId,
+    p_access_enabled: chatAdminOptionalBoolean(body.access_enabled, "access_enabled"),
+    p_can_start_direct: chatAdminOptionalBoolean(body.can_start_direct, "can_start_direct"),
+    p_can_create_group: chatAdminOptionalBoolean(body.can_create_group, "can_create_group"),
+    p_can_browse_users: chatAdminOptionalBoolean(body.can_browse_users, "can_browse_users"),
+    p_restriction_reason: reason,
+    p_restricted_until: updateUntil ? chatAdminOptionalTimestamp(body.restricted_until, "restricted_until") : null,
+    p_update_restriction_reason: updateReason,
+    p_update_restricted_until: updateUntil,
+    p_expected_updated_at: chatAdminExpectedTimestamp(body.expected_updated_at),
+    p_actor: actor,
+  }
+  const { data, error } = await supabase.rpc("chat_admin_update_user_access", args)
+  if (error) {
+    const conflict = String(error.code ?? "") === "40001"
+    throw { status: conflict ? 409 : 400, message: conflict ? "別の管理者が先に更新しました。再読み込みしてやり直してください。" : error.message } satisfies AppError
+  }
+  return { ok: true, access: data }
+}
+
+async function removeChatAdminUser(
+  supabase: ReturnType<typeof createClient<any>>,
+  userId: string,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const confirmUsername = String(body.confirm_username ?? "").trim()
+  if (!confirmUsername) {
+    throw { status: 400, message: "確認のため表示名を入力してください。" } satisfies AppError
+  }
+  const { data, error } = await supabase.rpc("chat_admin_remove_user", {
+    p_user_id: userId,
+    p_actor: actor,
+    p_confirm_username: confirmUsername,
+  })
+  if (error) throw { status: 400, message: error.message } satisfies AppError
+  return { ok: true, access: data, history_preserved: true, auth_user_preserved: true }
+}
+
+async function restoreChatAdminUser(
+  supabase: ReturnType<typeof createClient<any>>,
+  userId: string,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.rpc("chat_admin_restore_user", {
+    p_user_id: userId,
+    p_actor: actor,
+  })
+  if (error) throw { status: 400, message: error.message } satisfies AppError
+  return { ok: true, access: data }
+}
+
+async function updateChatAdminMemberPermissions(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+  userId: string,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const fields = ["can_view", "can_send", "can_invite", "can_manage"] as const
+  if (!fields.some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
+    throw { status: 400, message: "変更するルーム権限を指定してください。" } satisfies AppError
+  }
+  const { data, error } = await supabase.rpc("chat_admin_update_member_permissions", {
+    p_group_id: groupId,
+    p_user_id: userId,
+    p_can_view: chatAdminOptionalBoolean(body.can_view, "can_view"),
+    p_can_send: chatAdminOptionalBoolean(body.can_send, "can_send"),
+    p_can_invite: chatAdminOptionalBoolean(body.can_invite, "can_invite"),
+    p_can_manage: chatAdminOptionalBoolean(body.can_manage, "can_manage"),
+    p_actor: actor,
+  })
+  if (error) throw { status: 400, message: error.message } satisfies AppError
+  return { ok: true, membership: data }
+}
+
+async function removeChatAdminMember(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+  userId: string,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { error } = await supabase.rpc("chat_admin_remove_member", {
+    p_group_id: groupId,
+    p_user_id: userId,
+    p_actor: actor,
+  })
+  if (error) throw { status: 400, message: error.message } satisfies AppError
+  return { ok: true }
+}
+
 async function authenticateChatMember(
   req: Request,
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof createClient<any>>,
   groupId: number,
+  capability: "view" | "send" | "manage" = "view",
 ): Promise<string> {
   const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers.get("Authorization") ?? "").trim())?.[1]?.trim() ?? ""
   if (!jwt) {
@@ -3981,9 +4293,22 @@ async function authenticateChatMember(
   if (error || !userId) {
     throw { status: 401, message: "ログインしてください。" } satisfies AppError
   }
+  const { data: access, error: accessError } = await supabase
+    .from("chat_user_access")
+    .select("access_enabled, restricted_until, deleted_at")
+    .eq("user_id", userId)
+    .maybeSingle()
+  if (accessError) {
+    throw { status: 500, message: `M-talk利用状態の確認に失敗しました: ${accessError.message}` } satisfies AppError
+  }
+  const restrictedUntil = access?.restricted_until ? new Date(String(access.restricted_until)).getTime() : 0
+  if (!access || access.access_enabled !== true || access.deleted_at || restrictedUntil > Date.now()) {
+    throw { status: 403, message: "M-talkの利用が停止されています。" } satisfies AppError
+  }
+
   const { data: member, error: memberError } = await supabase
     .from("chat_group_members")
-    .select("user_id")
+    .select("user_id, can_view, can_send, can_manage")
     .eq("group_id", groupId)
     .eq("user_id", userId)
     .maybeSingle()
@@ -3992,6 +4317,15 @@ async function authenticateChatMember(
   }
   if (!member) {
     throw { status: 403, message: "このルームのメンバーではありません。" } satisfies AppError
+  }
+  if (member.can_view !== true) {
+    throw { status: 403, message: "このルームを閲覧する権限がありません。" } satisfies AppError
+  }
+  if (capability === "send" && member.can_send !== true) {
+    throw { status: 403, message: "このルームへ送信する権限がありません。" } satisfies AppError
+  }
+  if (capability === "manage" && member.can_manage !== true) {
+    throw { status: 403, message: "このルームを管理する権限がありません。" } satisfies AppError
   }
   return userId
 }
@@ -4055,12 +4389,13 @@ async function requireChatScheduleMember(
   url: URL,
   supabase: ReturnType<typeof createClient>,
   body?: Record<string, unknown> | null,
+  capability: "view" | "send" | "manage" = "view",
 ): Promise<{ groupId: number; storeKey: string | null; ambiguous: boolean; roomName: string | null }> {
   const groupId = Number(body?.group_id ?? url.searchParams.get("group_id") ?? "")
   if (!Number.isSafeInteger(groupId) || groupId <= 0) {
     throw { status: 400, message: "group_id is required." } satisfies AppError
   }
-  await authenticateChatMember(req, supabase, groupId)
+  await authenticateChatMember(req, supabase, groupId, capability)
   const resolved = await resolveMtalkRoomStoreKey(supabase, groupId)
   return {
     groupId,
@@ -4195,7 +4530,7 @@ async function handleChatScheduleReservation(
   supabase: ReturnType<typeof createClient>,
 ): Promise<Response> {
   const body = await parseChatScheduleBody(req, workReq)
-  const ctx = await requireChatScheduleMember(req, url, supabase, body)
+  const ctx = await requireChatScheduleMember(req, url, supabase, body, "manage")
   const storeKey = requireChatScheduleStoreKey(ctx)
 
   if (req.method === "POST") {
@@ -4263,7 +4598,7 @@ async function handleChatScheduleEvent(
   supabase: ReturnType<typeof createClient>,
 ): Promise<Response> {
   const body = await parseChatScheduleBody(req, workReq)
-  const ctx = await requireChatScheduleMember(req, url, supabase, body)
+  const ctx = await requireChatScheduleMember(req, url, supabase, body, "manage")
   const mtalkRoomId = mtalkSyntheticRoomId(ctx.groupId)
   if (!mtalkRoomId) {
     throw { status: 400, message: "ルームが指定されていません。" } satisfies AppError
@@ -4365,7 +4700,7 @@ async function handleChatRoomPurge(
   if (!Number.isSafeInteger(groupId) || groupId <= 0) {
     throw { status: 400, message: "group_id is required." } satisfies AppError
   }
-  const userId = await authenticateChatMember(req, supabase, groupId)
+  const userId = await authenticateChatMember(req, supabase, groupId, "manage")
   const { data: group, error } = await supabase
     .from("chat_groups")
     .select("id, group_name, created_by, is_store_room, trashed_at")
@@ -4403,7 +4738,7 @@ async function handleChatRoomConfig(
   if (!Number.isSafeInteger(groupId) || groupId <= 0) {
     throw { status: 400, message: "group_id is required." } satisfies AppError
   }
-  await authenticateChatMember(req, supabase, groupId)
+  await authenticateChatMember(req, supabase, groupId, req.method === "GET" ? "view" : "manage")
   const ensured = await ensureMtalkRoomSettings(supabase, groupId)
   if (!ensured) throw { status: 500, message: "ルーム設定を作れませんでした。" } satisfies AppError
   if (req.method === "PUT") {
@@ -15865,6 +16200,12 @@ function resolveAdminRateLimit(method: string, path: string): { maxRequests: num
     return {
       maxRequests: ADMIN_RATE_LIMIT_UPLOAD_MAX_REQUESTS,
       windowMs: ADMIN_RATE_LIMIT_UPLOAD_WINDOW_MS,
+    }
+  }
+  if (path.startsWith("/chat-admin/") && method !== "GET") {
+    return {
+      maxRequests: 60,
+      windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
     }
   }
   return {

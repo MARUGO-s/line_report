@@ -10,9 +10,12 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 ## 利用条件
 
 1. メールアドレスとパスワードで新規登録する。
-2. `chat_allowed_emails` に載っているメールだけがプロフィールを作れる。
-   載っていないと `chat_users` への insert がトリガで弾かれ、チャットを一切使えない。
+2. 新規登録はセルフ登録。プロフィール作成時に`chat_user_access`が既定有効で作られる。
+   本部管理者はM-talk専用管理画面から、M-talkだけの利用停止・一時制限・論理削除を行える。
 3. 初回のみ表示名とアイコンを決める。
+
+管理画面とユーザー／ルーム権限の詳細は
+[CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md)を参照。
 
 ## 店舗Botのロゴ
 
@@ -38,11 +41,12 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 
 | テーブル | 役割 |
 | --- | --- |
-| `chat_allowed_emails` | 利用を許可するメール。`service_role` だけが操作でき、一般ユーザーからは存在ごと見えない |
+| `chat_allowed_emails` | 旧許可リスト。セルフ登録の制限には現在使わない |
 | `chat_users` | 表示名とアイコン。`id` は `auth.users(id)` |
+| `chat_user_access` | M-talkだけの利用状態、1対1開始・ルーム作成・ユーザー一覧権限 |
 | `chat_groups` | トークルーム。`is_direct` が真なら1対1 |
-| `chat_group_members` | 参加関係 |
-| `chat_messages` | 発言。`kind` は `text` / `card` / `image` |
+| `chat_group_members` | 参加関係とルーム別の閲覧・送信・招待・管理権限 |
+| `chat_messages` | 発言。`kind` は `text` / `card` / `image` / `sticker` |
 | `chat_read_states` | 既読位置。未読バッジと既読表示に使う |
 | `chat_message_reactions` | リアクション。`(message_id, user_id, emoji)` |
 | `chat_push_subscriptions` | Web Push の購読 |
@@ -50,6 +54,7 @@ Supabase Auth / Realtime / Storage / Edge Function で動く。
 | `chat_push_dispatches` | 同一メッセージの重複送信防止 |
 | `chat_push_internal_config` | cron／pg_net から `chat-push` と `chat-knowledge` を叩くための内部シークレット |
 | `chat_scheduled_messages` | 予約送信。本人だけが見て取り消せる。時刻到来で `chat_messages` へ投稿 |
+| `chat_admin_audit_log` | M-talk管理画面から行った利用・権限変更の監査ログ |
 
 ## 発言の種別
 
@@ -136,7 +141,7 @@ M-talk のトーク下部「予約・予定」から、同じルームの予約�
 - 予約タブは Gmail 予約取り込み（食べログ／一休／手入力）と同じ店舗データを表示する。カレンダーの印も予約だけ。
 - 予定タブは、その M-talk ルームと、同じ店舗キーの LINE ルームに登録されたカレンダー予定を表示する。カレンダーの印も予定だけ。
 - 注意事項・特記事項（アレルギー、お誕生日、苦手、要望）だけ赤。ダークでも赤。時刻・氏名・コースなどその他はダークで白、ライトで黒。
-- ルームメンバーはこの画面から予約・予定の追加、編集、日付変更、キャンセル（予約は非表示、予定は削除）ができる。管理トークンは使わない。
+- 閲覧権限のあるメンバーは予約・予定を表示でき、ルーム管理権限のあるメンバーだけが追加、編集、日付変更、キャンセル（予約は非表示、予定は削除）できる。管理トークンは使わない。
 - 会話の「予定の自動登録」は Googleカレンダーではなく `line_room_calendar_events`（M-talkの予定カレンダー）へ保存する。LINEルームならその `room_id`、M-talkなら `mtalk-group-{id}`。
 - 予約の新規追加は手入力として店舗に保存する。食べログ／一休の取込予約も同じ店舗なら編集・キャンセルできる。
 - 閲覧はルームメンバーのログイン JWT のみ。予約の生 JSON（`reservation_detail`）は返さない。
@@ -144,7 +149,7 @@ M-talk のトーク下部「予約・予定」から、同じルームの予約�
 ## 店舗固定ルームと #メモ
 
 全店舗に `is_store_room` の固定ルームがある。退出・削除はできない。
-作成者は、店舗固定以外のルームを先にゴミ箱へ移せる。ゴミ箱タブから復元できる。完全削除はゴミ箱からだけでき、そのルームのメッセージ・画像・`mtalk-group-{id}` の予定だけが消える。他のルームや店舗の予約・売上は消えない。完全削除前にルーム名の再入力が必要。ゴミ箱のルームには送信できない。
+管理権限のあるメンバーは、店舗固定以外のルームを先にゴミ箱へ移し、ゴミ箱タブから復元できる。完全削除は管理権限を持つルーム作成者だけがゴミ箱から実行でき、そのルームのメッセージ・画像・`mtalk-group-{id}` の予定だけが消える。他のルームや店舗の予約・売上は消えない。完全削除前にルーム名の再入力が必要。ゴミ箱のルームには送信できない。
 店舗ルームへ `#メモ` / `#日報` / `#note`（全角シャープ可）を送ると、
 `chat-knowledge` が Journal Report の「資料」へ登録し、Bot が結果を返す。
 
@@ -160,7 +165,7 @@ M-talk のトーク下部「予約・予定」から、同じルームの予約�
 - バケット `chat-images`（**非公開**）。パスは `groups/<group_id>/<uuid>.jpg`
 - 表示のたびに署名URL（1時間）を作る。アイコン用 `chat-icons` は公開だが、
   トーク画像はレシートや予約表など顧客名の写った写真が流れる前提なので分ける
-- 読み書きできるのはそのグループの参加者だけ。update / delete のポリシーは作らない
+- 閲覧はそのルームの`can_view`、保存は`can_send`が必要。update / delete のポリシーは作らない
 - 送信前に長辺1600px・JPEG品質0.82へ縮小する
 
 ## 検索
@@ -211,6 +216,8 @@ M-talkの店舗Bot検索メニューでは、予定・メディア・売上検�
 - `chat_messages` INSERT
 - `chat_groups` INSERT
 - `chat_group_members` INSERT
+- `chat_group_members` UPDATE（本人のルーム権限変更）
+- `chat_user_access` UPDATE（本人の全体利用状態変更）
 - `chat_message_reactions` すべて
 - `chat_read_states` すべて
 
@@ -223,8 +230,8 @@ M-talkの店舗Bot検索メニューでは、予定・メディア・売上検�
 
 ## 確認項目
 
-1. 許可リストに無いメールでプロフィールを作れない。
-2. 未参加グループの本文が読めない。
+1. 停止・論理削除されたユーザーの既存JWTでもM-talkを利用できない。
+2. 未参加または閲覧不可のグループの本文が読めない。
 3. 画像の署名URLが期限切れ後に作り直される。
 4. 他グループのパスを指定した画像投稿が弾かれる。
 5. 他ルームの発言を返信先に指定できない。

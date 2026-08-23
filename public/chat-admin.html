@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
+  <script>if(window.top!==window.self){try{window.top.location=window.self.location.href;}catch(_){window.self.location.href='about:blank';}}</script>
+  <title>M-talk 管理</title>
+  <link rel="icon" type="image/svg+xml" href="icons/chat-logo-v3.svg">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0f1722; --side:#0a111c; --surface:#172230; --surface2:#1d2b3b;
+      --line:#2b3b4f; --text:#f4f7fb; --muted:#9bacbd; --accent:#06c755;
+      --blue:#3b82f6; --danger:#f05252; --warn:#f59e0b; --ok:#22c55e;
+      --shadow:0 18px 48px rgba(0,0,0,.24); --radius:16px;
+    }
+    html[data-theme="light"] { color-scheme:light; --bg:#eef2f6; --side:#f8fafc; --surface:#fff; --surface2:#f4f7fa; --line:#dce3eb; --text:#172230; --muted:#64748b; --shadow:0 12px 34px rgba(35,48,68,.12); }
+    * { box-sizing:border-box; }
+    html,body { min-height:100%; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif; }
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    .hidden,[hidden] { display:none!important; }
+    .app { min-height:100vh; display:grid; grid-template-columns:250px minmax(0,1fr); }
+    .side { position:sticky; top:0; height:100vh; padding:22px 16px; background:var(--side); border-right:1px solid var(--line); display:flex; flex-direction:column; gap:18px; }
+    .brand { display:flex; align-items:center; gap:12px; padding:4px 8px 18px; border-bottom:1px solid var(--line); }
+    .brand img { width:44px; height:44px; border-radius:13px; }
+    .brand strong { display:block; font-size:17px; }
+    .brand span { color:var(--muted); font-size:12px; }
+    .nav { display:grid; gap:7px; }
+    .nav button,.nav a { width:100%; border:0; border-radius:10px; padding:11px 12px; color:var(--muted); background:transparent; text-align:left; text-decoration:none; }
+    .nav button.active,.nav button:hover,.nav a:hover { color:var(--text); background:var(--surface2); }
+    .side-foot { margin-top:auto; display:grid; gap:8px; }
+    .main { min-width:0; padding:24px clamp(16px,3vw,38px) 54px; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; }
+    .top h1 { margin:0; font-size:clamp(22px,3vw,30px); }
+    .top p { margin:5px 0 0; color:var(--muted); font-size:13px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn { border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:9px; min-height:38px; padding:8px 13px; font-weight:650; }
+    .btn:hover { border-color:var(--blue); }
+    .btn.primary { border-color:var(--accent); background:var(--accent); color:#042d15; }
+    .btn.danger { border-color:rgba(240,82,82,.55); color:#fff; background:var(--danger); }
+    .btn.ghost-danger { color:var(--danger); }
+    .btn:disabled { opacity:.42; cursor:not-allowed; }
+    .login-wrap { min-height:calc(100vh - 140px); display:grid; place-items:center; }
+    .login-card { width:min(440px,100%); padding:28px; background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); }
+    .login-card h2 { margin:0 0 8px; }
+    .login-card p { color:var(--muted); line-height:1.65; font-size:13px; }
+    label.field { display:grid; gap:7px; margin:18px 0; color:var(--muted); font-size:13px; font-weight:650; }
+    input,select,textarea { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 12px; color:var(--text); background:var(--surface2); outline:none; }
+    input:focus,select:focus,textarea:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(59,130,246,.14); }
+    .notice { border:1px solid rgba(59,130,246,.4); background:rgba(59,130,246,.1); color:var(--text); border-radius:10px; padding:11px 13px; font-size:13px; line-height:1.55; }
+    .error { border-color:rgba(240,82,82,.45); background:rgba(240,82,82,.12); }
+    .summary { display:grid; grid-template-columns:repeat(6,minmax(120px,1fr)); gap:12px; margin-bottom:20px; }
+    .metric { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:15px; min-width:0; }
+    .metric span { display:block; color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .metric strong { display:block; margin-top:7px; font-size:25px; }
+    .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+    .panel + .panel { margin-top:18px; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:17px 18px; border-bottom:1px solid var(--line); }
+    .panel-head h2 { margin:0; font-size:17px; }
+    .panel-head p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+    .tools { display:flex; align-items:center; gap:8px; min-width:min(420px,55%); }
+    .tools input { min-width:0; }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; min-width:760px; }
+    th,td { padding:12px 14px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; font-size:13px; }
+    th { position:sticky; top:0; z-index:1; color:var(--muted); background:var(--surface); font-size:11px; letter-spacing:.03em; }
+    tbody tr:hover { background:var(--surface2); }
+    .person { display:flex; align-items:center; gap:10px; min-width:200px; }
+    .avatar { width:38px; height:38px; border-radius:50%; background:#3b4b60; display:grid; place-items:center; flex:0 0 auto; overflow:hidden; font-weight:800; }
+    .avatar img { width:100%; height:100%; object-fit:cover; }
+    .person strong,.person small { display:block; }
+    .person small { color:var(--muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; }
+    .badge { display:inline-flex; align-items:center; gap:5px; min-height:24px; padding:3px 8px; border-radius:999px; background:var(--surface2); color:var(--muted); font-size:11px; font-weight:750; white-space:nowrap; }
+    .badge.ok { color:var(--ok); background:rgba(34,197,94,.12); }
+    .badge.warn { color:var(--warn); background:rgba(245,158,11,.12); }
+    .badge.danger { color:var(--danger); background:rgba(240,82,82,.12); }
+    .row-actions { display:flex; justify-content:flex-end; gap:6px; }
+    .row-actions .btn { min-height:32px; padding:5px 9px; font-size:12px; }
+    .empty { padding:34px 18px; color:var(--muted); text-align:center; }
+    .tabs { display:flex; gap:7px; flex-wrap:wrap; }
+    .tab { border:1px solid var(--line); border-radius:999px; padding:7px 12px; background:transparent; color:var(--muted); }
+    .tab.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+    .room-layout { display:grid; grid-template-columns:minmax(280px,36%) minmax(0,1fr); min-height:480px; }
+    .room-list { border-right:1px solid var(--line); max-height:650px; overflow:auto; }
+    .room-item { width:100%; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--text); padding:13px 15px; text-align:left; }
+    .room-item:hover,.room-item.active { background:var(--surface2); }
+    .room-item-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .room-item small { display:block; color:var(--muted); margin-top:5px; }
+    .room-detail { min-width:0; padding:18px; }
+    .room-detail h3 { margin:0 0 6px; }
+    .room-detail > p { color:var(--muted); font-size:12px; }
+    .perm-grid { display:grid; grid-template-columns:minmax(160px,1fr) repeat(4,72px) 70px; align-items:center; gap:5px; min-width:560px; }
+    .perm-head { color:var(--muted); font-size:11px; text-align:center; padding:8px 4px; }
+    .member-row { display:contents; }
+    .member-cell { padding:10px 6px; border-top:1px solid var(--line); }
+    .member-cell.center { text-align:center; }
+    .member-cell input { width:18px; height:18px; accent-color:var(--accent); }
+    .member-name { display:flex; align-items:center; gap:8px; min-width:0; }
+    .member-name .avatar { width:30px; height:30px; font-size:12px; }
+    .audit-list { max-height:430px; overflow:auto; }
+    .audit { display:grid; grid-template-columns:165px 160px minmax(180px,1fr) minmax(220px,1.5fr); gap:10px; padding:11px 15px; border-bottom:1px solid var(--line); font-size:12px; }
+    .audit span:first-child,.audit span:nth-child(2) { color:var(--muted); }
+    dialog { width:min(620px,calc(100% - 24px)); border:1px solid var(--line); border-radius:18px; padding:0; color:var(--text); background:var(--surface); box-shadow:var(--shadow); }
+    dialog::backdrop { background:rgba(0,0,0,.62); }
+    .dialog-head,.dialog-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:16px 18px; border-bottom:1px solid var(--line); }
+    .dialog-foot { border-top:1px solid var(--line); border-bottom:0; justify-content:flex-end; }
+    .dialog-body { padding:18px; }
+    .dialog-body h3 { margin:0; }
+    .switches { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:18px 0; }
+    .switch { display:flex; align-items:center; gap:9px; padding:11px; border:1px solid var(--line); border-radius:10px; background:var(--surface2); }
+    .switch input { width:18px; height:18px; accent-color:var(--accent); }
+    .switch span { font-size:13px; font-weight:650; }
+    .toast { position:fixed; right:18px; bottom:18px; z-index:100; max-width:min(420px,calc(100% - 36px)); padding:12px 15px; border-radius:11px; color:#fff; background:#263547; box-shadow:var(--shadow); }
+    .toast.error { background:#9d2d2d; }
+    @media (max-width:1120px) { .summary { grid-template-columns:repeat(3,1fr); } .app { grid-template-columns:205px minmax(0,1fr); } }
+    @media (max-width:760px) {
+      .app { display:block; }
+      .side { position:static; width:100%; height:auto; padding:12px; border-right:0; border-bottom:1px solid var(--line); }
+      .brand { padding-bottom:10px; }
+      .nav { grid-template-columns:repeat(3,1fr); }
+      .nav button,.nav a { min-height:40px; padding:9px 7px; display:flex; align-items:center; justify-content:center; text-align:center; line-height:1.3; font-size:12px; }
+      .side-foot { margin-top:0; display:flex; gap:8px; }
+      .side-foot .btn { flex:1 1 0; min-width:0; }
+      .main { padding:18px 12px 42px; }
+      .top { align-items:flex-start; }
+      .top p { display:none; }
+      .summary { grid-template-columns:repeat(2,1fr); }
+      .panel-head { align-items:flex-start; flex-direction:column; }
+      .tools { width:100%; min-width:0; }
+      .room-layout { display:block; }
+      .room-list { border-right:0; border-bottom:1px solid var(--line); max-height:280px; }
+      .audit { grid-template-columns:110px 1fr; }
+      .audit span:nth-child(3),.audit span:nth-child(4) { grid-column:1/-1; }
+      .switches { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><img src="icons/chat-logo-v3.svg" alt=""><div><strong>M-talk 管理</strong><span>chat.html 専用権限</span></div></div>
+      <nav class="nav" aria-label="管理メニュー">
+        <button class="active" type="button" data-jump="overview">概要</button>
+        <button type="button" data-jump="users">ユーザー</button>
+        <button type="button" data-jump="rooms">ルーム</button>
+        <button type="button" data-jump="audit">監査ログ</button>
+        <a href="./chat.html">M-talkを開く</a>
+        <a href="./index.html">管理画面へ戻る</a>
+      </nav>
+      <div class="side-foot">
+        <button class="btn" id="themeToggleBtn" type="button">ライトモード</button>
+        <button class="btn ghost-danger hidden" id="logoutBtn" type="button">管理画面からログアウト</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="top">
+        <div><h1>M-talk 権限管理</h1><p>ここでの設定は M-talk（chat.html）だけに適用されます。LINEや他画面の権限は変わりません。</p></div>
+        <div class="actions"><button class="btn hidden" id="refreshBtn" type="button">再読み込み</button></div>
+      </header>
+
+      <section class="login-wrap" id="loginView">
+        <form class="login-card" id="loginForm">
+          <h2>本部管理者として接続</h2>
+          <p>既存のフル管理トークンを使用します。店舗・ルーム限定セッションではこの画面を開けません。</p>
+          <div class="notice hidden" id="loginError"></div>
+          <label class="field">管理トークン<input id="tokenInput" type="password" autocomplete="current-password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション" required></label>
+          <button class="btn primary" id="loginBtn" type="submit" style="width:100%">接続する</button>
+        </form>
+      </section>
+
+      <div class="hidden" id="dashboardView">
+        <section id="overview">
+          <div class="summary" id="summaryGrid"></div>
+          <div class="notice">M-talkの利用停止・削除はチャット履歴や認証アカウントを消しません。削除は論理削除として扱い、必要なら復元できます。</div>
+        </section>
+
+        <section class="panel" id="users">
+          <div class="panel-head"><div><h2>ユーザー</h2><p>全体利用と M-talk 内で可能な操作を設定します。Botは変更できません。</p></div><div class="tools"><select id="userStatus"><option value="all">すべて</option><option value="active">利用中</option><option value="suspended">停止中</option><option value="deleted">削除済み</option><option value="bot">Bot</option></select><input id="userSearch" type="search" placeholder="表示名・IDで検索"></div></div>
+          <div class="table-wrap"><table><thead><tr><th>ユーザー</th><th>状態</th><th>参加ルーム</th><th>1対1</th><th>グループ作成</th><th>ユーザー参照</th><th></th></tr></thead><tbody id="userRows"></tbody></table></div>
+        </section>
+
+        <section class="panel" id="rooms">
+          <div class="panel-head"><div><h2>ルーム / 1対1</h2><p>参加者ごとに閲覧・送信・招待・管理を設定します。</p></div><div class="tools"><div class="tabs" id="roomTabs"><button class="tab active" type="button" data-room-tab="all">すべて</button><button class="tab" type="button" data-room-tab="group">ルーム</button><button class="tab" type="button" data-room-tab="direct">1対1</button></div><input id="roomSearch" type="search" placeholder="ルーム名で検索"></div></div>
+          <div class="room-layout"><div class="room-list" id="roomRows"></div><div class="room-detail" id="roomDetail"><div class="empty">左からルームを選択してください</div></div></div>
+        </section>
+
+        <section class="panel" id="audit">
+          <div class="panel-head"><div><h2>監査ログ</h2><p>M-talk専用権限の変更履歴（最新200件）</p></div></div>
+          <div class="audit-list" id="auditRows"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="userDialog">
+    <form id="userForm">
+      <div class="dialog-head"><strong>ユーザー権限</strong><button class="btn" type="button" data-close-dialog>閉じる</button></div>
+      <div class="dialog-body">
+        <div class="person" id="dialogPerson"></div>
+        <div class="switches">
+          <label class="switch"><input id="editAccessEnabled" type="checkbox"><span>M-talkを利用できる</span></label>
+          <label class="switch"><input id="editCanStartDirect" type="checkbox"><span>1対1を開始できる</span></label>
+          <label class="switch"><input id="editCanCreateGroup" type="checkbox"><span>グループを作成できる</span></label>
+          <label class="switch"><input id="editCanBrowseUsers" type="checkbox"><span>登録ユーザーを参照できる</span></label>
+        </div>
+        <label class="field">制限理由<textarea id="editRestrictionReason" rows="3" maxlength="500" placeholder="停止理由を入力（ユーザー画面にも表示）"></textarea></label>
+        <label class="field">一時停止の終了日時<input id="editRestrictedUntil" type="datetime-local"></label>
+        <div class="notice">「M-talkを利用できる」をオフにすると即時停止します。日時だけ設定した場合は、その時刻まで一時停止します。</div>
+      </div>
+      <div class="dialog-foot"><button class="btn ghost-danger" id="removeUserBtn" type="button">ユーザーを削除</button><button class="btn" id="restoreUserBtn" type="button">ユーザーを復元</button><button class="btn primary" id="saveUserBtn" type="submit">保存</button></div>
+    </form>
+  </dialog>
+  <div class="toast hidden" id="toast" role="status"></div>
+
+  <script src="pages-config.js"></script>
+  <script src="auth-session.js?v=20260624"></script>
+  <script src="site-cache.js"></script>
+  <script src="app-theme.js?v=20260702"></script>
+  <script>
+    'use strict';
+    const PAGES = window.LINE_REPORT_PAGES || {};
+    const AUTH = window.LINE_REPORT_AUTH;
+    const PROJECT_URL = PAGES.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
+    const ADMIN_SURFACE = PAGES.ADMIN_SURFACE || 'line_report';
+    const $ = (id) => document.getElementById(id);
+    const state = { users: [], rooms: [], audit: [], summary: {}, selectedUser: null, selectedRoomId: null, roomTab: 'all', loading: false, busyDepth: 0 };
+
+    function token() { return AUTH ? AUTH.getToken() : ''; }
+    function apiUrl(path) { return PAGES.adminApiUrl(path, PROJECT_URL); }
+    function escapeHtml(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
+    function formatDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString('ja-JP') : '—'; }
+    function toLocalInput(value) { if (!value) return ''; const d = new Date(value); if (!Number.isFinite(d.getTime())) return ''; const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
+    function avatarHtml(user, sizeClass) { const name = String(user.username || '?'); const inner = user.icon_url ? '<img src="' + escapeHtml(user.icon_url) + '" alt="">' : escapeHtml(name.slice(0,1)); return '<span class="avatar ' + (sizeClass || '') + '">' + inner + '</span>'; }
+    function isRestrictionActive(access) { return !!(access && access.restricted_until && new Date(access.restricted_until).getTime() > Date.now()); }
+    function userStatus(user) { const access = user.access || {}; if (user.is_bot) return 'bot'; if (access.deleted_at) return 'deleted'; if (access.access_enabled === false || isRestrictionActive(access)) return 'suspended'; return 'active'; }
+    function statusBadge(user) { const value = userStatus(user); const map = {active:['ok','利用中'],suspended:['warn','停止中'],deleted:['danger','削除済み'],bot:['','Bot']}; const item = map[value]; return '<span class="badge ' + item[0] + '">' + item[1] + '</span>'; }
+    function toast(message, isError) { const el = $('toast'); el.textContent = message; el.className = 'toast' + (isError ? ' error' : ''); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 4200); }
+    function setBusy(value) {
+      state.busyDepth = Math.max(0, state.busyDepth + (value ? 1 : -1));
+      state.loading = state.busyDepth > 0;
+      document.querySelector('.app').inert = state.loading;
+      $('userDialog').inert = state.loading;
+      document.body.classList.toggle('is-busy', state.loading);
+    }
+
+    async function api(path, options) {
+      const current = token();
+      if (!current) throw new Error('管理者として接続してください。');
+      const request = options || {};
+      const headers = Object.assign({'x-admin-token':current,'x-admin-surface':ADMIN_SURFACE,'Content-Type':'application/json'}, request.headers || {});
+      const response = await fetch(apiUrl(path), Object.assign({}, request, {headers,cache:'no-store',referrerPolicy:'no-referrer'}));
+      const text = await response.text();
+      let body = {};
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) showLogin();
+        const error = new Error(body.error || ('API error: ' + response.status)); error.status = response.status; throw error;
+      }
+      return body;
+    }
+
+    function clearSensitiveState() {
+      state.users = []; state.rooms = []; state.audit = []; state.summary = {};
+      state.selectedUser = null; state.selectedRoomId = null;
+      if ($('userDialog').open) $('userDialog').close();
+      $('summaryGrid').replaceChildren(); $('userRows').replaceChildren(); $('roomRows').replaceChildren(); $('auditRows').replaceChildren();
+      $('roomDetail').innerHTML = '<div class="empty">左からルームを選択してください</div>';
+      $('dialogPerson').replaceChildren(); $('tokenInput').value = '';
+      $('userSearch').value = ''; $('roomSearch').value = ''; $('userStatus').value = 'all';
+    }
+
+    function showLogin(message) {
+      clearSensitiveState();
+      $('loginView').classList.remove('hidden'); $('dashboardView').classList.add('hidden'); $('refreshBtn').classList.add('hidden'); $('logoutBtn').classList.add('hidden');
+      $('loginError').textContent = message || ''; $('loginError').classList.toggle('hidden', !message);
+    }
+    function showDashboard() { $('loginView').classList.add('hidden'); $('dashboardView').classList.remove('hidden'); $('refreshBtn').classList.remove('hidden'); $('logoutBtn').classList.remove('hidden'); }
+
+    async function loadState() {
+      setBusy(true);
+      try {
+        const body = await api('/chat-admin/state?_ts=' + Date.now());
+        state.users = Array.isArray(body.users) ? body.users : [];
+        state.rooms = Array.isArray(body.rooms) ? body.rooms : [];
+        state.audit = Array.isArray(body.audit_logs) ? body.audit_logs : [];
+        state.summary = body.summary || {};
+        if (state.selectedRoomId && !state.rooms.some((room) => Number(room.id) === Number(state.selectedRoomId))) state.selectedRoomId = null;
+        renderAll(); showDashboard();
+      } finally { setBusy(false); }
+    }
+
+    function renderSummary() {
+      const items = [['active_users','利用中'],['suspended_users','停止中'],['deleted_users','削除済み'],['bot_users','Bot'],['group_rooms','ルーム'],['direct_rooms','1対1']];
+      $('summaryGrid').innerHTML = items.map(([key,label]) => '<div class="metric"><span>' + label + '</span><strong>' + Number(state.summary[key] || 0).toLocaleString('ja-JP') + '</strong></div>').join('');
+    }
+
+    function filteredUsers() {
+      const query = $('userSearch').value.trim().toLowerCase(); const status = $('userStatus').value;
+      return state.users.filter((user) => (status === 'all' || userStatus(user) === status) && (!query || String(user.username || '').toLowerCase().includes(query) || String(user.id || '').toLowerCase().includes(query)));
+    }
+    function renderUsers() {
+      const users = filteredUsers();
+      $('userRows').innerHTML = users.length ? users.map((user) => {
+        const access = user.access || {}; const locked = user.is_bot === true; const deleted = !!access.deleted_at;
+        return '<tr><td><div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (locked ? ' <span class="badge">Bot</span>' : '') + '</strong><small>' + escapeHtml(user.id) + '</small></div></div></td>' +
+          '<td>' + statusBadge(user) + (access.restriction_reason ? '<small style="display:block;margin-top:4px;color:var(--muted)">' + escapeHtml(access.restriction_reason) + '</small>' : '') + '</td>' +
+          '<td>' + Number(user.room_count || 0) + '</td><td>' + boolBadge(access.can_start_direct) + '</td><td>' + boolBadge(access.can_create_group) + '</td><td>' + boolBadge(access.can_browse_users) + '</td>' +
+          '<td><div class="row-actions"><button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '" ' + (locked ? 'disabled title="Botは変更できません"' : '') + '>' + (deleted ? '復元' : '権限設定') + '</button>' + (!locked && !deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '') + '</div></td></tr>';
+      }).join('') : '<tr><td colspan="7" class="empty">該当するユーザーはいません</td></tr>';
+    }
+    function boolBadge(value) { return value === false ? '<span class="badge danger">不可</span>' : '<span class="badge ok">可</span>'; }
+
+    function filteredRooms() {
+      const query = $('roomSearch').value.trim().toLowerCase();
+      return state.rooms.filter((room) => (state.roomTab === 'all' || (state.roomTab === 'direct' ? room.is_direct : !room.is_direct)) && (!query || String(room.group_name || '').toLowerCase().includes(query) || String(room.id).includes(query)));
+    }
+    function renderRooms() {
+      const rooms = filteredRooms();
+      $('roomRows').innerHTML = rooms.length ? rooms.map((room) => '<button class="room-item ' + (Number(room.id) === Number(state.selectedRoomId) ? 'active' : '') + '" type="button" data-room-id="' + room.id + '"><span class="room-item-head"><strong>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</strong><span class="badge ' + (room.trashed_at ? 'danger' : '') + '">' + (room.is_direct ? '1対1' : 'ルーム') + '</span></span><small>ID ' + room.id + ' ・ ' + Number(room.member_count || 0) + '人' + (room.trashed_at ? ' ・ ゴミ箱' : '') + '</small></button>').join('') : '<div class="empty">該当するルームはありません</div>';
+      renderRoomDetail();
+    }
+    function renderRoomDetail() {
+      const room = state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId));
+      if (!room) { $('roomDetail').innerHTML = '<div class="empty">左からルームを選択してください</div>'; return; }
+      const members = Array.isArray(room.members) ? room.members : [];
+      const rows = members.length ? members.map((member) => {
+        const locked = member.is_bot === true; const user = {username:member.username,icon_url:member.icon_url};
+        return '<div class="member-row" data-member-id="' + escapeHtml(member.user_id) + '"><div class="member-cell"><div class="member-name">' + avatarHtml(user) + '<div><strong>' + escapeHtml(member.username || '不明なユーザー') + '</strong>' + (locked ? '<span class="badge">Bot</span>' : '') + (member.user_deleted_at ? '<span class="badge danger">削除済み</span>' : '') + '</div></div></div>' +
+          memberPermission('can_view',member,locked,room.is_direct) + memberPermission('can_send',member,locked,room.is_direct) + memberPermission('can_invite',member,locked,room.is_direct) + memberPermission('can_manage',member,locked,room.is_direct) +
+          '<div class="member-cell center"><button class="btn ghost-danger" type="button" data-remove-member="' + escapeHtml(member.user_id) + '" ' + (locked || room.is_direct ? 'disabled title="1対1とBotはアクセス解除できません"' : '') + '>解除</button></div></div>';
+      }).join('') : '<div class="empty" style="grid-column:1/-1">メンバーはいません</div>';
+      $('roomDetail').innerHTML = '<h3>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + room.id + ' / ' + members.length + '人</p><div class="table-wrap"><div class="perm-grid"><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
+    }
+    function memberPermission(name,member,locked,isDirect) { const unavailable = locked || (isDirect && (name === 'can_invite' || name === 'can_manage')) || (name !== 'can_view' && member.can_view !== true); return '<label class="member-cell center" title="' + name + '"><input type="checkbox" data-member-permission="' + name + '" ' + (member[name] === true ? 'checked' : '') + (unavailable ? ' disabled' : '') + '></label>'; }
+
+    function renderAudit() {
+      $('auditRows').innerHTML = state.audit.length ? state.audit.map((item) => {
+        const before = item.before_state == null ? '—' : JSON.stringify(item.before_state);
+        const after = item.after_state == null ? '—' : JSON.stringify(item.after_state);
+        return '<div class="audit"><span>' + formatDate(item.created_at) + '</span><span>' + escapeHtml(item.actor || 'system') + '</span><strong>' + escapeHtml(item.action || '') + '</strong><span>' + escapeHtml(before + ' → ' + after) + '</span></div>';
+      }).join('') : '<div class="empty">監査ログはありません</div>';
+    }
+    function renderAll() { renderSummary(); renderUsers(); renderRooms(); renderAudit(); }
+
+    function openUserDialog(userId) {
+      const user = state.users.find((item) => item.id === userId); if (!user || user.is_bot) return;
+      state.selectedUser = user; const access = user.access || {};
+      $('dialogPerson').innerHTML = avatarHtml(user) + '<div><h3>' + escapeHtml(user.username || '名称なし') + '</h3><small>' + escapeHtml(user.id) + '</small></div>';
+      $('editAccessEnabled').checked = access.access_enabled !== false; $('editCanStartDirect').checked = access.can_start_direct !== false; $('editCanCreateGroup').checked = access.can_create_group !== false; $('editCanBrowseUsers').checked = access.can_browse_users !== false;
+      $('editRestrictionReason').value = access.restriction_reason || ''; $('editRestrictedUntil').value = toLocalInput(access.restricted_until);
+      const deleted = !!access.deleted_at; document.querySelectorAll('#userForm input,#userForm textarea').forEach((input) => input.disabled = deleted); $('saveUserBtn').classList.toggle('hidden', deleted); $('removeUserBtn').classList.toggle('hidden', deleted); $('restoreUserBtn').classList.toggle('hidden', !deleted);
+      $('userDialog').showModal();
+    }
+    async function saveUser(event) {
+      event.preventDefault(); const user = state.selectedUser; if (!user || user.is_bot) return;
+      const restricted = $('editRestrictedUntil').value;
+      await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify({access_enabled:$('editAccessEnabled').checked,can_start_direct:$('editCanStartDirect').checked,can_create_group:$('editCanCreateGroup').checked,can_browse_users:$('editCanBrowseUsers').checked,restriction_reason:$('editRestrictionReason').value.trim() || null,restricted_until:restricted ? new Date(restricted).toISOString() : null,expected_updated_at:user.access?.updated_at})}, 'ユーザー権限を保存しました');
+      $('userDialog').close();
+    }
+    async function toggleUserAccess(userId) {
+      const user = state.users.find((item) => item.id === userId); if (!user || user.is_bot || user.access?.deleted_at) return;
+      const enabling = user.access?.access_enabled === false; if (!enabling && !confirm(user.username + ' のM-talk利用を停止しますか？')) return;
+      await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify({access_enabled:enabling,restriction_reason:enabling ? null : '管理者による利用停止',restricted_until:null,expected_updated_at:user.access?.updated_at})}, enabling ? 'M-talkの利用を再開しました' : 'M-talkの利用を停止しました');
+    }
+    async function removeUser() {
+      const user = state.selectedUser; if (!user || user.is_bot) return;
+      if (!confirm(user.username + ' をM-talkから削除します。\n履歴と認証アカウントは保持されます。続けますか？')) return;
+      const typed = prompt('確認のため表示名「' + user.username + '」を入力してください'); if (typed === null) return;
+      if (typed.trim() !== String(user.username || '').trim()) { alert('表示名が一致しません。削除を中止しました。'); return; }
+      if (!confirm('最終確認です。' + user.username + ' を削除状態にしますか？')) return;
+      await mutate('/chat-admin/users/' + encodeURIComponent(user.id) + '/remove', {method:'POST',body:JSON.stringify({confirm_username:typed.trim()})}, 'ユーザーを削除状態にしました'); $('userDialog').close();
+    }
+    async function restoreUser() {
+      const user = state.selectedUser; if (!user || user.is_bot || !confirm(user.username + ' をM-talkへ復元しますか？')) return;
+      await mutate('/chat-admin/users/' + encodeURIComponent(user.id) + '/restore', {method:'POST',body:'{}'}, 'ユーザーを復元しました'); $('userDialog').close();
+    }
+    async function updateMember(target) {
+      const room = state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId)); const row = target.closest('[data-member-id]'); if (!room || !row) return;
+      const member = room.members.find((item) => item.user_id === row.dataset.memberId); if (!member || member.is_bot) return;
+      const permission = target.dataset.memberPermission; if (!['can_view','can_send','can_invite','can_manage'].includes(permission)) return;
+      const payload = {[permission]:target.checked};
+      if (permission === 'can_view' && !target.checked) {
+        payload.can_send = false; payload.can_invite = false; payload.can_manage = false;
+        row.querySelectorAll('[data-member-permission]:not([data-member-permission="can_view"])').forEach((input) => { input.checked = false; });
+      }
+      await mutate('/chat-admin/rooms/' + room.id + '/members/' + encodeURIComponent(member.user_id), {method:'PATCH',body:JSON.stringify(payload)}, 'ルーム権限を保存しました');
+    }
+    async function removeMember(userId) {
+      const room = state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId)); const member = room?.members?.find((item) => item.user_id === userId); if (!room || room.is_direct || !member || member.is_bot) return;
+      if (!confirm(member.username + ' の「' + (room.group_name || 'このルーム') + '」へのアクセスを解除しますか？\n履歴は保持され、権限を再設定すれば復元できます。')) return;
+      await mutate('/chat-admin/rooms/' + room.id + '/members/' + encodeURIComponent(userId), {method:'DELETE'}, 'ルームへのアクセスを解除しました');
+    }
+    async function mutate(path,options,message) { setBusy(true); try { await api(path,options); await loadState(); toast(message,false); } catch (error) { if (error.status === 409) { await loadState().catch(() => {}); if ($('userDialog').open) $('userDialog').close(); } toast(error.message || String(error),true); throw error; } finally { setBusy(false); } }
+
+    $('loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const value = $('tokenInput').value.trim(); $('loginError').classList.add('hidden'); setBusy(true); try { await AUTH.loginWithToken(value,{sessionUrl:apiUrl('/auth/session'),adminSurface:ADMIN_SURFACE}); $('tokenInput').value=''; await loadState(); } catch (error) { showLogin(error.message || String(error)); } finally { setBusy(false); } });
+    $('logoutBtn').addEventListener('click', async () => { try { await AUTH.logout({logoutUrl:apiUrl('/auth/logout'),adminSurface:ADMIN_SURFACE}); } finally { showLogin(); } });
+    $('refreshBtn').addEventListener('click', () => loadState().catch((error) => toast(error.message,true)));
+    $('userSearch').addEventListener('input', renderUsers); $('userStatus').addEventListener('change', renderUsers); $('roomSearch').addEventListener('input', renderRooms);
+    $('userRows').addEventListener('click', (event) => { const edit = event.target.closest('[data-edit-user]'); const toggle = event.target.closest('[data-toggle-access]'); if (edit) openUserDialog(edit.dataset.editUser); if (toggle) toggleUserAccess(toggle.dataset.toggleAccess).catch(() => {}); });
+    $('roomTabs').addEventListener('click', (event) => { const tab = event.target.closest('[data-room-tab]'); if (!tab) return; state.roomTab=tab.dataset.roomTab; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item===tab)); renderRooms(); });
+    $('roomRows').addEventListener('click', (event) => { const row=event.target.closest('[data-room-id]'); if (!row) return; state.selectedRoomId=Number(row.dataset.roomId); renderRooms(); });
+    $('roomDetail').addEventListener('change', (event) => { if (event.target.matches('[data-member-permission]')) updateMember(event.target).catch(() => {}); });
+    $('roomDetail').addEventListener('click', (event) => { const button=event.target.closest('[data-remove-member]'); if (button) removeMember(button.dataset.removeMember).catch(() => {}); });
+    $('userForm').addEventListener('submit', (event) => saveUser(event).catch((error) => toast(error.message,true))); $('removeUserBtn').addEventListener('click', () => removeUser().catch((error) => toast(error.message,true))); $('restoreUserBtn').addEventListener('click', () => restoreUser().catch((error) => toast(error.message,true)));
+    document.querySelectorAll('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => $('userDialog').close()));
+    document.querySelectorAll('[data-jump]').forEach((button) => button.addEventListener('click', () => { document.querySelectorAll('[data-jump]').forEach((item) => item.classList.toggle('active',item===button)); $(button.dataset.jump)?.scrollIntoView({behavior:'smooth',block:'start'}); }));
+
+    (async function init() {
+      try { if (AUTH && AUTH.consumeUrlAuthParams) await AUTH.consumeUrlAuthParams({exchangeUrl:apiUrl('/auth/link-login'),adminSurface:ADMIN_SURFACE}); } catch (_) {}
+      if (!AUTH || !token()) { showLogin(); return; }
+      try { await loadState(); } catch (error) { showLogin(error.message || '管理セッションを確認できませんでした。'); }
+    })();
+  </script>
+</body>
+</html>

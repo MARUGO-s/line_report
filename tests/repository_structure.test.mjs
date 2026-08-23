@@ -20,6 +20,7 @@ const publicSiteFiles = [
   'ai-usage.html',
   'system-map.html',
   'chat.html',
+  'chat-admin.html',
   'mtalk_schedule.html',
   'chat.webmanifest',
   'chat-sw.js',

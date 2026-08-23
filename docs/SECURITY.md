@@ -46,6 +46,15 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - 自分の送信は除外、メッセージID単位で重複防止、Pushサービスが404/410を返した購読は自動停止する。
 - アイコン用未読合計は`chat_push_unread_totals(uuid[])`で計算する。このSECURITY DEFINER関数は`service_role`だけにEXECUTEを許可し、メッセージ本文や購読鍵を返さない。
 
+### 2.2 M-talk専用の利用・ルーム権限
+
+- `chat_user_access`はM-talkだけの利用停止・一時制限・論理削除を保持する。Supabase AuthやLINE Botの`line_user_permissions`は変更しない。
+- `chat_group_members`の`can_view / can_send / can_invite / can_manage`を、画面表示だけでなくメッセージ、Realtime、検索、既読・未読、リアクション、Storage、Push、予約送信、ルームRPCで強制する。
+- 生のメンバーINSERT/DELETEとルームINSERTは許可せず、権限検査付きRPCだけでルーム作成・招待参加・メンバー追加を行う。
+- `public/chat-admin.html`は`admin-api /chat-admin/*`を使用する。ブラウザへservice roleを渡さず、既存の本部フル管理セッションだけを許可する。店舗・ルーム・cronスコープは403。
+- 管理画面の「ユーザー削除」はM-talk上の論理削除。`auth.users`と`chat_users`を物理削除せず、作成ルーム・過去発言・他アプリのログインを保持する。
+- 詳細: [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md)
+
 ---
 
 ## 3. 認証・認可
@@ -148,6 +157,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - [ ] 新しい RLS ポリシー → `auth.x()` を `(select auth.x())` で包む。anon に開けるなら店舗スコープを必ず確認
 - [ ] 新しいテーブル → 内部用なら「RLS 有効・ポリシー無し（全拒否）」、クライアント可読なら店舗スコープのポリシー
 - [ ] 新しい admin-api パス → スコープ付きページが使うなら `STORE_SCOPED_ALLOWED_PATHS` に追加、全店専用なら追加しない
+- [ ] M-talk権限変更 → RLSだけでなくStorage、Realtime、Push、未読、予約送信時点、`admin-api`のチャットJWT経路にも同じ判定を適用
 - [ ] 新しい `verify_jwt=false` 関数 → 関数側で認可を実装＋`config.toml` に `verify_jwt=false` を追記
 - [ ] 新しい署名/トークン照合 → 定数時間比較・secret 未設定はフェイルクローズ
 - [ ] スキーマ変更 → migration ファイル経由（直接 DDL 禁止）。適用後に `get_advisors` を再実行

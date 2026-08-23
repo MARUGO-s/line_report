@@ -136,6 +136,26 @@ async function authenticatedUser(
   return { id: data.user.id }
 }
 
+async function hasActiveChatAccess(
+  supabase: DbClient,
+  userId: string,
+): Promise<boolean> {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from("chat_user_access")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("access_enabled", true)
+    .is("deleted_at", null)
+    .or(`restricted_until.is.null,restricted_until.lte.${now}`)
+    .maybeSingle()
+  if (error) {
+    console.error("Chat access check error:", error.message)
+    return false
+  }
+  return Boolean(data?.user_id)
+}
+
 async function internalDispatchAuthorized(
   supabase: DbClient,
   token: string,
@@ -592,14 +612,33 @@ async function handleDispatch(
     .from("chat_group_members")
     .select("user_id, muted_at")
     .eq("group_id", message.group_id)
+    .eq("can_view", true)
     .neq("user_id", message.user_id)
   if (memberError) throw new Error(`member load failed: ${memberError.message}`)
-  const recipientIds: string[] = [...new Set<string>(
+  const memberRecipientIds: string[] = [...new Set<string>(
     (memberRows || [])
       .filter((row: { muted_at?: unknown }) => !row.muted_at)
       .map((row: { user_id?: unknown }) => String(row.user_id ?? "").trim())
       .filter(Boolean),
   )]
+  let recipientIds: string[] = []
+  if (memberRecipientIds.length) {
+    const now = new Date().toISOString()
+    const { data: accessRows, error: accessError } = await supabase
+      .from("chat_user_access")
+      .select("user_id")
+      .in("user_id", memberRecipientIds)
+      .eq("access_enabled", true)
+      .is("deleted_at", null)
+      .or(`restricted_until.is.null,restricted_until.lte.${now}`)
+    if (accessError) throw new Error(`recipient access load failed: ${accessError.message}`)
+    const activeRecipientIds = new Set<string>(
+      (accessRows || [])
+        .map((row: { user_id?: unknown }) => String(row.user_id ?? "").trim())
+        .filter(Boolean),
+    )
+    recipientIds = memberRecipientIds.filter((id) => activeRecipientIds.has(id))
+  }
   if (!recipientIds.length) {
     await supabase.from("chat_push_dispatches").update({
       completed_at: new Date().toISOString(),
@@ -764,6 +803,9 @@ Deno.serve(async (req) => {
   const token = bearerToken(req)
   const user = await authenticatedUser(supabaseUrl, anonKey, token)
   if (user) {
+    if (!await hasActiveChatAccess(supabase, user.id)) {
+      return json({ ok: false, error: "Chat access is disabled or restricted." }, 403)
+    }
     if (req.method === "POST" && action === "subscribe") {
       return await handleRegister(req, supabase, user.id)
     }
