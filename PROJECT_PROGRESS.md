@@ -2,9 +2,9 @@
 
 ### 2026-08-24 - M-talkの感情イラスト（アイコン）予約配信に対応
 
-- Symptom: 予約配信時に感情イラスト（アイコン・スタンプ）を送信しようとするとエラーとなり予約できない。
-- Cause: データベース側の `chat_schedule_message` 関数で許可されている種別が `text` と `image` のみで、`sticker` が対象外として例外（`予約できるメッセージ種別ではありません`）となっていた。
-- Fix: `20260825030000_chat_schedule_sticker.sql` で `chat_schedule_message` に `v_kind = 'sticker'` を追加し、イラストの payload 情報を正規化・保持して登録できるように修正した。
+- Symptom: 予約配信時に感情イラスト（アイコン・スタンプ）を送信しようとすると、CHECK制約エラー（`chat_scheduled_messages_kind_check`）等で予約できない。
+- Cause: `chat_schedule_message` だけでなく、`chat_scheduled_messages` テーブルの CHECK 制約が `kind in ('text', 'image')` のままだった。また、配信 cron `chat_dispatch_scheduled_messages` も `sticker` の payload 再構築と `kind='sticker'` INSERT に対応していなかった。
+- Fix: `20260825040000_chat_schedule_sticker_constraint.sql` で CHECK 制約に `sticker` を追加し、`chat_dispatch_scheduled_messages` でイラスト台帳を参照した正規化と配信を行えるよう修正した。
 
 ### 2026-08-24 - M-talk管理に権限テンプレート・アクセス一覧・監査ログ復元を追加
 
