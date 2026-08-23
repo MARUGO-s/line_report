@@ -49,4 +49,6 @@ test('reaching the end of an intermediate search window automatically loads late
   assert.match(chat, /image\.addEventListener\('load', settle, \{ once: true \}\)/);
   assert.match(chat, /else resolveUnloadedLatestGap\(\)/);
   assert.match(chat, /watchStickerLayout\(el\)/);
+  assert.match(chat, /この問い合わせは常に最新ページを取得している/);
+  assert.match(chat, /viewHasLatest = true;\s*followNewMessages = true;[\s\S]*?scrollMessagesToBottom\(\);\s*updateJumpLatestButton\(\);/);
 });

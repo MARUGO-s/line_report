@@ -5402,11 +5402,16 @@
         const merged = fromCache ? mergeLatestPage(currentMessages, loaded) : loaded;
         const before = latestMessageFingerprint(currentMessages);
         const after = latestMessageFingerprint(merged);
+        // この問い合わせは常に最新ページを取得している。検索・途中ジャンプ由来の
+        // キャッシュが viewHasLatest=false でも、取得成功後は最新状態へ戻す。
+        viewHasLatest = true;
+        followNewMessages = true;
         if (!fromCache || before !== after) {
           await setMessages(merged);
           if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
-          scrollMessagesToBottom();
         }
+        scrollMessagesToBottom();
+        updateJumpLatestButton();
         snapshotRoomView(group.id);
       } catch (error) {
         console.error('Load messages error:', error);
