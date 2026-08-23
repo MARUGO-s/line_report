@@ -1123,9 +1123,11 @@
       object-fit: contain;
       filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.18));
     }
-    .message.sticker.compact-sticker .message-content { max-width: 120px; }
-    .message.sticker.compact-sticker .message-bubble { padding: 8px; }
+    .message.sticker.compact-sticker .message-content { max-width: min(82%, 420px); }
+    .message.sticker.compact-sticker .message-bubble { padding: 8px 12px; }
     .message.sticker.compact-sticker .msg-sticker { width: 64px; max-height: 64px; }
+    .inline-sticker-message { display: flex; align-items: center; gap: 8px; }
+    .inline-sticker-message .bubble-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
     .image-viewer {
       position: fixed;
@@ -1646,6 +1648,21 @@
       gap: 8px;
       align-items: flex-end;
     }
+    .inline-sticker-preview {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      align-self: flex-start;
+      max-width: calc(100% - 20px);
+      margin-left: 54px;
+      padding: 5px 8px;
+      border-radius: 12px;
+      background: #fff;
+      color: #333;
+      font-size: 12px;
+    }
+    .inline-sticker-preview img { width: 36px; height: 36px; object-fit: contain; }
+    .inline-sticker-preview button { border: 0; background: #ddd; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; }
     .composer-menu {
       display: flex;
       gap: 8px;
@@ -2215,6 +2232,7 @@
     <div class="input-area hidden" id="inputArea">
       <div class="mention-pop hidden" id="mentionPop"></div>
       <div class="sticker-picker hidden" id="stickerPicker"></div>
+      <div class="inline-sticker-preview hidden" id="inlineStickerPreview"></div>
       <div class="input-row">
         <button class="attach-btn" type="button" onclick="pickChatImage()" title="画像を送る" aria-label="画像を送る">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2456,6 +2474,7 @@
     let stickerCatalogLoaded = false;
     let activeStickerCategory = 'emotion';
     let stickerSendMode = 'large';
+    let pendingInlineSticker = null;
     const STICKER_CATEGORIES = [
       { id: 'emotion', label: '感情' },
       { id: 'symbol', label: '漫符・記号' },
@@ -5655,7 +5674,11 @@
         bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像"${ratio} loading="lazy" decoding="async">`;
       } else if (sticker) {
         const stickerImage = `<img class="msg-sticker" src="${escapeHtml(sticker.path)}" alt="${escapeHtml(sticker.label || '感情イラスト')}" loading="lazy" decoding="async">`;
-        bodyHtml = compactSticker ? `<div class="message-bubble">${stickerImage}</div>` : stickerImage;
+        const inlineText = compactSticker && !String(msg.content || '').startsWith('[感情イラスト]')
+          ? `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>` : '';
+        bodyHtml = compactSticker
+          ? `<div class="message-bubble"><div class="inline-sticker-message">${stickerImage}${inlineText}</div></div>`
+          : stickerImage;
       } else {
         bodyHtml = `<div class="message-bubble"><span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span></div>`;
       }
@@ -6307,7 +6330,37 @@
       }
     }
 
-    async function sendSticker(stickerId, display = stickerSendMode) {
+    function renderInlineStickerPreview() {
+      const preview = $('inlineStickerPreview');
+      if (!preview) return;
+      if (!pendingInlineSticker) {
+        preview.innerHTML = '';
+        preview.classList.add('hidden');
+        resizeComposer();
+        return;
+      }
+      preview.innerHTML = `<img src="${escapeHtml(pendingInlineSticker.asset_path)}" alt=""><span>文章と一緒に送信</span><button type="button" aria-label="添付を外す" onclick="clearInlineSticker()">×</button>`;
+      preview.classList.remove('hidden');
+      resizeComposer();
+    }
+
+    function clearInlineSticker() {
+      pendingInlineSticker = null;
+      renderInlineStickerPreview();
+    }
+
+    function handleStickerSelection(stickerId) {
+      if (stickerSendMode === 'compact') {
+        pendingInlineSticker = stickerCatalog.find((sticker) => sticker.id === stickerId) || null;
+        $('stickerPicker')?.classList.add('hidden');
+        renderInlineStickerPreview();
+        $('messageInput')?.focus();
+        return;
+      }
+      sendSticker(stickerId, 'large');
+    }
+
+    async function sendSticker(stickerId, display = 'large', messageText = '') {
       if (!currentGroupId || !currentUser || !stickerId) return;
       $('stickerPicker')?.classList.add('hidden');
       try {
@@ -6315,22 +6368,26 @@
           group_id: currentGroupId,
           user_id: currentUser.id,
           username: currentUser.username,
-          content: '[感情イラスト]',
+          content: messageText || '[感情イラスト]',
           kind: 'sticker',
           payload: { v: 1, kind: 'sticker', sticker: { id: stickerId, display } },
-          reply_to_id: replyTarget ? replyTarget.id : null
+          reply_to_id: replyTarget ? replyTarget.id : null,
+          mentions: collectMentions(messageText)
         }).select(MESSAGE_COLUMNS).single();
         if (error) throw error;
         clearReplyTarget();
+        if (display === 'compact') clearInlineSticker();
         lastMessages[data.group_id] = data;
         followNewMessages = true;
         if (viewHasLatest) addMessageToUI(data); else await jumpToLatest();
         scrollSentStickerIntoView(data.id);
         renderGroups();
         dispatchPushForMessage(data.id);
+        return true;
       } catch (error) {
         console.error('Send sticker error:', error);
         alert(`感情イラストの送信に失敗しました: ${error.message || error}`);
+        return false;
       }
     }
 
@@ -6679,11 +6736,14 @@
       if (!currentGroupId || !currentUser) return;
       const input = $('messageInput');
       const content = input.value.trim();
-      if (!content) return;
+      if (!content && !pendingInlineSticker) return;
       input.value = '';
       resizeComposer();
       input.focus();
-      const ok = await sendChatText(content);
+      const inlineSticker = pendingInlineSticker;
+      const ok = inlineSticker
+        ? await sendSticker(inlineSticker.id, 'compact', content)
+        : await sendChatText(content);
       if (!ok) {
         input.value = content;
         resizeComposer();
@@ -7294,7 +7354,7 @@
         return;
       }
       const button = e.target.closest('[data-sticker-id]');
-      if (button) sendSticker(button.dataset.stickerId);
+      if (button) handleStickerSelection(button.dataset.stickerId);
     });
 
     // メンション候補

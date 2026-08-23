@@ -7,6 +7,7 @@ const migration = await readFile(new URL('../supabase/migrations/20260821123000_
 const addedStickerMigration = await readFile(new URL('../supabase/migrations/20260823030000_chat_emotion_stickers_more.sql', import.meta.url), 'utf8');
 const categoryMigration = await readFile(new URL('../supabase/migrations/20260823033000_chat_sticker_categories_and_symbols.sql', import.meta.url), 'utf8');
 const displayModeMigration = await readFile(new URL('../supabase/migrations/20260823173000_chat_sticker_display_mode.sql', import.meta.url), 'utf8');
+const inlineTextMigration = await readFile(new URL('../supabase/migrations/20260823174000_chat_inline_sticker_text.sql', import.meta.url), 'utf8');
 
 test('M-talk exposes all emotion illustrations from the database catalog', async () => {
   const assets = (await readdir(new URL('../public/stickers/face/', import.meta.url))).filter((name) => name.endsWith('.png'));
@@ -36,7 +37,7 @@ test('composer picker sends and renders sticker messages', () => {
   assert.match(chat, /kind: 'sticker'/);
   assert.match(chat, /function stickerFromMessage\(msg\)/);
   assert.match(chat, /class="msg-sticker"/);
-  assert.match(chat, /sendSticker\(button\.dataset\.stickerId\)/);
+  assert.match(chat, /handleStickerSelection\(button\.dataset\.stickerId\)/);
   assert.match(chat, /STICKER_CATALOG_CACHE_KEY/);
   assert.match(chat, /loading="lazy" decoding="async"/);
   assert.match(chat, /warmImageAssets\(\)/);
@@ -58,8 +59,17 @@ test('sticker picker lets users choose large or compact bubble display', () => {
   assert.match(chat, /data-sticker-mode="large">大きく送る/);
   assert.match(chat, /data-sticker-mode="compact">小さく吹き出し内/);
   assert.match(chat, /sticker\.display === 'compact'/);
-  assert.match(chat, /class="message-bubble">\$\{stickerImage\}/);
+  assert.match(chat, /class="message-bubble"><div class="inline-sticker-message">\$\{stickerImage\}/);
   assert.match(chat, /sticker: \{ id: stickerId, display \}/);
   assert.match(displayModeMigration, /v_sticker_display := case[\s\S]*?'compact'[\s\S]*?'large'/);
   assert.match(displayModeMigration, /'display', v_sticker_display/);
+});
+
+test('compact stickers attach to the composer and send with message text', () => {
+  assert.match(chat, /id="inlineStickerPreview"/);
+  assert.match(chat, /pendingInlineSticker = stickerCatalog\.find/);
+  assert.match(chat, /文章と一緒に送信/);
+  assert.match(chat, /sendSticker\(inlineSticker\.id, 'compact', content\)/);
+  assert.match(chat, /class="inline-sticker-message">\$\{stickerImage\}\$\{inlineText\}/);
+  assert.match(inlineTextMigration, /v_sticker_display = 'compact'[\s\S]*?new\.content := left\(new\.content, 2000\)/);
 });
