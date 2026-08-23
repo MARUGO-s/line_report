@@ -6,6 +6,7 @@ const chat = await readFile(new URL('../public/chat.html', import.meta.url), 'ut
 const migration = await readFile(new URL('../supabase/migrations/20260821123000_chat_emotion_stickers.sql', import.meta.url), 'utf8');
 const addedStickerMigration = await readFile(new URL('../supabase/migrations/20260823030000_chat_emotion_stickers_more.sql', import.meta.url), 'utf8');
 const categoryMigration = await readFile(new URL('../supabase/migrations/20260823033000_chat_sticker_categories_and_symbols.sql', import.meta.url), 'utf8');
+const displayModeMigration = await readFile(new URL('../supabase/migrations/20260823173000_chat_sticker_display_mode.sql', import.meta.url), 'utf8');
 
 test('M-talk exposes all emotion illustrations from the database catalog', async () => {
   const assets = (await readdir(new URL('../public/stickers/face/', import.meta.url))).filter((name) => name.endsWith('.png'));
@@ -51,4 +52,14 @@ test('sticker picker separates emotion and symbol illustrations with swipeable t
   assert.match(chat, /\.sticker-tabs \{[\s\S]*?overflow-x: auto/);
   assert.match(chat, /data-sticker-category/);
   assert.match(chat, /stickerCatalog\.filter\(\(sticker\) => \(sticker\.category \|\| 'emotion'\) === activeStickerCategory\)/);
+});
+
+test('sticker picker lets users choose large or compact bubble display', () => {
+  assert.match(chat, /data-sticker-mode="large">大きく送る/);
+  assert.match(chat, /data-sticker-mode="compact">小さく吹き出し内/);
+  assert.match(chat, /sticker\.display === 'compact'/);
+  assert.match(chat, /class="message-bubble">\$\{stickerImage\}/);
+  assert.match(chat, /sticker: \{ id: stickerId, display \}/);
+  assert.match(displayModeMigration, /v_sticker_display := case[\s\S]*?'compact'[\s\S]*?'large'/);
+  assert.match(displayModeMigration, /'display', v_sticker_display/);
 });
