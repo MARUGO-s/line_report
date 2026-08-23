@@ -9,7 +9,7 @@ import {
 } from '../supabase/functions/_shared/calendar_tomorrow_reminder.ts';
 
 const migration = await readFile(
-  new URL('../supabase/migrations/20260826020000_calendar_multi_reminders.sql', import.meta.url),
+  new URL('../supabase/migrations/20260826030000_calendar_multi_reminders.sql', import.meta.url),
   'utf8',
 );
 const edgeCron = await readFile(

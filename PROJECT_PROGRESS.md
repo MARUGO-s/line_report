@@ -4,7 +4,7 @@
 
 - Feature: 予定配信（カレンダー予定リマインダー）を最大3スロットまで複数時刻・対象日（前日/当日）で設定できるように拡張。
 - Implementation:
-  - DB: `20260826020000_calendar_multi_reminders.sql` で `room_summary_settings.calendar_reminder_slots (jsonb)` と `calendar_tomorrow_reminder_logs.slot_id` を追加。
+  - DB: `20260826030000_calendar_multi_reminders.sql` で `room_summary_settings.calendar_reminder_slots (jsonb)` と `calendar_tomorrow_reminder_logs.slot_id` を追加。
   - Edge Function: `calendar-tomorrow-cron` で複数スロットと対象日（前日/当日）を判定・配信。
   - UI: `room_settings.html` で最大3件のリマインド設定UIを実装。
 

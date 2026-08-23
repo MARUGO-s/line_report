@@ -11,7 +11,10 @@ comment on column public.room_summary_settings.calendar_reminder_slots
 alter table public.calendar_tomorrow_reminder_logs
   add column if not exists slot_id text not null default 'default';
 
-comment on column public.calendar_tomorrow_reminder_logs
+comment on column public.calendar_tomorrow_reminder_logs.slot_id
+  is '予定配信のスロット識別子（例: slot_1, slot_2, default）';
+
+comment on table public.calendar_tomorrow_reminder_logs
   is '予定配信の送信済み記録（room_id×対象日×slot_idで重複送信を防止）';
 
 do $$
