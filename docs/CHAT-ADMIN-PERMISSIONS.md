@@ -65,8 +65,14 @@ Botは管理画面から停止・削除できない。
 | POST | `/chat-admin/users/:id/restore` | 論理削除を解除 |
 | PATCH | `/chat-admin/rooms/:id/members/:userId` | 4つのルーム権限を更新 |
 | DELETE | `/chat-admin/rooms/:id/members/:userId` | 通常ルームの4権限を無効化（履歴保持・再設定可） |
+| GET | `/chat-admin/templates` | 権限テンプレート一覧と一括適用の上限 |
+| POST | `/chat-admin/templates/apply` | テンプレートの一括適用。`dry_run`でプレビュー |
+| GET | `/chat-admin/users/:id/access` | ユーザー1人の実効アクセス一覧（ページネーション） |
+| POST | `/chat-admin/audit/:id/revert` | 監査ログからの復元。`dry_run`で差分のみ |
 
 変更は `chat_admin_audit_log` へ、操作者、対象、変更内容、日時を記録する。
+
+`dry_run` は省略時 `true`。書き込みは `dry_run: false` を明示したときだけ行う。
 
 ## 「ユーザー削除」の意味
 
@@ -98,6 +104,64 @@ Botは管理画面から停止・削除できない。
 署名済みの画像URLは発行後最大1時間有効。権限取消後の新しいURL発行は拒否するが、
 発行済みURLを即時失効させる仕様ではない。
 
+## 権限テンプレートと一括設定
+
+`chat_permission_templates` に、ルーム別4権限の組み合わせを保存する。組込は
+`viewer`（閲覧のみ）、`member`（一般メンバー）、`room_admin`（ルーム管理者）。
+
+- 適用は `chat_admin_apply_room_template(group_ids, user_ids, template_key, dry_run, actor)`。
+  1回の呼び出しが1トランザクションで、成功と失敗が混ざらない。
+- `dry_run = true` は一切書き込まず、適用時とまったく同じ差分（対象、現在値、適用後、変更有無）を返す。
+  管理画面のプレビューはこの結果をそのまま表示する。
+- 1回の上限は100件（`chat_admin_apply_room_template` と `admin-api` の
+  `CHAT_ADMIN_TEMPLATE_MAX_TARGETS` の両方に持つ。変更するときは必ず両方そろえる）。
+  これは性能ではなく**被害範囲**の制限。2026-08-25の本番実測では全参加行57、
+  1ルーム最大3人、1ユーザー最大27ルームなので、正常な操作は通り、指定を誤って
+  全件を巻き込んだときだけ止まる。超えた場合はルームまたはユーザーで絞る。
+- Botと論理削除済みユーザーは対象外として `skipped` に返す。削除済みユーザーのルーム権限は
+  復元用のスナップショットなので、テンプレートで上書きしない。
+- 4権限の正規化は `chat_admin_normalize_member_permissions` に一本化した。
+  `can_view = false` なら他3権限もfalse、1対1は招待・管理を常にfalse。
+  単体更新RPCもテンプレート適用も同じ関数を通るので、テンプレート経路から保護を迂回できない。
+- 実際の書き込みは既存の `chat_admin_update_member_permissions` へ委譲する。
+  行ロック、`chat_group_members_view_required` 制約、監査ログが単体更新とまったく同じになる。
+- 監査には、対象ごとの `member_permissions_update` と、1件の `template_apply` サマリを残す。
+
+## ユーザー別アクセス一覧
+
+`chat_admin_user_effective_access(user_id, limit, offset)` は、ユーザー1人について
+全体権限、参加ルーム、ルームごとの付与値と実効値、そして**利用できない理由コード**を返す。
+
+| コード | 意味 |
+| --- | --- |
+| `user_deleted` | M-talk上で論理削除済み |
+| `user_disabled` | 全体の`access_enabled`がfalse |
+| `user_restricted` | `restricted_until`が未来 |
+| `room_view_denied` | そのルームの`can_view`がfalse |
+| `room_send_denied` / `room_invite_denied` / `room_manage_denied` | 対応する権限がfalse |
+| `room_direct_locked` | 1対1のため招待・管理は付与できない |
+| `room_trashed` | ルームがゴミ箱にある |
+
+実効値の判定は `chat_has_active_access` と同じ条件で行い、画面側で再計算しない。
+メッセージ本文や顧客情報は返さない。`/chat-admin/state` は互換のため据え置き、
+規模が増える詳細だけをこのページネーションAPIへ分けている。
+
+## 監査ログからの復元
+
+`chat_admin_revert_audit(audit_id, dry_run, actor)` は、監査ログの`before_state`へ戻す。
+
+- 対象は `user_access_update` / `user_remove` / `member_permissions_update` / `member_remove` のみ。
+  ルーム完全削除やメッセージ消去のような復元不能操作はホワイトリストに入れない。
+- 現在値がその操作の**直後の状態**（`after_state`）と一致するときだけ実行する。
+  別の管理者が後から更新していれば `40001` を送出し、APIは409で止める。
+- `chat_admin_audit_log.source_audit_id` で二重復元を防ぐ。同じログは1度しか戻せない。
+- 削除状態へ戻す方向（`before_state.deleted_at` が非null）は実行しない。復元は常に安全側へ倒す。
+- 実際の書き戻しは既存の `chat_admin_restore_user` / `chat_admin_update_user_access` /
+  `chat_admin_update_member_permissions` へ委譲する。復元専用の書き込み経路を新設しない。
+- 復元自体も `audit_revert` として監査に残し、`source_audit_id` で元ログと関連付ける。
+- `user_remove` の復元は「復元RPC → 全体権限をbefore_stateへ戻す」の2段になるため、
+  監査には委譲先の記録も残る。これは意図した挙動。
+
 ## 運用確認
 
 1. anon、一般ユーザー、停止ユーザーで管理APIが403/401になる。
@@ -106,4 +170,7 @@ Botは管理画面から停止・削除できない。
 4. 招待不可のメンバーが招待トークンを発行・更新できない。
 5. 1対1の空席へ第三者が生INSERTできない。
 6. 論理削除後もAuthユーザー、過去発言、既存ルームが残る。
-7. 店舗・ルーム限定の管理セッションから`/chat-admin/state`を取得できない。
+7. 店舗・ルーム限定の管理セッションから`/chat-admin/state`と新しい`/chat-admin/*`を取得できない。
+8. テンプレートの`dry_run`が1件も書き込まない。適用後に`can_view=false`の行で他3権限がtrueにならない。
+9. 1対1へ`room_admin`テンプレートを適用しても、招待・管理がfalseのままになる。
+10. 別の管理者が先に更新した監査ログの復元が409で止まる。同じ監査ログを2度復元できない。
