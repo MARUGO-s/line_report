@@ -1,5 +1,32 @@
 # LINE Report Project Progress
 
+### 2026-08-24 - M-talkに個人メモを追加（送信しない私的な注記）
+
+- Request: 同じトークルームに複数人いても、自分だけの目印・記憶の断片を、送信せず
+  タイムラインへ挟みたい。
+- Implementation: `chat_private_notes`（group_id, user_id, content）を新設。RLSは
+  select/insert/delete のみ本人限定（`user_id = (select auth.uid())`）で、update
+  ポリシーは意図的に作らず編集不可にした。insertは`chat_can_view_group(group_id)`を
+  満たすルームにのみ許可。`chat.html`はメッセージ配列(`currentMessages`)とは別に
+  `currentPrivateNotes`を保持し、`buildTimeline()`で時系列にマージして描画するため、
+  返信・引用・メンション・検索・転送・削除など既存のメッセージ操作を一切巻き込まない。
+  表示は破線・付箋色の中央寄せカードにし、通常の吹き出しと混同しないようにした。
+  本人の別端末・別タブへは`chat-global`と同じRealtimeチャンネルで、
+  `filter: user_id=eq.<自分>`を付けた個別購読で同期する。
+- Naming: 店舗ルームへ送信してJournal Reportの資料へ登録する既存の「#メモ」とは
+  無関係の別機能。混同を避けるため画面上は「個人メモ」と表示する。
+- Verified: `test:chat` 87/87。本番でトランザクション適用→14試験→ROLLBACKを実行し、
+  本人insert可・なりすまし拒否・他人からは0件・編集はRLSで無効化(内容不変)・
+  未参加ルームへのinsert拒否・本人delete成功・anonは0件、をすべて確認。
+- Migration: `20260826050000_chat_private_notes.sql`。
+
+### 2026-08-24 - ドキュメントの既存記載ミスを修正
+
+- Symptom: `docs/CHAT-TALK-GUIDE.md`と統合ガイドが「発言は追記のみで削除できない」と
+  書いていたが、実際は自分の発言を削除できる（編集は不可）。
+- Fix: 実装（`deleteMessage()`とRLSの`chat_messages_delete_own`policy）に合わせて
+  「編集はできないが、自分の発言は削除できる」へ訂正した。
+
 ### 2026-08-24 - M-talkの検索通知ゼロ化（ダイアログ直接起動）およびメッセージ「通知なし（サイレント送信）」対応
 
 - Feature:

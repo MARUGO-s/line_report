@@ -1100,6 +1100,56 @@
       font-weight: 600;
     }
 
+    /* 個人メモ。送信される吹き出しと混同しないよう、中央寄せ・破線・付箋色にする。 */
+    .private-note {
+      align-self: center;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      max-width: 86%;
+      margin: 4px 0;
+      padding: 9px 12px;
+      border-radius: 14px;
+      background: rgba(255, 245, 214, 0.96);
+      border: 1px dashed rgba(178, 134, 34, 0.55);
+      color: #5b4a1d;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+    .private-note .note-pin { flex: 0 0 auto; font-size: 14px; line-height: 1.5; }
+    .private-note .note-body { flex: 1 1 auto; min-width: 0; }
+    .private-note .note-label {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      color: rgba(91, 74, 29, .78);
+      margin-bottom: 2px;
+    }
+    .private-note .note-text {
+      display: block;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .private-note .note-time {
+      display: block;
+      margin-top: 4px;
+      font-size: 10.5px;
+      color: rgba(91, 74, 29, .6);
+    }
+    .private-note .note-delete {
+      flex: 0 0 auto;
+      border: 0;
+      background: transparent;
+      color: rgba(91, 74, 29, .55);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+    .private-note .note-delete:hover { color: rgba(91, 74, 29, .95); }
+
     /* スクロール内に置くと読み込み後の位置復元がずれるので、外に浮かせる。 */
     .history-spinner {
       position: absolute;
@@ -2378,6 +2428,7 @@
         <button class="composer-menu-btn" id="composerSearchBtn" type="button" onclick="openSearchLauncher()">検索</button>
         <button class="composer-menu-btn" id="composerScheduleBtn" type="button" onclick="openReservationSchedule()">予約・予定</button>
         <button class="composer-menu-btn" id="composerSettingsBtn" type="button" onclick="openRoomSettings()">設定</button>
+        <button class="composer-menu-btn" id="composerNoteBtn" type="button" onclick="openPrivateNoteComposer()">個人メモ</button>
       </div>
     </div>
     <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
@@ -2402,6 +2453,18 @@
         </button>
       </div>
       <button class="invite-close" type="button" onclick="closeSearchLauncher()">閉じる</button>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="privateNoteOverlay" onclick="if (event.target === this) closePrivateNoteComposer()">
+    <div class="invite-sheet" role="dialog" aria-label="個人メモを書く">
+      <h2>個人メモ</h2>
+      <p class="schedule-hint">送信されません。ここに書いた内容は、このルームの自分のトーク履歴にだけ残ります。</p>
+      <textarea id="privateNoteInput" rows="4" maxlength="500" placeholder="自分だけの目印・メモを書く" style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;resize:vertical;margin-bottom:14px;"></textarea>
+      <div style="display:flex;gap:10px;">
+        <button class="invite-close" type="button" onclick="closePrivateNoteComposer()" style="flex:1;">キャンセル</button>
+        <button class="send-mode-now" type="button" onclick="savePrivateNote()" style="flex:1;">メモを保存</button>
+      </div>
     </div>
   </div>
 
@@ -2630,6 +2693,8 @@
     let composerResizeObserver = null;
     // 開いているトークの読み込み済みメッセージ（created_at 昇順）。
     let currentMessages = [];
+    // 開いているトークの個人メモ（本人にだけ表示。送信されない）。
+    let currentPrivateNotes = [];
     let stickerCatalog = [];
     let stickerCatalogLoaded = false;
     let activeStickerCategory = 'emotion';
@@ -3225,6 +3290,12 @@
           { event: 'INSERT', schema: 'public', table: 'chat_messages' },
           (payload) => handleIncomingMessage(payload.new))
         .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'chat_private_notes', filter: `user_id=eq.${currentUser.id}` },
+          (payload) => handleIncomingNote(payload.new))
+        .on('postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'chat_private_notes', filter: `user_id=eq.${currentUser.id}` },
+          (payload) => handleDeletedNote(payload.old))
+        .on('postgres_changes',
           { event: 'DELETE', schema: 'public', table: 'chat_messages' },
           (payload) => handleDeletedMessage(payload.old))
         .on('postgres_changes',
@@ -3345,6 +3416,23 @@
         }
       }
       loadMemberCounts().then(() => renderGroups());
+    }
+
+    // 別端末・別タブから同じ個人メモを追加/削除したときに同期する。
+    function handleIncomingNote(row) {
+      if (!row || Number(row.group_id) !== Number(currentGroupId)) return;
+      if (currentPrivateNotes.some((n) => n.id === row.id)) return;
+      currentPrivateNotes = currentPrivateNotes.concat([row])
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      renderMessageList();
+    }
+
+    function handleDeletedNote(row) {
+      const id = Number(row && row.id);
+      if (!Number.isSafeInteger(id)) return;
+      const before = currentPrivateNotes.length;
+      currentPrivateNotes = currentPrivateNotes.filter((n) => n.id !== id);
+      if (currentPrivateNotes.length !== before) renderMessageList();
     }
 
     function handleDeletedMessage(row) {
@@ -5715,6 +5803,7 @@
       roomViewCache.delete(id);
       roomViewCache.set(id, {
         messages: currentMessages.slice(),
+        notes: (currentPrivateNotes || []).slice(),
         reactions: new Map(reactionsByMessage),
         quoted: new Map(quotedMessages),
         members: (groupMembers || []).slice(),
@@ -5729,6 +5818,7 @@
       const cached = roomViewCache.get(Number(groupId));
       if (!cached || !cached.messages.length) return false;
       currentMessages = cached.messages.slice();
+      currentPrivateNotes = cached.notes ? cached.notes.slice() : [];
       reactionsByMessage = new Map(cached.reactions);
       quotedMessages = new Map(cached.quoted);
       groupMembers = cached.members.slice();
@@ -5827,6 +5917,7 @@
       }
 
       const contextPromise = loadGroupContext(group.id);
+      const notesPromise = loadPrivateNotes(group.id, seq);
       loadScheduledMessages();
 
       try {
@@ -5859,7 +5950,7 @@
         console.error('Load messages error:', error);
       }
 
-      await contextPromise;
+      await Promise.all([contextPromise, notesPromise]);
       if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
       paintChatHeader(group);
       renderGroups();
@@ -5903,6 +5994,25 @@
         console.error('Load group context error:', error);
       }
       updateChatHeaderMeta();
+    }
+
+    // 個人メモを取得する。RLSで本人の分しか返らない。件数が変わったときだけ描き直す。
+    async function loadPrivateNotes(groupId, seq) {
+      try {
+        const { data, error } = await sb
+          .from('chat_private_notes')
+          .select('id, group_id, content, created_at')
+          .eq('group_id', groupId)
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(groupId)) return;
+        const next = data || [];
+        const changed = JSON.stringify(currentPrivateNotes) !== JSON.stringify(next);
+        currentPrivateNotes = next;
+        if (changed) renderMessageList();
+      } catch (error) {
+        console.error('Load private notes error:', error);
+      }
     }
 
     async function loadReactions(messageIds) {
@@ -5972,6 +6082,7 @@
 
     function resetMessageView() {
       currentMessages = [];
+      currentPrivateNotes = [];
       seenMessageIds = new Set();
       historyExhausted = false;
       loadingHistory = false;
@@ -6249,17 +6360,44 @@
       return div;
     }
 
+    // 送信されない私的な注記。誰からも自分にしか見えないことが一目でわかるよう、
+    // 通常の吹き出しとは別の見た目（中央寄せ・破線・付箋色）にする。
+    function buildNoteNode(note) {
+      const div = document.createElement('div');
+      div.className = 'private-note';
+      div.dataset.noteId = String(note.id);
+      div.innerHTML = `
+        <span class="note-pin" aria-hidden="true">📌</span>
+        <span class="note-body">
+          <span class="note-label">個人メモ（自分だけに表示・送信されません）</span>
+          <span class="note-text">${escapeHtml(note.content)}</span>
+          <span class="note-time">${formatTime(note.created_at)}</span>
+        </span>
+        <button class="note-delete" type="button" data-delete-note="${note.id}" title="このメモを削除" aria-label="このメモを削除">✕</button>
+      `;
+      return div;
+    }
+
+    // メッセージと個人メモを時系列で1本にまとめる。メッセージ側の配列・状態は
+    // 一切変更しない（返信・引用・削除・転送などが個人メモを巻き込まないため）。
+    function buildTimeline() {
+      const items = currentMessages.map((m) => ({ ts: m.created_at, kind: 'message', data: m }));
+      currentPrivateNotes.forEach((n) => items.push({ ts: n.created_at, kind: 'note', data: n }));
+      items.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+      return items;
+    }
+
     function renderMessageList() {
       const el = $('messages');
       el.innerHTML = '';
       let lastDay = '';
-      currentMessages.forEach((msg) => {
-        const key = dayKey(msg.created_at);
+      buildTimeline().forEach((item) => {
+        const key = dayKey(item.ts);
         if (key !== lastDay) {
-          el.appendChild(buildDayDivider(msg.created_at));
+          el.appendChild(buildDayDivider(item.ts));
           lastDay = key;
         }
-        el.appendChild(buildMessageNode(msg));
+        el.appendChild(item.kind === 'note' ? buildNoteNode(item.data) : buildMessageNode(item.data));
       });
       hydrateMessageImages();
       watchStickerLayout(el);
@@ -7351,6 +7489,59 @@
       $('searchLauncherOverlay')?.classList.add('hidden');
     }
 
+    // 個人メモ: 送信は一切行わない。保存先はDBだが、他の参加者・Bot・管理画面には見せない。
+    function openPrivateNoteComposer() {
+      if (!currentGroupId || !currentUser) return;
+      const input = $('privateNoteInput');
+      if (input) input.value = '';
+      $('privateNoteOverlay')?.classList.remove('hidden');
+      if (input) input.focus();
+    }
+
+    function closePrivateNoteComposer() {
+      $('privateNoteOverlay')?.classList.add('hidden');
+    }
+
+    async function savePrivateNote() {
+      if (!currentGroupId || !currentUser) return;
+      const input = $('privateNoteInput');
+      const content = String(input?.value || '').trim();
+      if (!content) { input?.focus(); return; }
+      if (content.length > 500) { alert('個人メモは500文字までです'); return; }
+      try {
+        const { data, error } = await sb
+          .from('chat_private_notes')
+          .insert({ group_id: currentGroupId, user_id: currentUser.id, content })
+          .select('id, group_id, content, created_at')
+          .single();
+        if (error) throw error;
+        closePrivateNoteComposer();
+        if (data && !currentPrivateNotes.some((n) => n.id === data.id)) {
+          currentPrivateNotes = currentPrivateNotes.concat([data]);
+          renderMessageList();
+          if (followNewMessages) scrollMessagesToBottom();
+        }
+      } catch (error) {
+        console.error('Save private note error:', error);
+        alert(error.message || '個人メモの保存に失敗しました');
+      }
+    }
+
+    async function deletePrivateNote(noteId) {
+      const id = Number(noteId);
+      if (!Number.isSafeInteger(id)) return;
+      if (!confirm('この個人メモを削除しますか？')) return;
+      try {
+        const { error } = await sb.from('chat_private_notes').delete().eq('id', id);
+        if (error) throw error;
+        currentPrivateNotes = currentPrivateNotes.filter((n) => n.id !== id);
+        renderMessageList();
+      } catch (error) {
+        console.error('Delete private note error:', error);
+        alert(error.message || '個人メモの削除に失敗しました');
+      }
+    }
+
     function triggerMessageSearchFromLauncher() {
       closeSearchLauncher();
       const searchInput = $('talkSearch');
@@ -7969,6 +8160,9 @@
 
     $('messages').addEventListener('click', (e) => {
       if (!e.target.closest) return;
+
+      const deleteNote = e.target.closest('[data-delete-note]');
+      if (deleteNote) { deletePrivateNote(deleteNote.dataset.deleteNote); return; }
 
       // 画像はクリックで拡大。署名URLは hydrate 済みの src をそのまま使う。
       const commandBtn = e.target.closest('[data-card-command]');
