@@ -1,10 +1,10 @@
 # LINE Report Project Progress
 
-### 2026-08-24 - M-talkの感情イラスト（アイコン）予約配信に対応
+### 2026-08-24 - M-talkの感情イラスト（アイコン）予約配信およびCronディスパッチ統合
 
-- Symptom: 予約配信時に感情イラスト（アイコン・スタンプ）を送信しようとすると、CHECK制約エラー（`chat_scheduled_messages_kind_check`）等で予約できない。
-- Cause: `chat_schedule_message` だけでなく、`chat_scheduled_messages` テーブルの CHECK 制約が `kind in ('text', 'image')` のままだった。また、配信 cron `chat_dispatch_scheduled_messages` も `sticker` の payload 再構築と `kind='sticker'` INSERT に対応していなかった。
-- Fix: `20260825040000_chat_schedule_sticker_constraint.sql` で CHECK 制約に `sticker` を追加し、`chat_dispatch_scheduled_messages` でイラスト台帳を参照した正規化と配信を行えるよう修正した。
+- Symptom: 予約配信時に感情イラスト（アイコン・スタンプ）を送信しようとするとエラーとなり、また予約時間到来時に自動配信されない。
+- Cause: `chat_scheduled_messages` テーブルの CHECK 制約（`chat_scheduled_messages_kind_check`）が `kind in ('text', 'image')` のままだった。また、毎分の pg_cron 基盤（`high-frequency-dispatcher-cron-job`）に `chat_dispatch_scheduled_messages` が統合されておらず、pg_cron からの実行権限（`postgres`）も不足していた。
+- Fix: `20260825040000_chat_schedule_sticker_constraint.sql` で CHECK 制約に `sticker` を追加し、`20260825050000_chat_schedule_cron_dispatch_integration.sql` で `invoke_high_frequency_dispatcher_cron` に予約配信を組み込んで毎分確実にディスパッチされるようにした。
 
 ### 2026-08-24 - M-talk管理に権限テンプレート・アクセス一覧・監査ログ復元を追加
 
