@@ -8,6 +8,63 @@
 - Supabase production project: `hocbnifuactbvmyjraxy`
 - Main surfaces: static GitHub Pages, `admin-api`, store-scoped `line-webhook`, cron Functions, Postgres/RLS, private `line-media` Storage.
 
+## 引き継ぎメモ（2026-08-24 セッション終了時点）
+
+前セッションが利用上限で中断した。**この節を最初に読むこと。**
+
+### 本番反映済み（確認済み）
+
+| PR | コミット | 内容 |
+| --- | --- | --- |
+| [#161](https://github.com/MARUGO-s/line_report/pull/161) | `52d5312` | 権限テンプレート一括適用／ユーザー別アクセス一覧／監査ログ復元 |
+| [#162](https://github.com/MARUGO-s/line_report/pull/162) | `07d3fae` | `chat_admin_normalize_member_permissions` の search_path 固定＋反映記録 |
+
+検証済み: 両ワークフロー成功、migration `20260825010000` / `20260825020000` 適用、
+新5関数は `anon=false / authenticated=false / service_role=true`、
+Pages 200・未認証API 401、Advisors は WARN 54（ベースラインへ復帰）で
+増加は `chat_permission_templates` の意図的な INFO 1件のみ。
+
+### 未マージ
+
+- [#163](https://github.com/MARUGO-s/line_report/pull/163) ブランチ `docs/m-talk-complete-guide`
+  — `docs/M-TALK-COMPLETE-GUIDE.md`（M-talk統合ガイド11章）。レビュー待ち。
+
+### 未着手（ユーザーが依頼済み）
+
+1. **店舗スタッフ向けの共有Webページ**（Artifact として公開）。
+   統合ガイドのうち**使い方に関わる部分だけ**を対象にし、
+   セキュリティ内部構造・テーブル名・管理APIパス・開発者向けルールは載せない。
+   前セッションは `artifact-design` skill を読み込んだところで中断した。
+
+### 未実施の検証（重要）
+
+- **本番での実操作スモークテストがまだ。** これまでの検証は層ごとで、
+  DB試験はすべて ROLLBACK している。「管理トークン → admin-api → RPC」を
+  通した実行が本番で一度もない。特に supabase-js が `group_ids`(JS数値配列) を
+  `bigint[]` へ、`user_ids` を `uuid[]` へ渡す部分が未検証。
+- 確認方法: `chat-admin.html` でルームを選び「変更内容を確認」を押すだけ。
+  `dry_run:true` なので行も監査ログも書き込まない（本番DBで確認済み）。
+
+### 次に勧める実装
+
+**複数ルームへの一括適用（UI）。** APIは複数ルーム対応済みだが、
+管理UIは選択中の1ルームしか送っていない（`public/chat-admin.html` の
+`group_ids:[Number(room.id)]`）。ルーム一覧にチェックボックスを足して
+プレビューへ渡すだけで、DB変更なしに実現できる。
+
+ロードマップ7（実効権限チェック）はアクセス一覧で実質達成済み。
+8・9は現在の規模（有効ルーム26・参加行57）では時期尚早。
+4・5・6はユーザーの判断待ち（下記の質問参照）。
+
+### 注意
+
+- migration `20260825*` はファイル名の日付が実施日（2026-08-24 JST）より1日進んでいる。
+  適用済みのため改名しない。次のchat系は `20260825020000` より後の版番号にする。
+- ローカルのプレビューサーバー（ポート8765）が起動したままの可能性がある。
+  `lsof -ti tcp:8765 | xargs kill` で停止する。
+
+---
+
 ## Active handoff — M-talk管理画面の次期改善（2026-08-24 / 2026-08-24更新）
 
 ### 次のAIが最初に知ること
