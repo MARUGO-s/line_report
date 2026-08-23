@@ -5494,6 +5494,24 @@
       el.scrollTop = el.scrollHeight;
     }
 
+    // 自分が送った感情イラストは、画像の読み込みで高さが確定した後も
+    // 入力欄の裏へ隠れないよう、最新位置へ追従させる。
+    function scrollSentStickerIntoView(messageId) {
+      const messages = $('messages');
+      const scroll = () => {
+        if (!messages || Number(currentMessages.at(-1)?.id) !== Number(messageId)) return;
+        messages.scrollTop = messages.scrollHeight;
+        updateJumpLatestButton();
+      };
+
+      requestAnimationFrame(() => {
+        scroll();
+        requestAnimationFrame(scroll);
+        const image = messages?.querySelector(`.message[data-message-id="${messageId}"] img.msg-sticker`);
+        if (image && !image.complete) image.addEventListener('load', scroll, { once: true });
+      });
+    }
+
     // --- 日付の区切り ---
 
     function dayKey(iso) {
@@ -6274,6 +6292,7 @@
         lastMessages[data.group_id] = data;
         followNewMessages = true;
         if (viewHasLatest) addMessageToUI(data); else await jumpToLatest();
+        scrollSentStickerIntoView(data.id);
         renderGroups();
         dispatchPushForMessage(data.id);
       } catch (error) {

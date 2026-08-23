@@ -39,6 +39,9 @@ test('composer picker sends and renders sticker messages', () => {
   assert.match(chat, /STICKER_CATALOG_CACHE_KEY/);
   assert.match(chat, /loading="lazy" decoding="async"/);
   assert.match(chat, /warmImageAssets\(\)/);
+  assert.match(chat, /function scrollSentStickerIntoView\(messageId\)/);
+  assert.match(chat, /image\.addEventListener\('load', scroll, \{ once: true \}\)/);
+  assert.match(chat, /scrollSentStickerIntoView\(data\.id\)/);
 });
 
 test('sticker picker separates emotion and symbol illustrations with swipeable tabs', () => {

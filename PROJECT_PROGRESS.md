@@ -1100,3 +1100,7 @@ New records are appended below.
   - Graphify／Obsidian はこのクラウド環境に未配置のため `knowledge:check` は未実施。
 - Deploy notes:
   - Pages（`public/jnm`）と Edge Function `ai-analyze`（および `pos_journal_ai` を使う `admin-api`）の反映が必要。
+### 2026-08-23 - 送信した感情イラストを自動表示
+
+- Symptom: 感情イラストを送信しても、画像の下側が固定入力欄の裏に隠れ、「最新へ」が残ることがある。
+- Fix: 送信直後に加え、画像の読み込みで高さが確定した後にも最新位置へスクロールし、送信したイラスト全体を表示する。
