@@ -1,5 +1,28 @@
 # LINE Report Project Progress
 
+### 2026-08-24 - M-talkメディア閲覧を店舗Botのルームへ限定し、保存先の取り違えを修正
+
+- Symptom: M-talkの検索ランチャー「写真・メディアライブラリ」がどのルームからも開けた
+  （`289da77`で店舗Botがいるルームだけに制限済み）。加えて、M-talkからの画像投稿が
+  同じ店舗の別のLINEルーム（例: エリア会議）の`line_message_media`へ保存されうる経路が
+  残っていた。
+- Fix:
+  - `chat_store_file_bridge.ts`: 投稿元のM-talkルーム（`mtalk-group-{groupId}`）へ常に
+    保存するよう修正。メディアIDも`mtalk-{groupId}-{messageId}`へ変更し
+    （旧形式`mtalk-{messageId}`とも互換）、一意制約で重複投稿を防ぐ。
+  - ワンタイム閲覧リンクの認証情報へ`store_partition_key`を追加し、ルームだけでなく
+    店舗でも閲覧セッションを絞れるようにした。
+  - `/chat-admin`のメディア一覧APIへルーム名・投稿者名の補完を追加（既存の
+    `fetchRoomNameMapForIds`/`fetchSenderNameMapForUserIds`を再利用、他店舗・他ルームの
+    データは混ぜない）。
+  - レシート修正・解析削除コマンドの正規表現を新IDフォーマットへ追随。
+- Verified: `npm run test` 全8グループ0件失敗、`npm run check`。`deno check admin-api`は
+  一時的に+2件（`fetchRoomNameMapForIds`等へ渡す`supabase`の型パラメータ不一致）に
+  なったため、同ファイル内の既存キャストパターンへ揃えてベースライン(186件)へ戻した。
+  レシート系IDへの参照漏れがないことをリポジトリ全体で確認。
+- Note: `289da77`（機能追加の本体）は前セッションが本番反映済みだったが、
+  `PROJECT_PROGRESS.md`／`docs/店舗運用修正記録.md`への記録が漏れていた。
+
 ### 2026-08-24 - M-talkに個人メモを追加（送信しない私的な注記）
 
 - Request: 同じトークルームに複数人いても、自分だけの目印・記憶の断片を、送信せず

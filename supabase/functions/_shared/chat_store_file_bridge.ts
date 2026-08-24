@@ -35,8 +35,11 @@ import { mtalkCardFromLineReply } from './chat_flex_card.ts'
 // deno-lint-ignore no-explicit-any
 type DbClient = any
 
-export function mtalkMediaMessageId(chatMessageId: number): string {
-  return `mtalk-${chatMessageId}`
+// M-talk画像のメディアIDは「送信元ルーム + chat_messages.id」で固定する。
+// 画像解析の旧経路とchat.htmlのアーカイブ経路が同じ投稿を扱っても、
+// line_message_media の一意制約で必ず1件になる。
+export function mtalkMediaMessageId(groupId: number, chatMessageId: number): string {
+  return `mtalk-${groupId}-${chatMessageId}`
 }
 
 export async function resolveStoreLineRoomId(supabase: DbClient, storeKey: string): Promise<string | null> {
@@ -153,9 +156,10 @@ export async function saveStoreRoomFileToMediaLibrary(
     bytes: Uint8Array
   },
 ): Promise<{ saved: boolean; lineMessageId: string; roomId: string; reason?: string }> {
-  const lineRoomId = await resolveStoreLineRoomId(supabase, params.storeKey)
-  const roomId = lineRoomId || `mtalk-group-${params.groupId}`
-  const lineMessageId = mtalkMediaMessageId(params.chatMessageId)
+  // M-talkからの投稿を、同じ店舗の任意のLINEルーム（例: エリア会議）へ
+  // 保存してはいけない。投稿元のM-talkルームを常に保存先にする。
+  const roomId = `mtalk-group-${params.groupId}`
+  const lineMessageId = mtalkMediaMessageId(params.groupId, params.chatMessageId)
   const result = await saveMediaBytesToLibrary(supabase, {
     roomId,
     lineMessageId,
@@ -172,9 +176,10 @@ export async function saveStoreRoomFileToMediaLibrary(
 
 export async function removeStoreRoomMediaForChatMessage(
   supabase: DbClient,
+  groupId: number,
   chatMessageId: number,
 ): Promise<boolean> {
-  return await removeRoomMediaByMessageId(supabase, mtalkMediaMessageId(chatMessageId))
+  return await removeRoomMediaByMessageId(supabase, mtalkMediaMessageId(groupId, chatMessageId))
 }
 
 function resolveClaudeApiKey(): string {

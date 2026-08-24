@@ -265,8 +265,11 @@ export async function authenticateAdminDashboardSessionToken(
   const scopeKind = typeof meta.scope === "string" && meta.scope ? meta.scope : null
   const storeRaw = typeof meta.store_partition_key === "string" ? meta.store_partition_key.trim() : ""
   const roomRaw = typeof meta.room_id === "string" ? meta.room_id.trim() : ""
-  if (scopeKind === ROOM_CONFIG_SCOPE || scopeKind === CHAT_MEDIA_VIEW_SCOPE) {
+  if (scopeKind === ROOM_CONFIG_SCOPE) {
     return { ok: true, storeScope: null, roomScope: roomRaw || null, scopeKind }
+  }
+  if (scopeKind === CHAT_MEDIA_VIEW_SCOPE) {
+    return { ok: true, storeScope: storeRaw || null, roomScope: roomRaw || null, scopeKind }
   }
   return {
     ok: true,
