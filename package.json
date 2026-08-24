@@ -18,7 +18,7 @@
     "test:ci": "npm run test:structure && npm run test:chat && npm run test:foodcourt && npm run test:reservation && npm run test:receipt && npm run test:journal-ai && npm run test:pos-journal",
     "test:knowledge": "node --test tests/knowledge_system.test.mjs",
     "test:structure": "node --test tests/repository_structure.test.mjs tests/ux_mobile_layout.test.mjs tests/html_inline_scripts.test.mjs",
-    "test:chat": "node --test tests/chat_web_push.test.ts tests/chat_admin_permissions.test.mjs tests/chat_admin_templates.test.mjs tests/chat_private_notes.test.mjs tests/chat_store_bot_logos.test.mjs tests/chat_emotion_stickers.test.mjs tests/chat_profile_icon_catalog.test.mjs tests/chat_history_since_join.test.mjs tests/mtalk_schedule.test.ts tests/calendar_tomorrow_reminder.test.ts tests/calendar_multi_reminders.test.mjs tests/chat_silent_messages.test.mjs tests/room_hard_delete.test.ts",
+    "test:chat": "node --test tests/chat_web_push.test.ts tests/chat_admin_permissions.test.mjs tests/chat_admin_templates.test.mjs tests/chat_private_notes.test.mjs tests/chat_store_bot_logos.test.mjs tests/chat_emotion_stickers.test.mjs tests/chat_profile_icon_catalog.test.mjs tests/chat_history_since_join.test.mjs tests/mtalk_schedule.test.ts tests/calendar_tomorrow_reminder.test.ts tests/calendar_multi_reminders.test.mjs tests/chat_silent_messages.test.mjs tests/chat_media_archive.test.mjs tests/room_hard_delete.test.ts",
     "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "deno test --no-lock --no-check --allow-read --allow-env tests/yamato_collect_expense.test.ts && node --test tests/receipt_*.test.ts",

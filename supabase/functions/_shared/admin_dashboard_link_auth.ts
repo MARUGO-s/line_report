@@ -5,6 +5,9 @@ const LOGIN_LINK_PREFIX = "lrlt_"
 const SESSION_PREFIX = "lrst_"
 // ルーム・セルフ設定スコープ（store スコープとは排他）。metadata.scope に入れる。
 export const ROOM_CONFIG_SCOPE = "room_config"
+// 既発行の旧M-talkメディア閲覧トークンを、期限まで通常の管理APIから遮断するためだけに残す。
+export const CHAT_MEDIA_VIEW_SCOPE = "chat_media_view"
+// M-talkから開く店舗Botメディア専用の、閲覧のみ・短命セッション。
 // ログインリンク(lt)はLINEに平文配信されるため漏えい窓を短く。単一使用(used_at)と併用。
 const LOGIN_LINK_TTL_SEC = 24 * 60 * 60
 const SESSION_TTL_REMEMBER_SEC = 3 * 24 * 60 * 60
@@ -109,7 +112,7 @@ export async function issueAdminDashboardSessionToken(
 export async function exchangeAdminDashboardLoginLinkToken(
   supabase: SupabaseClient,
   rawToken: string,
-  options?: { rememberLogin?: boolean; metadata?: Record<string, unknown> },
+  options?: { rememberLogin?: boolean; metadata?: Record<string, unknown>; ttlSeconds?: number },
 ): Promise<{ token: string; expires_at: string }> {
   const token = String(rawToken ?? "").trim()
   if (!token.startsWith(LOGIN_LINK_PREFIX)) {
@@ -160,7 +163,7 @@ export async function exchangeAdminDashboardLoginLinkToken(
   return await issueAdminDashboardSessionToken(supabase, {
     rememberLogin: options?.rememberLogin,
     metadata: mergedMetadata,
-    ttlSeconds: isReusableViewLink ? REUSABLE_VIEW_LINK_TTL_SEC : undefined,
+    ttlSeconds: isReusableViewLink ? REUSABLE_VIEW_LINK_TTL_SEC : options?.ttlSeconds,
   })
 }
 
@@ -262,7 +265,7 @@ export async function authenticateAdminDashboardSessionToken(
   const scopeKind = typeof meta.scope === "string" && meta.scope ? meta.scope : null
   const storeRaw = typeof meta.store_partition_key === "string" ? meta.store_partition_key.trim() : ""
   const roomRaw = typeof meta.room_id === "string" ? meta.room_id.trim() : ""
-  if (scopeKind === ROOM_CONFIG_SCOPE) {
+  if (scopeKind === ROOM_CONFIG_SCOPE || scopeKind === CHAT_MEDIA_VIEW_SCOPE) {
     return { ok: true, storeScope: null, roomScope: roomRaw || null, scopeKind }
   }
   return {

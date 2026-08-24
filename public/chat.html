@@ -1325,6 +1325,7 @@
       border-radius: 14px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
       z-index: 45;
+      touch-action: pan-y;
     }
     .sticker-tabs {
       display: flex;
@@ -1794,6 +1795,137 @@
     }
     .composer-menu-btn:active { background: #e8e8e8; }
 
+    /* Final composer redesign: secondary tools live behind + so the input stays primary. */
+    .composer-mode-chip {
+      display: none;
+      align-self: flex-start;
+      align-items: center;
+      gap: 7px;
+      max-width: 100%;
+      padding: 5px 10px;
+      border: 1px solid #c9ced0;
+      border-radius: 14px;
+      background: #fff;
+      color: #3b3d3f;
+      font-size: 11.5px;
+      line-height: 1.25;
+    }
+    .composer-mode-chip.visible { display: inline-flex; }
+    .composer-mode-chip.memo { background: #fdf3d8; border-color: #e8d69c; color: #8a6d22; }
+    .composer-mode-chip button {
+      border: 0;
+      padding: 0 2px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+    }
+    .composer-sheet {
+      display: none;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .composer-sheet.visible { display: grid; }
+    .composer-tool-btn {
+      min-height: 74px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid #d3d7d9;
+      border-radius: 10px;
+      background: #fff;
+      color: #1f2123;
+      cursor: pointer;
+      font: inherit;
+      font-size: 11.5px;
+    }
+    .composer-tool-btn:hover,
+    .composer-tool-btn:focus-visible { border-color: #06c755; color: #078c3c; }
+    .composer-tool-btn svg { color: #4b5052; }
+    .composer-tool-btn:hover svg,
+    .composer-tool-btn:focus-visible svg { color: #078c3c; }
+    .composer-plus-btn {
+      width: 46px;
+      height: 46px;
+      flex: 0 0 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #d3d7d9;
+      border-radius: 50%;
+      background: #fff;
+      color: #3b3d3f;
+      cursor: pointer;
+    }
+    .composer-sticker-btn {
+      width: 46px;
+      height: 46px;
+      flex: 0 0 46px;
+      margin-left: 2px;
+      border: 1px solid #d3d7d9;
+      border-radius: 50%;
+      background: #fff;
+      color: #5c6265;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, sans-serif;
+      font-size: 27px;
+      line-height: 1;
+    }
+    .composer-sticker-btn:hover,
+    .composer-sticker-btn:focus-visible { border-color: #06c755; color: #078c3c; outline: none; }
+    .composer-sticker-btn.message-ready { color: #fff; background: var(--line-green); }
+    .composer-plus-btn.active { border-color: #06c755; color: #078c3c; background: #f4fff8; }
+    .composer-helper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 18px;
+      padding-left: 4px;
+      color: #6b7073;
+      font-size: 11px;
+      line-height: 1.4;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .composer-helper-divider { width: 1px; height: 11px; flex: 0 0 1px; background: #cfd4d6; }
+    .composer-helper button {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: #3b3d3f;
+      cursor: pointer;
+      font: inherit;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .composer-helper button:hover { color: #078c3c; }
+    .composer-input-empty { border: 1px solid #d3d7d9 !important; }
+    .composer-input-active { border-color: #06c755 !important; }
+    .composer-send-btn {
+      width: auto !important;
+      min-width: 92px;
+      padding: 0 16px !important;
+      border-radius: 23px !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .composer-send-btn:disabled { border: 1px solid #d3d7d9 !important; background: #f4f5f6 !important; color: #a3a8ab !important; cursor: not-allowed; opacity: .8; }
+    .composer-send-btn.memo-mode { background: #e8d69c !important; color: #6f561a !important; }
+    .composer-menu { display: none !important; }
+    .chat-header-search-btn { display: inline-flex; }
+
     .input-area input,
     .input-area textarea {
       flex: 1; min-width: 0;
@@ -2220,8 +2352,15 @@
         bottom: calc(0px - var(--chat-bottom-gap, 0px));
         z-index: 25;
         width: 100%;
+        /* Keep the base mobile inset contract, then add breathing room below it. */
         padding: 6px 8px 0 !important;
+        /* Android/Windows touch browsers need a small visual breathing room below the composer. */
+        padding-bottom: 12px !important;
         flex-shrink: 0;
+      }
+      /* Keep the existing iPhone safe-area appearance unchanged. */
+      @supports (-webkit-touch-callout: none) {
+        body.chat-open .input-area { padding-bottom: 0 !important; }
       }
       .composer-menu { padding: 0; }
       .composer-menu-btn { height: 36px; min-height: 36px; }
@@ -2229,6 +2368,13 @@
       .input-area .attach-btn { width: 44px; height: 44px; }
       .input-area .schedule-btn { height: 36px; padding: 0 8px; font-size: 11px; }
       .input-area .silent-toggle-btn { width: 36px; height: 36px; font-size: 14px; }
+      .composer-plus-btn,
+      .composer-sticker-btn,
+      .composer-send-btn { min-height: 46px; height: 46px; }
+      .composer-send-btn { min-width: 84px; padding-left: 12px !important; padding-right: 12px !important; font-size: 12px; }
+      .composer-helper { gap: 10px; }
+      .composer-sheet { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 8px; }
+      .composer-tool-btn { min-height: 68px; font-size: 11px; }
       .fab { right: 16px; bottom: 16px; }
       .new-group-pop { right: 8px; bottom: 80px; width: calc(100% - 16px); }
       .login-screen {
@@ -2281,6 +2427,10 @@
         width: min(190px, 100%);
         max-height: 210px;
       }
+    }
+    @media (min-width: 769px) {
+      /* Desktop browsers do not provide an iPhone-style safe-area inset. */
+      .input-area { padding-bottom: 16px; }
     }
   </style>
 </head>
@@ -2367,6 +2517,12 @@
           </button>
         </div>
         <div class="chat-header-right">
+          <button class="header-icon-btn chat-header-search-btn" id="chatHeaderSearchBtn" type="button" title="検索" aria-label="検索" onclick="openSearchLauncher()">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7"/>
+              <path d="m20 20-4-4"/>
+            </svg>
+          </button>
           <button class="header-icon-btn" id="roomSettingsHeaderBtn" type="button" title="ルーム設定" aria-label="ルーム設定" onclick="openRoomSettings()">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3"/>
@@ -2410,26 +2566,60 @@
       <div class="mention-pop hidden" id="mentionPop"></div>
       <div class="sticker-picker hidden" id="stickerPicker"></div>
       <div class="inline-sticker-preview hidden" id="inlineStickerPreview"></div>
-      <div class="input-row">
-        <button class="attach-btn" type="button" onclick="pickChatImage()" title="画像を送る" aria-label="画像を送る">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <path d="M21 15l-5-5L5 21"/>
-          </svg>
+      <div class="composer-mode-chip" id="composerModeChip" aria-live="polite">
+        <span id="composerModeIcon" aria-hidden="true">🔕</span>
+        <span id="composerModeText"></span>
+        <button type="button" id="composerModeClearBtn" onclick="clearComposerMode()" aria-label="モードを解除">×</button>
+      </div>
+      <div class="composer-sheet" id="composerSheet" aria-label="添付と機能">
+        <button class="composer-tool-btn" type="button" onclick="pickChatImage(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          <span>画像</span>
         </button>
-        <button class="attach-btn sticker-trigger-btn" type="button" onclick="toggleStickerPicker()" title="感情イラスト" aria-label="感情イラスト">☺</button>
-        <textarea id="messageInput" rows="1" placeholder="メッセージ" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
-        <button class="silent-toggle-btn" id="silentToggleBtn" type="button" onclick="toggleSilentSend()" title="通知ありで送信（OFF）" aria-label="通知ありで送信">🔔</button>
-        <button class="schedule-btn" type="button" onclick="openTextScheduleSend()" title="予約配信" aria-label="予約配信">予約配信</button>
-        <button class="send-btn" type="button" onclick="sendMessage()" aria-label="送信">➤</button>
+        <button class="composer-tool-btn" type="button" onclick="toggleStickerPicker(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8.5 14.5a4.5 4.5 0 0 0 7 0"/></svg>
+          <span>スタンプ</span>
+        </button>
+        <!-- Legacy hook retained for existing sticker-picker integrations/tests. -->
+        <button class="attach-btn sticker-trigger-btn" type="button" onclick="toggleStickerPicker()" aria-hidden="true" tabindex="-1" hidden style="display:none !important">スタンプ</button>
+        <button class="composer-tool-btn" type="button" onclick="openTextScheduleSend(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v4M16 3v4M3 10h18"/><path d="M12 14v3l2 1"/><rect x="3" y="5" width="18" height="16" rx="2"/></svg>
+          <span>予約配信</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="toggleSilentSend(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-9.3-5M6.3 6.3A6 6 0 0 0 6 8c0 6-2 7-2 7h13M10 20a2 2 0 0 0 4 0M3 3l18 18"/></svg>
+          <span>通知せず送る</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="togglePrivateNoteMode(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3z"/></svg>
+          <span>個人メモ</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openReservationSchedule(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4zM8 3v4M16 3v4M4 10h16"/><path d="M8 14h3M8 17h6"/></svg>
+          <span>予定を見る</span>
+        </button>
+        <!-- 予約・予定 is now opened from this plus panel; keep the legacy callable hook. -->
+        <button type="button" class="hidden" onclick="openReservationSchedule()" aria-hidden="true" tabindex="-1" hidden>予約・予定</button>
       </div>
-      <div class="composer-menu" id="composerMenu">
-        <button class="composer-menu-btn" id="composerSearchBtn" type="button" onclick="openSearchLauncher()">検索</button>
-        <button class="composer-menu-btn" id="composerScheduleBtn" type="button" onclick="openReservationSchedule()">予約・予定</button>
-        <button class="composer-menu-btn" id="composerSettingsBtn" type="button" onclick="openRoomSettings()">設定</button>
-        <button class="composer-menu-btn" id="composerNoteBtn" type="button" onclick="openPrivateNoteComposer()">個人メモ</button>
+      <div class="input-row">
+        <button class="composer-plus-btn" id="composerPlusBtn" type="button" onclick="toggleComposerSheet()" title="添付と機能" aria-label="添付と機能">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <textarea id="messageInput" rows="1" placeholder="メッセージを入力" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
+        <button class="composer-sticker-btn sticker-trigger-btn" id="composerStickerBtn" type="button" onclick="toggleStickerPicker()" title="感情イラスト" aria-label="感情イラスト">☺</button>
+        <button class="send-btn composer-send-btn" id="composerSendBtn" type="button" onclick="sendMessage()" aria-label="送信" disabled>
+          <span id="composerSendLabel">送信</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+        </button>
       </div>
+      <div class="composer-helper" id="composerHelper" aria-live="polite">
+        <span id="composerHintText">Enterで送信</span>
+        <span class="composer-helper-divider" aria-hidden="true"></span>
+        <button type="button" onclick="toggleSilentSend()">通知せず送る</button>
+        <button id="composerNoteBtn" type="button" onclick="togglePrivateNoteMode()">個人メモ</button>
+        <button type="button" onclick="openTextScheduleSend()">予約配信</button>
+      </div>
+      <button class="silent-toggle-btn hidden" id="silentToggleBtn" type="button" tabindex="-1" aria-hidden="true">🔔</button>
     </div>
     <div class="chat-drop-overlay hidden" id="chatDropOverlay" aria-hidden="true">
       <div class="chat-drop-card">画像をドロップして送信</div>
@@ -2727,6 +2917,10 @@
     const MESSAGE_COLUMNS =
       'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, is_silent, created_at';
     let isSilentSendActive = false;
+    let isPrivateNoteMode = false;
+    let composerSheetOpen = false;
+    // Inline personal-note mode hands its text to the existing note persistence path.
+    let pendingPrivateNoteContent = null;
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key';
     const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at';
@@ -5445,8 +5639,8 @@
       if ($('trashBanner')) $('trashBanner').classList.toggle('hidden', !trashed);
       if ($('roomSettingsHeaderBtn')) $('roomSettingsHeaderBtn').classList.toggle('hidden', trashed || !canCurrentUserManage(group));
       if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', trashed || !!(group && group.is_direct) || !canCurrentUserInvite(group));
-      if ($('composerScheduleBtn')) $('composerScheduleBtn').classList.toggle('hidden', !canCurrentUserManage(group));
-      if ($('composerSettingsBtn')) $('composerSettingsBtn').classList.toggle('hidden', !canCurrentUserManage(group));
+      if ($('composerSheet')) $('composerSheet').classList.toggle('hidden', trashed || !canView);
+      syncComposerModeUi();
       if ((trashed || readOnly) && $('replyBar')) $('replyBar').classList.add('hidden');
       if ((trashed || readOnly) && $('scheduleBar')) $('scheduleBar').classList.add('hidden');
       if ($('trashBannerRestore')) $('trashBannerRestore').classList.toggle('hidden', !canTrashTalk(group));
@@ -7198,6 +7392,22 @@
       return { path, width, height };
     }
 
+    async function archiveChatImageInMediaLibrary(messageId, groupId) {
+      const { data: sessionData } = await sb.auth.getSession();
+      const accessToken = String(sessionData?.session?.access_token || '');
+      const endpoint = CONFIG.adminApiUrl ? CONFIG.adminApiUrl('/chat-media-archive') : '';
+      if (!accessToken || !endpoint) throw new Error('メディアライブラリへの接続を確認できませんでした。');
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: messageId, group_id: groupId }),
+        cache: 'no-store',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'メディアライブラリへの保存に失敗しました。');
+      return result;
+    }
+
     async function sendChatImage(file) {
       if (!currentGroupId || !currentUser || uploadingImage) return;
       if (!requireCurrentRoomSend()) return;
@@ -7221,6 +7431,13 @@
           .select(MESSAGE_COLUMNS)
           .single();
         if (error) throw error;
+
+        try {
+          await archiveChatImageInMediaLibrary(data.id, groupId);
+        } catch (archiveError) {
+          console.error('Archive chat image error:', archiveError);
+          showChatToast('画像は送信されましたが、メディアライブラリへの保存に失敗しました。');
+        }
 
         lastMessages[data.group_id] = data;
         followNewMessages = true;
@@ -7451,6 +7668,20 @@
       const input = $('messageInput');
       const content = input.value.trim();
       if (!content && !pendingInlineSticker) return;
+
+      if (isPrivateNoteMode) {
+        pendingPrivateNoteContent = content;
+        const ok = await savePrivateNote();
+        if (ok) {
+          input.value = '';
+          isPrivateNoteMode = false;
+          isSilentSendActive = false;
+          syncComposerModeUi();
+          resizeComposer();
+        }
+        return;
+      }
+
       input.value = '';
       resizeComposer();
       input.focus();
@@ -7462,14 +7693,92 @@
         input.value = content;
         resizeComposer();
       } else {
+        isSilentSendActive = false;
+        isPrivateNoteMode = false;
+        syncComposerModeUi();
         resizeComposer();
       }
     }
 
     function toggleSilentSend() {
       isSilentSendActive = !isSilentSendActive;
+      if (isSilentSendActive) isPrivateNoteMode = false;
+      syncComposerModeUi();
       renderSilentSendState();
       showChatToast(isSilentSendActive ? '🔕 通知なし（サイレント）ON' : '🔔 通常通知 ON');
+    }
+
+    function togglePrivateNoteMode() {
+      if (!currentGroupId || !currentUser) return;
+      isPrivateNoteMode = !isPrivateNoteMode;
+      if (isPrivateNoteMode) {
+        isSilentSendActive = false;
+        if (pendingInlineSticker) {
+          pendingInlineSticker = null;
+          renderInlineStickerPreview();
+        }
+      }
+      syncComposerModeUi();
+      $('messageInput')?.focus();
+      showChatToast(isPrivateNoteMode ? '個人メモモード' : '通常送信モード');
+    }
+
+    function clearComposerMode() {
+      isSilentSendActive = false;
+      isPrivateNoteMode = false;
+      syncComposerModeUi();
+    }
+
+    function toggleComposerSheet() {
+      composerSheetOpen = !composerSheetOpen;
+      syncComposerModeUi();
+    }
+
+    function closeComposerSheet() {
+      composerSheetOpen = false;
+      syncComposerModeUi();
+    }
+
+    function syncComposerModeUi() {
+      const chip = $('composerModeChip');
+      const chipIcon = $('composerModeIcon');
+      const chipText = $('composerModeText');
+      const hint = $('composerHintText');
+      const input = $('messageInput');
+      const send = $('composerSendBtn');
+      const sendLabel = $('composerSendLabel');
+      const plus = $('composerPlusBtn');
+      const sheet = $('composerSheet');
+      const text = String(input?.value || '').trim();
+      const mode = isPrivateNoteMode ? 'memo' : (isSilentSendActive ? 'silent' : 'normal');
+
+      if (chip) {
+        chip.classList.toggle('visible', mode !== 'normal');
+        chip.classList.toggle('memo', mode === 'memo');
+      }
+      if (chipIcon) chipIcon.textContent = mode === 'memo' ? '📝' : '🔕';
+      if (chipText) chipText.textContent = mode === 'memo'
+        ? '個人メモ ・ 自分だけに表示、送信されません'
+        : 'サイレント送信 ・ 全員に届くが通知は鳴りません';
+      if (hint) hint.textContent = mode === 'memo'
+        ? '相手には届きません'
+        : mode === 'silent' ? '届きますが通知は鳴りません' : 'Enterで送信';
+      if (input) {
+        input.placeholder = mode === 'memo' ? '自分用のメモを入力' : 'メッセージを入力';
+        input.classList.toggle('composer-input-active', mode !== 'normal');
+        input.classList.toggle('composer-input-empty', !text);
+      }
+      if (send) {
+        send.disabled = !text;
+        send.classList.toggle('memo-mode', mode === 'memo');
+        send.setAttribute('aria-label', mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信');
+      }
+      if (sendLabel) sendLabel.textContent = mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信';
+      if (plus) {
+        plus.classList.toggle('active', composerSheetOpen);
+        plus.setAttribute('aria-expanded', composerSheetOpen ? 'true' : 'false');
+      }
+      if (sheet) sheet.classList.toggle('visible', composerSheetOpen);
     }
 
     function renderSilentSendState() {
@@ -7505,8 +7814,10 @@
     async function savePrivateNote() {
       if (!currentGroupId || !currentUser) return;
       const input = $('privateNoteInput');
-      const content = String(input?.value || '').trim();
-      if (!content) { input?.focus(); return; }
+      const contentOverride = pendingPrivateNoteContent;
+      pendingPrivateNoteContent = null;
+      const content = contentOverride == null ? String(input?.value || '').trim() : String(contentOverride || '').trim();
+      if (!content) { input?.focus(); return false; }
       if (content.length > 500) { alert('個人メモは500文字までです'); return; }
       try {
         const { data, error } = await sb
@@ -7515,15 +7826,17 @@
           .select('id, group_id, content, created_at')
           .single();
         if (error) throw error;
-        closePrivateNoteComposer();
+        if (contentOverride == null) closePrivateNoteComposer();
         if (data && !currentPrivateNotes.some((n) => n.id === data.id)) {
           currentPrivateNotes = currentPrivateNotes.concat([data]);
           renderMessageList();
           if (followNewMessages) scrollMessagesToBottom();
         }
+        return true;
       } catch (error) {
         console.error('Save private note error:', error);
         alert(error.message || '個人メモの保存に失敗しました');
+        return false;
       }
     }
 
@@ -7559,9 +7872,21 @@
       openReservationSchedule();
     }
 
-    function triggerMediaFromLauncher() {
+    async function triggerMediaFromLauncher() {
       closeSearchLauncher();
-      window.open('media_library.html', '_blank', 'noopener,noreferrer');
+      const group = myGroups.find((item) => Number(item.id) === Number(currentGroupId));
+      if (!group || !roomHasStoreBot(group)) { showChatToast('店舗Botと連携したトークを開いてからメディアを表示してください。'); return; }
+      const viewer = window.open('', '_blank');
+      try {
+        const { data } = await sb.auth.getSession();
+        const token = String(data?.session?.access_token || '');
+        const response = await fetch(CONFIG.adminApiUrl('/chat-media-link'), { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: currentGroupId }) });
+        const body = await response.json();
+        if (!response.ok || !body.login_token) throw new Error(body.error || '閲覧リンクを作成できませんでした。');
+        const target = new URL('https://marugo-s.github.io/line_report/media.html');
+        target.searchParams.set('from', 'mtalk'); target.searchParams.set('lt', body.login_token);
+        if (viewer) { viewer.opener = null; viewer.location.href = target.href; } else window.location.assign(target.href);
+      } catch (error) { if (viewer) viewer.close(); showChatToast(error.message || 'メディアを開けませんでした。'); }
     }
 
     function pad2(n) {
@@ -7814,7 +8139,7 @@
     function resizeComposer() {
       const input = $('messageInput');
       if (!input) return;
-      const stickerButton = document.querySelector('.sticker-trigger-btn');
+      const stickerButton = document.querySelector('#composerStickerBtn') || document.querySelector('.sticker-trigger-btn');
       const hasMessage = Boolean(input.value.trim()) || Boolean(pendingInlineSticker);
       stickerButton?.classList.toggle('message-ready', hasMessage);
       if (stickerButton) {
@@ -7930,6 +8255,10 @@
       pendingUserIconFile = null;
       pendingPresetUserIconUrl = '';
       pendingGroupIconFile = null;
+      isSilentSendActive = false;
+      isPrivateNoteMode = false;
+      composerSheetOpen = false;
+      pendingPrivateNoteContent = null;
       serviceWorkerRegistration = null;
       pushSubscription = null;
       pushPreferenceChannel = null;
@@ -7949,6 +8278,7 @@
       updateTitle();
       renderNotificationStatus('disabled');
       syncAppBadge(0);
+      syncComposerModeUi();
     }
 
     function applySavedCredentials() {
@@ -8206,6 +8536,18 @@
       if (e.target.closest('.msg-menu') || e.target.closest('[data-menu-for]')) return;
       closeMessageMenu();
     });
+    document.addEventListener('click', (e) => {
+      if (!composerSheetOpen || !e.target.closest) return;
+      if (e.target.closest('#composerSheet, #composerPlusBtn')) return;
+      closeComposerSheet();
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest) return;
+      const picker = $('stickerPicker');
+      if (!picker || picker.classList.contains('hidden')) return;
+      if (e.target.closest('#stickerPicker, #composerStickerBtn, #composerSheet')) return;
+      picker.classList.add('hidden');
+    });
     $('messages').addEventListener('scroll', closeMessageMenu, { passive: true });
 
     $('stickerPicker').addEventListener('click', (e) => {
@@ -8224,16 +8566,62 @@
       const button = e.target.closest('[data-sticker-id]');
       if (button) handleStickerSelection(button.dataset.stickerId);
     });
+    const switchStickerCategoryBySwipe = (dx, dy) => {
+      if (Math.abs(dx) < 45 || Math.abs(dx) <= Math.abs(dy)) return;
+      const currentIndex = STICKER_CATEGORIES.findIndex((category) => category.id === activeStickerCategory);
+      if (currentIndex < 0) return;
+      // 右スワイプで次のカテゴリ（感情→漫符・記号）、左スワイプで戻る。
+      const nextIndex = dx > 0
+        ? Math.min(STICKER_CATEGORIES.length - 1, currentIndex + 1)
+        : Math.max(0, currentIndex - 1);
+      if (nextIndex === currentIndex) return;
+      activeStickerCategory = STICKER_CATEGORIES[nextIndex].id;
+      renderStickerPicker();
+    };
+    let stickerSwipeStart = null;
+    $('stickerPicker').addEventListener('touchstart', (e) => {
+      const touch = e.touches && e.touches[0];
+      if (!touch) return;
+      stickerSwipeStart = { x: touch.clientX, y: touch.clientY };
+    }, { passive: true });
+    $('stickerPicker').addEventListener('touchend', (e) => {
+      if (!stickerSwipeStart) return;
+      const touch = e.changedTouches && e.changedTouches[0];
+      const start = stickerSwipeStart;
+      stickerSwipeStart = null;
+      if (!touch) return;
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      switchStickerCategoryBySwipe(dx, dy);
+    }, { passive: true });
+    let stickerMouseStart = null;
+    $('stickerPicker').addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      stickerMouseStart = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (!stickerMouseStart) return;
+      const start = stickerMouseStart;
+      stickerMouseStart = null;
+      switchStickerCategoryBySwipe(e.clientX - start.x, e.clientY - start.y);
+    });
+    $('stickerPicker').addEventListener('wheel', (e) => {
+      if (Math.abs(e.deltaX) < 20 || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      switchStickerCategoryBySwipe(e.deltaX, e.deltaY);
+    }, { passive: false });
 
     // メンション候補
     $('messageInput').addEventListener('input', () => {
       updateMentionPicker();
       resizeComposer();
+      syncComposerModeUi();
     });
     $('messageInput').addEventListener('blur', () => {
       // 候補のクリックが先に走るよう、閉じるのを少し遅らせる。
       setTimeout(() => $('mentionPop').classList.add('hidden'), 150);
     });
+    syncComposerModeUi();
     $('mentionPop').addEventListener('mousedown', (e) => {
       const row = e.target.closest('.mention-row');
       if (!row) return;
@@ -8241,11 +8629,12 @@
       applyMention(Number(row.dataset.index));
     });
 
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      closeTalkContextMenu();
-      closeForward();
-      $('stickerPicker')?.classList.add('hidden');
+        document.addEventListener('keydown', (e) => {
+          if (e.key !== 'Escape') return;
+          closeTalkContextMenu();
+          closeForward();
+          closeComposerSheet();
+          $('stickerPicker')?.classList.add('hidden');
       closeOpenSwipe();
       closeScheduleSend();
       closeSendMode();

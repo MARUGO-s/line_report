@@ -996,6 +996,20 @@
     .ms-hidden-conn { display: none !important; }
     .ms-navlink[hidden] { display: none !important; }
 
+    /* M-talkから開いた場合は、メディア閲覧だけに絞った専用画面にする。 */
+    body.mtalk-media-only .ms-shell { grid-template-columns: minmax(0, 1fr); }
+    body.mtalk-media-only .ms-side,
+    body.mtalk-media-only .ms-navtoggle,
+    body.mtalk-media-only .ms-nav-backdrop,
+    body.mtalk-media-only .ms-topbar,
+    body.mtalk-media-only #toggleMediaBulkDeleteBtn,
+    body.mtalk-media-only #mediaUploadMaxMbInput,
+    body.mtalk-media-only #saveMediaUploadLimitBtn,
+    body.mtalk-media-only #mediaUploadLimitMeta,
+    body.mtalk-media-only .ms-inner > .card:nth-of-type(2) { display: none !important; }
+    body.mtalk-media-only .ms-content { padding-top: 28px; }
+    body.mtalk-media-only .ms-sub::after { content: '（M-talkからの閲覧専用）'; margin-left: .45em; color: var(--accent); }
+
     /* ---------- コンポーネントをコンソール配色へ寄せる ---------- */
     .ms-inner > .card { margin-top: 22px; padding: 24px 26px; }
     .card { background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
@@ -1282,6 +1296,18 @@
     const STORE_TOKEN_KEY = 'line_summary_admin_token';
     const STORE_THEME_KEY = 'line_reservation_calendar_theme';
     const FIXED_PROJECT_URL = LINE_REPORT_PAGES.PROJECT_URL;
+    const MTALK_MEDIA_ONLY = new URLSearchParams(window.location.search).get('from') === 'mtalk';
+    const MTALK_LINK_TOKEN = String(new URLSearchParams(window.location.search).get('lt') || '');
+    let mtalkSessionToken = '';
+    if (MTALK_MEDIA_ONLY) {
+      document.body.classList.add('mtalk-media-only');
+      // 隠し忘れた管理画面リンクがあっても、この専用モードからは遷移させない。
+      document.addEventListener('click', function(event) {
+        const link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+        if (!link || link.hasAttribute('download') || link.closest('#mediaList')) return;
+        event.preventDefault();
+      }, true);
+    }
 
     const state = {
       offset: 0,
@@ -1959,7 +1985,8 @@
     }
 
     async function api(path, options) {
-      const token = getToken();
+      const isMtalkMedia = MTALK_MEDIA_ONLY && path.indexOf('/chat-media-view') === 0;
+      const token = isMtalkMedia ? mtalkSessionToken : getToken();
       if (!token) throw new Error('先に管理トークンを保存してください。');
       const req = options || {};
       const url = LINE_REPORT_PAGES.adminApiUrl(path);
@@ -1994,6 +2021,7 @@
       params.set('limit', String(state.limit));
       params.set('offset', String(state.offset));
       const type = String(dom.typeFilter.value || '').trim();
+      if (MTALK_MEDIA_ONLY) return '/chat-media-view?' + params.toString();
       const storeKey = String(dom.roomFilter.value || '').trim();
       if (type) params.set('media_type', type);
       if (storeKey) params.set('store_partition_key', storeKey);
@@ -2009,6 +2037,11 @@
      *  店名の横に保存件数（例:「マルゴ オット（3件）」）を表示する（件数取得後）。 */
     function setMediaStoreFilterOptions() {
       if (!dom.roomFilter) return;
+      if (MTALK_MEDIA_ONLY) {
+        dom.roomFilter.innerHTML = '<option value="">このトークの店舗</option>';
+        dom.roomFilter.disabled = true;
+        return;
+      }
       const cfg = window.LINE_REPORT_PAGES;
       const names = (cfg && cfg.STORE_NAMES) ? cfg.STORE_NAMES : {};
       const counts = mediaStoreCountsByKey;
@@ -2128,6 +2161,7 @@
     }
 
     async function loadRoomFilterOptions() {
+      if (MTALK_MEDIA_ONLY) { setMediaStoreFilterOptions(); return; }
       // メディア一覧の絞り込みは店舗単位（静的な店舗マスター）。state取得に依存せず先に構築。
       setMediaStoreFilterOptions();
       const SC = window.LINE_REPORT_SITE_CACHE;
@@ -3092,11 +3126,22 @@
       dom.mediaUploadLimitMeta.textContent = '現在: 10MB未満';
       clearSelectedDocumentFile();
       renderUsageBar(0, MEDIA_CAP_DEFAULT_BYTES);
-      if (getToken()) {
-        Promise.all([loadRoomFilterOptions(), loadFirstPage(), loadFirstDocumentPage()]).catch(function(error) {
+      const boot = async function() {
+        if (MTALK_MEDIA_ONLY) {
+          if (!MTALK_LINK_TOKEN) throw new Error('M-talkから開き直してください。');
+          const res = await fetch(LINE_REPORT_PAGES.adminApiUrl('/auth/chat-media-login'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login_token: MTALK_LINK_TOKEN }) });
+          const body = await res.json();
+          if (!res.ok || !body.session_token) throw new Error(body.error || '閲覧リンクが無効です。');
+          mtalkSessionToken = String(body.session_token);
+          history.replaceState({}, document.title, location.pathname + '?from=mtalk');
+          await loadRoomFilterOptions(); await loadFirstPage();
+          return;
+        }
+        if (getToken()) await Promise.all([loadRoomFilterOptions(), loadFirstPage(), loadFirstDocumentPage()]);
+      };
+      boot().catch(function(error) {
           alert(error.message || String(error));
-        });
-      }
+      });
     })();
   </script>
   <script>

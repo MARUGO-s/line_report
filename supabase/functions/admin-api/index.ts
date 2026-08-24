@@ -124,11 +124,13 @@ import {
   hashRoomConfigPassword,
   issueAdminDashboardLoginLinkToken,
   issueAdminDashboardSessionToken,
+  CHAT_MEDIA_VIEW_SCOPE,
   REUSABLE_VIEW_LINK_TTL_SEC,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
   ROOM_CONFIG_SCOPE,
 } from "../_shared/admin_dashboard_link_auth.ts"
+import { saveMediaBytesToLibrary } from "../_shared/line_media_store.ts"
 import {
   ADMIN_ACCESS_HISTORY_KEEP,
   actorFromAuth,
@@ -1331,6 +1333,30 @@ Deno.serve(async (req, info) => {
       const err = asAppError(e)
       return json({ error: err.message }, err.status)
     }
+  }
+
+  // M-talkの添付画像を、LINE受信メディアと同じライブラリへ保存する。
+  // クライアントが任意のストレージを指定できないよう、送信済み自分のメッセージだけを
+  // サーバー側で検証して private chat-images から取り出す。
+  if (req.method === "POST" && path === "/chat-media-archive") {
+    try {
+      return json(await archiveChatMedia(req, workReq, supabase), 200)
+    } catch (e) {
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
+  }
+  if (req.method === "POST" && path === "/chat-media-link") {
+    try { return json(await issueChatMediaViewLink(req, workReq, supabase), 200) }
+    catch (e) { const err = asAppError(e); return json({ error: err.message }, err.status) }
+  }
+  if (req.method === "POST" && path === "/auth/chat-media-login") {
+    try { return json(await exchangeChatMediaViewLink(workReq, supabase), 200) }
+    catch (e) { const err = asAppError(e); return json({ error: err.message }, err.status) }
+  }
+  if (req.method === "GET" && path === "/chat-media-view") {
+    try { return json(await fetchChatMediaView(req, supabase, url), 200) }
+    catch (e) { const err = asAppError(e); return json({ error: err.message }, err.status) }
   }
 
   const fallbackAdminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? ""
@@ -4515,6 +4541,121 @@ async function authenticateChatMember(
   return userId
 }
 
+async function resolveChatMediaRoom(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+): Promise<{ roomId: string; storeKey: string | null } | null> {
+  const { data, error } = await supabase
+    .from("room_summary_settings")
+    .select("room_id, receipt_report_store_partition_key")
+    .eq("chat_group_id", groupId)
+    .limit(2)
+  if (error) throw { status: 500, message: `メディア対象ルームの確認に失敗しました: ${error.message}` } satisfies AppError
+  const rooms = Array.isArray(data)
+    ? data.map((row) => ({
+      roomId: String(row?.room_id ?? "").trim(),
+      storeKey: String(row?.receipt_report_store_partition_key ?? "").trim() || null,
+    })).filter((row) => row.roomId)
+    : []
+  return rooms.length === 1 ? rooms[0] : null
+}
+
+async function archiveChatMedia(
+  req: Request,
+  workReq: Request,
+  supabase: ReturnType<typeof createClient<any>>,
+): Promise<Record<string, unknown>> {
+  const body = await parseJson(workReq)
+  if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+  const groupId = Number(body.group_id)
+  const messageId = Number(body.message_id)
+  if (!Number.isSafeInteger(groupId) || groupId <= 0 || !Number.isSafeInteger(messageId) || messageId <= 0) {
+    throw { status: 400, message: "group_id and message_id are required." } satisfies AppError
+  }
+  const userId = await authenticateChatMember(req, supabase, groupId, "send")
+  const { data: message, error: messageError } = await supabase
+    .from("chat_messages")
+    .select("id, group_id, user_id, username, kind, payload")
+    .eq("id", messageId)
+    .eq("group_id", groupId)
+    .eq("user_id", userId)
+    .maybeSingle()
+  if (messageError) throw { status: 500, message: `送信画像の確認に失敗しました: ${messageError.message}` } satisfies AppError
+  if (!message || String(message.kind ?? "") !== "image") {
+    throw { status: 404, message: "送信した画像が見つかりません。" } satisfies AppError
+  }
+  const image = isRecord(message.payload) && isRecord(message.payload.image) ? message.payload.image : null
+  const imagePath = String(image?.path ?? "").trim()
+  if (!imagePath || !imagePath.startsWith(`groups/${groupId}/`)) {
+    throw { status: 400, message: "画像保存先が不正です。" } satisfies AppError
+  }
+  const room = await resolveChatMediaRoom(supabase, groupId)
+  if (!room) return { saved: false, reason: "not_linked_room" }
+  const { data: blob, error: downloadError } = await supabase.storage.from("chat-images").download(imagePath)
+  if (downloadError || !blob) {
+    throw { status: 500, message: `送信画像の取得に失敗しました: ${downloadError?.message ?? "unknown error"}` } satisfies AppError
+  }
+  const result = await saveMediaBytesToLibrary(supabase, {
+    roomId: room.roomId,
+    lineMessageId: `mtalk-${groupId}-${messageId}`,
+    userId,
+    senderDisplayName: String(message.username ?? "").trim() || null,
+    mediaType: "image",
+    storeKey: room.storeKey,
+    fileName: null,
+    contentType: blob.type || "image/jpeg",
+    bytes: new Uint8Array(await blob.arrayBuffer()),
+  })
+  if (!result.saved && result.reason !== "already_saved") {
+    throw { status: 500, message: `メディアライブラリへの保存に失敗しました: ${result.reason ?? "unknown error"}` } satisfies AppError
+  }
+  return { saved: true, room_id: room.roomId }
+}
+
+async function issueChatMediaViewLink(req: Request, workReq: Request, supabase: ReturnType<typeof createClient<any>>): Promise<Record<string, unknown>> {
+  const body = await parseJson(workReq)
+  const groupId = Number(isRecord(body) ? body.group_id : 0)
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) throw { status: 400, message: "group_id is required." } satisfies AppError
+  const userId = await authenticateChatMember(req, supabase, groupId, "view")
+  const room = await resolveChatMediaRoom(supabase, groupId)
+  if (!room) throw { status: 404, message: "このトークには対応するBotメディアが設定されていません。" } satisfies AppError
+  const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+    scope: CHAT_MEDIA_VIEW_SCOPE, group_id: String(groupId), room_id: room.roomId, chat_user_id: userId, capabilities: ["media_read"],
+  }, { ttlSeconds: 5 * 60 })
+  return { login_token: issued.token, expires_at: issued.expires_at }
+}
+
+async function exchangeChatMediaViewLink(workReq: Request, supabase: ReturnType<typeof createClient<any>>): Promise<Record<string, unknown>> {
+  const body = await parseJson(workReq)
+  const loginToken = String(isRecord(body) ? body.login_token ?? "" : "").trim()
+  if (!loginToken) throw { status: 400, message: "login_token is required." } satisfies AppError
+  const issued = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, { rememberLogin: false, ttlSeconds: 15 * 60 })
+  const session = await authenticateAdminDashboardSessionToken(supabase, issued.token)
+  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || !session.roomScope) {
+    await revokeAdminDashboardSessionToken(supabase, issued.token)
+    throw { status: 401, message: "このリンクはM-talkメディア閲覧用ではありません。" } satisfies AppError
+  }
+  return { session_token: issued.token, expires_at: issued.expires_at }
+}
+
+async function fetchChatMediaView(req: Request, supabase: ReturnType<typeof createClient<any>>, url: URL): Promise<Record<string, unknown>> {
+  const session = await authenticateAdminDashboardSessionToken(supabase, String(req.headers.get("x-admin-token") ?? "").trim())
+  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || !session.roomScope) {
+    throw { status: 401, message: "メディア閲覧リンクが無効または期限切れです。" } satisfies AppError
+  }
+  const limit = clampInt(url.searchParams.get("limit"), 24, 1, 60)
+  const offset = clampInt(url.searchParams.get("offset"), 0, 0, 1000000)
+  const mediaType = normalizeMediaType(url.searchParams.get("media_type"))
+  let query = supabase.from("line_message_media").select("id, media_type, storage_bucket, storage_path, original_file_name, mime_type, file_size_bytes, created_at", { count: "exact" }).eq("room_id", session.roomScope).order("created_at", { ascending: false }).range(offset, offset + limit - 1)
+  if (mediaType) query = query.eq("media_type", mediaType)
+  const { data, error, count } = await query
+  if (error) throw { status: 500, message: `メディアの取得に失敗しました: ${error.message}` } satisfies AppError
+  const rows = Array.isArray(data) ? data.map(normalizeMediaListRow).filter((row): row is MediaListRow => row !== null) : []
+  const items = await Promise.all(rows.map(async (row) => ({ ...row, signed_url: await createSignedMediaUrl(supabase as ReturnType<typeof createClient>, row.storage_bucket, row.storage_path) })))
+  const total = Number(count ?? items.length)
+  return { items, total, has_more: offset + items.length < total, generated_at: new Date().toISOString() }
+}
+
 function slimChatScheduleReservation(item: Record<string, unknown>): Record<string, unknown> {
   const parsed = parseReservationCalendarDetail(toSafeString(item.reservation_detail))
   const anniversaryLabel = normalizeCalendarText(
@@ -4986,6 +5127,10 @@ async function authenticate(
 
   const session = await authenticateAdminDashboardSessionToken(supabase, provided)
   if (session.ok) {
+    // chat_media_view は /chat-media-view 専用。通常の管理APIへ横展開させない。
+    if (session.scopeKind === CHAT_MEDIA_VIEW_SCOPE) {
+      return { ok: false, status: 403, message: "この閲覧リンクではこの操作はできません。" }
+    }
     // ログインリンク由来のセッションは storeScope か roomScope を持つ＝その店舗/ルームだけに制限。
     return {
       ok: true,
