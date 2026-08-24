@@ -1851,9 +1851,9 @@
     .composer-tool-btn:hover svg,
     .composer-tool-btn:focus-visible svg { color: #078c3c; }
     .composer-plus-btn {
-      width: 46px;
-      height: 46px;
-      flex: 0 0 46px;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -1864,9 +1864,9 @@
       cursor: pointer;
     }
     .composer-sticker-btn {
-      width: 46px;
-      height: 46px;
-      flex: 0 0 46px;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
       margin-left: 2px;
       border: 1px solid #d3d7d9;
       border-radius: 50%;
@@ -1912,6 +1912,7 @@
     .composer-input-active { border-color: #06c755 !important; }
     .composer-send-btn {
       width: auto !important;
+      height: 44px !important;
       min-width: 92px;
       padding: 0 16px !important;
       border-radius: 23px !important;
@@ -1925,6 +1926,100 @@
     .composer-send-btn.memo-mode { background: #e8d69c !important; color: #6f561a !important; }
     .composer-menu { display: none !important; }
     .chat-header-search-btn { display: inline-flex; }
+
+    /* 検索・メニュー: 投稿せず自分だけで使う操作なので、ボトムシートではなく
+       画面中央のモーダルにする。他のオーバーレイ(.invite-overlay等)とは
+       独立したクラスにして、送信方法・招待などの見た目に影響させない。 */
+    @keyframes searchMenuFade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes searchMenuUp { from { transform: translateY(8px) scale(.97); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+    .search-menu-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 3000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 18px;
+    }
+    .search-menu-overlay.hidden { display: none; }
+    .search-menu-backdrop {
+      position: absolute;
+      inset: 0;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      background: rgba(16, 22, 30, .42);
+      -webkit-backdrop-filter: blur(1.5px);
+      backdrop-filter: blur(1.5px);
+      animation: searchMenuFade .18s ease both;
+    }
+    .search-menu-dialog {
+      position: relative;
+      width: 100%;
+      max-width: 354px;
+      max-height: min(78vh, 520px);
+      overflow-y: auto;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 18px 44px rgba(12, 18, 26, .28), 0 2px 6px rgba(12, 18, 26, .12);
+      animation: searchMenuUp .22s cubic-bezier(.22, .8, .3, 1) both;
+    }
+    .search-menu-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 16px 18px 12px;
+    }
+    .search-menu-head-text { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .search-menu-title { font-size: 15px; font-weight: 600; color: #1f2123; letter-spacing: .01em; }
+    .search-menu-sub { font-size: 11.5px; color: #8b9195; line-height: 1.5; }
+    .search-menu-close {
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 50%;
+      background: #f2f4f5;
+      color: #6b7073;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .search-menu-divider { height: 1px; background: #eceeef; }
+    .search-menu-row {
+      width: 100%;
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 0 18px;
+      border: 0;
+      border-bottom: 1px solid #f1f3f4;
+      background: #fff;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+    }
+    .search-menu-row:hover,
+    .search-menu-row:focus-visible { background: #f7f9fa; }
+    .search-menu-row-icon {
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      background: #f4f6f7;
+      color: #3b3d3f;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .search-menu-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .search-menu-row-label { font-size: 13.5px; color: #1f2123; font-weight: 500; }
+    .search-menu-row-sub { font-size: 10.5px; color: #9aa0a4; }
+    .search-menu-row-chevron { flex: 0 0 auto; color: #c3c8cb; }
 
     .input-area input,
     .input-area textarea {
@@ -2369,8 +2464,8 @@
       .input-area .schedule-btn { height: 36px; padding: 0 8px; font-size: 11px; }
       .input-area .silent-toggle-btn { width: 36px; height: 36px; font-size: 14px; }
       .composer-plus-btn,
-      .composer-sticker-btn,
-      .composer-send-btn { min-height: 46px; height: 46px; }
+      .composer-sticker-btn { width: 46px; height: 46px; flex: 0 0 46px; }
+      .composer-send-btn { min-height: 46px; height: 46px !important; }
       .composer-send-btn { min-width: 84px; padding-left: 12px !important; padding-right: 12px !important; font-size: 12px; }
       .composer-helper { gap: 10px; }
       .composer-sheet { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 8px; }
@@ -2627,22 +2722,43 @@
     <div class="chat-toast hidden" id="chatToast"></div>
   </div>
 
-  <div class="invite-overlay hidden" id="searchLauncherOverlay" onclick="if (event.target === this) closeSearchLauncher()">
-    <div class="invite-sheet" role="dialog" aria-label="検索・便利メニュー">
-      <h2>検索・メニュー</h2>
-      <p class="schedule-hint">トークに投稿せず、あなただけで検索・閲覧できます</p>
-      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
-        <button class="invite-copy" type="button" onclick="triggerMessageSearchFromLauncher()" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px;font-weight:700;">
-          <span>🔍</span><span>トーク履歴・メッセージ検索</span>
-        </button>
-        <button class="invite-share" type="button" onclick="triggerScheduleFromLauncher()" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px;font-weight:700;">
-          <span>📅</span><span>予定・予約カレンダーを開く</span>
-        </button>
-        <button class="send-mode-now" type="button" onclick="triggerMediaFromLauncher()" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px;font-weight:700;background:#4f46e5;color:#fff;border:none;border-radius:10px;">
-          <span>📁</span><span>写真・メディアライブラリ</span>
+  <div class="search-menu-overlay hidden" id="searchLauncherOverlay" role="dialog" aria-label="検索・メニュー">
+    <button type="button" class="search-menu-backdrop" onclick="closeSearchLauncher()" aria-label="閉じる"></button>
+    <div class="search-menu-dialog">
+      <div class="search-menu-head">
+        <div class="search-menu-head-text">
+          <div class="search-menu-title">検索・メニュー</div>
+          <div class="search-menu-sub">トークに投稿せず、自分だけで検索・閲覧できます</div>
+        </div>
+        <button type="button" class="search-menu-close" onclick="closeSearchLauncher()" aria-label="閉じる">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </div>
-      <button class="invite-close" type="button" onclick="closeSearchLauncher()">閉じる</button>
+      <div class="search-menu-divider"></div>
+      <button type="button" class="search-menu-row" onclick="triggerMessageSearchFromLauncher()">
+        <span class="search-menu-row-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></span>
+        <span class="search-menu-row-text">
+          <span class="search-menu-row-label">トーク履歴・メッセージ検索</span>
+          <span class="search-menu-row-sub">2文字以上入力して探せます</span>
+        </span>
+        <svg class="search-menu-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <button type="button" class="search-menu-row" onclick="triggerScheduleFromLauncher()">
+        <span class="search-menu-row-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v4M16 3v4M3 10h18"/><path d="M12 14v3l2 1"/><rect x="3" y="5" width="18" height="16" rx="2"/></svg></span>
+        <span class="search-menu-row-text">
+          <span class="search-menu-row-label">予定・予約カレンダー</span>
+          <span class="search-menu-row-sub">このルームの予約と予定を見る</span>
+        </span>
+        <svg class="search-menu-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <button type="button" class="search-menu-row" onclick="triggerMediaFromLauncher()">
+        <span class="search-menu-row-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
+        <span class="search-menu-row-text">
+          <span class="search-menu-row-label">写真・メディアライブラリ</span>
+          <span class="search-menu-row-sub">店舗Botのルームだけで使えます</span>
+        </span>
+        <svg class="search-menu-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
     </div>
   </div>
 
