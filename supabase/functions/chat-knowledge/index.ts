@@ -330,7 +330,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     if (quoted && (quoted.kind === "image" || imagePathFromPayload(quoted.payload))) {
       const ok = await registerQuotedImage(supabase, storeKey, quoted, text, senderName, lineTimestamp)
       if (ok) {
-        try { await removeStoreRoomMediaForChatMessage(supabase, Number(quoted.id)) } catch (_) { /* ignore */ }
+        try { await removeStoreRoomMediaForChatMessage(supabase, groupId, Number(quoted.id)) } catch (_) { /* ignore */ }
       }
       await replyInRoom(
         supabase,

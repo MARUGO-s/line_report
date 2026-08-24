@@ -4620,7 +4620,7 @@ async function issueChatMediaViewLink(req: Request, workReq: Request, supabase: 
   const room = await resolveChatMediaRoom(supabase, groupId)
   if (!room) throw { status: 404, message: "このトークには対応するBotメディアが設定されていません。" } satisfies AppError
   const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-    scope: CHAT_MEDIA_VIEW_SCOPE, group_id: String(groupId), room_id: room.roomId, chat_user_id: userId, capabilities: ["media_read"],
+    scope: CHAT_MEDIA_VIEW_SCOPE, group_id: String(groupId), room_id: room.roomId, store_partition_key: room.storeKey, chat_user_id: userId, capabilities: ["media_read"],
   }, { ttlSeconds: 5 * 60 })
   return { login_token: issued.token, expires_at: issued.expires_at }
 }
@@ -4631,7 +4631,7 @@ async function exchangeChatMediaViewLink(workReq: Request, supabase: ReturnType<
   if (!loginToken) throw { status: 400, message: "login_token is required." } satisfies AppError
   const issued = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, { rememberLogin: false, ttlSeconds: 15 * 60 })
   const session = await authenticateAdminDashboardSessionToken(supabase, issued.token)
-  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || !session.roomScope) {
+  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || (!session.roomScope && !session.storeScope)) {
     await revokeAdminDashboardSessionToken(supabase, issued.token)
     throw { status: 401, message: "このリンクはM-talkメディア閲覧用ではありません。" } satisfies AppError
   }
@@ -4640,18 +4640,42 @@ async function exchangeChatMediaViewLink(workReq: Request, supabase: ReturnType<
 
 async function fetchChatMediaView(req: Request, supabase: ReturnType<typeof createClient<any>>, url: URL): Promise<Record<string, unknown>> {
   const session = await authenticateAdminDashboardSessionToken(supabase, String(req.headers.get("x-admin-token") ?? "").trim())
-  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || !session.roomScope) {
+  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || (!session.roomScope && !session.storeScope)) {
     throw { status: 401, message: "メディア閲覧リンクが無効または期限切れです。" } satisfies AppError
   }
   const limit = clampInt(url.searchParams.get("limit"), 24, 1, 60)
   const offset = clampInt(url.searchParams.get("offset"), 0, 0, 1000000)
   const mediaType = normalizeMediaType(url.searchParams.get("media_type"))
-  let query = supabase.from("line_message_media").select("id, media_type, storage_bucket, storage_path, original_file_name, mime_type, file_size_bytes, created_at", { count: "exact" }).eq("room_id", session.roomScope).order("created_at", { ascending: false }).range(offset, offset + limit - 1)
+  let query = supabase
+    .from("line_message_media")
+    .select(
+      "id, message_id, line_message_id, room_id, user_id, sender_display_name, media_type, storage_bucket, storage_path, original_file_name, mime_type, file_size_bytes, content_preview, created_at",
+      { count: "exact" },
+    )
+    .eq("room_id", session.roomScope)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1)
   if (mediaType) query = query.eq("media_type", mediaType)
   const { data, error, count } = await query
   if (error) throw { status: 500, message: `メディアの取得に失敗しました: ${error.message}` } satisfies AppError
   const rows = Array.isArray(data) ? data.map(normalizeMediaListRow).filter((row): row is MediaListRow => row !== null) : []
-  const items = await Promise.all(rows.map(async (row) => ({ ...row, signed_url: await createSignedMediaUrl(supabase as ReturnType<typeof createClient>, row.storage_bucket, row.storage_path) })))
+  // M-talk経由でも通常のメディア閲覧と同じ表示情報を返す。保存済みの
+  // sender_display_name が空の場合だけ user_id から補完し、別店舗・別ルームは
+  // ここへ混ぜない（上の room_id 完全一致を維持する）。
+  const [roomNameMap, senderNameMap] = await Promise.all([
+    fetchRoomNameMapForIds(supabase as ReturnType<typeof createClient>, rows.map((row) => row.room_id)),
+    fetchSenderNameMapForUserIds(
+      supabase as ReturnType<typeof createClient>,
+      rows.filter((row) => !row.sender_display_name && row.user_id).map((row) => String(row.user_id)),
+    ),
+  ])
+  const items = await Promise.all(rows.map(async (row) => ({
+    ...row,
+    room_name: roomNameMap.get(row.room_id) ?? row.room_name ?? null,
+    sender_display_name: row.sender_display_name
+      ?? (row.user_id ? senderNameMap.get(String(row.user_id)) ?? null : null),
+    signed_url: await createSignedMediaUrl(supabase as ReturnType<typeof createClient>, row.storage_bucket, row.storage_path),
+  })))
   const total = Number(count ?? items.length)
   return { items, total, has_more: offset + items.length < total, generated_at: new Date().toISOString() }
 }

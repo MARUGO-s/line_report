@@ -108,7 +108,7 @@ export function parseReceiptCorrectionStartDirective(
       return { matched: true, targetLineMessageId: null, targetReceiptRowId: Math.round(rowId) }
     }
   }
-  const mtalkTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:id[:：]|#)\s*(mtalk-\d{1,12})$/iu)
+  const mtalkTagged = normalized.match(/^レシート(?:修正|訂正)\s*(?:id[:：]|#)\s*(mtalk-\d{1,12}(?:-\d{1,12})?)$/iu)
   if (mtalkTagged?.[1]) {
     return { matched: true, targetLineMessageId: String(mtalkTagged[1]).trim(), targetReceiptRowId: null }
   }
@@ -143,7 +143,7 @@ export function parseReceiptAnalysisDeleteDirective(
     }
   }
   const mtalkTagged = normalized.match(
-    /^レシート(?:画像)?解析削除\s*(?:id[:：]|#)\s*(mtalk-\d{1,12})$/iu,
+    /^レシート(?:画像)?解析削除\s*(?:id[:：]|#)\s*(mtalk-\d{1,12}(?:-\d{1,12})?)$/iu,
   )
   if (mtalkTagged?.[1]) {
     return { matched: true, targetLineMessageId: String(mtalkTagged[1]).trim(), targetReceiptRowId: null }
