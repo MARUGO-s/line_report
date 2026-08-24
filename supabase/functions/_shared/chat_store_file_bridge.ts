@@ -356,7 +356,10 @@ export async function handleStoreRoomReceiptCommand(
   if (!text) return false
   const registry = await loadStoreRegistryRow(supabase, params.storeKey)
   if (!registry) return false
-  const roomId = (await resolveStoreLineRoomId(supabase, params.storeKey)) || `mtalk-group-${params.groupId}`
+  // 保留状態（重複確認・修正・店舗不一致）の会話キーは (room_id, user_id)。
+  // 画像側は投稿元の M-talk ルームで保留を書くので、ここも同じ ID で引く。
+  // 店舗の LINE ルームを優先すると保留が見つからず、「置き換え」等に無反応になる。
+  const roomId = `mtalk-group-${params.groupId}`
   const reply = await handleStoreReceiptTextMessage(
     supabase,
     registry,
