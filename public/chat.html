@@ -2527,6 +2527,22 @@
       /* Desktop browsers do not provide an iPhone-style safe-area inset. */
       .input-area { padding-bottom: 16px; }
     }
+    .keep-list, .album-list { display:flex; flex-direction:column; gap:8px; max-height:42vh; overflow:auto; margin:12px 0; }
+    .keep-item, .album-item-row { border:1px solid #e2e5e9; border-radius:10px; padding:10px 12px; background:#fff; display:flex; gap:10px; align-items:flex-start; }
+    .keep-item-body { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; color:#222; }
+    .keep-item-meta { color:#777; font-size:11px; margin-top:5px; }
+    .keep-delete, .album-remove { border:0; background:transparent; color:#b33; cursor:pointer; font-size:16px; }
+    .album-create-row { display:flex; gap:8px; margin:10px 0; }
+    .album-create-row input { flex:1; min-width:0; border:1px solid #ddd; border-radius:9px; padding:9px 10px; font:inherit; }
+    .album-card { border:1px solid #e2e5e9; border-radius:10px; padding:10px; background:#fff; }
+    .album-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .album-card-title { font-weight:700; }
+    .album-photo-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:8px; }
+    .album-photo-grid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:7px; background:#eee; }
+    .album-source-list { display:grid; gap:6px; max-height:24vh; overflow:auto; margin-top:8px; }
+    .album-source-row { display:flex; align-items:center; gap:8px; border:1px solid #e2e5e9; border-radius:8px; padding:6px; }
+    .album-source-row img { width:44px; height:44px; object-fit:cover; border-radius:6px; }
+    .album-source-row button { margin-left:auto; }
   </style>
 </head>
 <body>
@@ -2689,6 +2705,12 @@
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3z"/></svg>
           <span>個人メモ</span>
         </button>
+        <button class="composer-tool-btn" type="button" onclick="openKeepMemo(); closeComposerSheet();">
+          <span aria-hidden="true">📌</span><span>Keepメモ</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openAlbumManager(); closeComposerSheet();">
+          <span aria-hidden="true">🖼️</span><span>アルバム</span>
+        </button>
         <button class="composer-tool-btn" type="button" onclick="openReservationSchedule(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4zM8 3v4M16 3v4M4 10h16"/><path d="M8 14h3M8 17h6"/></svg>
           <span>予定を見る</span>
@@ -2772,6 +2794,27 @@
         <button class="invite-close" type="button" onclick="closePrivateNoteComposer()" style="flex:1;">キャンセル</button>
         <button class="send-mode-now" type="button" onclick="savePrivateNote()" style="flex:1;">メモを保存</button>
       </div>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="keepOverlay" onclick="if (event.target === this) closeKeepMemo()">
+    <div class="invite-sheet" role="dialog" aria-modal="true" aria-label="Keepメモ">
+      <h2>Keepメモ</h2>
+      <p class="schedule-hint">自分だけが見られる保存場所です。ルームをまたいで利用できます。</p>
+      <textarea id="keepInput" rows="3" maxlength="5000" placeholder="あとで見るメモを書く" style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:10px;padding:10px 12px;font:inherit;resize:vertical;"></textarea>
+      <div style="display:flex;gap:10px;margin-top:10px;"><button class="invite-close" type="button" onclick="closeKeepMemo()" style="flex:1;">閉じる</button><button class="send-mode-now" type="button" onclick="saveKeepMemo()" style="flex:1;">保存</button></div>
+      <div class="keep-list" id="keepList"></div>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="albumOverlay" onclick="if (event.target === this) closeAlbumManager()">
+    <div class="invite-sheet" role="dialog" aria-modal="true" aria-label="アルバム">
+      <h2>アルバム</h2>
+      <p class="schedule-hint">このルームの画像を、みんなで整理・閲覧できます。</p>
+      <div class="album-create-row"><input id="albumNameInput" maxlength="80" placeholder="新しいアルバム名"><button class="send-mode-now" type="button" onclick="createAlbum()">作成</button></div>
+      <div class="album-list" id="albumList"></div>
+      <div id="albumSourcePanel" class="hidden"><div style="font-weight:700;margin-top:12px;">画像を追加</div><div class="album-source-list" id="albumSourceList"></div></div>
+      <button class="invite-close" type="button" onclick="closeAlbumManager()">閉じる</button>
     </div>
   </div>
 
@@ -3002,6 +3045,10 @@
     let currentMessages = [];
     // 開いているトークの個人メモ（本人にだけ表示。送信されない）。
     let currentPrivateNotes = [];
+    let keepItems = [];
+    let albums = [];
+    let selectedAlbumId = null;
+    let albumItemsById = new Map();
     let stickerCatalog = [];
     let stickerCatalogLoaded = false;
     let activeStickerCategory = 'emotion';
@@ -3377,6 +3424,12 @@
     function requireCurrentRoomSend() {
       if (canCurrentUserSend()) return true;
       alert('このルームは閲覧専用です。メッセージは送信できません。');
+      return false;
+    }
+
+    function requireCurrentRoomView() {
+      if (currentGroup() && membershipFor(currentGroup())?.can_view === true) return true;
+      alert('このルームは閲覧できません。');
       return false;
     }
 
@@ -6766,6 +6819,7 @@
         <div class="msg-menu-actions">
           ${canInteract ? '<button class="msg-menu-reply" type="button" data-action="reply"><span class="msg-menu-action-icon">↩</span><span>返信</span></button>' : ''}
           <button class="msg-menu-reply" type="button" data-action="copy"><span class="msg-menu-action-icon">⧉</span><span>コピー</span></button>
+          <button class="msg-menu-reply" type="button" data-action="keep"><span class="msg-menu-action-icon">📌</span><span>Keepに保存</span></button>
           <button class="msg-menu-reply" type="button" data-action="forward"><span class="msg-menu-action-icon">➜</span><span>転送</span></button>
           ${canDelete ? '<button class="msg-menu-reply msg-menu-delete" type="button" data-action="delete"><span class="msg-menu-action-icon">⌫</span><span>削除</span></button>' : ''}
         </div>
@@ -6799,6 +6853,11 @@
         }
         if (e.target.closest('[data-action="copy"]')) {
           copyMessage(msg);
+          closeMessageMenu();
+          return;
+        }
+        if (e.target.closest('[data-action="keep"]')) {
+          saveMessageToKeep(msg);
           closeMessageMenu();
           return;
         }
@@ -7915,6 +7974,214 @@
       $('searchLauncherOverlay')?.classList.add('hidden');
     }
 
+    function keepDate(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function renderKeepItems() {
+      const list = $('keepList');
+      if (!list) return;
+      if (!keepItems.length) {
+        list.innerHTML = '<div class="schedule-hint">まだKeepメモはありません。</div>';
+        return;
+      }
+      list.innerHTML = keepItems.map((item) => `
+        <div class="keep-item">
+          <div class="keep-item-body">${escapeHtml(item.content || '[保存データ]')}<div class="keep-item-meta">${escapeHtml(keepDate(item.created_at))}</div></div>
+          <button class="keep-delete" type="button" aria-label="Keepメモを削除" onclick="deleteKeepMemo(${Number(item.id)})">×</button>
+        </div>`).join('');
+    }
+
+    async function loadKeepItems() {
+      if (!currentUser) return;
+      const { data, error } = await sb.from('chat_keep_items')
+        .select('id,kind,content,payload,created_at,updated_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false }).limit(200);
+      if (error) throw error;
+      keepItems = data || [];
+      renderKeepItems();
+    }
+
+    async function openKeepMemo() {
+      if (!currentUser) return;
+      closeComposerSheet();
+      $('keepOverlay')?.classList.remove('hidden');
+      try { await loadKeepItems(); } catch (error) { console.error('Load Keep memo error:', error); alert('Keepメモを読み込めませんでした'); }
+      $('keepInput')?.focus();
+    }
+
+    function closeKeepMemo() {
+      $('keepOverlay')?.classList.add('hidden');
+    }
+
+    async function saveKeepMemo() {
+      if (!currentUser) return;
+      const input = $('keepInput');
+      const content = String(input?.value || '').trim();
+      if (!content) { input?.focus(); return; }
+      try {
+        const { data, error } = await sb.from('chat_keep_items')
+          .insert({ user_id: currentUser.id, kind: 'text', content })
+          .select('id,kind,content,payload,created_at,updated_at').single();
+        if (error) throw error;
+        keepItems = [data, ...keepItems];
+        if (input) input.value = '';
+        renderKeepItems();
+        showChatToast('Keepメモに保存しました');
+      } catch (error) { console.error('Save Keep memo error:', error); alert(`Keepメモの保存に失敗しました: ${error.message || error}`); }
+    }
+
+    async function deleteKeepMemo(id) {
+      if (!currentUser || !Number.isFinite(Number(id))) return;
+      if (!confirm('このKeepメモを削除しますか？')) return;
+      const { error } = await sb.from('chat_keep_items').delete().eq('id', Number(id));
+      if (error) { alert(`Keepメモの削除に失敗しました: ${error.message || error}`); return; }
+      keepItems = keepItems.filter((item) => Number(item.id) !== Number(id));
+      renderKeepItems();
+    }
+
+    async function saveMessageToKeep(msg) {
+      if (!currentUser || !msg) return;
+      const content = msg.kind === 'image' ? '[画像]' : String(msg.content || '').trim();
+      if (!content) { alert('このメッセージはKeepに保存できません'); return; }
+      const { data, error } = await sb.from('chat_keep_items')
+        .insert({ user_id: currentUser.id, kind: 'text', content })
+        .select('id,kind,content,payload,created_at,updated_at').single();
+      if (error) { alert(`Keepへの保存に失敗しました: ${error.message || error}`); return; }
+      keepItems = [data, ...keepItems];
+      showChatToast('Keepメモに保存しました');
+    }
+
+    function albumDate(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('ja-JP');
+    }
+
+    async function albumSignedUrls(paths) {
+      const wanted = [...new Set(paths.filter(Boolean))];
+      const result = new Map();
+      const missing = wanted.filter((path) => {
+        const cached = signedImageUrls.get(path);
+        if (cached && cached.expiresAt > Date.now() + 60000) { result.set(path, cached.url); return false; }
+        return true;
+      });
+      if (missing.length) {
+        const { data, error } = await sb.storage.from('chat-images').createSignedUrls(missing, 3600);
+        if (error) throw error;
+        (data || []).forEach((row) => {
+          if (!row.path || !row.signedUrl) return;
+          signedImageUrls.set(row.path, { url: row.signedUrl, expiresAt: Date.now() + 3600000 });
+          result.set(row.path, row.signedUrl);
+        });
+        persistSignedImageCache();
+      }
+      wanted.forEach((path) => { if (!result.has(path) && signedImageUrls.has(path)) result.set(path, signedImageUrls.get(path).url); });
+      return result;
+    }
+
+    async function loadAlbumItems(albumId) {
+      const { data, error } = await sb.from('chat_album_items')
+        .select('id,album_id,group_id,message_id,storage_path,caption,added_by,created_at')
+        .eq('album_id', albumId).order('created_at', { ascending: false });
+      if (error) throw error;
+      const rows = data || [];
+      const urls = await albumSignedUrls(rows.map((row) => row.storage_path));
+      albumItemsById.set(Number(albumId), rows.map((row) => ({ ...row, url: urls.get(row.storage_path) || '' })));
+    }
+
+    function renderAlbumSourceList() {
+      const panel = $('albumSourcePanel');
+      const list = $('albumSourceList');
+      if (!panel || !list) return;
+      if (!selectedAlbumId) { panel.classList.add('hidden'); return; }
+      panel.classList.remove('hidden');
+      const existing = new Set((albumItemsById.get(Number(selectedAlbumId)) || []).map((row) => Number(row.message_id)));
+      const images = currentMessages.filter((message) => imageFromMessage(message));
+      if (!images.length) { list.innerHTML = '<div class="schedule-hint">このルームに画像メッセージがありません。</div>'; return; }
+      list.innerHTML = images.map((message) => {
+        const image = imageFromMessage(message);
+        const cached = signedImageUrls.get(image.path);
+        return `<div class="album-source-row"><img src="${escapeHtml(cached?.url || '')}" data-path="${escapeHtml(image.path)}" alt=""><span>${escapeHtml(message.username || '画像')}<br><small>${escapeHtml(albumDate(message.created_at))}</small></span><button class="send-mode-now" type="button" ${existing.has(Number(message.id)) ? 'disabled' : ''} onclick="addMessageToAlbum(${Number(selectedAlbumId)},${Number(message.id)})">${existing.has(Number(message.id)) ? '追加済み' : '追加'}</button></div>`;
+      }).join('');
+      void hydrateAlbumSourceImages();
+    }
+
+    async function hydrateAlbumSourceImages() {
+      const nodes = [...document.querySelectorAll('#albumSourceList img[data-path]')];
+      const urls = await albumSignedUrls(nodes.map((node) => node.dataset.path));
+      nodes.forEach((node) => { const url = urls.get(node.dataset.path); if (url) node.src = url; });
+    }
+
+    function renderAlbums() {
+      const list = $('albumList');
+      if (!list) return;
+      if (!albums.length) { list.innerHTML = '<div class="schedule-hint">まだアルバムはありません。名前を入力して作成してください。</div>'; renderAlbumSourceList(); return; }
+      list.innerHTML = albums.map((album) => {
+        const items = albumItemsById.get(Number(album.id)) || [];
+        return `<div class="album-card"><div class="album-card-head"><span class="album-card-title">${escapeHtml(album.name)}</span><button class="send-mode-now" type="button" onclick="selectAlbum(${Number(album.id)})">${selectedAlbumId === Number(album.id) ? '画像を追加' : '開く'}</button></div><small>${items.length}枚 ・ ${escapeHtml(albumDate(album.updated_at || album.created_at))}</small><div class="album-photo-grid">${items.map((item) => item.url ? `<img src="${escapeHtml(item.url)}" alt="">` : '').join('')}</div></div>`;
+      }).join('');
+      renderAlbumSourceList();
+    }
+
+    async function loadAlbums() {
+      if (!currentGroupId) return;
+      const { data, error } = await sb.from('chat_albums').select('id,group_id,name,created_by,created_at,updated_at').eq('group_id', currentGroupId).order('updated_at', { ascending: false });
+      if (error) throw error;
+      albums = data || [];
+      albumItemsById = new Map();
+      for (const album of albums) await loadAlbumItems(album.id);
+      renderAlbums();
+    }
+
+    async function openAlbumManager() {
+      if (!currentGroupId || !currentUser) return;
+      if (!requireCurrentRoomView()) return;
+      closeComposerSheet();
+      selectedAlbumId = null;
+      $('albumOverlay')?.classList.remove('hidden');
+      try { await loadAlbums(); } catch (error) { console.error('Load albums error:', error); alert('アルバムを読み込めませんでした'); }
+    }
+
+    function closeAlbumManager() {
+      $('albumOverlay')?.classList.add('hidden');
+      selectedAlbumId = null;
+      $('albumSourcePanel')?.classList.add('hidden');
+    }
+
+    async function createAlbum() {
+      if (!currentGroupId || !currentUser || !requireCurrentRoomSend()) return;
+      const input = $('albumNameInput');
+      const name = String(input?.value || '').trim();
+      if (!name) { input?.focus(); return; }
+      const { data, error } = await sb.from('chat_albums').insert({ group_id: currentGroupId, name, created_by: currentUser.id }).select('id,group_id,name,created_by,created_at,updated_at').single();
+      if (error) { alert(`アルバムの作成に失敗しました: ${error.message || error}`); return; }
+      albums = [data, ...albums];
+      if (input) input.value = '';
+      await loadAlbumItems(data.id);
+      selectedAlbumId = Number(data.id);
+      renderAlbums();
+    }
+
+    async function selectAlbum(albumId) {
+      selectedAlbumId = Number(albumId);
+      if (!albumItemsById.has(selectedAlbumId)) await loadAlbumItems(selectedAlbumId);
+      renderAlbums();
+    }
+
+    async function addMessageToAlbum(albumId, messageId) {
+      if (!currentGroupId || !currentUser || !requireCurrentRoomSend()) return;
+      const message = currentMessages.find((row) => Number(row.id) === Number(messageId));
+      const image = message && imageFromMessage(message);
+      if (!image?.path) return;
+      const { error } = await sb.from('chat_album_items').insert({ album_id: Number(albumId), group_id: currentGroupId, message_id: Number(messageId), storage_path: image.path, added_by: currentUser.id });
+      if (error) { alert(`アルバムへの追加に失敗しました: ${error.message || error}`); return; }
+      await loadAlbumItems(albumId);
+      renderAlbums();
+      showChatToast('アルバムに追加しました');
+    }
+
     // 個人メモ: 送信は一切行わない。保存先はDBだが、他の参加者・Bot・管理画面には見せない。
     function openPrivateNoteComposer() {
       if (!currentGroupId || !currentUser) return;
@@ -8376,6 +8643,12 @@
       isPrivateNoteMode = false;
       composerSheetOpen = false;
       pendingPrivateNoteContent = null;
+      keepItems = [];
+      albums = [];
+      selectedAlbumId = null;
+      albumItemsById = new Map();
+      closeKeepMemo();
+      closeAlbumManager();
       serviceWorkerRegistration = null;
       pushSubscription = null;
       pushPreferenceChannel = null;
