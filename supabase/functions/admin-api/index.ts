@@ -1266,7 +1266,12 @@ Deno.serve(async (req, info) => {
     req.method === "POST" && (
       path === "/pos-journals/knowledge/analyze-image" ||
       path === "/pos-journals/knowledge/upload" ||
-      path === "/pos-journals/knowledge"
+      path === "/pos-journals/knowledge" ||
+      // M-talk の店舗ルームへ落とされた .lzh を、その店舗として取り込む。
+      // 店舗は呼び出し側(chat-knowledge)がルームから解決して store_key で渡す。
+      // storeScope は null で通し、下の uploadPosJournalFiles が
+      // 「ファイル名の店舗コード == 指定店舗」を必ず検証する。
+      path === "/pos-journals/upload"
     )
   ) {
     const internalKey = req.headers.get("x-internal-key") ?? ""
@@ -1278,6 +1283,9 @@ Deno.serve(async (req, info) => {
         }
         if (path === "/pos-journals/knowledge/upload") {
           return json(await uploadStoreKnowledgeFile(req, supabase, null), 200)
+        }
+        if (path === "/pos-journals/upload") {
+          return json(await uploadPosJournalFiles(req, supabase, null), 200)
         }
         const body = await parseJson(req)
         if (!isRecord(body)) {
@@ -12479,6 +12487,41 @@ async function ensurePosJournalStorageForRepair(
   }
 }
 
+/**
+ * pos_journal_store_codes から「レジ店舗コード → 店舗」を引く。
+ * コード内の POS_JOURNAL_STORE_CODE_MAP に無い店舗を、デプロイなしで
+ * 増やせるようにするための後段。見つからなければ null。
+ */
+async function lookupPosJournalStoreCode(
+  supabase: ReturnType<typeof createClient>,
+  storeCode: string,
+): Promise<{ storeKey: string; storeName: string } | null> {
+  const code = String(storeCode || "").trim()
+  if (!/^\d{4}$/.test(code)) return null
+  try {
+    const { data, error } = await supabase
+      .from("pos_journal_store_codes")
+      .select("store_partition_key, store_name")
+      .eq("store_code", code)
+      .maybeSingle()
+    if (error) {
+      console.error("lookupPosJournalStoreCode failed:", error.message)
+      return null
+    }
+    const storeKey = String(
+      (data as { store_partition_key?: unknown } | null)?.store_partition_key ?? "",
+    ).trim()
+    const storeName = String(
+      (data as { store_name?: unknown } | null)?.store_name ?? "",
+    ).trim()
+    if (!storeKey) return null
+    return { storeKey, storeName: storeName || storeKey }
+  } catch (e) {
+    console.error("lookupPosJournalStoreCode threw:", e instanceof Error ? e.message : String(e))
+    return null
+  }
+}
+
 async function uploadPosJournalFiles(
   req: Request,
   supabase: ReturnType<typeof createClient>,
@@ -12570,7 +12613,10 @@ async function uploadPosJournalFiles(
       }
       const bytes = new Uint8Array(await file.arrayBuffer())
       const storeCode = detectPosJournalStoreCode(originalFileName)
-      const mappedStore = resolvePosJournalStore(storeCode)
+      // コード内の定数を先に見て、無ければ pos_journal_store_codes を引く。
+      // 店舗コードが判明した時点で insert するだけで使えるようにするため。
+      const mappedStore = resolvePosJournalStore(storeCode) ??
+        await lookupPosJournalStoreCode(supabase, storeCode)
       if (!mappedStore) {
         throw new Error(`未登録の店舗コードです: ${storeCode || "不明"}`)
       }

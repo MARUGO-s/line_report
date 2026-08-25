@@ -9,7 +9,7 @@ import {
   loadChatStoreBot,
   resolveRoomStoreKey,
 } from "../_shared/chat_store_file_bridge.ts"
-import { postChatCard } from "../_shared/chat_bridge.ts"
+import { postChatCard, type ChatCardSection } from "../_shared/chat_bridge.ts"
 import { ensureMtalkRoomSettings, loadMtalkRoomFlags } from "../_shared/mtalk_room_settings.ts"
 import { mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.ts"
@@ -176,6 +176,134 @@ async function registerQuotedImage(
   return true
 }
 
+/** payload から添付ファイル情報を取り出す。 */
+function filePayload(payload: unknown): { path: string; name: string; mime: string } | null {
+  const file = (payload as { file?: Record<string, unknown> } | null)?.file
+  if (!file) return null
+  const path = String(file.path ?? "").trim()
+  if (!path) return null
+  return {
+    path,
+    name: String(file.name ?? "").trim() || "journal.lzh",
+    mime: String(file.mime ?? "").trim(),
+  }
+}
+
+function isJournalArchiveName(name: string): boolean {
+  return /\.lzh$/i.test(String(name || "").trim())
+}
+
+function yen(value: unknown): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? `¥${Math.round(n).toLocaleString("ja-JP")}` : "-"
+}
+
+/**
+ * 店舗ルームへ落とされた .lzh を、そのルームの店舗として電子ジャーナルへ取り込む。
+ * 保管も解析も /pos-journals/upload に任せる（店舗コード検証・重複スキップ・
+ * 対象月判定・保存レポート再作成まで、管理画面から入れたときと同じ処理が走る）。
+ */
+async function processStoreRoomJournalArchive(
+  supabase: DbClient,
+  params: {
+    groupId: number
+    storeKey: string
+    path: string
+    fileName: string
+    asUser?: { id: string; username: string } | null
+  },
+): Promise<boolean> {
+  const { data: file, error: downloadError } = await supabase.storage
+    .from("chat-images")
+    .download(params.path)
+  if (downloadError || !file) {
+    console.warn("journal archive download failed:", downloadError?.message)
+    await postStoreRoomLineStyleReply(supabase, params.groupId, {
+      text: "電子ジャーナルのファイルを読み込めませんでした。",
+    }, params.asUser)
+    return false
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "https://hocbnifuactbvmyjraxy.supabase.co"
+  const internalKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
+  const form = new FormData()
+  form.append("files", new Blob([await file.arrayBuffer()]), params.fileName)
+  form.append("store_key", params.storeKey)
+
+  let result: Record<string, unknown> = {}
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/upload`, {
+      method: "POST",
+      headers: {
+        "x-internal-key": internalKey,
+        "x-admin-surface": "line_report",
+        "x-store-key": params.storeKey,
+      },
+      body: form,
+    })
+    result = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const msg = String((result as { error?: unknown }).error ?? `HTTP ${res.status}`)
+      await postStoreRoomLineStyleReply(supabase, params.groupId, {
+        text: `電子ジャーナルを取り込めませんでした: ${msg}`,
+      }, params.asUser)
+      return false
+    }
+  } catch (err) {
+    console.error("journal upload threw:", err instanceof Error ? err.message : String(err))
+    await postStoreRoomLineStyleReply(supabase, params.groupId, {
+      text: "電子ジャーナルの取込に失敗しました。時間をおいて試してください。",
+    }, params.asUser)
+    return false
+  }
+
+  const successes = Array.isArray(result.successes) ? result.successes : []
+  const repaired = Array.isArray(result.repaired) ? result.repaired : []
+  const duplicates = Array.isArray(result.duplicates) ? result.duplicates : []
+  const failures = Array.isArray(result.failures) ? result.failures : []
+
+  const rows: { label: string; value: string }[] = []
+  const applied = [...successes, ...repaired]
+  for (const row of applied) {
+    const r = row as Record<string, unknown>
+    rows.push({ label: String(r.business_date ?? "営業日"), value: yen(r.gross_sales) })
+  }
+
+  let headline = ""
+  if (applied.length) {
+    headline = repaired.length ? "電子ジャーナルを登録・修復しました" : "電子ジャーナルを登録しました"
+  } else if (duplicates.length) {
+    headline = "同じ内容が登録済みのため取り込みませんでした"
+  } else if (failures.length) {
+    const first = failures[0] as Record<string, unknown>
+    const reason = String(first?.error ?? first?.message ?? "取込に失敗しました")
+    await postStoreRoomLineStyleReply(supabase, params.groupId, {
+      text: `電子ジャーナルを取り込めませんでした: ${reason}`,
+    }, params.asUser)
+    return false
+  } else {
+    headline = "取り込む対象がありませんでした"
+  }
+
+  const sections: ChatCardSection[] = []
+  if (rows.length) sections.push({ type: "fields", rows })
+  const notes: string[] = []
+  if (duplicates.length) notes.push(`重複スキップ ${duplicates.length}件`)
+  if (failures.length) notes.push(`失敗 ${failures.length}件`)
+  notes.push("Journal Report の日別・月間レポートも更新されます。")
+  sections.push({ type: "note", text: notes.join(" / "), size: "xs" })
+
+  await postStoreRoomLineStyleReply(supabase, params.groupId, {
+    text: `${headline}（${params.fileName}）`,
+    card: {
+      variant: "line",
+      header: { title: headline, subtitle: params.fileName },
+      sections,
+    },
+  }, params.asUser)
+  return true
+}
+
 async function handleDispatch(req: Request, supabase: DbClient): Promise<Response> {
   const body = await req.json().catch(() => ({})) as { message_id?: unknown; store_key?: unknown }
   const messageId = Number(body.message_id)
@@ -278,6 +406,19 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
       asUser: storeBot,
     })
     if (searched) return json({ ok: true, processed: true, kind: "search" }, 200)
+  }
+
+  // .lzh は電子ジャーナルの原本。ルームの店舗として取り込む。
+  const attachment = filePayload(message.payload)
+  if (message.kind === "file" && attachment && isJournalArchiveName(attachment.name)) {
+    const done = await processStoreRoomJournalArchive(supabase, {
+      groupId,
+      storeKey,
+      path: attachment.path,
+      fileName: attachment.name,
+      asUser: storeBot,
+    })
+    return json({ ok: done, processed: true, kind: "journal-archive" }, 200)
   }
 
   // LINE と同じ: #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。

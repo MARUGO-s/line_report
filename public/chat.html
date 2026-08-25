@@ -2673,7 +2673,7 @@
   <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
-  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.heic,.heif" class="hidden">
+  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.heic,.heif,.lzh" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
@@ -7705,7 +7705,9 @@
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.ms-powerpoint',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain', 'text/csv', 'application/zip'
+      'text/plain', 'text/csv', 'application/zip',
+      // 電子ジャーナルの原本。店舗ルームでのみ受け、取込へ回す。
+      'application/x-lzh-compressed'
     ]);
 
     // アプリ内で中身まで開ける形式。ここに無いものは保存して開いてもらう。
@@ -7722,6 +7724,14 @@
     // 「登録できた」ように見える写しだけが残り、原本が二重管理になる。
     function isJournalArchiveFile(file) {
       return /\.(lzh|lha)$/i.test(String((file && file.name) || ''));
+    }
+
+    // 店舗ルーム（または店舗Botのいるルーム）なら、その店舗として取り込める。
+    // それ以外のルームは取込先の店舗が決まらないので、従来どおり画面へ誘導する。
+    function currentRoomAcceptsJournalArchive() {
+      const group = findMineGroup(currentGroupId);
+      if (group && group.is_store_room && group.store_key) return true;
+      return groupMembers.some((user) => user && user.is_bot && user.store_key);
     }
 
     // 落とした本人が次に何をすればよいか分かるようにする。
@@ -7741,7 +7751,7 @@
       if (isImageFile(file)) return true;
       const type = String(file.type || '').toLowerCase();
       const name = String(file.name || '').toLowerCase();
-      return CHAT_FILE_MIMES.has(type) || /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|heic|heif)$/.test(name);
+      return CHAT_FILE_MIMES.has(type) || /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|heic|heif|lzh)$/.test(name);
     }
 
     function imageFilesFromList(list) {
@@ -9540,7 +9550,11 @@
       const file = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!file) return;
-      if (isJournalArchiveFile(file)) { promptJournalArchive(); return; }
+      if (isJournalArchiveFile(file)) {
+        if (currentRoomAcceptsJournalArchive()) sendChatFile(file);
+        else promptJournalArchive();
+        return;
+      }
       if (!isSupportedChatFile(file)) { showChatToast('対応形式または容量上限（10MB）を確認してください'); return; }
       askSendModeForFiles([file]);
     });
@@ -9568,8 +9582,14 @@
       const dropped = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
       const files = chatFilesFromList(dropped);
       // 混在で落とされたときも、落ちた .lzh を黙って捨てない。
-      if (dropped.some(isJournalArchiveFile)) {
-        promptJournalArchive();
+      const journalFiles = dropped.filter(isJournalArchiveFile);
+      if (journalFiles.length) {
+        if (currentRoomAcceptsJournalArchive()) {
+          // このルームの店舗として電子ジャーナルへ取り込む。
+          for (const file of journalFiles) sendChatFile(file);
+        } else {
+          promptJournalArchive();
+        }
         if (files.length) askSendModeForFiles(files);
         return;
       }
