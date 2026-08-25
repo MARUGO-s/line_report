@@ -1180,6 +1180,25 @@
     .link-preview-host { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; }
     .link-preview-url { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; opacity:.7; }
 
+    .file-viewer { flex-direction: column; gap: 10px; }
+    .file-viewer-title {
+      color: #fff; font-size: 14px; font-weight: 600; max-width: min(92vw, 900px);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
+    }
+    .file-viewer-frame {
+      width: min(92vw, 900px); height: min(78vh, 1000px);
+      border: 0; border-radius: 10px; background: #fff;
+    }
+    .file-viewer-text {
+      width: min(92vw, 900px); max-height: 78vh; overflow: auto;
+      background: #fff; color: #111; border-radius: 10px; padding: 16px;
+      font-size: 14px; line-height: 1.6;
+    }
+    .file-viewer-pre {
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+    }
+
     .msg-image {
       display: block;
       width: 100%;
@@ -2626,7 +2645,7 @@
   <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
-  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" class="hidden">
+  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.heic,.heif" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
@@ -6764,7 +6783,7 @@
         bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像" loading="lazy" decoding="async">`;
       } else if (file) {
         const size = Number(file.size) > 0 ? `${(Number(file.size) / 1024 / 1024).toFixed(2)} MB` : 'ファイル';
-        bodyHtml = `<a class="file-attachment" data-file-path="${escapeHtml(file.path)}" href="#" download><span class="file-attachment-icon" aria-hidden="true">📄</span><span class="file-attachment-body"><span class="file-attachment-name">${escapeHtml(file.name || '添付ファイル')}</span><span class="file-attachment-meta">${escapeHtml(file.mime || '')} · ${escapeHtml(size)}</span></span><span class="file-attachment-download">保存</span></a>`;
+        bodyHtml = `<a class="file-attachment" data-file-path="${escapeHtml(file.path)}" data-file-mime="${escapeHtml(file.mime || '')}" data-file-name="${escapeHtml(file.name || '添付ファイル')}" href="#" download><span class="file-attachment-icon" aria-hidden="true">${fileAttachmentIcon(file.mime)}</span><span class="file-attachment-body"><span class="file-attachment-name">${escapeHtml(file.name || '添付ファイル')}</span><span class="file-attachment-meta">${escapeHtml(file.mime || '')} · ${escapeHtml(size)}</span></span><span class="file-attachment-download">保存</span></a>`;
       } else if (sticker) {
         const stickerImage = `<img class="msg-sticker" src="${escapeHtml(sticker.path)}" alt="${escapeHtml(sticker.label || '感情イラスト')}" loading="lazy" decoding="async">`;
         const inlineText = compactSticker && !String(msg.content || '').startsWith('[感情イラスト]')
@@ -6814,6 +6833,20 @@
         const imageElement = div.querySelector('.msg-image');
         if (imageElement && width && height) {
           imageElement.style.aspectRatio = `${width} / ${height}`;
+        }
+      }
+      if (file) {
+        // 札そのものを押したら開く。右端の「保存」だけ従来どおり保存する。
+        const card = div.querySelector('a.file-attachment');
+        if (card) {
+          card.addEventListener('click', (event) => {
+            if (event.target.closest('.file-attachment-download')) return;
+            event.preventDefault();
+            openFileViewer(card.dataset.filePath, {
+              mime: card.dataset.fileMime,
+              name: card.dataset.fileName,
+            });
+          });
         }
       }
       return div;
@@ -7633,14 +7666,25 @@
       return /^image\/(jpeg|png|webp|gif)$/.test(type) || /\.(jpe?g|png|webp|gif)$/.test(name);
     }
 
-    const CHAT_FILE_MAX_BYTES = 10 * 1024 * 1024;
+    const CHAT_FILE_MAX_BYTES = 25 * 1024 * 1024;
     const CHAT_FILE_MIMES = new Set([
+      // HEIC はブラウザ（Safari以外）が復号できないので画像扱いにせず、
+      // 原本のままファイルとして送る。canvas 縮小に回すと失敗する。
+      'image/heic', 'image/heif',
       'application/pdf', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'text/plain', 'text/csv', 'application/zip'
     ]);
+
+    // アプリ内で中身まで開ける形式。ここに無いものは保存して開いてもらう。
+    const CHAT_PREVIEW_PDF = new Set(['application/pdf']);
+    const CHAT_PREVIEW_TEXT = new Set(['text/plain', 'text/csv']);
+    // 本文を読み込む上限。巨大なCSVで固まらせない。
+    const CHAT_PREVIEW_TEXT_MAX_BYTES = 512 * 1024;
 
     // 電子ジャーナル(.lzh)はトークに添付させない。
     // pos-journal.html → /pos-journals/upload が正本の取込経路で、単なる保管ではなく
@@ -7669,7 +7713,7 @@
       if (isImageFile(file)) return true;
       const type = String(file.type || '').toLowerCase();
       const name = String(file.name || '').toLowerCase();
-      return CHAT_FILE_MIMES.has(type) || /\.(pdf|doc|docx|xls|xlsx|txt|csv|zip)$/.test(name);
+      return CHAT_FILE_MIMES.has(type) || /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|heic|heif)$/.test(name);
     }
 
     function imageFilesFromList(list) {
@@ -7873,6 +7917,88 @@
       scheduleTarget = 'files';
       $('sendModeOverlay').classList.add('hidden');
       openScheduleSend();
+    }
+
+    function fileAttachmentIcon(mime) {
+      const m = String(mime || '').toLowerCase();
+      if (m === 'application/pdf') return '📕';
+      if (m.includes('word')) return '📘';
+      if (m.includes('sheet') || m.includes('excel')) return '📗';
+      if (m.includes('presentation') || m.includes('powerpoint')) return '📙';
+      if (m === 'application/zip') return '🗜️';
+      if (m.startsWith('image/')) return '🖼️';
+      if (m.startsWith('text/')) return '📄';
+      return '📎';
+    }
+
+    // 添付ファイルを保存せずその場で開く。
+    // PDF はブラウザ内蔵ビューア、テキスト/CSV は取得して整形表示する。
+    // Office と ZIP はブラウザ単体で描画できないため保存してもらう
+    // （外部の変換サービスへ送る手もあるが、顧客名の入った資料が社外へ出るので採らない）。
+    async function openFileViewer(path, meta = {}) {
+      const mime = String(meta.mime || '').toLowerCase();
+      const name = String(meta.name || '添付ファイル');
+      let signedUrl = '';
+      try {
+        const { data, error } = await sb.storage.from('chat-images').createSignedUrl(path, 3600);
+        if (error) throw error;
+        signedUrl = data && data.signedUrl ? data.signedUrl : '';
+      } catch (error) {
+        console.error('Sign file url error:', error);
+        alert('ファイルを開けませんでした');
+        return;
+      }
+      const safeUrl = safeHttpUrl(signedUrl);
+      if (!safeUrl) return;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'image-viewer file-viewer';
+      const close = () => { overlay.remove(); document.removeEventListener('keydown', onKeydown); };
+      const onKeydown = (event) => { if (event.key === 'Escape') close(); };
+
+      let inner = '';
+      if (CHAT_PREVIEW_PDF.has(mime)) {
+        inner = `<iframe class="file-viewer-frame" src="${escapeHtml(safeUrl)}" title="${escapeHtml(name)}"></iframe>`;
+      } else if (CHAT_PREVIEW_TEXT.has(mime)) {
+        inner = '<div class="file-viewer-text">読み込んでいます…</div>';
+      } else {
+        inner = `<div class="file-viewer-text">この形式はアプリ内で表示できません。<br>保存してから開いてください。</div>`;
+      }
+      overlay.innerHTML = `<button type="button" class="image-viewer-close" aria-label="閉じる">閉じる</button>`
+        + `<button type="button" class="image-viewer-download">ダウンロード</button>`
+        + `<div class="file-viewer-title">${escapeHtml(name)}</div>${inner}`;
+
+      overlay.onclick = (event) => { if (event.target === overlay) close(); };
+      overlay.querySelector('.image-viewer-close').addEventListener('click', close);
+      overlay.querySelector('.image-viewer-download').addEventListener('click', (event) => {
+        event.stopPropagation();
+        const link = document.createElement('a');
+        link.href = safeUrl;
+        link.download = name;
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      });
+      document.addEventListener('keydown', onKeydown);
+      document.body.appendChild(overlay);
+
+      if (CHAT_PREVIEW_TEXT.has(mime)) {
+        const box = overlay.querySelector('.file-viewer-text');
+        try {
+          const res = await fetch(safeUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const buf = await res.arrayBuffer();
+          const truncated = buf.byteLength > CHAT_PREVIEW_TEXT_MAX_BYTES;
+          const slice = truncated ? buf.slice(0, CHAT_PREVIEW_TEXT_MAX_BYTES) : buf;
+          const text = new TextDecoder('utf-8').decode(slice);
+          box.className = 'file-viewer-text file-viewer-pre';
+          box.textContent = truncated ? `${text}\n\n…（先頭 512KB のみ表示しています）` : text;
+        } catch (error) {
+          console.error('File preview error:', error);
+          box.textContent = '本文を読み込めませんでした。保存してから開いてください。';
+        }
+      }
     }
 
     function openImageViewer(src, options = {}) {
