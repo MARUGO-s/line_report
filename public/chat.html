@@ -2548,6 +2548,8 @@
     .album-card-title { font-weight:700; }
     .album-photo-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:8px; }
     .album-photo-grid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:7px; background:#eee; }
+    .album-photo { position:relative; min-width:0; }
+    .album-photo-remove { position:absolute; top:4px; right:4px; width:26px; height:26px; border:0; border-radius:50%; background:rgba(0,0,0,.65); color:#fff; cursor:pointer; }
     .album-source-list { display:grid; gap:6px; max-height:24vh; overflow:auto; margin-top:8px; }
     .album-source-row { display:flex; align-items:center; gap:8px; border:1px solid #e2e5e9; border-radius:8px; padding:6px; }
     .album-source-row img { width:44px; height:44px; object-fit:cover; border-radius:6px; }
@@ -8226,7 +8228,9 @@
       if (!albums.length) { list.innerHTML = '<div class="schedule-hint">まだアルバムはありません。名前を入力して作成してください。</div>'; renderAlbumSourceList(); return; }
       list.innerHTML = albums.map((album) => {
         const items = albumItemsById.get(Number(album.id)) || [];
-        return `<div class="album-card"><div class="album-card-head"><span class="album-card-title">${escapeHtml(album.name)}</span><button class="send-mode-now" type="button" onclick="selectAlbum(${Number(album.id)})">${selectedAlbumId === Number(album.id) ? '画像を追加' : '開く'}</button></div><small>${items.length}枚 ・ ${escapeHtml(albumDate(album.updated_at || album.created_at))}</small><div class="album-photo-grid">${items.map((item) => item.url ? `<img src="${escapeHtml(item.url)}" alt="画像を開く" title="クリックして拡大・ダウンロード" onclick="openImageViewer('${escapeHtml(item.url)}',{messageId:${Number(item.message_id)},storagePath:'${escapeHtml(item.storage_path)}'})">` : '').join('')}</div></div>`;
+        const editable = canEditAlbum(album);
+        const photos = items.map((item) => item.url ? `<div class="album-photo"><img src="${escapeHtml(item.url)}" alt="画像を開く" title="クリックして拡大・ダウンロード" onclick="openImageViewer('${escapeHtml(item.url)}',{messageId:${Number(item.message_id)},storagePath:'${escapeHtml(item.storage_path)}'})">${selectedAlbumId === Number(album.id) && editable ? `<button class="album-photo-remove" type="button" aria-label="画像を削除" onclick="removeAlbumItem(${Number(item.id)},${Number(album.id)})">×</button>` : ''}</div>` : '').join('');
+        return `<div class="album-card"><div class="album-card-head"><span class="album-card-title">${escapeHtml(album.name)}</span><div style="display:flex;gap:6px;align-items:center;">${editable ? `<button class="album-remove" type="button" aria-label="アルバムを削除" onclick="deleteAlbum(${Number(album.id)})">削除</button>` : ''}<button class="send-mode-now" type="button" onclick="selectAlbum(${Number(album.id)})">${selectedAlbumId === Number(album.id) ? '画像を追加' : '開く'}</button></div></div><small>${items.length}枚 ・ ${escapeHtml(albumDate(album.updated_at || album.created_at))}</small><div class="album-photo-grid">${photos}</div></div>`;
       }).join('');
       renderAlbumSourceList();
     }
@@ -8274,6 +8278,36 @@
       selectedAlbumId = Number(albumId);
       if (!albumItemsById.has(selectedAlbumId)) await loadAlbumItems(selectedAlbumId);
       renderAlbums();
+    }
+
+    function canEditAlbum(album) {
+      return !!(album && currentUser && (String(album.created_by) === String(currentUser.id) || canCurrentUserManage()));
+    }
+
+    async function removeAlbumItem(itemId, albumId) {
+      if (!currentUser || !Number.isFinite(Number(itemId))) return;
+      const album = albums.find((row) => Number(row.id) === Number(albumId));
+      if (!canEditAlbum(album)) { alert('このアルバムを編集する権限がありません'); return; }
+      const { error } = await sb.from('chat_album_items').delete().eq('id', Number(itemId));
+      if (error) { alert(`アルバムからの削除に失敗しました: ${error.message || error}`); return; }
+      const rows = (albumItemsById.get(Number(albumId)) || []).filter((row) => Number(row.id) !== Number(itemId));
+      albumItemsById.set(Number(albumId), rows);
+      renderAlbums();
+      showChatToast('アルバムから削除しました');
+    }
+
+    async function deleteAlbum(albumId) {
+      if (!currentUser || !Number.isFinite(Number(albumId))) return;
+      const album = albums.find((row) => Number(row.id) === Number(albumId));
+      if (!canEditAlbum(album)) { alert('このアルバムを削除する権限がありません'); return; }
+      if (!confirm(`「${album.name}」を削除しますか？\nアルバム内の整理情報だけが削除され、元画像は残ります。`)) return;
+      const { error } = await sb.from('chat_albums').delete().eq('id', Number(albumId));
+      if (error) { alert(`アルバムの削除に失敗しました: ${error.message || error}`); return; }
+      albums = albums.filter((row) => Number(row.id) !== Number(albumId));
+      albumItemsById.delete(Number(albumId));
+      if (selectedAlbumId === Number(albumId)) selectedAlbumId = null;
+      renderAlbums();
+      showChatToast('アルバムを削除しました');
     }
 
     async function addMessageToAlbum(albumId, messageId) {

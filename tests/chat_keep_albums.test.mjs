@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const root = new URL('..', import.meta.url);
 const chat = fs.readFileSync(new URL('public/chat.html', root), 'utf8');
 const migration = fs.readFileSync(new URL('supabase/migrations/20260827010000_chat_keep_and_albums.sql', root), 'utf8');
+const editMigration = fs.readFileSync(new URL('supabase/migrations/20260827020000_chat_album_edit_permissions.sql', root), 'utf8');
 
 test('Keepメモ is private and exposed through the chat composer', () => {
   assert.match(migration, /create table if not exists public\.chat_keep_items/);
@@ -23,6 +24,10 @@ test('Albums are scoped to a room and can only contain same-room image messages'
   assert.match(chat, /id="albumOverlay"/);
   assert.match(chat, /function openAlbumManager\(\)/);
   assert.match(chat, /from\('chat_album_items'\)/);
+  assert.match(editMigration, /chat_albums_delete_owner_or_manager/);
+  assert.match(editMigration, /chat_album_items_delete_album_owner_or_manager/);
+  assert.match(chat, /function deleteAlbum\(albumId\)/);
+  assert.match(chat, /function removeAlbumItem\(itemId, albumId\)/);
 });
 
 test('Album images use signed URLs instead of exposing the private storage path', () => {
