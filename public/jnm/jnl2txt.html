@@ -1718,7 +1718,20 @@
     border-color: rgba(15,118,110,0.35);
     background: rgba(15,118,110,0.08);
   }
-</style>
+
+    /* M-talk から iframe で埋め込むときは、AIチャットだけを全面に出す。
+       ロジックはこの画面のまま使いたいが、レポート本体のUIは見せない。 */
+    body.mtalk-embed > *:not(#aiChatPanel):not(#aiChatBackdrop):not(#appLoading) { display: none !important; }
+    body.mtalk-embed { overflow: hidden; background: #111; }
+    body.mtalk-embed #aiChatBackdrop { display: none !important; }
+    body.mtalk-embed #aiChatPanel {
+      position: fixed; inset: 0; width: 100%; max-width: none; height: 100%;
+      max-height: none; border-radius: 0; border: 0; transform: none;
+      display: flex; flex-direction: column;
+    }
+    body.mtalk-embed #aiChatPanel .ai-panel-close { display: none !important; }
+    body.mtalk-embed #aiChatMessages { flex: 1 1 auto; }
+  </style>
 </head>
 <body>
 
@@ -2767,6 +2780,15 @@ async function saveAdminToken() {
     if (btn) btn.disabled = false;
   }
 }
+// M-talk 内に埋め込まれているか。?mtalk_embed=1 のときだけ。
+const MTALK_EMBED = new URLSearchParams(location.search).get('mtalk_embed') === '1';
+if (MTALK_EMBED) {
+  document.documentElement.classList.add('mtalk-embed');
+  document.addEventListener('DOMContentLoaded', () => {
+    document.body.classList.add('mtalk-embed');
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async function () {
   if (AUTH && AUTH.consumeUrlAuthParams) {
     try {
@@ -2778,6 +2800,10 @@ document.addEventListener('DOMContentLoaded', async function () {
   }
   setAuthUiState(!!getAdminToken());
   await initJournalStoreSelect();
+  // 埋め込みでは最初からAIチャットを出す。利用者に開かせる導線が無いため。
+  if (MTALK_EMBED) {
+    try { openAiChat(); } catch (_) {}
+  }
   if (getAdminToken()) {
     try {
       const overridesNow = await loadProductCategoryOverridesFromCloud();

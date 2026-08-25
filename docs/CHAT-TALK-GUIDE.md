@@ -356,48 +356,53 @@ M-talkの店舗Bot検索メニューでは、予定・メディア・売上検�
 - **メンション**: `mentions uuid[]`。クライアントの申告を信用せず、トリガで
   そのグループの参加者だけに絞る。名指しされた人の Web Push は本文の頭に「@あなた宛」が付く
 
-## 電子ジャーナルに聞く（M-talk → ジャーナルレポート）
+## 電子ジャーナルに聞く（M-talk内でジャーナルレポートのAI）
 
 **M-talk 側にAIを持たない。** 1対1の `＋` →「ジャーナルに聞く」で
-**ジャーナルレポート（`jnm/jnl2txt.html`）そのものを開く**。答えるのは
-ジャーナルレポートのAIで、M-talk はその答えを受け取るだけ。
+`mtalk_journal_ai.html` を開き、その中に**ジャーナルレポートのAIチャットを
+そのまま iframe で埋め込む**。答えるのはジャーナルレポートのAIなので、
+あちらの画面で聞いたときと完全に同じ答えになる。
 
-こうしている理由は、同じ答えを得るには同じシステムに答えさせるしかないため。
+ページ遷移で飛ばさない。利用者から見れば M-talk の画面のまま。
+
+### なぜ埋め込みか
+
 ジャーナルレポートのAIは、質問の解釈・期間の解決・`systemInstruction` の
-組み立て・`clarify`（聞き返し）が `jnl2txt.html`（17,000行超）の中にあり、
-サーバ側へ切り出すと「よく似た別物」になる。
+組み立て・`clarify`（聞き返し）が `jnl2txt.html`（17,000行超）の中にある。
+サーバ側へ切り出すと「よく似た別物」になり、答えは一致しない。
+そのまま動かすのが唯一、同じ答えを保証する方法。
 
 ### つなぎ方
 
-    chat.html                     openJournalReport()
-      → POST /auth/chat-journal-login   （M-talkのSupabase JWTで）
-      → jnm/jnl2txt.html?lt=<token>&mtalk_group_id=<id>
+    chat.html            → mtalk_journal_ai.html?group_id=<id>
+    mtalk_journal_ai.html  POST /auth/chat-journal-login （M-talkのSupabase JWT）
+                         → iframe: jnm/jnl2txt.html?mtalk_embed=1&lt=…&mtalk_group_id=…
 
 `/auth/chat-journal-login` は **`/auth/chat-media-login` と同じ型**。
-1対1であること・その部屋の参加者であること・店舗Botがいて店舗が一意に
-決まることを確かめ、**その店舗にスコープを固定した**ワンタイムリンク（5分）を出す。
+1対1であること・参加者であること・店舗Botがいて店舗が一意に決まることを
+確かめ、**その店舗にスコープを固定した**ワンタイムリンク（5分）を出す。
 
-jnl2txt.html は `?lt=` を `auth-session.js` が拾って `/auth/link-login` で
-交換するので、**画面側は認証の改修なしで入れる**。
+`?lt=` は `auth-session.js` が `/auth/link-login` で交換するので、
+ジャーナルレポート側は認証の改修が要らない。発行されるのは店舗スコープ付き
+セッションなので `STORE_SCOPED_ALLOWED_PATHS` の範囲に限られ、全店アクセスに
+はならない。
 
-発行されるのは店舗スコープ付きセッションなので、`STORE_SCOPED_ALLOWED_PATHS`
-の範囲（保存済みレポート・AI・予約など）に限られ、全店アクセスにはならない。
+### 埋め込みモード
 
-リンクが取れなくても画面自体は開く。あちらのログイン画面から入れるため、
-入口を塞がない。
+`?mtalk_embed=1` のとき、`jnl2txt.html` は `body.mtalk-embed` を付けて
+**AIチャットパネル以外を隠し**、パネルを全面表示にして自動で開く。
+閉じるボタンも隠す（枠側の「戻る」を使うため）。
+CSSと起動条件だけで、AIのロジックには一切触れていない。
 
-### 回答をM-talkへ戻す
+### 回答をトークへ
 
-`?mtalk_group_id=` が付いているときだけ、ジャーナルレポートのAI回答に
-「💬 M-talkに貼る」が出る。押すとそのトークへ書き込む。通常アクセスでは出ない。
+`?mtalk_group_id=` が付いているときだけ、回答に「💬 M-talkに貼る」が出る。
+押すとそのトークへ書き込む。通常アクセスでは出ない。同一オリジンなので
+Supabase のセッションを共有できる。`jnl2txt.html` は普段 Supabase JS を
+読まないため、貼るときだけ遅延読込する。
 
-M-talk と同一オリジンなので Supabase のセッションは共有される。
-jnl2txt.html は普段 Supabase JS を読まないため、貼るときだけ遅延読込する。
-
-> **M-talk 側の自前Q&A画面(`mtalk_journal_ai.html`)と `/chat-journal-ai` は廃止した。**
-> `/pos-journals/ai-ask` を直接叩く作りで、ジャーナルレポートとは
-> 別のAI経路・別の材料だったため、答えが一致しなかった。
-> 同じことをする道を2つ残さない。
+> **自前で `/pos-journals/ai-ask` を叩く実装は廃止した。** ジャーナルレポート
+> とは材料もロジックも違い、答えが一致しなかった。
 
 > ⚠️ **特記事項: Bistro CAVACAVA 専用（2026-08-25 時点）**
 >
