@@ -2573,6 +2573,13 @@
     #albumOverlay .album-card-head .send-mode-now { width:auto; padding:0 13px; background:transparent; color:#8b641d; border:1px solid #b68235; }
     #albumOverlay .album-sheet-footer { display:flex; justify-content:flex-end; padding:12px 18px 18px; border-top:1px solid #e2e0da; }
     #albumOverlay .album-sheet-footer .invite-close { width:auto; margin:0; padding:0 24px; height:40px; background:transparent; color:#333; border:1px solid #ddd; }
+    #keepOverlay { align-items:center !important; padding:16px !important; }
+    #keepOverlay .keep-sheet { width:min(520px,100%) !important; max-height:min(86vh,760px) !important; border-radius:18px !important; padding:24px !important; background:#faf9f5 !important; overflow:hidden !important; }
+    #keepOverlay .keep-sheet h2 { margin:0 0 10px; font-size:26px; }
+    #keepOverlay .keep-sheet > .schedule-hint { margin-bottom:16px; font-size:14px; }
+    #keepOverlay .keep-sheet textarea { background:#fff; border-color:#ddd; min-height:120px; }
+    #keepOverlay .keep-list { max-height:38vh; margin-top:16px; padding-right:2px; }
+    #keepOverlay .keep-item { background:#fff; border-color:#ddd; }
   </style>
 </head>
 <body>
@@ -2828,7 +2835,7 @@
   </div>
 
   <div class="invite-overlay hidden" id="keepOverlay" onclick="if (event.target === this) closeKeepMemo()">
-    <div class="invite-sheet" role="dialog" aria-modal="true" aria-label="Keepメモ">
+    <div class="invite-sheet keep-sheet" role="dialog" aria-modal="true" aria-label="Keepメモ">
       <h2>Keepメモ</h2>
       <p class="schedule-hint">自分だけが見られる保存場所です。ルームをまたいで利用できます。</p>
       <textarea id="keepInput" rows="3" maxlength="5000" placeholder="あとで見るメモを書く" style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:10px;padding:10px 12px;font:inherit;resize:vertical;"></textarea>
