@@ -2538,6 +2538,7 @@
     .keep-list, .album-list { display:flex; flex-direction:column; gap:8px; max-height:42vh; overflow:auto; margin:12px 0; }
     .keep-item, .album-item-row { border:1px solid #e2e5e9; border-radius:10px; padding:10px 12px; background:#fff; display:flex; gap:10px; align-items:flex-start; }
     .keep-item-body { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; color:#222; }
+    .keep-image { display:block; width:96px; height:96px; object-fit:cover; border-radius:8px; background:#eee; cursor:pointer; margin-bottom:6px; }
     .keep-item-meta { color:#777; font-size:11px; margin-top:5px; }
     .keep-delete, .album-remove { border:0; background:transparent; color:#b33; cursor:pointer; font-size:16px; }
     .album-create-row { display:flex; gap:8px; margin:10px 0; }
@@ -8094,11 +8095,27 @@
         list.innerHTML = '<div class="schedule-hint">まだKeepメモはありません。</div>';
         return;
       }
-      list.innerHTML = keepItems.map((item) => `
+      list.innerHTML = keepItems.map((item) => {
+        const payload = typeof item.payload === 'string' ? safeParseJson(item.payload) : item.payload;
+        const path = item.kind === 'image' && payload?.image?.path ? String(payload.image.path) : '';
+        const cached = path ? signedImageUrls.get(path) : null;
+        const body = path
+          ? `<img class="keep-image" data-keep-path="${escapeHtml(path)}" src="${escapeHtml(cached?.url || '')}" alt="Keepした画像" onclick="if (this.src) openImageViewer(this.src)"><div>画像</div>`
+          : escapeHtml(item.content || '[保存データ]');
+        return `
         <div class="keep-item">
-          <div class="keep-item-body">${escapeHtml(item.content || '[保存データ]')}<div class="keep-item-meta">${escapeHtml(keepDate(item.created_at))}</div></div>
+          <div class="keep-item-body">${body}<div class="keep-item-meta">${escapeHtml(keepDate(item.created_at))}</div></div>
           <button class="keep-delete" type="button" aria-label="Keepメモを削除" onclick="deleteKeepMemo(${Number(item.id)})">×</button>
-        </div>`).join('');
+        </div>`;
+      }).join('');
+      void hydrateKeepImages();
+    }
+
+    async function hydrateKeepImages() {
+      const nodes = [...document.querySelectorAll('#keepList img[data-keep-path]')];
+      if (!nodes.length) return;
+      const urls = await albumSignedUrls(nodes.map((node) => node.dataset.keepPath));
+      nodes.forEach((node) => { const url = urls.get(node.dataset.keepPath); if (url) node.src = url; });
     }
 
     async function loadKeepItems() {
