@@ -1271,7 +1271,11 @@ Deno.serve(async (req, info) => {
       // 店舗は呼び出し側(chat-knowledge)がルームから解決して store_key で渡す。
       // storeScope は null で通し、下の uploadPosJournalFiles が
       // 「ファイル名の店舗コード == 指定店舗」を必ず検証する。
-      path === "/pos-journals/upload"
+      path === "/pos-journals/upload" ||
+      // M-talk の「ジャーナル検索」から電子ジャーナルAIへ質問する。
+      // 同じく storeScope は null で通すが、resolvePosJournalAiStore が
+      // 対応店舗（現状 Bistro CAVACAVA のみ）以外を必ず弾く。
+      path === "/pos-journals/ai-ask"
     )
   ) {
     const internalKey = req.headers.get("x-internal-key") ?? ""
@@ -1286,6 +1290,13 @@ Deno.serve(async (req, info) => {
         }
         if (path === "/pos-journals/upload") {
           return json(await uploadPosJournalFiles(req, supabase, null), 200)
+        }
+        if (path === "/pos-journals/ai-ask") {
+          const askBody = await parseJson(req)
+          if (!isRecord(askBody)) {
+            throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+          }
+          return json(await askPosJournalAi(supabase, askBody, null), 200)
         }
         const body = await parseJson(req)
         if (!isRecord(body)) {

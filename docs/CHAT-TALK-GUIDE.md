@@ -356,6 +356,34 @@ M-talkの店舗Bot検索メニューでは、予定・メディア・売上検�
 - **メンション**: `mentions uuid[]`。クライアントの申告を信用せず、トリガで
   そのグループの参加者だけに絞る。名指しされた人の Web Push は本文の頭に「@あなた宛」が付く
 
+## 電子ジャーナルに聞く（M-talk）
+
+店舗ルームで「**ジャーナル検索**」（または `srch=jnl` ボタン／「電子ジャーナルに聞く」
+「売上分析」）と送ると質問待ちになり、次の1通で答える。
+
+    202608 前年同月より伸びた商品は？
+
+先頭6桁が対象月、残りが質問。集計も回答生成も `admin-api` の
+`/pos-journals/ai-ask` に任せるので、電子ジャーナル画面から聞いたときと
+同じ根拠・同じ制約で答える。登録済みの日計精算・会計明細だけを根拠にする。
+
+保留は `line_room_search_pending` に `search_kind='journal'` で積む。TTL は
+他の検索と同じ2分。
+
+> **`loadSearchPending()` は使えない。** あの関数は `search_kind` が既知4種
+> (`message`/`calendar`/`media`/`sales`) 以外だと null を返すため、`journal` の
+> 保留を必ず捨ててしまう。M-talk 側で `loadJournalPending()` として自前に読む。
+> LINE 側の `SearchKind` は変えない（LINE の検索メニューには出さない）。
+
+> ⚠️ **特記事項: Bistro CAVACAVA 専用（2026-08-25 時点）**
+>
+> `resolvePosJournalAiStore()` が `resolvePosJournalStore("1015")` と一致しない
+> 店舗を明示的に弾く（「現在、電子ジャーナルAI分析はBistro CAVACAVAのみ対応
+> しています。」）。これは意図的な制約で、`.lzh` 取込の店舗コード登録とは別。
+> 他店舗へ広げるにはこの制約自体の見直しが要る。
+>
+> 実データも `pos_journal_files` は `bistrocavacava` の1店舗分しかない。
+
 ## Realtime
 
 ## Keepメモとアルバム

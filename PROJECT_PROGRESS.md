@@ -1,5 +1,13 @@
 # LINE Report Project Progress
 
+### 2026-08-25 - M-talkから電子ジャーナルへ質問できるようにした
+
+- Request: Journal Report の資産を M-talk から使えるようにする（提案の第2段）。
+- Implementation: 店舗ルームで「ジャーナル検索」と送ると質問待ちになり、次の1通「月6桁＋質問」で答える。集計も回答生成も `/pos-journals/ai-ask` に任せるので、電子ジャーナル画面から聞いたときと同じ根拠・同じ制約で答える。M-talk の検索メニューにもボタンを足した。
+- Note: 保留は `line_room_search_pending` に `search_kind='journal'` で積むが、`loadSearchPending()` は既知4種以外を null にして捨てるため使えない。`loadJournalPending()` として自前に読む。LINE 側の `SearchKind` は変えず、M-talk だけに閉じている。
+- Security: `admin-api` の内部キー経路に `/pos-journals/ai-ask` を追加した。`storeScope` は null で通すが、`resolvePosJournalAiStore` が対応店舗以外を必ず弾く。
+- **Pending（特記事項）**: **電子ジャーナルAIは Bistro CAVACAVA 専用。** `resolvePosJournalAiStore` が `resolvePosJournalStore("1015")` と一致しない店舗を明示的に拒否する意図的な制約で、`.lzh` 取込の店舗コード登録とは別問題。他店舗へ広げるにはこの制約の見直しが要る。実データも `pos_journal_files` は bistrocavacava の1店舗分のみ。
+
 ### 2026-08-25 - M-talkに落とした.lzhをその店舗の電子ジャーナルへ取り込む
 
 - Request: `.lzh` をジャーナルレポートに店舗を紐づけて、その店舗用のデータベースにドロップしたときと同じように解析保存する。
