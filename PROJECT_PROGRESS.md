@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-08-25 - 電子ジャーナルQ&Aを、ジャーナルレポート本体に答えさせる方式へ変更
+
+- Request: M-talk に同じシステムを作るのではなく、ジャーナルレポートに答えてもらい、それを M-talk へ模写する形にしたい。全く同じ答えを得たい。
+- Implementation: M-talk 側にAIを持たせるのをやめ、1対1の「ジャーナルに聞く」で `jnm/jnl2txt.html` 自体を開く。`/auth/chat-journal-login` を追加し、M-talk の Supabase JWT で1対1・参加者・店舗Bot一意を確認したうえで、その店舗にスコープを固定したワンタイムリンク（5分）を発行する。`?lt=` は `auth-session.js` が `/auth/link-login` で交換するため、ジャーナルレポート側は認証の改修不要。
+- Implementation: `?mtalk_group_id=` が付いているときだけ、ジャーナルレポートのAI回答に「M-talkに貼る」を出す。押すとそのトークへ書き戻す。同一オリジンなので Supabase セッションを共有できる。
+- Removed: 自前Q&A画面 `mtalk_journal_ai.html` と `/chat-journal-ai` を廃止。`/pos-journals/ai-ask` を直接叩く別経路で、ジャーナルレポートとは材料もロジックも違い、答えが一致しなかった。
+- Security: 発行するのは店舗スコープ付きセッションで、`STORE_SCOPED_ALLOWED_PATHS` の範囲に限られる。全店アクセスにはならない。既存の `/auth/chat-media-login` と同じ型を踏襲した。
+- **Pending（特記事項）**: ジャーナルレポート側が Bistro CAVACAVA 専用のため、対象店舗はそのまま。
+
 ### 2026-08-25 - 電子ジャーナルAI画面がログインを認識しない不具合を修正
 
 - Symptom: M-talkの1対1トークから「電子ジャーナルに聞く」を開くと「ログインしてください」と

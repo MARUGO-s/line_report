@@ -16647,9 +16647,79 @@ function appendAiChatMessage(role, text, meta) {
     pdfBtn.textContent = '📄 PDFにする';
     pdfBtn.onclick = () => saveAndOpenAiChatMessagePdf(pdfMeta.question, text, pdfMeta);
     div.appendChild(pdfBtn);
+
+    // M-talk から開いたときだけ、回答をそのトークへ書き戻せるようにする。
+    // M-talk 側で同じAIを組み直さず、この画面の答えをそのまま渡すため。
+    if (MTALK_GROUP_ID) {
+      const talkBtn = document.createElement('button');
+      talkBtn.type = 'button';
+      talkBtn.className = 'ai-msg-pdf-btn';
+      talkBtn.textContent = '💬 M-talkに貼る';
+      talkBtn.onclick = () => postAiAnswerToMtalk(talkBtn, pdfMeta.question, text);
+      div.appendChild(talkBtn);
+    }
   }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+// M-talk から ?mtalk_group_id= 付きで開かれたか。付いていなければ何も出さない。
+const MTALK_GROUP_ID = (() => {
+  const raw = new URLSearchParams(location.search).get('mtalk_group_id') || '';
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : 0;
+})();
+
+/**
+ * この回答をM-talkのトークへ書き戻す。
+ * M-talk 側のログイン(Supabase Auth)が要る。同一オリジンなのでセッションは共有される。
+ */
+async function postAiAnswerToMtalk(button, question, answer) {
+  if (!MTALK_GROUP_ID) return;
+  const body = String(answer || '').trim();
+  if (!body) { alert('貼り付ける回答がありません。'); return; }
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = '送信中...';
+  try {
+    // この画面は普段 Supabase JS を読まない。貼るときだけ取りに行く。
+    if (!window.supabase) {
+      await new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = '../vendor/supabase/supabase-2.110.9.min.js';
+        el.onload = resolve;
+        el.onerror = () => reject(new Error('通信モジュールを読み込めませんでした。'));
+        document.head.appendChild(el);
+      });
+    }
+    if (!window.supabase) throw new Error('通信モジュールを読み込めませんでした。');
+    const cfg = window.LINE_REPORT_PAGES || {};
+    const sb = window.supabase.createClient(
+      cfg.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co',
+      cfg.RECEIPT_ADMIN_ANON_KEY || '',
+      { auth: { persistSession: true, autoRefreshToken: true } },
+    );
+    const { data: sessionData } = await sb.auth.getSession();
+    const userId = sessionData?.session?.user?.id;
+    if (!userId) throw new Error('M-talkにログインしてください。');
+    const { data: me } = await sb.from('chat_users').select('username').eq('id', userId).maybeSingle();
+    const q = String(question || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const content = (q ? `[電子ジャーナル] ${q}\n\n` : '[電子ジャーナル]\n')
+      + body.slice(0, 1700);
+    const { error } = await sb.from('chat_messages').insert({
+      group_id: MTALK_GROUP_ID,
+      user_id: userId,
+      username: me?.username || '',
+      content,
+    });
+    if (error) throw new Error(error.message);
+    button.textContent = '✅ 貼りました';
+    setTimeout(() => { button.textContent = original; button.disabled = false; }, 2000);
+  } catch (error) {
+    alert(`M-talkへ貼れませんでした: ${error && error.message ? error.message : error}`);
+    button.textContent = original;
+    button.disabled = false;
+  }
 }
 
 async function saveAiChatPdfHistory(question, answer, meta) {
