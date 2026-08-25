@@ -164,6 +164,71 @@ M-talk のトーク下部「予約・予定」から、同じルームの予約�
 - `chat-knowledge` は pg_net の内部シークレットで認可する。ゲートウェイ JWT 検証は
   `verify_jwt=false`。設定を忘れると `UNAUTHORIZED_INVALID_JWT_FORMAT` で無反応になる
 
+## 添付ファイル
+
+送れるのは次の形式で、上限は **25MB**。すべて非公開バケット `chat-images` の
+`groups/<group_id>/` 配下へ入り、表示のたびに署名URL（1時間）を作る。
+
+| 種類 | 形式 | アプリ内で開けるか |
+| --- | --- | --- |
+| 画像 | JPEG / PNG / WebP / GIF | ✅ 画像ビューア |
+| PDF | `.pdf` | ✅ ブラウザ内蔵ビューア（iframe） |
+| Excel | `.xls` / `.xlsx` | ✅ 表として表示。シートはタブ切替 |
+| Word | `.docx` | ✅ 本文を整形表示（`.doc` は不可） |
+| テキスト | `.txt` / `.csv` | ✅ 等幅で整形表示 |
+| PowerPoint | `.ppt` / `.pptx` | ❌ 保存して開く |
+| 書庫 | `.zip` | ❌ 保存して開く |
+| iPhone写真 | `.heic` / `.heif` | ✅ 送信時にJPEGへ自動変換 |
+
+札そのものを押すと開き、右端の「保存」を押したときだけダウンロードする。
+
+検証は3層。ブラウザ（MIME＋拡張子＋サイズ）、Storage バケットの MIME 許可
+リストと上限、DBトリガ（MIME再検証・保存先が送信先グループ配下か・
+ファイル名を `[^A-Za-z0-9._() -]` → `_` へ）。
+
+`text/html` と `image/svg+xml` は入れない。署名URLで開いた際にスクリプトが
+動くため。アイコン用 `chat-icons` は公開バケットで SVG を許可しているが、
+こちらとは別扱い。
+
+### アプリ内プレビューの作り
+
+重い描画ライブラリは `public/vendor/` に置いて自己ホストし、その形式を
+実際に開いたときだけ遅延読込する（`loadVendorScript`）。外部CDNは読まない。
+
+- `xlsx.full.min.js` … SheetJS CE 0.20.3 (Apache-2.0)
+- `mammoth.browser.min.js` … mammoth.js 1.8.0 (BSD-2-Clause)
+- `heic2any.min.js` … heic2any 0.0.4（HEIC→JPEG変換用）
+
+**Office を外部の変換サービス（Office Online 等）へ渡さない。** 署名URLごと
+資料が社外へ出るため、`chat-images` を非公開にしている判断と矛盾する。
+
+Excel はライブラリのHTML出力を使わず、`sheet_to_json` で値だけ取り出して
+表を自前で組む。Word は mammoth の出力が文書由来なので `sandbox=""` の
+iframe に閉じ込める（スクリプトも `javascript:` 遷移も効かない）。
+
+負荷対策として Excel は 500行 × 40列、テキスト/CSV は先頭512KBで打ち切る。
+
+### HEIC の自動変換
+
+iPhone の「高効率」設定で出てくる `.heic` は、送信時にJPEGへ変換してから
+通常の画像経路（長辺1600px・品質0.82）に乗せる。変換後はサムネイル表示・
+アルバム・転送・Keepメモがそのまま使える。
+
+Safari は HEIC をそのまま復号できるので `createImageBitmap` で試し、
+復号できないブラウザのときだけ `heic2any`（1.3MB）を読み込む。
+変換に失敗したら原本のままファイル添付として送る（送れないより良い）。
+
+即時送信と予約配信の両方で変換する。
+
+### 電子ジャーナル(.lzh)は添付できない
+
+`.lzh` を落とすと確認ダイアログを出し、電子ジャーナル画面へ誘導する。
+`pos-journal.html` → `/pos-journals/upload` が正本の取込経路で、単なる保管
+ではなくファイル名先頭4桁での店舗コード検証（1015 / Bistro CAVACAVA 限定）、
+重複スキップ、対象月の判定、不完全日の修復、Journal Report の日別・月間
+レポート再作成までを行う。トークに添付すると、それらが走らないまま
+「登録できた」ように見える写しだけが残る。
+
 ## 画像
 
 - バケット `chat-images`（**非公開**）。画像パスは `groups/<group_id>/<uuid>.jpg`、ファイルは同じルーム配下のUUID＋元拡張子
