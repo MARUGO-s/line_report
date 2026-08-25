@@ -31,7 +31,7 @@ function secureEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-function commandKind(text: string): SearchKind | "menu" | "help" | "cancel" | "message" | "journal" | null {
+function commandKind(text: string): SearchKind | "menu" | "help" | "cancel" | "message" | null {
   const value = text.trim().replace(/\s+/g, "")
   if (["検索", "検索ヘルプ", "検索の仕方", "検索方法", "search"].includes(value) || value === "srch=menu") return "menu"
   if (["ヘルプ", "使い方", "help"].includes(value) || value === "srch=help") return "help"
@@ -40,8 +40,6 @@ function commandKind(text: string): SearchKind | "menu" | "help" | "cancel" | "m
   if (["予定検索", "カレンダー検索", "予定を検索", "srch=cal"].includes(value)) return "calendar"
   if (["メディア検索", "画像検索", "ファイル検索", "srch=med"].includes(value)) return "media"
   if (["売上検索", "売り上げ検索", "レシート検索", "srch=sal"].includes(value)) return "sales"
-  // 電子ジャーナル検索は mtalk_search 側が処理する。ここでは合図を素通しする。
-  if (["ジャーナル検索", "電子ジャーナル検索", "ジャーナルに聞く", "電子ジャーナルに聞く", "売上分析", "srch=jnl"].includes(value)) return "journal"
   return null
 }
 
@@ -58,7 +56,6 @@ function menuCard(enabled: Record<SearchKind, boolean>) {
       header: { title: "過去データの検索（1対1）" },
       sections: [
         { type: "note", text: "検索したい種類のボタンを押し、続けてキーワード（売上は日付8桁）を送ると結果が返ります。", size: "sm" },
-        { type: "note", text: "「電子ジャーナルに聞く」は1対1のトーク専用です。月6桁＋質問で、登録済みの日計精算・会計明細から答えます。続けて質問すると前の話を踏まえます。", size: "xs", color: "#888888" },
         { type: "note", text: "予定・メディアは、招待されているグループ等で記録した過去データも横断して検索できます（直近1年）。", size: "xs", color: "#888888" },
         { type: "note", text: PENDING_NOTICE, size: "xs", color: "#888888" },
       ],
@@ -66,7 +63,6 @@ function menuCard(enabled: Record<SearchKind, boolean>) {
         action("予定検索", "srch=cal", enabled.calendar),
         action("メディア検索", "srch=med", enabled.media),
         action("売上検索", "srch=sal", enabled.sales),
-        { label: "電子ジャーナルに聞く（1対1のみ）", command: "srch=jnl", style: "primary" } as ChatAction,
         { label: "📖 使い方（全機能）", command: "srch=help", style: "secondary" },
       ],
     },
@@ -155,8 +151,6 @@ Deno.serve(async (req) => {
     sales: rows.length === 0 || rows.some((row: any) => row.receipt_midreport_enabled !== false || row.receipt_monthend_report_enabled !== false),
   }
 
-  // 電子ジャーナル検索は mtalk_search.handleMtalkSearchText が受け持つ。
-  if (command === "journal") return json({ ok: true, skipped: true, reason: "handled by mtalk_search" }, 200)
   if (command === "menu") await postReply(supabase, groupId, bot, menuCard(enabled))
   else if (command === "message") await postReply(supabase, groupId, bot, { text: "M-talkの会話検索は、トーク一覧上部の「トークルームとメッセージ検索」を使ってください。" })
   else if (command === "cancel") {

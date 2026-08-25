@@ -1335,11 +1335,15 @@ Deno.serve(async (req, info) => {
   if (
     path === "/chat-schedule" ||
     path === "/chat-schedule/reservation" ||
-    path === "/chat-schedule/event"
+    path === "/chat-schedule/event" ||
+    path === "/chat-journal-ai"
   ) {
     try {
       if (path === "/chat-schedule" && req.method === "GET") {
         return await handleChatSchedule(req, url, supabase)
+      }
+      if (path === "/chat-journal-ai") {
+        return await handleChatJournalAi(req, url, supabase)
       }
       if (path === "/chat-schedule/reservation") {
         return await handleChatScheduleReservation(req, workReq, url, supabase)
@@ -4751,6 +4755,106 @@ async function listChatScheduleRoomIds(
     }
   }
   return roomIds
+}
+
+/**
+ * M-talk の「電子ジャーナルに聞く」画面の窓口。
+ *
+ * チャット利用者の Supabase JWT を検証し、そのルームの参加者であることと
+ * 1対1であることを確かめてから、内部で askPosJournalAi を呼ぶ。
+ * /chat-schedule と同じ作りで、管理セッションは要らない。
+ *
+ *   GET  ?group_id=  … これまでのやり取り（会話履歴）
+ *   POST { group_id, month, question } … 質問して答えを返す
+ */
+async function handleChatJournalAi(
+  req: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const body = req.method === "POST" ? await parseJson(req) : null
+  const ctx = await requireChatScheduleMember(
+    req,
+    url,
+    supabase,
+    isRecord(body) ? body : null,
+  )
+  // requireChatScheduleMember の中で認証済み。userId が要るのでもう一度受け取る
+  // （同じ検証を通るので、ここで新たに権限が緩むことはない）。
+  const userId = await authenticateChatMember(req, supabase, ctx.groupId, "view")
+
+  // 売上の質問と回答が参加者全員に見えるのを避けるため1対1限定。
+  const { data: group, error: groupError } = await supabase
+    .from("chat_groups")
+    .select("is_direct")
+    .eq("id", ctx.groupId)
+    .maybeSingle()
+  if (groupError) {
+    throw { status: 500, message: `Failed to load room: ${groupError.message}` } satisfies AppError
+  }
+  if (!group || (group as { is_direct?: unknown }).is_direct !== true) {
+    throw {
+      status: 403,
+      message: "電子ジャーナルへの質問は1対1のトークでのみ使えます。",
+    } satisfies AppError
+  }
+
+  const storeKey = requireChatScheduleStoreKey(ctx)
+
+  if (req.method === "GET") {
+    const { data, error } = await supabase
+      .from("mtalk_journal_qa_history")
+      .select("role, content, created_at")
+      .eq("group_id", ctx.groupId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(64)
+    if (error) {
+      throw { status: 500, message: `Failed to load history: ${error.message}` } satisfies AppError
+    }
+    return json({ ok: true, store_key: storeKey, history: data ?? [] }, 200)
+  }
+
+  if (req.method !== "POST" || !isRecord(body)) {
+    throw { status: 405, message: "Method not allowed." } satisfies AppError
+  }
+
+  const month = normalizeYearMonth(body.month)
+  const question = String(body.question ?? "").trim()
+  if (!question) {
+    throw { status: 400, message: "質問を入力してください。" } satisfies AppError
+  }
+
+  // 続きの質問が通るよう、直近の往復を渡す。画面のQ&Aと同じ8往復。
+  const { data: prior } = await supabase
+    .from("mtalk_journal_qa_history")
+    .select("role, content")
+    .eq("group_id", ctx.groupId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(16)
+  const history = (Array.isArray(prior) ? prior : [])
+    .reverse()
+    .map((row: Record<string, unknown>) => ({
+      role: String(row.role ?? ""),
+      content: String(row.content ?? ""),
+    }))
+    .filter((row) => row.role && row.content)
+
+  const result = await askPosJournalAi(
+    supabase,
+    { store_key: storeKey, month, question, history },
+    null,
+  ) as Record<string, unknown>
+
+  const answer = String(result.answer ?? "").trim()
+  if (answer) {
+    await supabase.from("mtalk_journal_qa_history").insert([
+      { group_id: ctx.groupId, user_id: userId, role: "user", content: question.slice(0, 4000) },
+      { group_id: ctx.groupId, user_id: userId, role: "assistant", content: answer.slice(0, 4000) },
+    ])
+  }
+  return json({ ok: true, ...result }, 200)
 }
 
 async function requireChatScheduleMember(

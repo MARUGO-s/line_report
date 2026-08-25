@@ -2835,6 +2835,10 @@
         <button class="composer-tool-btn" type="button" onclick="openAlbumManager(); closeComposerSheet();">
           <span aria-hidden="true">🖼️</span><span>アルバム</span>
         </button>
+        <button class="composer-tool-btn hidden" id="journalAiBtn" type="button" onclick="openJournalAi(); closeComposerSheet();">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/><circle cx="17" cy="16" r="2.5"/></svg>
+          <span>ジャーナルに聞く</span>
+        </button>
         <button class="composer-tool-btn" type="button" onclick="openReservationSchedule(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4zM8 3v4M16 3v4M4 10h16"/><path d="M8 14h3M8 17h6"/></svg>
           <span>予定を見る</span>
@@ -4944,6 +4948,21 @@
       url.searchParams.set('group_id', String(id));
       url.searchParams.set('v', '202608201340');
       window.open(url.href, '_blank', 'noopener');
+    }
+
+    // 電子ジャーナルAIは1対1専用。売上の質問と回答が参加者全員に見えるのを避ける。
+    function openJournalAi() {
+      const id = Number(currentGroupId);
+      if (!Number.isSafeInteger(id) || id <= 0) return;
+      const group = findMineGroup(id);
+      if (!group || !group.is_direct) {
+        alert('電子ジャーナルへの質問は1対1のトークでのみ使えます。');
+        return;
+      }
+      const url = new URL('mtalk_journal_ai.html', window.location.href);
+      url.searchParams.set('from', 'chat');
+      url.searchParams.set('group_id', String(id));
+      window.location.href = url.href;
     }
 
     function openReservationSchedule(groupId, tab) {
@@ -8530,6 +8549,12 @@
     }
 
     function syncComposerModeUi() {
+      // ジャーナルAIは1対1専用なので、グループではボタン自体を出さない。
+      const journalBtn = $('journalAiBtn');
+      if (journalBtn) {
+        const group = findMineGroup(currentGroupId);
+        journalBtn.classList.toggle('hidden', !(group && group.is_direct));
+      }
       const chip = $('composerModeChip');
       const chipIcon = $('composerModeIcon');
       const chipText = $('composerModeText');
