@@ -37,6 +37,21 @@
     #thread { flex: 1 1 auto; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
     .msg { max-width: 88%; padding: 11px 13px; border-radius: 14px; font-size: 15px; line-height: 1.65;
       white-space: pre-wrap; word-break: break-word; }
+    /* AIの回答は整形済みHTML。pre-wrap のままだとタグ間の改行が余白になる。 */
+    .msg.ai { white-space: normal; max-width: 94%; }
+    .md > *:first-child { margin-top: 0; }
+    .md > *:last-child { margin-bottom: 0; }
+    .md p { margin: 0 0 6px; }
+    .md ul { margin: 4px 0 8px; padding-left: 1.25em; }
+    .md li { margin: 2px 0; }
+    .md .md-gap { height: 8px; }
+    .md strong { font-weight: 700; }
+    .md-table-wrap { overflow-x: auto; margin: 8px 0 10px; }
+    .md table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+    .md th, .md td { border: 1px solid rgba(255,255,255,.16); padding: 5px 9px;
+      text-align: left; white-space: nowrap; }
+    .md th { background: rgba(255,255,255,.07); font-weight: 600; }
+    .md td:nth-child(n+2) { text-align: right; }
     .msg.user { align-self: flex-end; background: var(--accent); color: #06231a; }
     .msg.ai { align-self: flex-start; background: var(--card); }
     .meta { font-size: 11px; color: var(--muted); margin-top: 6px; }
@@ -67,8 +82,16 @@
       .print-turn { margin: 0 0 14px; page-break-inside: avoid; }
       .print-q { font-weight: 700; margin: 0 0 5px; }
       .print-q::before { content: "Q. "; color: #666; }
-      .print-a { margin: 0; white-space: pre-wrap; }
-      .print-a::before { content: "A. "; color: #666; font-weight: 700; }
+      .print-a { margin: 0; }
+      .print-a > .md-table-wrap:first-child { margin-top: 4px; }
+      .print-a p:first-child::before { content: "A. "; color: #666; font-weight: 700; }
+      .print-a p { margin: 0 0 4px; }
+      .print-a ul { margin: 3px 0 6px; padding-left: 1.2em; }
+      .print-a table { border-collapse: collapse; font-size: 9pt; }
+      .print-a th, .print-a td { border: 1px solid #bbb; padding: 3px 6px; text-align: left; }
+      .print-a th { background: #f0f0f0; }
+      .print-a td:nth-child(n+2) { text-align: right; }
+      .print-a .md-gap { height: 5px; }
       .print-note { margin: 4px 0 0; font-size: 8.5pt; color: #777; }
       .print-warn { margin: 4px 0 0; font-size: 8.5pt; color: #b03a2e; }
       .print-foot { margin-top: 18px; padding-top: 8px; border-top: 1px solid #bbb;
@@ -115,6 +138,61 @@
         ? CONFIG.adminApiUrl(path)
         : (SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path);
     }
+    // AIの回答は Markdown で返る。そのまま出すと ** や | が文字のまま見えるので、
+    // 太字・表・箇条書きだけ整形する。必ず esc した文字列にだけ手を入れる
+    // （生のHTMLは通さない）。
+    function mdInline(escaped) {
+      return escaped
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    }
+
+    function isTableRow(line) { return /^\s*\|.*\|\s*$/.test(line); }
+    function isTableDivider(line) { return /^\s*\|[\s:|-]+\|\s*$/.test(line); }
+    function splitRow(line) {
+      return line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+    }
+
+    function renderMarkdown(text) {
+      const lines = String(text ?? '').split(/\r?\n/);
+      const out = [];
+      let list = null;
+      const flushList = () => { if (list) { out.push('<ul>' + list.join('') + '</ul>'); list = null; } };
+
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+
+        // 表: 連続する | 行をまとめる
+        if (isTableRow(line)) {
+          flushList();
+          const rows = [];
+          while (i < lines.length && isTableRow(lines[i])) {
+            if (!isTableDivider(lines[i])) rows.push(splitRow(lines[i]));
+            i += 1;
+          }
+          i -= 1;
+          if (rows.length) {
+            const head = rows.shift();
+            out.push('<div class="md-table-wrap"><table><thead><tr>'
+              + head.map((c) => `<th>${mdInline(esc(c))}</th>`).join('')
+              + '</tr></thead><tbody>'
+              + rows.map((r) => '<tr>' + r.map((c) => `<td>${mdInline(esc(c))}</td>`).join('') + '</tr>').join('')
+              + '</tbody></table></div>');
+          }
+          continue;
+        }
+
+        const bullet = /^\s*[-*・]\s+(.*)$/.exec(line);
+        if (bullet) { (list = list || []).push(`<li>${mdInline(esc(bullet[1]))}</li>`); continue; }
+
+        flushList();
+        if (!line.trim()) { out.push('<div class="md-gap"></div>'); continue; }
+        out.push(`<p>${mdInline(esc(line))}</p>`);
+      }
+      flushList();
+      return out.join('');
+    }
+
     // 失敗の原因が「未ログイン」「権限なし」「1対1でない」のどれか分かるようにする。
     // 区別せず1つの文言にすると、利用者も私も切り分けられない。
     function appError(message, kind) {
@@ -180,7 +258,7 @@
         if (t.role === 'user') return `<div class="msg user">${esc(t.content)}</div>`;
         const meta = t.meta ? `<div class="meta">${esc(t.meta)}</div>` : '';
         const warn = t.warning ? `<div class="meta warn">⚠️ ${esc(t.warning)}</div>` : '';
-        return `<div class="msg ai">${esc(t.content)}${warn}${meta}`
+        return `<div class="msg ai"><div class="md">${renderMarkdown(t.content)}</div>${warn}${meta}`
           + `<div class="msg-actions"><button type="button" data-share="${i}">この回答をトークに貼る</button></div></div>`;
       }).join('');
       box.scrollTop = box.scrollHeight;
@@ -261,9 +339,9 @@
       const body = blocks.map((b) => {
         const note = b.a && b.a.meta ? `<p class="print-note">${esc(b.a.meta)}</p>` : '';
         const warn = b.a && b.a.warning ? `<p class="print-warn">⚠️ ${esc(b.a.warning)}</p>` : '';
-        const ans = b.a ? esc(b.a.content) : '（回答なし）';
+        const ans = b.a ? renderMarkdown(b.a.content) : '<p>（回答なし）</p>';
         return `<div class="print-turn"><p class="print-q">${esc(b.q)}</p>`
-          + `<p class="print-a">${ans}</p>${warn}${note}</div>`;
+          + `<div class="print-a md">${ans}</div>${warn}${note}</div>`;
       }).join('');
 
       return '<div class="print-head"><div class="print-kicker">LINE Report / M-talk</div>'
