@@ -6,7 +6,7 @@
 - 利用画面: `https://marugo-s.github.io/line_report/chat.html`
 - 管理画面: `https://marugo-s.github.io/line_report/chat-admin.html`
 - Supabase プロジェクト: `hocbnifuactbvmyjraxy`（hocbn）
-- 最終更新: 2026-08-24
+- 最終更新: 2026-08-25
 
 > **この文書へ書いてはいけないもの**: endpoint、暗号鍵、VAPID 秘密鍵、
 > メッセージ本文、顧客名、実データ。構造と手順だけを書く。
@@ -107,6 +107,21 @@ Supabase の Auth / Realtime / Storage / Edge Function で動く静的Webアプ�
 - **PC**: Enter で送信、Shift+Enter で改行。
 - **スマホ**: 送信ボタンで送信、Enter は改行。
 - 店舗Botルームでは入力欄に「#メモ対応」と表示される。
+
+### 1対1の使い方AI
+
+自分以外の人間がいない店舗Botトークでは、通常のメッセージ欄から
+「画像はどう送る？」「通知が来ない」「個人メモは他の人に見える？」など、
+M-talkの操作を自然な文章で質問できる。
+
+AIは `supabase/functions/_shared/mtalk_help_manual.ts` の利用者向けマニュアルから、
+質問に関連する項目だけを選んで参照する。ボタン名や操作場所を具体的に答え、
+マニュアルにない機能は推測しない。マニュアルの内容は本書と
+`CHAT-TALK-GUIDE.md` を正本とし、M-talkの利用者向け機能を変更するときは
+3ファイルを同時に更新する。
+
+通常の雑談・簡単な相談にも応じるが、売上・客数などの正確な店舗実績は
+通常会話では答えず、「ジャーナルに聞く」へ案内する。
 
 ### 履歴の見え方
 

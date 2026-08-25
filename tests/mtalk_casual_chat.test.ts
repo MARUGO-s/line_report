@@ -1,4 +1,13 @@
-import { generateCasualReply, isSoloHumanRoom } from "../supabase/functions/_shared/mtalk_casual_chat.ts"
+import {
+  buildCasualSystemPrompt,
+  generateCasualReply,
+  isSoloHumanRoom,
+} from "../supabase/functions/_shared/mtalk_casual_chat.ts"
+import {
+  buildMtalkHelpReference,
+  isMtalkHelpQuestion,
+  selectMtalkHelpSections,
+} from "../supabase/functions/_shared/mtalk_help_manual.ts"
 
 function assertEquals(actual: unknown, expected: unknown, label = ""): void {
   const a = JSON.stringify(actual)
@@ -79,4 +88,60 @@ Deno.test("質問が空文字なら null を返す", async () => {
     question: "   ",
   })
   assertEquals(result, null)
+})
+
+Deno.test("画像の送り方には画像・ファイルのマニュアルを選ぶ", () => {
+  const selected = selectMtalkHelpSections("PDFや画像はどうやって送ればいいですか？")
+  assertEquals(selected[0]?.section.id, "image-file")
+  const reference = buildMtalkHelpReference("PDFや画像はどうやって送ればいいですか？")
+  if (!reference.includes("入力欄左の「＋」")) {
+    throw new Error("画像・ファイルの具体的な操作手順が参照文へ入りませんでした")
+  }
+})
+
+Deno.test("通知が来ない質問には通知マニュアルを選ぶ", () => {
+  const selected = selectMtalkHelpSections("iPhoneで通知が来ないときはどうすればいい？")
+  assertEquals(selected[0]?.section.id, "notifications")
+  const reference = buildMtalkHelpReference("iPhoneで通知が来ないときはどうすればいい？")
+  if (!reference.includes("ホーム画面に追加") || !reference.includes("通知テスト")) {
+    throw new Error("iPhone通知の切り分け手順が参照文へ入りませんでした")
+  }
+})
+
+Deno.test("一般的な使い方質問にはM-talk全体概要を渡す", () => {
+  assertEquals(isMtalkHelpQuestion("M-talkでは何ができますか？"), true)
+  const reference = buildMtalkHelpReference("M-talkでは何ができますか？")
+  if (
+    !reference.includes("M-talk全体概要") ||
+    !reference.includes("全機能の使い方一覧") ||
+    !reference.includes("予約配信") ||
+    !reference.includes("Keepメモ") ||
+    !reference.includes("権限・閲覧専用")
+  ) {
+    throw new Error("全体概要と全機能一覧が参照文へ入りませんでした")
+  }
+})
+
+Deno.test("通常の雑談には使い方マニュアルを注入しない", () => {
+  assertEquals(isMtalkHelpQuestion("今日は暑いですね"), false)
+  const system = buildCasualSystemPrompt({
+    storeName: "テスト店",
+    question: "今日は暑いですね",
+  })
+  if (system.includes("マニュアル（質問に関連する抜粋）")) {
+    throw new Error("通常の雑談へ使い方マニュアルが注入されました")
+  }
+})
+
+Deno.test("M-talkの使い方質問には関連マニュアルをシステム指示として渡す", () => {
+  const system = buildCasualSystemPrompt({
+    storeName: "テスト店",
+    question: "個人メモは他の人に見えますか？",
+  })
+  if (!system.includes("M-talk使い方マニュアル") || !system.includes("他の参加者、Bot、管理画面、Web Pushには表示されません")) {
+    throw new Error("個人メモのマニュアルがシステム指示へ入りませんでした")
+  }
+  if (!system.includes("マニュアルに書かれていない機能・場所・手順は推測で作らず")) {
+    throw new Error("マニュアル外を推測しない安全指示がありません")
+  }
 })
