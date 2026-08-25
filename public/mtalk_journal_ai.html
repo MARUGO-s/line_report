@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>電子ジャーナルに聞く</title>
+  <link rel="icon" type="image/svg+xml" href="icons/chat-logo-v3.svg">
+  <style>
+    :root, html, body {
+      --bg: #111; --surface: #1c1c1e; --card: #2c2c2e; --line: #2c2c2e;
+      --text: #f2f2f2; --muted: #8e8e93; --accent: #06c755;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+    body { display: flex; flex-direction: column;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+    header {
+      display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+      border-bottom: 1px solid var(--line); background: var(--surface); flex: 0 0 auto;
+    }
+    header h1 { margin: 0; font-size: 16px; font-weight: 600; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn { border: 0; border-radius: 999px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+      background: var(--card); color: var(--text); }
+    .btn.primary { background: var(--accent); color: #06231a; font-weight: 700; }
+    #frameWrap { flex: 1 1 auto; position: relative; min-height: 0; }
+    #journalFrame { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+    .notice { margin: 14px; padding: 12px 14px; border-radius: 12px; background: var(--card);
+      color: var(--muted); font-size: 13px; line-height: 1.8; }
+    .notice .btn { margin-top: 10px; }
+    .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 13px; background: var(--bg); }
+    .loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <button class="btn" type="button" id="backBtn">← 戻る</button>
+    <h1>電子ジャーナルに聞く</h1>
+  </header>
+  <div id="frameWrap">
+    <div class="loading" id="loading">読み込んでいます…</div>
+    <iframe id="journalFrame" title="電子ジャーナル AIチャット"
+      allow="clipboard-write" referrerpolicy="same-origin"></iframe>
+  </div>
+
+  <script src="vendor/supabase/supabase-2.110.9.min.js"></script>
+  <script src="pages-config.js"></script>
+  <script>
+    // この画面はAIを持たない。ジャーナルレポートのAIチャットをそのまま埋め込み、
+    // 答えるのは向こうのシステムに任せる（同じ答えを得るため作り直さない）。
+    const CONFIG = window.LINE_REPORT_PAGES || {};
+    const SUPABASE_URL = CONFIG.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
+    const SUPABASE_ANON_KEY = CONFIG.RECEIPT_ADMIN_ANON_KEY || '';
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true },
+    });
+    const groupId = Number(new URLSearchParams(location.search).get('group_id') || 0);
+    const el = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function backToChat() {
+      const url = new URL('chat.html', location.href);
+      if (groupId) url.searchParams.set('group_id', String(groupId));
+      location.href = url.href;
+    }
+
+    function showNotice(message, hint) {
+      el('frameWrap').innerHTML = `<div class="notice">${esc(message)}<br>`
+        + `<span style="color:var(--muted)">${esc(hint || '')}</span><br>`
+        + '<button class="btn primary" type="button" id="noticeBack">トークへ戻る</button></div>';
+      el('noticeBack').addEventListener('click', backToChat);
+    }
+
+    async function boot() {
+      if (!groupId) { showNotice('トークから開いてください。', ''); return; }
+      let loginToken = '';
+      try {
+        const { data } = await sb.auth.getSession();
+        const token = data?.session?.access_token;
+        if (!token) {
+          showNotice('M-talkにログインしてから開いてください。',
+            'トークの画面でログインしたあと、もう一度「ジャーナルに聞く」から開いてください。');
+          return;
+        }
+        const endpoint = CONFIG.adminApiUrl ? CONFIG.adminApiUrl('/auth/chat-journal-login') : '';
+        if (!endpoint) throw new Error('接続先を確認できませんでした。');
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_id: groupId }),
+          cache: 'no-store',
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showNotice(body.error || `接続に失敗しました（HTTP ${res.status}）`,
+            '店舗Bot（例: Bistro CAVACAVA）との1対1のトークから開いてください。');
+          return;
+        }
+        loginToken = String(body.login_token || '');
+      } catch (error) {
+        showNotice(error.message || String(error), '通信状況を確認して、もう一度お試しください。');
+        return;
+      }
+
+      // AIチャットだけを出す埋め込みモードで読み込む。
+      const src = new URL('jnm/jnl2txt.html', location.href);
+      src.searchParams.set('mtalk_embed', '1');
+      src.searchParams.set('mtalk_group_id', String(groupId));
+      if (loginToken) src.searchParams.set('lt', loginToken);
+      const frame = el('journalFrame');
+      frame.addEventListener('load', () => el('loading').classList.add('hidden'));
+      frame.src = src.href;
+    }
+
+    el('backBtn').addEventListener('click', backToChat);
+    boot();
+  </script>
+</body>
+</html>
