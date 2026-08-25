@@ -115,10 +115,19 @@
         ? CONFIG.adminApiUrl(path)
         : (SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path);
     }
+    // 失敗の原因が「未ログイン」「権限なし」「1対1でない」のどれか分かるようにする。
+    // 区別せず1つの文言にすると、利用者も私も切り分けられない。
+    function appError(message, kind) {
+      const error = new Error(message);
+      error.kind = kind || 'other';
+      return error;
+    }
     async function authHeaders() {
       const { data } = await sb.auth.getSession();
       const token = data?.session?.access_token;
-      if (!token) throw new Error('ログインしてください。');
+      if (!token) {
+        throw appError('M-talkにログインしてから開いてください。', 'signin');
+      }
       return { Authorization: 'Bearer ' + token, apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
     }
     async function api(method, body) {
@@ -130,8 +139,26 @@
         cache: 'no-store',
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-      return data;
+      if (res.ok) return data;
+      const detail = String(data.error || '').trim();
+      if (res.status === 401) throw appError(detail || 'ログインの有効期限が切れています。', 'signin');
+      if (res.status === 403) throw appError(detail || 'この画面を使う権限がありません。', 'forbidden');
+      throw appError(detail || ('通信に失敗しました（HTTP ' + res.status + '）'), 'other');
+    }
+
+    // 行き止まりにしない。必ずトークへ戻れるようにする。
+    function showNotice(error) {
+      const kind = error && error.kind;
+      const message = esc((error && error.message) || String(error));
+      const hint = kind === 'signin'
+        ? 'トークの画面でログインしたあと、もう一度「ジャーナルに聞く」から開いてください。'
+        : kind === 'forbidden'
+          ? '店舗Botとの1対1のトークから開くと使えます。'
+          : '通信状況を確認して、もう一度お試しください。';
+      el('thread').innerHTML = `<div class="notice">${message}<br><span style="color:var(--muted)">`
+        + `${esc(hint)}</span><div style="margin-top:12px;display:flex;gap:8px">`
+        + '<button class="btn primary" type="button" data-notice="back">トークへ戻る</button>'
+        + '<button class="btn" type="button" data-notice="retry">再試行</button></div></div>';
     }
 
     function backToChat() {
@@ -165,7 +192,7 @@
         turns = (data.history || []).map((row) => ({ role: row.role, content: row.content }));
         render();
       } catch (error) {
-        el('thread').innerHTML = `<div class="notice">${esc(error.message || error)}</div>`;
+        showNotice(error);
       }
     }
 
@@ -183,6 +210,13 @@
         const meta = [(data.ai_generated ? 'AI生成' : '基本回答（AI未使用）'), data.model].filter(Boolean).join(' / ');
         turns.push({ role: 'assistant', content: data.answer || '回答が空でした。', meta, warning: data.warning || '' });
       } catch (error) {
+        // ログインが切れている場合は、会話に混ぜず案内に切り替える。
+        if (error && error.kind === 'signin') {
+          turns.pop();
+          el('askBtn').disabled = false;
+          showNotice(error);
+          return;
+        }
         turns.push({ role: 'assistant', content: String(error.message || error), meta: 'エラー' });
       } finally {
         el('askBtn').disabled = false;
@@ -263,8 +297,12 @@
     el('backBtn').addEventListener('click', backToChat);
     el('askBtn').addEventListener('click', ask);
     el('thread').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-share]');
-      if (btn) shareToChat(Number(btn.dataset.share));
+      const share = e.target.closest('[data-share]');
+      if (share) { shareToChat(Number(share.dataset.share)); return; }
+      const notice = e.target.closest('[data-notice]');
+      if (!notice) return;
+      if (notice.dataset.notice === 'back') backToChat();
+      else load();
     });
     el('clearBtn').addEventListener('click', () => {
       if (!confirm('この画面の会話を消しますか？（トークの発言は消えません）')) return;
@@ -279,7 +317,7 @@
       const now = new Date();
       el('monthSel').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       if (!groupId) {
-        el('thread').innerHTML = '<div class="notice">トークから開いてください。</div>';
+        showNotice(appError('トークから開いてください。', 'other'));
         return;
       }
       load();
