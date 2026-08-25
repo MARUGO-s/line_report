@@ -7642,6 +7642,28 @@
       'text/plain', 'text/csv', 'application/zip'
     ]);
 
+    // 電子ジャーナル(.lzh)はトークに添付させない。
+    // pos-journal.html → /pos-journals/upload が正本の取込経路で、単なる保管ではなく
+    // ファイル名先頭4桁での店舗コード検証、同一内容の重複スキップ、ファイル名の日付
+    // からの対象月判定、会計0件の不完全日の修復、Journal Report の日別・月間レポート
+    // 再作成までを行う。ここに添付すると、それらが一切走らないまま
+    // 「登録できた」ように見える写しだけが残り、原本が二重管理になる。
+    function isJournalArchiveFile(file) {
+      return /\.(lzh|lha)$/i.test(String((file && file.name) || ''));
+    }
+
+    // 落とした本人が次に何をすればよいか分かるようにする。
+    function promptJournalArchive() {
+      const ok = confirm(
+        '電子ジャーナル（.lzh）はトークに添付できません。\n\n'
+        + '原本は「電子ジャーナル」画面から取り込んでください。\n'
+        + '店舗コードの照合・重複スキップ・対象月の判定・保存レポートの再作成は、'
+        + 'そちらでしか行われません。\n\n'
+        + '電子ジャーナル画面を開きますか？'
+      );
+      if (ok) window.open(new URL('pos-journal.html', window.location.href).href, '_blank', 'noopener');
+    }
+
     function isSupportedChatFile(file) {
       if (!file || Number(file.size) > CHAT_FILE_MAX_BYTES) return false;
       if (isImageFile(file)) return true;
@@ -9197,7 +9219,8 @@
       const file = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!file) return;
-      if (!isSupportedChatFile(file)) { showNotice('対応形式または容量上限（10MB）を確認してください'); return; }
+      if (isJournalArchiveFile(file)) { promptJournalArchive(); return; }
+      if (!isSupportedChatFile(file)) { showChatToast('対応形式または容量上限（10MB）を確認してください'); return; }
       askSendModeForFiles([file]);
     });
 
@@ -9221,9 +9244,16 @@
       e.preventDefault();
       setChatDropActive(false);
       if (!currentGroupId || !canCurrentUserSend()) return;
-      const files = chatFilesFromList(e.dataTransfer && e.dataTransfer.files);
+      const dropped = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      const files = chatFilesFromList(dropped);
+      // 混在で落とされたときも、落ちた .lzh を黙って捨てない。
+      if (dropped.some(isJournalArchiveFile)) {
+        promptJournalArchive();
+        if (files.length) askSendModeForFiles(files);
+        return;
+      }
       if (!files.length) {
-        showNotice('画像・PDF・Office・CSV・ZIP（10MB以内）をドロップしてください');
+        showChatToast('画像・PDF・Office・CSV・ZIP（10MB以内）をドロップしてください');
         return;
       }
       askSendModeForFiles(files);
