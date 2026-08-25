@@ -1,5 +1,20 @@
 # LINE Report Project Progress
 
+### 2026-08-25 - 電子ジャーナルAI画面がログインを認識しない不具合を修正
+
+- Symptom: M-talkの1対1トークから「電子ジャーナルに聞く」を開くと「ログインしてください」と
+  表示され、この画面にはログインの手段が無いため操作が先に進まない。
+- Cause: `mtalk_journal_ai.html`のSupabaseクライアントだけが独自の`storageKey: 'mtalk-auth'`を
+  指定していた。`chat.html`と兄弟画面の`mtalk_schedule.html`はどちらもデフォルトのキーを使う
+  ため、chat.htmlで保存されたログインセッションがこの画面からは見えなかった。
+  導入コミット(#179)は「mtalk_schedule.htmlと同じ型」「チャット利用者のJWTをそのまま使う」と
+  明記しており、設計意図に反する取り違えだった。
+- Fix: `storageKey`の指定を削除し、他画面と同じデフォルトキーへ揃えた。
+- Verified: ブラウザでchat.htmlが書き込むのと同じデフォルトキーへ模擬セッションを保存し、
+  修正版は認識する(`hasSession:true`)・旧コードは再現して認識しない(`hasSession:false`)ことを
+  実測で確認。`npm run test`全8グループ0件失敗、`npm run check`。
+  他のpublicページに同種の`storageKey`指定がないことをリポジトリ全体でgrep確認。
+
 ### 2026-08-25 - 電子ジャーナルAIを1対1専用の別画面にした
 
 - Request: ジャーナルレポートのAIに質問するのは、分けられた別モードにしたい。1対1で発動できるモードとして。チャット内の一問一答は無くす。
