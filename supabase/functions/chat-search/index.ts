@@ -58,7 +58,7 @@ function menuCard(enabled: Record<SearchKind, boolean>) {
       header: { title: "過去データの検索（1対1）" },
       sections: [
         { type: "note", text: "検索したい種類のボタンを押し、続けてキーワード（売上は日付8桁）を送ると結果が返ります。", size: "sm" },
-        { type: "note", text: "「電子ジャーナルに聞く」は、月6桁＋質問で登録済みの日計精算・会計明細から答えます。", size: "xs", color: "#888888" },
+        { type: "note", text: "「電子ジャーナルに聞く」は1対1のトーク専用です。月6桁＋質問で、登録済みの日計精算・会計明細から答えます。続けて質問すると前の話を踏まえます。", size: "xs", color: "#888888" },
         { type: "note", text: "予定・メディアは、招待されているグループ等で記録した過去データも横断して検索できます（直近1年）。", size: "xs", color: "#888888" },
         { type: "note", text: PENDING_NOTICE, size: "xs", color: "#888888" },
       ],
@@ -66,7 +66,7 @@ function menuCard(enabled: Record<SearchKind, boolean>) {
         action("予定検索", "srch=cal", enabled.calendar),
         action("メディア検索", "srch=med", enabled.media),
         action("売上検索", "srch=sal", enabled.sales),
-        { label: "電子ジャーナルに聞く", command: "srch=jnl", style: "primary" } as ChatAction,
+        { label: "電子ジャーナルに聞く（1対1のみ）", command: "srch=jnl", style: "primary" } as ChatAction,
         { label: "📖 使い方（全機能）", command: "srch=help", style: "secondary" },
       ],
     },
