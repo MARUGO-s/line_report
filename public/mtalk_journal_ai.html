@@ -50,6 +50,30 @@
     footer textarea { flex: 1; resize: none; max-height: 120px; }
     .notice { margin: 14px; padding: 12px 14px; border-radius: 12px; background: var(--card);
       color: var(--meta); font-size: 13px; line-height: 1.8; }
+
+    /* PDFは既存のジャーナル画面と同じく window.print() で出す（PDFライブラリは入れない）。 */
+    #printReport { display: none; }
+    @media print {
+      @page { size: A4; margin: 12mm 12mm; }
+      body.printing { background: #fff !important; color: #111 !important;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact; display: block; }
+      body.printing > *:not(#printReport) { display: none !important; }
+      body.printing #printReport { display: block !important; }
+      #printReport { color: #111; font-size: 11.5pt; line-height: 1.7; }
+      .print-head { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 16px; }
+      .print-kicker { font-size: 9pt; letter-spacing: .08em; color: #666; }
+      .print-head h1 { margin: 4px 0 8px; font-size: 17pt; }
+      .print-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 9.5pt; color: #444; }
+      .print-turn { margin: 0 0 14px; page-break-inside: avoid; }
+      .print-q { font-weight: 700; margin: 0 0 5px; }
+      .print-q::before { content: "Q. "; color: #666; }
+      .print-a { margin: 0; white-space: pre-wrap; }
+      .print-a::before { content: "A. "; color: #666; font-weight: 700; }
+      .print-note { margin: 4px 0 0; font-size: 8.5pt; color: #777; }
+      .print-warn { margin: 4px 0 0; font-size: 8.5pt; color: #b03a2e; }
+      .print-foot { margin-top: 18px; padding-top: 8px; border-top: 1px solid #bbb;
+        font-size: 8.5pt; color: #666; display: flex; justify-content: space-between; }
+    }
   </style>
 </head>
 <body>
@@ -60,6 +84,7 @@
   <div class="bar">
     <label for="monthSel">対象月</label>
     <input type="month" id="monthSel">
+    <button class="btn" type="button" id="pdfBtn" title="このやり取りをPDFにする">PDF</button>
     <button class="btn" type="button" id="clearBtn" title="この画面の会話を消す">履歴を消す</button>
   </div>
   <div id="thread"><div class="empty">読み込んでいます…</div></div>
@@ -67,6 +92,8 @@
     <textarea id="q" rows="1" placeholder="質問を入力（例: 前年同月より伸びた商品は？）"></textarea>
     <button class="btn primary" type="button" id="askBtn">送信</button>
   </footer>
+
+  <div id="printReport" aria-hidden="true"></div>
 
   <script src="vendor/supabase/supabase-2.110.9.min.js"></script>
   <script src="pages-config.js"></script>
@@ -181,6 +208,58 @@
       else alert('トークに貼りました。');
     }
 
+    // Q&Aを1枚にまとめてPDFへ。既存のジャーナル画面と同じく window.print() を使う
+    // （PDFライブラリを増やさない。印刷ダイアログから「PDFとして保存」を選ぶ）。
+    function printReportHtml() {
+      const month = el('monthSel').value || '';
+      const now = new Date();
+      const stamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/`
+        + `${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:`
+        + `${String(now.getMinutes()).padStart(2, '0')}`;
+
+      // 質問と回答を1往復ずつ組にする。相手が無い分も落とさない。
+      const blocks = [];
+      for (let i = 0; i < turns.length; i += 1) {
+        if (turns[i].role !== 'user') continue;
+        const answer = turns[i + 1] && turns[i + 1].role === 'assistant' ? turns[i + 1] : null;
+        blocks.push({ q: turns[i].content, a: answer });
+      }
+      const body = blocks.map((b) => {
+        const note = b.a && b.a.meta ? `<p class="print-note">${esc(b.a.meta)}</p>` : '';
+        const warn = b.a && b.a.warning ? `<p class="print-warn">⚠️ ${esc(b.a.warning)}</p>` : '';
+        const ans = b.a ? esc(b.a.content) : '（回答なし）';
+        return `<div class="print-turn"><p class="print-q">${esc(b.q)}</p>`
+          + `<p class="print-a">${ans}</p>${warn}${note}</div>`;
+      }).join('');
+
+      return '<div class="print-head"><div class="print-kicker">LINE Report / M-talk</div>'
+        + '<h1>電子ジャーナル Q&amp;A</h1><div class="print-meta">'
+        + `<span>対象月: ${esc(month)}</span><span>出力: ${esc(stamp)}</span>`
+        + `<span>やり取り: ${blocks.length}件</span></div></div>`
+        + (body || '<p>やり取りがありません。</p>')
+        + '<div class="print-foot"><span>登録済みの電子ジャーナルのみを根拠にしています。</span>'
+        + '<span>保存時点のデータに基づきます。</span></div>';
+    }
+
+    function savePdf() {
+      if (!turns.length) { alert('PDFにできるやり取りがありません。'); return; }
+      const report = el('printReport');
+      report.innerHTML = printReportHtml();
+      report.setAttribute('aria-hidden', 'false');
+      const previousTitle = document.title;
+      document.title = `電子ジャーナルQA_${(el('monthSel').value || '').replace('-', '')}`;
+      document.body.classList.add('printing');
+      const cleanup = () => {
+        document.body.classList.remove('printing');
+        document.title = previousTitle;
+        report.setAttribute('aria-hidden', 'true');
+        window.removeEventListener('afterprint', cleanup);
+      };
+      window.addEventListener('afterprint', cleanup);
+      setTimeout(() => { window.print(); setTimeout(cleanup, 1500); }, 50);
+    }
+
+    el('pdfBtn').addEventListener('click', savePdf);
     el('backBtn').addEventListener('click', backToChat);
     el('askBtn').addEventListener('click', ask);
     el('thread').addEventListener('click', (e) => {
