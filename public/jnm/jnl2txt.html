@@ -16704,6 +16704,79 @@ const MTALK_GROUP_ID = (() => {
 })();
 
 /**
+ * AI回答のMarkdownを、M-talkのトークで読みやすいプレーンテキストへ整形する。
+ * M-talkは通常テキスト表示のため、見出し(#)、強調(**)、表(| |)をそのまま貼ると
+ * 記号だらけになる。ここで次のように置き換える。
+ *   見出し   → 「■ 見出し」/「▪ 小見出し」
+ *   表        → 2列は「項目：値」、3列以上は「値 / 値 / 値」
+ *   箇条書き → 「・」、水平線 → 区切り線、強調/リンク記号は除去
+ */
+function mtalkPlainTextFromMarkdown(md) {
+  const src = String(md || '').replace(/\r\n?/g, '\n');
+  const stripInline = (s) => String(s == null ? '' : s)
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1（$2）')
+    .trim();
+  const isTableSeparator = (s) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(s);
+  const lines = src.split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    // 表ブロック（| から始まる行が続くあいだ）
+    if (trimmed.startsWith('|') && trimmed.indexOf('|', 1) !== -1) {
+      const rows = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        const rowText = lines[i];
+        i++;
+        if (isTableSeparator(rowText)) continue;
+        const cells = rowText.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(stripInline);
+        rows.push(cells);
+      }
+      const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+      rows.forEach((r) => {
+        if (maxCols === 2) {
+          const key = r[0] || '';
+          const val = r[1] || '';
+          if (key || val) out.push(val ? `${key}：${val}` : key);
+        } else {
+          const joined = r.filter((c) => c).join(' / ');
+          if (joined) out.push(joined);
+        }
+      });
+      continue;
+    }
+    // 見出し
+    const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+    if (heading) {
+      const text = stripInline(heading[2]);
+      if (text) out.push(heading[1].length <= 2 ? `■ ${text}` : `▪ ${text}`);
+      i++;
+      continue;
+    }
+    // 水平線
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { out.push('────────'); i++; continue; }
+    // 箇条書き
+    const bullet = /^(\s*)[-*+]\s+(.*)$/.exec(line);
+    if (bullet) { out.push(`${bullet[1]}・${stripInline(bullet[2])}`); i++; continue; }
+    // 番号付き
+    const ordered = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
+    if (ordered) { out.push(`${ordered[1]}${ordered[2]}. ${stripInline(ordered[3])}`); i++; continue; }
+    // 引用
+    const quote = /^\s*>\s?(.*)$/.exec(line);
+    if (quote) { out.push(stripInline(quote[1])); i++; continue; }
+    // 通常行
+    out.push(stripInline(line));
+    i++;
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
  * この回答をM-talkのトークへ書き戻す。
  * M-talk 側のログイン(Supabase Auth)が要る。同一オリジンなのでセッションは共有される。
  */
@@ -16737,8 +16810,11 @@ async function postAiAnswerToMtalk(button, question, answer) {
     if (!userId) throw new Error('M-talkにログインしてください。');
     const { data: me } = await sb.from('chat_users').select('username').eq('id', userId).maybeSingle();
     const q = String(question || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    // M-talkのトークは通常テキスト表示なので、Markdown記法(##・**・表)をそのまま貼ると
+    // 記号だらけで読みにくい。貼る直前に、見やすいプレーンテキストへ整形する。
+    const pretty = mtalkPlainTextFromMarkdown(body);
     const content = (q ? `[電子ジャーナル] ${q}\n\n` : '[電子ジャーナル]\n')
-      + body.slice(0, 1700);
+      + pretty.slice(0, 1700);
     const { error } = await sb.from('chat_messages').insert({
       group_id: MTALK_GROUP_ID,
       user_id: userId,

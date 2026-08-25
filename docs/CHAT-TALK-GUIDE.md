@@ -445,6 +445,13 @@ CSSと起動条件だけで、AIのロジックには一切触れていない。
 Supabase のセッションを共有できる。`jnl2txt.html` は普段 Supabase JS を
 読まないため、貼るときだけ遅延読込する。
 
+M-talkのトークは通常テキスト表示のため、AI回答のMarkdown（`##` 見出し・
+`**強調**`・`| 表 |`）をそのまま貼ると記号だらけで読みにくい。貼る直前に
+`mtalkPlainTextFromMarkdown()`（`public/jnm/jnl2txt.html`）で、見出しは
+「■/▪」、2列の表は「項目：値」、3列以上は「値 / 値」、箇条書きは「・」へ
+整形し、強調・リンク・区切り記号を除いた読みやすいテキストにして貼る。
+整形の検証は `tests/mtalk_journal_paste_format.test.mjs`。
+
 > **自前で `/pos-journals/ai-ask` を叩く実装は廃止した。** ジャーナルレポート
 > とは材料もロジックも違い、答えが一致しなかった。
 

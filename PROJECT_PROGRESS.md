@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-08-25 - 「M-talkに貼る」をMarkdownのまま貼らず読みやすく整形
+
+- Request: 「ジャーナルに聞く」の分析結果を「M-talkに貼る」で貼ると、Markdown（`##`・`**`・表）のまま出力されるので、見やすい形にまとめて貼る。
+- Implementation: `public/jnm/jnl2txt.html` に `mtalkPlainTextFromMarkdown()` を追加し、`postAiAnswerToMtalk()` が貼る直前に整形する。見出しは「■/▪」、2列の表は「項目：値」、3列以上は「値 / 値」、箇条書きは「・」、水平線は区切り線にし、強調・リンク記号を除去する。
+- Note: M-talkのトークは通常テキスト表示のため、カード化ではなく読みやすいプレーンテキストへ整形する方針。挿入はこれまでどおり本人JWTでの `chat_messages`(kind=text)。
+- Test: `tests/mtalk_journal_paste_format.test.mjs` を追加（見出し/強調/水平線/2列表/3列表/空入力）。`npm run test:chat` 97件成功。
+
 ### 2026-08-25 - 1対1雑談AIの数値誘導を「ジャーナルに聞くを開いて確認」へ明確化
 
 - Request: 細かい数字の分析に対しては、ジャーナルを開くよう明確に案内する言い回しにする。
