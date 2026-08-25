@@ -145,3 +145,16 @@ Deno.test("M-talkの使い方質問には関連マニュアルをシステム指
     throw new Error("マニュアル外を推測しない安全指示がありません")
   }
 })
+
+Deno.test("数値質問はジャーナルに聞くを開くよう明確に案内する", () => {
+  const system = buildCasualSystemPrompt({
+    storeName: "テスト店",
+    question: "先月の売上はいくらでしたか？",
+  })
+  if (!system.includes("「ジャーナルに聞く」を開いて確認してください")) {
+    throw new Error("数値質問でジャーナルを開く明確な誘導が入りませんでした")
+  }
+  if (!system.includes("店舗の実データに基づく具体的な数字には絶対に答えないでください")) {
+    throw new Error("数値を答えない安全指示がありません")
+  }
+})
