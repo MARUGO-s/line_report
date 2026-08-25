@@ -1,5 +1,13 @@
 # LINE Report Project Progress
 
+### 2026-08-25 - 電子ジャーナルQ&Aを1対1限定にし、続きの質問と回答の出どころ表示を追加
+
+- Request: 質問は1対1のみに制限したうえで、会話履歴と「AI生成/基本回答」の区別を入れる。
+- Implementation: 合図を受けた時点と質問を受けた時点の両方で `chat_groups.is_direct` を確認し、グループでは断る（売上の質問と回答が参加者全員に見えるため）。`mtalk_journal_qa_history` に往復を持ち、直近8往復かつ2時間以内だけを `history` として `/pos-journals/ai-ask` へ渡すので「じゃあ前月は？」が通る。古い文脈が別件へ混ざらないよう時間で切る。行はトリガで1対1×利用者ごとに直近32行へ刈る。
+- Implementation: 回答カードに `ai_generated`（AI生成／基本回答）とモデル名を出し、`warning` があれば赤字で添える。区別せず出すと「AIが分析した」と誤解されるため。
+- Note: `summary` は渡さない。未指定なら `resolvePosJournalAiSummary` が DB から組み直すので、画面の状態に依存しないぶん確実。
+- Security: 質問文と回答が入るため `mtalk_journal_qa_history` は service_role 専用。RLSを有効にしたうえで anon/authenticated から revoke する。
+
 ### 2026-08-25 - M-talkから電子ジャーナルへ質問できるようにした
 
 - Request: Journal Report の資産を M-talk から使えるようにする（提案の第2段）。

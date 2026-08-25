@@ -6,7 +6,7 @@ import type { LineReplyPayload } from './receipt_types.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { isReceiptCorrectionControlText } from './receipt_correction.ts'
 import { mtalkCardFromLineReply } from './chat_flex_card.ts'
-import { postChatCard, type ChatCard } from './chat_bridge.ts'
+import { postChatCard, type ChatCard, type ChatCardSection } from './chat_bridge.ts'
 import {
   buildAllFeaturesGuideFlex,
   buildSearchEntryReply,
@@ -142,7 +142,8 @@ function journalPromptCard(): { text: string; card: ChatCard } {
           type: 'note',
           size: 'xs',
           color: '#888888',
-          text: '登録済みの電子ジャーナル（日計精算・会計明細）だけを根拠に答えます。',
+          text: '登録済みの電子ジャーナル（日計精算・会計明細）だけを根拠に答えます。\n'
+            + '続けて質問すると、直前のやり取り（2時間以内・8往復まで）を踏まえます。',
         },
       ],
       actions: [
@@ -151,6 +152,60 @@ function journalPromptCard(): { text: string; card: ChatCard } {
       ],
     },
   }
+}
+
+/** 1対1トークか。ジャーナルQ&Aはグループでは受けない。 */
+async function isDirectGroup(supabase: DbClient, groupId: number): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('chat_groups')
+    .select('is_direct')
+    .eq('id', groupId)
+    .maybeSingle()
+  if (error || !data) return false
+  return data.is_direct === true
+}
+
+/** 続きの質問に使う直近の往復。古い文脈が別件へ混ざらないよう2時間で切る。 */
+const JOURNAL_HISTORY_TURNS = 8
+const JOURNAL_HISTORY_WINDOW_MS = 2 * 60 * 60 * 1000
+
+async function loadJournalHistory(
+  supabase: DbClient,
+  groupId: number,
+  userId: string,
+): Promise<Array<{ role: string; content: string }>> {
+  const since = new Date(Date.now() - JOURNAL_HISTORY_WINDOW_MS).toISOString()
+  const { data, error } = await supabase
+    .from('mtalk_journal_qa_history')
+    .select('role, content, created_at')
+    .eq('group_id', groupId)
+    .eq('user_id', userId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(JOURNAL_HISTORY_TURNS * 2)
+  if (error || !Array.isArray(data)) return []
+  return data
+    .reverse()
+    .map((row: Record<string, unknown>) => ({
+      role: String(row.role ?? ''),
+      content: String(row.content ?? ''),
+    }))
+    .filter((row) => row.role && row.content)
+}
+
+async function saveJournalHistory(
+  supabase: DbClient,
+  groupId: number,
+  userId: string,
+  role: 'user' | 'assistant',
+  content: string,
+): Promise<void> {
+  const text = String(content ?? '').trim().slice(0, 4000)
+  if (!text) return
+  const { error } = await supabase
+    .from('mtalk_journal_qa_history')
+    .insert({ group_id: groupId, user_id: userId, role, content: text })
+  if (error) console.warn('saveJournalHistory failed:', error.message)
 }
 
 /**
@@ -162,7 +217,8 @@ async function askJournalAi(
   storeKey: string,
   month: string,
   question: string,
-): Promise<{ text: string; card?: ChatCard }> {
+  history: Array<{ role: string; content: string }>,
+): Promise<{ text: string; card?: ChatCard; answer?: string }> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
   const internalKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
   try {
@@ -174,7 +230,9 @@ async function askJournalAi(
         'x-admin-surface': 'line_report',
         'x-store-key': storeKey,
       },
-      body: JSON.stringify({ store_key: storeKey, month, question }),
+      // summary は渡さない。未指定なら resolvePosJournalAiSummary が DB から
+      // 同じものを組み直すため、画面の状態に依存しないぶん確実。
+      body: JSON.stringify({ store_key: storeKey, month, question, history }),
     })
     const data = await res.json().catch(() => ({})) as Record<string, unknown>
     if (!res.ok) {
@@ -182,15 +240,35 @@ async function askJournalAi(
     }
     const answer = String(data.answer ?? data.text ?? '').trim()
     if (!answer) return { text: '回答を得られませんでした。質問を変えて試してください。' }
+
+    // 画面と同じく、AIが答えたのか定型の基本回答なのかを示す。
+    // 区別せず出すと「AIが分析した」と誤解される。
+    const aiGenerated = data.ai_generated === true
+    const model = String(data.model ?? '').trim()
+    const warning = String(data.warning ?? '').trim()
+    const meta = [aiGenerated ? 'AI生成' : '基本回答（AI未使用）', model]
+      .filter(Boolean).join(' / ')
+
+    const notes: ChatCardSection[] = [
+      { type: 'note', size: 'sm', text: answer.slice(0, 1800) },
+    ]
+    if (warning) {
+      notes.push({ type: 'note', size: 'xs', color: '#c0392b', text: `⚠️ ${warning}` })
+    }
+    notes.push({
+      type: 'note',
+      size: 'xs',
+      color: '#888888',
+      text: `${meta} ／ 登録済みの電子ジャーナルだけを根拠にしています。`,
+    })
+
     return {
       text: answer.slice(0, 1800),
+      answer,
       card: {
         variant: 'line',
         header: { title: '電子ジャーナル', subtitle: `${month} の記録から` },
-        sections: [
-          { type: 'note', size: 'sm', text: answer.slice(0, 1800) },
-          { type: 'note', size: 'xs', color: '#888888', text: '登録済みの電子ジャーナルだけを根拠にしています。' },
-        ],
+        sections: notes,
       },
     }
   } catch (err) {
@@ -297,6 +375,11 @@ export async function handleMtalkSearchText(
   // 電子ジャーナル検索は M-talk 専用。LINE 側の SearchKind は変えず、
   // 保留テーブルへ 'journal' を積んで次の1通を質問として受ける。
   if (isJournalTrigger(text)) {
+    // グループでは受けない。売上の質問と回答が参加者全員に見えてしまうため。
+    if (!await isDirectGroup(supabase, params.groupId)) {
+      await reply('電子ジャーナルへの質問は1対1のトークでのみ使えます。店舗Botとの1対1から送ってください。')
+      return true
+    }
     await supabase.from('line_room_search_pending').upsert({
       room_id: roomId,
       user_id: userId,
@@ -328,11 +411,24 @@ export async function handleMtalkSearchText(
       })
       return true
     }
+    // 保留を積む時点で1対1を確認しているが、念のためここでも確認する。
+    if (!await isDirectGroup(supabase, params.groupId)) {
+      await reply('電子ジャーナルへの質問は1対1のトークでのみ使えます。')
+      return true
+    }
+    const history = await loadJournalHistory(supabase, params.groupId, userId)
     const answer = await askJournalAi(
       params.registry.store_partition_key,
       parsed.month,
       parsed.question,
+      history,
     )
+    // 続きの質問（「じゃあ前月は？」）が通るよう往復を残す。
+    // 回答が得られたときだけ積む。失敗を文脈に混ぜない。
+    if (answer.answer) {
+      await saveJournalHistory(supabase, params.groupId, userId, 'user', text)
+      await saveJournalHistory(supabase, params.groupId, userId, 'assistant', answer.answer)
+    }
     if (answer.card) {
       await postChatCard(supabase, {
         groupId: params.groupId,
