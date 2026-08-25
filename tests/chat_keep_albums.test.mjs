@@ -29,4 +29,6 @@ test('Album images use signed URLs instead of exposing the private storage path'
   assert.match(chat, /createSignedUrls\(missing, 3600\)/);
   assert.match(chat, /from\('chat-images'\)/);
   assert.match(migration, /storage_path ~ '\^groups\//);
+  assert.match(chat, /function downloadImage\(src\)/);
+  assert.match(chat, /画像を開く/);
 });

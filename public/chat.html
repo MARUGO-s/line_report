@@ -1201,7 +1201,8 @@
       justify-content: center;
       padding: 24px;
     }
-    .image-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .image-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-out; }
+    .image-viewer-download { position:absolute; top:16px; right:16px; z-index:1; border:1px solid rgba(255,255,255,.45); border-radius:9px; padding:9px 13px; background:rgba(0,0,0,.55); color:#fff; font:inherit; cursor:pointer; }
 
     /* メッセージ検索の結果行 */
     .search-hit {
@@ -7690,11 +7691,44 @@
     }
 
     function openImageViewer(src) {
+      const safeSrc = safeHttpUrl(src);
+      if (!safeSrc) return;
       const overlay = document.createElement('div');
       overlay.className = 'image-viewer';
-      overlay.innerHTML = `<img src="${escapeHtml(src)}" alt="画像">`;
+      overlay.innerHTML = `<button type="button" class="image-viewer-download">ダウンロード</button><img src="${escapeHtml(safeSrc)}" alt="画像">`;
       overlay.onclick = () => overlay.remove();
+      overlay.querySelector('img').addEventListener('click', (event) => event.stopPropagation());
+      overlay.querySelector('.image-viewer-download').addEventListener('click', async (event) => {
+        event.stopPropagation();
+        await downloadImage(safeSrc);
+      });
       document.body.appendChild(overlay);
+    }
+
+    async function downloadImage(src) {
+      const safeSrc = safeHttpUrl(src);
+      if (!safeSrc) return;
+      try {
+        const response = await fetch(safeSrc);
+        if (!response.ok) throw new Error('画像を取得できませんでした');
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `mtalk-image-${Date.now()}.jpg`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        console.warn('Image download fallback:', error);
+        const anchor = document.createElement('a');
+        anchor.href = safeSrc;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener';
+        anchor.download = '';
+        anchor.click();
+      }
     }
 
     // javascript: 等を踏まないよう、リンクは http(s) のみ通す。
@@ -8120,7 +8154,7 @@
       list.innerHTML = images.map((message) => {
         const image = imageFromMessage(message);
         const cached = signedImageUrls.get(image.path);
-        return `<div class="album-source-row"><img src="${escapeHtml(cached?.url || '')}" data-path="${escapeHtml(image.path)}" alt=""><span>${escapeHtml(message.username || '画像')}<br><small>${escapeHtml(albumDate(message.created_at))}</small></span><button class="send-mode-now" type="button" ${existing.has(Number(message.id)) ? 'disabled' : ''} onclick="addMessageToAlbum(${Number(selectedAlbumId)},${Number(message.id)})">${existing.has(Number(message.id)) ? '追加済み' : '追加'}</button></div>`;
+        return `<div class="album-source-row"><img src="${escapeHtml(cached?.url || '')}" data-path="${escapeHtml(image.path)}" alt="画像を開く" onclick="if (this.src) openImageViewer(this.src)"><span>${escapeHtml(message.username || '画像')}<br><small>${escapeHtml(albumDate(message.created_at))}</small></span><button class="send-mode-now" type="button" ${existing.has(Number(message.id)) ? 'disabled' : ''} onclick="addMessageToAlbum(${Number(selectedAlbumId)},${Number(message.id)})">${existing.has(Number(message.id)) ? '追加済み' : '追加'}</button></div>`;
       }).join('');
       void hydrateAlbumSourceImages();
     }
@@ -8137,7 +8171,7 @@
       if (!albums.length) { list.innerHTML = '<div class="schedule-hint">まだアルバムはありません。名前を入力して作成してください。</div>'; renderAlbumSourceList(); return; }
       list.innerHTML = albums.map((album) => {
         const items = albumItemsById.get(Number(album.id)) || [];
-        return `<div class="album-card"><div class="album-card-head"><span class="album-card-title">${escapeHtml(album.name)}</span><button class="send-mode-now" type="button" onclick="selectAlbum(${Number(album.id)})">${selectedAlbumId === Number(album.id) ? '画像を追加' : '開く'}</button></div><small>${items.length}枚 ・ ${escapeHtml(albumDate(album.updated_at || album.created_at))}</small><div class="album-photo-grid">${items.map((item) => item.url ? `<img src="${escapeHtml(item.url)}" alt="">` : '').join('')}</div></div>`;
+        return `<div class="album-card"><div class="album-card-head"><span class="album-card-title">${escapeHtml(album.name)}</span><button class="send-mode-now" type="button" onclick="selectAlbum(${Number(album.id)})">${selectedAlbumId === Number(album.id) ? '画像を追加' : '開く'}</button></div><small>${items.length}枚 ・ ${escapeHtml(albumDate(album.updated_at || album.created_at))}</small><div class="album-photo-grid">${items.map((item) => item.url ? `<img src="${escapeHtml(item.url)}" alt="画像を開く" title="クリックして拡大・ダウンロード" onclick="openImageViewer('${escapeHtml(item.url)}')">` : '').join('')}</div></div>`;
       }).join('');
       renderAlbumSourceList();
     }
