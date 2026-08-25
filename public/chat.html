@@ -4952,23 +4952,30 @@
 
     // 1対1であることに加えて、店舗Botがいること。店舗が決まらないルームでは
     // サーバ側が必ず弾くので、入口の時点で出さない。
+    // is_direct（自動作成のDMかどうか）ではなく「人間メンバーが自分1人だけか」で見る。
+    // 利用者が自分でBotを招待して作った2人部屋（is_direct=false）も対象にするため。
+    // サーバ側(issueChatJournalLoginLink)も同じ基準で判定する。
+    function currentRoomHasOnlyMeAndBots() {
+      const humans = groupMembers.filter((user) => user && !user.is_bot);
+      return humans.length === 1 && humans[0] && humans[0].id === currentUser?.id;
+    }
+
     function currentRoomAllowsJournalAi() {
-      const group = findMineGroup(currentGroupId);
-      if (!group || !group.is_direct) return false;
+      if (!currentRoomHasOnlyMeAndBots()) return false;
       return groupMembers.some((user) => user && user.is_bot && user.store_key);
     }
 
-    // 電子ジャーナルAIは1対1専用。売上の質問と回答が参加者全員に見えるのを避ける。
+    // 電子ジャーナルAIは、自分以外の人間がいないトーク専用。売上の質問と回答が
+    // 他の参加者に見えるのを避ける。
     function openJournalAi() {
       const id = Number(currentGroupId);
       if (!Number.isSafeInteger(id) || id <= 0) return;
-      const group = findMineGroup(id);
-      if (!group || !group.is_direct) {
-        alert('電子ジャーナルへの質問は1対1のトークでのみ使えます。');
+      if (!currentRoomHasOnlyMeAndBots()) {
+        alert('電子ジャーナルへの質問は、自分以外の人がいないトークでのみ使えます。');
         return;
       }
       if (!currentRoomAllowsJournalAi()) {
-        alert('このトークには店舗Botがいないため、電子ジャーナルへ質問できません。\n店舗Botとの1対1トークから開いてください。');
+        alert('このトークには店舗Botがいないため、電子ジャーナルへ質問できません。\n店舗Botとのトークから開いてください。');
         return;
       }
       // M-talk 内の画面を開く。中身はジャーナルレポートのAIチャットを
