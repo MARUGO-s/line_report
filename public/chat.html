@@ -1202,7 +1202,9 @@
       padding: 24px;
     }
     .image-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-out; }
-    .image-viewer-download { position:absolute; top:16px; right:16px; z-index:1; border:1px solid rgba(255,255,255,.45); border-radius:9px; padding:9px 13px; background:rgba(0,0,0,.55); color:#fff; font:inherit; cursor:pointer; }
+    .image-viewer-download, .image-viewer-close { position:absolute; top:16px; z-index:1; border:1px solid rgba(255,255,255,.45); border-radius:9px; padding:9px 13px; background:rgba(0,0,0,.55); color:#fff; font:inherit; cursor:pointer; }
+    .image-viewer-download { right:16px; }
+    .image-viewer-close { left:16px; }
 
     /* メッセージ検索の結果行 */
     .search-hit {
@@ -7695,14 +7697,18 @@
       if (!safeSrc) return;
       const overlay = document.createElement('div');
       overlay.className = 'image-viewer';
-      overlay.innerHTML = `<button type="button" class="image-viewer-download">ダウンロード</button><img src="${escapeHtml(safeSrc)}" alt="画像">`;
-      overlay.onclick = () => overlay.remove();
+      overlay.innerHTML = `<button type="button" class="image-viewer-close" aria-label="画像を閉じる">閉じる</button><button type="button" class="image-viewer-download">ダウンロード</button><img src="${escapeHtml(safeSrc)}" alt="画像">`;
+      const close = () => { overlay.remove(); document.removeEventListener('keydown', onKeydown); };
+      const onKeydown = (event) => { if (event.key === 'Escape') close(); };
+      overlay.onclick = (event) => { if (event.target === overlay) close(); };
+      overlay.querySelector('.image-viewer-close').addEventListener('click', close);
       overlay.querySelector('img').addEventListener('click', (event) => event.stopPropagation());
       overlay.querySelector('.image-viewer-download').addEventListener('click', async (event) => {
         event.stopPropagation();
         await downloadImage(safeSrc);
       });
       document.body.appendChild(overlay);
+      document.addEventListener('keydown', onKeydown);
     }
 
     async function downloadImage(src) {
