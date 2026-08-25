@@ -4971,9 +4971,38 @@
         alert('このトークには店舗Botがいないため、電子ジャーナルへ質問できません。\n店舗Botとの1対1トークから開いてください。');
         return;
       }
-      const url = new URL('mtalk_journal_ai.html', window.location.href);
-      url.searchParams.set('from', 'chat');
-      url.searchParams.set('group_id', String(id));
+      // 自前のQ&A画面ではなく、ジャーナルレポートそのものを開く。
+      // 同じ答えを得るには同じシステムに答えさせるしかない（作り直さない）。
+      // ワンタイムのログインリンクを取り、?lt= を付けて渡す。
+      openJournalReport(id);
+    }
+
+    async function openJournalReport(groupId) {
+      const url = new URL('jnm/jnl2txt.html', window.location.href);
+      url.searchParams.set('from', 'mtalk');
+      url.searchParams.set('mtalk_group_id', String(groupId));
+      try {
+        const { data: sessionData } = await sb.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) throw new Error('ログインしてください。');
+        const endpoint = CONFIG.adminApiUrl
+          ? CONFIG.adminApiUrl('/auth/chat-journal-login')
+          : '';
+        if (!endpoint) throw new Error('接続先を確認できませんでした。');
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_id: groupId }),
+          cache: 'no-store',
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        if (data.login_token) url.searchParams.set('lt', String(data.login_token));
+      } catch (error) {
+        // リンクが取れなくても画面自体は開く。あちらのログイン画面から入れる。
+        console.error('Journal login link error:', error);
+        showChatToast(error.message || 'ジャーナルレポートのログイン準備に失敗しました');
+      }
       window.location.href = url.href;
     }
 
