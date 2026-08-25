@@ -15,6 +15,7 @@ import { mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.ts"
 import { handleMtalkSearchText } from "../_shared/mtalk_search.ts"
 import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
+import { generateCasualReply, isSoloHumanRoom } from "../_shared/mtalk_casual_chat.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
 const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
@@ -457,6 +458,24 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
       text,
     })
     if (handled) return json({ ok: true, processed: true, kind: "receipt-command" }, 200)
+
+    // ここまでの既存コマンドに一致しなかった発言。自分以外の人間がいない
+    // 部屋（店舗Botとの1対1、または自分でBotを招待して作った部屋）でだけ、
+    // 雑談・簡単な相談として oss-120b で返す。グループでは黙って無視する
+    // （他のスタッフの雑談を勝手にAIへ送らないため）。
+    if (text && await isSoloHumanRoom(supabase, groupId, String(message.user_id || ""))) {
+      const casualReply = await generateCasualReply(supabase, {
+        groupId,
+        messageId,
+        storeName: registry?.display_name || storeBot?.username || "",
+        botUserId: storeBot?.id || "",
+        question: text,
+      })
+      if (casualReply) {
+        await replyInRoom(supabase, groupId, casualReply, storeBot)
+        return json({ ok: true, processed: true, kind: "casual-chat" }, 200)
+      }
+    }
     return json({ ok: true, skipped: true, reason: "no memo tag" }, 200)
   }
 
