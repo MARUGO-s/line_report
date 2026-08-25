@@ -4950,6 +4950,14 @@
       window.open(url.href, '_blank', 'noopener');
     }
 
+    // 1対1であることに加えて、店舗Botがいること。店舗が決まらないルームでは
+    // サーバ側が必ず弾くので、入口の時点で出さない。
+    function currentRoomAllowsJournalAi() {
+      const group = findMineGroup(currentGroupId);
+      if (!group || !group.is_direct) return false;
+      return groupMembers.some((user) => user && user.is_bot && user.store_key);
+    }
+
     // 電子ジャーナルAIは1対1専用。売上の質問と回答が参加者全員に見えるのを避ける。
     function openJournalAi() {
       const id = Number(currentGroupId);
@@ -4957,6 +4965,10 @@
       const group = findMineGroup(id);
       if (!group || !group.is_direct) {
         alert('電子ジャーナルへの質問は1対1のトークでのみ使えます。');
+        return;
+      }
+      if (!currentRoomAllowsJournalAi()) {
+        alert('このトークには店舗Botがいないため、電子ジャーナルへ質問できません。\n店舗Botとの1対1トークから開いてください。');
         return;
       }
       const url = new URL('mtalk_journal_ai.html', window.location.href);
@@ -8549,12 +8561,10 @@
     }
 
     function syncComposerModeUi() {
-      // ジャーナルAIは1対1専用なので、グループではボタン自体を出さない。
+      // ジャーナルAIは1対1専用。加えて、取込先の店舗が決まらないと使えないので
+      // 店舗Botのいる1対1に限る（人同士のDMでは出さない）。
       const journalBtn = $('journalAiBtn');
-      if (journalBtn) {
-        const group = findMineGroup(currentGroupId);
-        journalBtn.classList.toggle('hidden', !(group && group.is_direct));
-      }
+      if (journalBtn) journalBtn.classList.toggle('hidden', !currentRoomAllowsJournalAi());
       const chip = $('composerModeChip');
       const chipIcon = $('composerModeIcon');
       const chipText = $('composerModeText');

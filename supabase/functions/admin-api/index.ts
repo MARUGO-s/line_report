@@ -4799,7 +4799,17 @@ async function handleChatJournalAi(
     } satisfies AppError
   }
 
-  const storeKey = requireChatScheduleStoreKey(ctx)
+  // requireChatScheduleStoreKey は「店舗予約がありません」と返す。予約画面の
+  // 文言をそのまま出すと何を直せばよいか分からないので、この画面用に言い換える。
+  if (!ctx.storeKey) {
+    throw {
+      status: 403,
+      message: ctx.ambiguous
+        ? "このトークには店舗Botが複数いるため、どの店舗か決められません。"
+        : "このトークには店舗Botがいないため、電子ジャーナルへ質問できません。",
+    } satisfies AppError
+  }
+  const storeKey = ctx.storeKey
 
   if (req.method === "GET") {
     const { data, error } = await supabase
