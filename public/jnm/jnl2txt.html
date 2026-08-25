@@ -1720,8 +1720,11 @@
   }
 
     /* M-talk から iframe で埋め込むときは、AIチャットだけを全面に出す。
-       ロジックはこの画面のまま使いたいが、レポート本体のUIは見せない。 */
-    body.mtalk-embed > *:not(#aiChatPanel):not(#aiChatBackdrop):not(#appLoading) { display: none !important; }
+       ロジックはこの画面のまま使いたいが、レポート本体のUIは見せない。
+       #reportView は許可リストに入れる。「PDFにする」がここへ印刷用レイアウトを
+       描画して開くため、隠すと window.print() 前のプレビュー自体が見えなくなる
+       （ロジックは動いているのに画面に出ないだけ、というバグだった）。 */
+    body.mtalk-embed > *:not(#aiChatPanel):not(#aiChatBackdrop):not(#appLoading):not(#reportView) { display: none !important; }
     body.mtalk-embed { overflow: hidden; background: #111; }
     body.mtalk-embed #aiChatBackdrop { display: none !important; }
     body.mtalk-embed #aiChatPanel {
@@ -1731,6 +1734,10 @@
     }
     body.mtalk-embed #aiChatPanel .ai-panel-close { display: none !important; }
     body.mtalk-embed #aiChatMessages { flex: 1 1 auto; }
+    /* #reportView は z-index:100 だが .ai-panel は 9999 なので、許可しただけでは
+       AIチャット枠の下に隠れて見えない（表示はされているのに見えないバグになる）。
+       埋め込みモード限定で reportView を最前面に上げる。 */
+    body.mtalk-embed #reportView { z-index: 10000; }
   </style>
 </head>
 <body>
