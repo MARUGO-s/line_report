@@ -6,7 +6,7 @@ import type { LineReplyPayload } from './receipt_types.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { isReceiptCorrectionControlText } from './receipt_correction.ts'
 import { mtalkCardFromLineReply } from './chat_flex_card.ts'
-import { postChatCard, type ChatCard, type ChatCardSection } from './chat_bridge.ts'
+import { postChatCard, type ChatCard } from './chat_bridge.ts'
 import {
   buildAllFeaturesGuideFlex,
   buildSearchEntryReply,
@@ -74,209 +74,6 @@ function toChatReply(payload: LineReplyPayload): { text: string; card?: ChatCard
   return mtalkCardFromLineReply(first)
 }
 
-/** 「ジャーナル検索」の合図。M-talk 専用で、LINE 側の SearchKind には足さない。 */
-const MTALK_JOURNAL_PENDING = 'journal'
-/** line_search_bot の PENDING_TTL_MS と揃える（2分）。 */
-const MTALK_JOURNAL_PENDING_TTL_MS = 2 * 60 * 1000
-
-/**
- * ジャーナル検索の保留を読む。
- * loadSearchPending は search_kind が既知4種('message'|'calendar'|'media'|'sales')
- * 以外だと null を返すので、この種別には使えない。TTL の扱いだけ合わせる。
- */
-async function loadJournalPending(
-  supabase: DbClient,
-  roomId: string,
-  userId: string,
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('line_room_search_pending')
-    .select('search_kind, updated_at')
-    .eq('room_id', roomId)
-    .eq('user_id', userId)
-    .maybeSingle()
-  if (error || !data) return false
-  if (String(data.search_kind ?? '') !== MTALK_JOURNAL_PENDING) return false
-  const updatedAt = new Date(String(data.updated_at ?? '')).getTime()
-  if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > MTALK_JOURNAL_PENDING_TTL_MS) {
-    await clearSearchPending(supabase, roomId, userId)
-    return false
-  }
-  return true
-}
-
-export function isJournalTrigger(text: string): boolean {
-  const v = String(text ?? '').trim().replace(/\s+/g, '')
-  return v === 'srch=jnl'
-    || ['ジャーナル検索', '電子ジャーナル検索', 'ジャーナルに聞く', '電子ジャーナルに聞く', '売上分析'].includes(v)
-}
-
-/** 「202608 前年より売れた商品は？」を月と質問に割る。 */
-export function parseJournalQuestion(text: string): { month: string; question: string } | null {
-  const v = String(text ?? '').trim()
-  const m = /^(\d{6})\s*(.*)$/s.exec(v)
-  if (!m) return null
-  const month = `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}`
-  const question = m[2].trim()
-  if (!question) return null
-  const mm = Number(m[1].slice(4, 6))
-  if (!(mm >= 1 && mm <= 12)) return null
-  return { month, question }
-}
-
-function journalPromptCard(): { text: string; card: ChatCard } {
-  return {
-    text: '電子ジャーナル検索 — 月と質問の入力待ち',
-    card: {
-      variant: 'line',
-      header: { title: '電子ジャーナルに聞く' },
-      sections: [
-        {
-          type: 'note',
-          size: 'sm',
-          text: '対象月6桁のあとに質問を続けて送ってください。\n'
-            + '例: 202608 前年同月より伸びた商品は？\n'
-            + '例: 202608 客単価の推移を教えて',
-        },
-        {
-          type: 'note',
-          size: 'xs',
-          color: '#888888',
-          text: '登録済みの電子ジャーナル（日計精算・会計明細）だけを根拠に答えます。\n'
-            + '続けて質問すると、直前のやり取り（2時間以内・8往復まで）を踏まえます。',
-        },
-      ],
-      actions: [
-        { label: '検索メニューに戻る', command: 'srch=menu', style: 'secondary' },
-        { label: 'キャンセル', command: 'srch=cancel', style: 'secondary' },
-      ],
-    },
-  }
-}
-
-/** 1対1トークか。ジャーナルQ&Aはグループでは受けない。 */
-async function isDirectGroup(supabase: DbClient, groupId: number): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('chat_groups')
-    .select('is_direct')
-    .eq('id', groupId)
-    .maybeSingle()
-  if (error || !data) return false
-  return data.is_direct === true
-}
-
-/** 続きの質問に使う直近の往復。古い文脈が別件へ混ざらないよう2時間で切る。 */
-const JOURNAL_HISTORY_TURNS = 8
-const JOURNAL_HISTORY_WINDOW_MS = 2 * 60 * 60 * 1000
-
-async function loadJournalHistory(
-  supabase: DbClient,
-  groupId: number,
-  userId: string,
-): Promise<Array<{ role: string; content: string }>> {
-  const since = new Date(Date.now() - JOURNAL_HISTORY_WINDOW_MS).toISOString()
-  const { data, error } = await supabase
-    .from('mtalk_journal_qa_history')
-    .select('role, content, created_at')
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(JOURNAL_HISTORY_TURNS * 2)
-  if (error || !Array.isArray(data)) return []
-  return data
-    .reverse()
-    .map((row: Record<string, unknown>) => ({
-      role: String(row.role ?? ''),
-      content: String(row.content ?? ''),
-    }))
-    .filter((row) => row.role && row.content)
-}
-
-async function saveJournalHistory(
-  supabase: DbClient,
-  groupId: number,
-  userId: string,
-  role: 'user' | 'assistant',
-  content: string,
-): Promise<void> {
-  const text = String(content ?? '').trim().slice(0, 4000)
-  if (!text) return
-  const { error } = await supabase
-    .from('mtalk_journal_qa_history')
-    .insert({ group_id: groupId, user_id: userId, role, content: text })
-  if (error) console.warn('saveJournalHistory failed:', error.message)
-}
-
-/**
- * 電子ジャーナルAIへ質問して答えを返す。
- * 集計も回答生成も admin-api の /pos-journals/ai-ask に任せる
- * （画面から聞いたときと同じ根拠・同じ制約で答えさせるため）。
- */
-async function askJournalAi(
-  storeKey: string,
-  month: string,
-  question: string,
-  history: Array<{ role: string; content: string }>,
-): Promise<{ text: string; card?: ChatCard; answer?: string }> {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://hocbnifuactbvmyjraxy.supabase.co'
-  const internalKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-  try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/admin-api/pos-journals/ai-ask`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-key': internalKey,
-        'x-admin-surface': 'line_report',
-        'x-store-key': storeKey,
-      },
-      // summary は渡さない。未指定なら resolvePosJournalAiSummary が DB から
-      // 同じものを組み直すため、画面の状態に依存しないぶん確実。
-      body: JSON.stringify({ store_key: storeKey, month, question, history }),
-    })
-    const data = await res.json().catch(() => ({})) as Record<string, unknown>
-    if (!res.ok) {
-      return { text: `電子ジャーナルに聞けませんでした: ${String(data.error ?? `HTTP ${res.status}`)}` }
-    }
-    const answer = String(data.answer ?? data.text ?? '').trim()
-    if (!answer) return { text: '回答を得られませんでした。質問を変えて試してください。' }
-
-    // 画面と同じく、AIが答えたのか定型の基本回答なのかを示す。
-    // 区別せず出すと「AIが分析した」と誤解される。
-    const aiGenerated = data.ai_generated === true
-    const model = String(data.model ?? '').trim()
-    const warning = String(data.warning ?? '').trim()
-    const meta = [aiGenerated ? 'AI生成' : '基本回答（AI未使用）', model]
-      .filter(Boolean).join(' / ')
-
-    const notes: ChatCardSection[] = [
-      { type: 'note', size: 'sm', text: answer.slice(0, 1800) },
-    ]
-    if (warning) {
-      notes.push({ type: 'note', size: 'xs', color: '#c0392b', text: `⚠️ ${warning}` })
-    }
-    notes.push({
-      type: 'note',
-      size: 'xs',
-      color: '#888888',
-      text: `${meta} ／ 登録済みの電子ジャーナルだけを根拠にしています。`,
-    })
-
-    return {
-      text: answer.slice(0, 1800),
-      answer,
-      card: {
-        variant: 'line',
-        header: { title: '電子ジャーナル', subtitle: `${month} の記録から` },
-        sections: notes,
-      },
-    }
-  } catch (err) {
-    console.error('askJournalAi threw:', err instanceof Error ? err.message : String(err))
-    return { text: '電子ジャーナルへの問い合わせに失敗しました。時間をおいて試してください。' }
-  }
-}
-
 export async function handleMtalkSearchText(
   supabase: DbClient,
   params: {
@@ -294,7 +91,6 @@ export async function handleMtalkSearchText(
 
   const postback = parsePostbackKind(text)
   const pending = await loadSearchPending(supabase, roomId, userId)
-  const journalPending = await loadJournalPending(supabase, roomId, userId)
   const salesInput = parseSalesDateInput(text)
   if (
     !postback
@@ -303,8 +99,6 @@ export async function handleMtalkSearchText(
     && !detectKindTrigger(text)
     && !isCancelText(text)
     && !salesInput
-    && !isJournalTrigger(text)
-    && !journalPending
   ) {
     return false
   }
@@ -369,77 +163,6 @@ export async function handleMtalkSearchText(
 
   if (postback === 'calendar' || postback === 'media' || postback === 'sales') {
     await reply(await startSearchKind(supabase, roomId, userId, postback, flags))
-    return true
-  }
-
-  // 電子ジャーナル検索は M-talk 専用。LINE 側の SearchKind は変えず、
-  // 保留テーブルへ 'journal' を積んで次の1通を質問として受ける。
-  if (isJournalTrigger(text)) {
-    // グループでは受けない。売上の質問と回答が参加者全員に見えてしまうため。
-    if (!await isDirectGroup(supabase, params.groupId)) {
-      await reply('電子ジャーナルへの質問は1対1のトークでのみ使えます。店舗Botとの1対1から送ってください。')
-      return true
-    }
-    await supabase.from('line_room_search_pending').upsert({
-      room_id: roomId,
-      user_id: userId,
-      search_kind: MTALK_JOURNAL_PENDING,
-      updated_at: new Date().toISOString(),
-    })
-    const prompt = journalPromptCard()
-    await postChatCard(supabase, {
-      groupId: params.groupId,
-      kind: 'search',
-      text: prompt.text,
-      cards: [prompt.card],
-      asUser: params.asUser ?? null,
-    })
-    return true
-  }
-
-  if (journalPending) {
-    await clearSearchPending(supabase, roomId, userId)
-    const parsed = parseJournalQuestion(text)
-    if (!parsed) {
-      const prompt = journalPromptCard()
-      await postChatCard(supabase, {
-        groupId: params.groupId,
-        kind: 'search',
-        text: '対象月6桁のあとに質問を続けてください（例: 202608 前年より伸びた商品は？）',
-        cards: [prompt.card],
-        asUser: params.asUser ?? null,
-      })
-      return true
-    }
-    // 保留を積む時点で1対1を確認しているが、念のためここでも確認する。
-    if (!await isDirectGroup(supabase, params.groupId)) {
-      await reply('電子ジャーナルへの質問は1対1のトークでのみ使えます。')
-      return true
-    }
-    const history = await loadJournalHistory(supabase, params.groupId, userId)
-    const answer = await askJournalAi(
-      params.registry.store_partition_key,
-      parsed.month,
-      parsed.question,
-      history,
-    )
-    // 続きの質問（「じゃあ前月は？」）が通るよう往復を残す。
-    // 回答が得られたときだけ積む。失敗を文脈に混ぜない。
-    if (answer.answer) {
-      await saveJournalHistory(supabase, params.groupId, userId, 'user', text)
-      await saveJournalHistory(supabase, params.groupId, userId, 'assistant', answer.answer)
-    }
-    if (answer.card) {
-      await postChatCard(supabase, {
-        groupId: params.groupId,
-        kind: 'search',
-        text: answer.text,
-        cards: [answer.card],
-        asUser: params.asUser ?? null,
-      })
-    } else {
-      await reply(answer.text)
-    }
     return true
   }
 
