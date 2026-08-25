@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-08-25 - トークの添付を拡張し、アプリ内で開けるようにした
+
+- Request: 画像やPDFなど様々なファイルをドラッグ&ドロップできるようにし、すべてアプリ内で閲覧できるようにする。
+- Implementation: 添付できる形式に PowerPoint と HEIC を足し、上限を 10MB→25MB へ。札を押すとその場で開くようにした（保存チップを押したときだけダウンロード）。PDFはブラウザ内蔵ビューア、テキスト/CSVは等幅表示、ExcelはSheetJSで表化しシートをタブ切替、Wordはmammothで整形表示。HEICは送信時にJPEGへ自動変換して通常の画像経路（長辺1600px・品質0.82）へ乗せ、サムネイル・アルバム・転送・Keepが使えるようにした。
+- Security: Office を Office Online 等の外部変換サービスへ渡さない。署名URLごと資料が社外へ出るため、`chat-images` を非公開にしている判断と矛盾する。描画ライブラリは `public/vendor/` へ置いて自己ホストし、その形式を開いたときだけ遅延読込する。Excelはライブラリのhtml出力を使わず値だけ取り出して自前で表を組む。Wordはmammothの出力を `sandbox=""` の iframe に閉じ込める。`text/html` と `image/svg+xml` は引き続き除外。
+- Note: `.lzh` は添付させず電子ジャーナル画面へ誘導する。`/pos-journals/upload` が店舗コード検証・重複スキップ・対象月判定・保存レポート再作成まで行う正本経路で、トークに添付すると取り込まれない写しだけが残るため。
+- Fix: 20260828010000 で `chat_set_message_author` を書き直した際に落ちていたスタンプの `display`（compact/large）と、compact時に本文を上書きしない処理を復旧した。あわせて Keep/アルバム導入時の `grant ... on all sequences` が `chat_push_delivery_diagnostics_id_seq` の意図的な revoke を打ち消していたので戻し、アルバムの `updated_at` を更新するトリガを足し、購読されていない Realtime 配信を外した。
+- Fix: M-talk のレシート重複確認で「置き換え」等に無反応だった問題。保留の会話キーが画像側 `mtalk-group-N` / テキスト側は店舗のLINEルームでずれていた。
+
 ### 2026-08-24 - M-talk検索・メニューを中央モーダルへ刷新し、入力欄を44/46px規格に統一
 
 - Request: 提供されたデザインハンドオフ（M-talk Composer Final）に沿って入力欄まわりを仕上げる。

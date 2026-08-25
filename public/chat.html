@@ -7826,7 +7826,57 @@
       return result;
     }
 
+    function isHeicFile(file) {
+      const type = String((file && file.type) || '').toLowerCase();
+      const name = String((file && file.name) || '').toLowerCase();
+      return type === 'image/heic' || type === 'image/heif' || /\.(heic|heif)$/.test(name);
+    }
+
+    function jpegFileName(name) {
+      const base = String(name || 'photo').replace(/\.(heic|heif)$/i, '');
+      return /\.jpe?g$/i.test(base) ? base : `${base}.jpg`;
+    }
+
+    // HEIC を JPEG にしてから通常の画像経路へ渡す。
+    // Safari は HEIC をそのまま復号できるので、まず標準機能で試す。
+    // 復号できないブラウザのときだけ変換ライブラリ（1.3MB）を読み込む。
+    async function convertHeicToJpeg(file) {
+      try {
+        const bitmap = await createImageBitmap(file);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        if (bitmap.close) bitmap.close();
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+        if (blob) return new File([blob], jpegFileName(file.name), { type: 'image/jpeg' });
+      } catch (_error) {
+        // 標準機能では復号できない。下のライブラリに任せる。
+      }
+      const heic2anyLib = await loadVendorScript('vendor/heic2any.min.js', 'heic2any');
+      const converted = await heic2anyLib({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+      const blob = Array.isArray(converted) ? converted[0] : converted;
+      if (!blob) throw new Error('HEIC の変換に失敗しました');
+      return new File([blob], jpegFileName(file.name), { type: 'image/jpeg' });
+    }
+
+    // 画像として送れる形に整える。HEIC 以外はそのまま返す。
+    async function normalizeImageFile(file) {
+      if (!isHeicFile(file)) return file;
+      showChatToast('写真を変換しています…');
+      return convertHeicToJpeg(file);
+    }
+
     async function sendChatImage(file) {
+      if (isHeicFile(file)) {
+        try {
+          file = await normalizeImageFile(file);
+        } catch (error) {
+          console.error('HEIC convert error:', error);
+          // 変換できなければ原本のままファイルとして送る（送れないより良い）。
+          return sendChatFile(file);
+        }
+      }
       if (!isImageFile(file)) return sendChatFile(file);
       if (!currentGroupId || !currentUser || uploadingImage) return;
       if (!requireCurrentRoomSend()) return;
@@ -7938,7 +7988,7 @@
 
     function chooseSendLater() {
       if (!pendingSendFiles.length) return;
-      if (pendingSendFiles.some((file) => !isImageFile(file))) {
+      if (pendingSendFiles.some((file) => !isImageFile(file) && !isHeicFile(file))) {
         alert('PDF・Office等のファイルは、まず今すぐ送信してください。');
         return;
       }
@@ -9091,7 +9141,8 @@
           return;
         }
         try {
-          for (const file of files) {
+          for (const rawFile of files) {
+            const file = await normalizeImageFile(rawFile);
             const image = await uploadChatImage(file, currentGroupId);
             const { error } = await sb.rpc('chat_schedule_message', {
               p_group_id: currentGroupId,
