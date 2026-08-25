@@ -1194,6 +1194,34 @@
       background: #fff; color: #111; border-radius: 10px; padding: 16px;
       font-size: 14px; line-height: 1.6;
     }
+    .file-viewer-sheet { padding: 0; }
+    .file-viewer-tabs {
+      display: flex; gap: 4px; overflow-x: auto; padding: 10px 12px 0;
+      border-bottom: 1px solid #e6e6e6; background: #fafafa;
+      border-radius: 10px 10px 0 0;
+    }
+    .file-viewer-tab {
+      flex: 0 0 auto; border: 0; background: transparent; cursor: pointer;
+      padding: 7px 12px; font-size: 13px; color: #555;
+      border-bottom: 2px solid transparent;
+    }
+    .file-viewer-tab.active { color: #06c755; border-bottom-color: #06c755; font-weight: 600; }
+    .file-viewer-sheet-body { overflow: auto; max-height: calc(78vh - 46px); padding: 12px; }
+    .file-viewer-sheet-body table { border-collapse: collapse; font-size: 13px; }
+    .file-viewer-sheet-body th,
+    .file-viewer-sheet-body td {
+      border: 1px solid #e0e0e0; padding: 5px 9px;
+      white-space: nowrap; text-align: left; max-width: 320px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .file-viewer-sheet-body th { background: #f4f4f4; font-weight: 600; position: sticky; top: 0; }
+    .file-viewer-note { padding: 10px 2px 0; font-size: 12px; color: #777; }
+    .file-viewer-doc-wrap {
+      width: min(92vw, 900px); height: min(78vh, 1000px);
+      background: #fff; border-radius: 10px; overflow: hidden;
+    }
+    .file-viewer-doc { width: 100%; height: 100%; border: 0; background: #fff; }
+
     .file-viewer-pre {
       white-space: pre-wrap; word-break: break-word;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
@@ -7919,6 +7947,113 @@
       openScheduleSend();
     }
 
+    const CHAT_PREVIEW_SHEET = new Set([
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ]);
+    const CHAT_PREVIEW_DOC = new Set([
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ]);
+    // 表が巨大でも描画で固まらせない。
+    const CHAT_PREVIEW_SHEET_MAX_ROWS = 500;
+    const CHAT_PREVIEW_SHEET_MAX_COLS = 40;
+
+    // Office の描画ライブラリは重い（合計1.5MB超）ので、
+    // その形式を実際に開いたときだけ読み込む。二重読込もしない。
+    const vendorScriptPromises = new Map();
+    function loadVendorScript(src, globalName) {
+      if (window[globalName]) return Promise.resolve(window[globalName]);
+      if (vendorScriptPromises.has(src)) return vendorScriptPromises.get(src);
+      const promise = new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = src;
+        el.async = true;
+        el.onload = () => window[globalName]
+          ? resolve(window[globalName])
+          : reject(new Error(`${globalName} was not exposed`));
+        el.onerror = () => reject(new Error(`failed to load ${src}`));
+        document.head.appendChild(el);
+      });
+      vendorScriptPromises.set(src, promise);
+      return promise;
+    }
+
+    // Excel は自前で表を組む。ライブラリのHTML出力をそのまま挿すより、
+    // 値を文字列として入れるほうが安全。
+    async function renderSheetPreview(box, buffer) {
+      const XLSXLib = await loadVendorScript('vendor/xlsx.full.min.js', 'XLSX');
+      const book = XLSXLib.read(buffer, { type: 'array' });
+      const names = Array.isArray(book.SheetNames) ? book.SheetNames : [];
+      if (!names.length) throw new Error('no sheets');
+      box.className = 'file-viewer-text file-viewer-sheet';
+      box.textContent = '';
+
+      const tabs = document.createElement('div');
+      tabs.className = 'file-viewer-tabs';
+      const body = document.createElement('div');
+      body.className = 'file-viewer-sheet-body';
+
+      const drawSheet = (name) => {
+        const rows = XLSXLib.utils.sheet_to_json(book.Sheets[name], { header: 1, defval: '', raw: false });
+        const shown = rows.slice(0, CHAT_PREVIEW_SHEET_MAX_ROWS);
+        const table = document.createElement('table');
+        shown.forEach((row, rowIndex) => {
+          const tr = document.createElement('tr');
+          const cells = (Array.isArray(row) ? row : []).slice(0, CHAT_PREVIEW_SHEET_MAX_COLS);
+          cells.forEach((cell) => {
+            const td = document.createElement(rowIndex === 0 ? 'th' : 'td');
+            td.textContent = String(cell == null ? '' : cell);
+            tr.appendChild(td);
+          });
+          table.appendChild(tr);
+        });
+        body.textContent = '';
+        body.appendChild(table);
+        if (rows.length > shown.length) {
+          const note = document.createElement('div');
+          note.className = 'file-viewer-note';
+          note.textContent = `先頭 ${CHAT_PREVIEW_SHEET_MAX_ROWS} 行のみ表示しています（全 ${rows.length} 行）。`;
+          body.appendChild(note);
+        }
+      };
+
+      names.forEach((name, index) => {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = `file-viewer-tab${index === 0 ? ' active' : ''}`;
+        tab.textContent = name;
+        tab.addEventListener('click', () => {
+          tabs.querySelectorAll('.file-viewer-tab').forEach((el) => el.classList.remove('active'));
+          tab.classList.add('active');
+          drawSheet(name);
+        });
+        tabs.appendChild(tab);
+      });
+
+      if (names.length > 1) box.appendChild(tabs);
+      box.appendChild(body);
+      drawSheet(names[0]);
+    }
+
+    // Word は mammoth が組み立てたHTMLを受け取る。文書由来の内容なので、
+    // スクリプトも javascript: 遷移も効かない sandbox iframe に閉じ込める。
+    async function renderDocPreview(box, buffer) {
+      const mammothLib = await loadVendorScript('vendor/mammoth.browser.min.js', 'mammoth');
+      const result = await mammothLib.convertToHtml({ arrayBuffer: buffer });
+      const frame = document.createElement('iframe');
+      frame.className = 'file-viewer-doc';
+      frame.setAttribute('sandbox', '');
+      frame.srcdoc = '<!doctype html><meta charset="utf-8">'
+        + '<style>body{margin:0;padding:18px;font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;'
+        + 'font-size:14px;line-height:1.7;color:#111;}img{max-width:100%;height:auto;}'
+        + 'table{border-collapse:collapse;}td,th{border:1px solid #d0d0d0;padding:4px 8px;}</style>'
+        + (result && result.value ? result.value : '<p>本文がありません。</p>');
+      box.className = 'file-viewer-doc-wrap';
+      box.textContent = '';
+      box.appendChild(frame);
+    }
+
     function fileAttachmentIcon(mime) {
       const m = String(mime || '').toLowerCase();
       if (m === 'application/pdf') return '📕';
@@ -7959,7 +8094,7 @@
       let inner = '';
       if (CHAT_PREVIEW_PDF.has(mime)) {
         inner = `<iframe class="file-viewer-frame" src="${escapeHtml(safeUrl)}" title="${escapeHtml(name)}"></iframe>`;
-      } else if (CHAT_PREVIEW_TEXT.has(mime)) {
+      } else if (CHAT_PREVIEW_TEXT.has(mime) || CHAT_PREVIEW_SHEET.has(mime) || CHAT_PREVIEW_DOC.has(mime)) {
         inner = '<div class="file-viewer-text">読み込んでいます…</div>';
       } else {
         inner = `<div class="file-viewer-text">この形式はアプリ内で表示できません。<br>保存してから開いてください。</div>`;
@@ -7983,19 +8118,28 @@
       document.addEventListener('keydown', onKeydown);
       document.body.appendChild(overlay);
 
-      if (CHAT_PREVIEW_TEXT.has(mime)) {
+      const needsFetch = CHAT_PREVIEW_TEXT.has(mime) || CHAT_PREVIEW_SHEET.has(mime) || CHAT_PREVIEW_DOC.has(mime);
+      if (needsFetch) {
         const box = overlay.querySelector('.file-viewer-text');
         try {
           const res = await fetch(safeUrl);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const buf = await res.arrayBuffer();
-          const truncated = buf.byteLength > CHAT_PREVIEW_TEXT_MAX_BYTES;
-          const slice = truncated ? buf.slice(0, CHAT_PREVIEW_TEXT_MAX_BYTES) : buf;
-          const text = new TextDecoder('utf-8').decode(slice);
-          box.className = 'file-viewer-text file-viewer-pre';
-          box.textContent = truncated ? `${text}\n\n…（先頭 512KB のみ表示しています）` : text;
+          if (CHAT_PREVIEW_SHEET.has(mime)) {
+            await renderSheetPreview(box, buf);
+          } else if (CHAT_PREVIEW_DOC.has(mime)) {
+            await renderDocPreview(box, buf);
+          } else {
+            const truncated = buf.byteLength > CHAT_PREVIEW_TEXT_MAX_BYTES;
+            const slice = truncated ? buf.slice(0, CHAT_PREVIEW_TEXT_MAX_BYTES) : buf;
+            const text = new TextDecoder('utf-8').decode(slice);
+            box.className = 'file-viewer-text file-viewer-pre';
+            box.textContent = truncated ? `${text}\n\n…（先頭 512KB のみ表示しています）` : text;
+          }
         } catch (error) {
           console.error('File preview error:', error);
+          // .doc（旧形式）は mammoth が扱えない。ここに来たら保存してもらう。
+          box.className = 'file-viewer-text';
           box.textContent = '本文を読み込めませんでした。保存してから開いてください。';
         }
       }
