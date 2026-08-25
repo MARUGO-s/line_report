@@ -1166,6 +1166,19 @@
 
     /* 画像メッセージ */
     .message.image .message-content { max-width: min(80%, 300px); }
+    .message.file .message-content { max-width: min(84%, 360px); }
+    .file-attachment { display:flex; align-items:center; gap:10px; min-width:220px; padding:10px 12px; border-radius:14px; background:#fff; color:#111; box-shadow:0 1px 1px rgba(0,0,0,.08); }
+    .message.own .file-attachment { background:#8ced4a; }
+    .file-attachment-icon { width:38px; height:38px; display:grid; place-items:center; border-radius:9px; background:rgba(0,0,0,.08); font-size:21px; }
+    .file-attachment-body { min-width:0; flex:1; }
+    .file-attachment-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; }
+    .file-attachment-meta { display:block; margin-top:2px; color:#666; font-size:11px; }
+    .file-attachment-download { flex:none; color:inherit; font-size:12px; font-weight:700; text-decoration:underline; }
+    .link-preview { display:block; margin-top:7px; padding:9px 11px; border:1px solid rgba(0,0,0,.12); border-radius:10px; color:inherit; text-decoration:none; background:rgba(255,255,255,.62); }
+    .message.own .link-preview { background:rgba(255,255,255,.35); }
+    .link-preview-label { display:block; font-size:10px; opacity:.65; text-transform:uppercase; letter-spacing:.06em; }
+    .link-preview-host { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; }
+    .link-preview-url { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; opacity:.7; }
 
     .msg-image {
       display: block;
@@ -2613,7 +2626,7 @@
   <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
   <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
-  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
@@ -2749,7 +2762,7 @@
       <div class="composer-sheet" id="composerSheet" aria-label="添付と機能">
         <button class="composer-tool-btn" type="button" onclick="pickChatImage(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          <span>画像</span>
+          <span>画像・ファイル</span>
         </button>
         <button class="composer-tool-btn" type="button" onclick="toggleStickerPicker(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8.5 14.5a4.5 4.5 0 0 0 7 0"/></svg>
@@ -6666,8 +6679,30 @@
     function quotePreviewText(quoted) {
       if (!quoted) return '（削除された発言）';
       if (quoted.kind === 'image') return '[画像]';
+      if (quoted.kind === 'file') return `[ファイル] ${fileFromMessage(quoted)?.name || ''}`;
       if (quoted.kind === 'sticker') return String(quoted.content || '[感情イラスト]');
       return String(quoted.content ?? '');
+    }
+
+    function fileFromMessage(msg) {
+      if (!msg || msg.kind !== 'file') return null;
+      const payload = typeof msg.payload === 'string' ? safeParseJson(msg.payload) : msg.payload;
+      const file = payload && payload.file;
+      return file && file.path ? file : null;
+    }
+
+    function firstMessageUrl(content) {
+      const match = String(content || '').match(/https?:\/\/[^\s<>「」『』]+/i);
+      if (!match) return '';
+      return safeHttpUrl(match[0].replace(/[.,!?。、，！？）)\]}]+$/g, ''));
+    }
+
+    function renderLinkPreview(content) {
+      const url = firstMessageUrl(content);
+      if (!url) return '';
+      let host = url;
+      try { host = new URL(url).hostname; } catch (_) {}
+      return `<a class="link-preview" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"><span class="link-preview-label">リンク</span><span class="link-preview-host">${escapeHtml(host)}</span><span class="link-preview-url">${escapeHtml(url)}</span></a>`;
     }
 
     function renderReactions(msg) {
@@ -6716,9 +6751,10 @@
       const isOwn = currentUser && String(msg.user_id) === String(currentUser.id);
       const cards = cardsFromMessage(msg);
       const image = imageFromMessage(msg);
+      const file = fileFromMessage(msg);
       const sticker = stickerFromMessage(msg);
       const compactSticker = sticker && sticker.display === 'compact';
-      div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''} ${image ? 'image' : ''} ${sticker ? 'sticker' : ''} ${compactSticker ? 'compact-sticker' : ''}`;
+      div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''} ${image ? 'image' : ''} ${file ? 'file' : ''} ${sticker ? 'sticker' : ''} ${compactSticker ? 'compact-sticker' : ''}`;
       div.dataset.messageId = String(msg.id);
 
       let bodyHtml;
@@ -6726,6 +6762,9 @@
         bodyHtml = cards.map(renderCard).join('');
       } else if (image) {
         bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像" loading="lazy" decoding="async">`;
+      } else if (file) {
+        const size = Number(file.size) > 0 ? `${(Number(file.size) / 1024 / 1024).toFixed(2)} MB` : 'ファイル';
+        bodyHtml = `<a class="file-attachment" data-file-path="${escapeHtml(file.path)}" href="#" download><span class="file-attachment-icon" aria-hidden="true">📄</span><span class="file-attachment-body"><span class="file-attachment-name">${escapeHtml(file.name || '添付ファイル')}</span><span class="file-attachment-meta">${escapeHtml(file.mime || '')} · ${escapeHtml(size)}</span></span><span class="file-attachment-download">保存</span></a>`;
       } else if (sticker) {
         const stickerImage = `<img class="msg-sticker" src="${escapeHtml(sticker.path)}" alt="${escapeHtml(sticker.label || '感情イラスト')}" loading="lazy" decoding="async">`;
         const inlineText = compactSticker && !String(msg.content || '').startsWith('[感情イラスト]')
@@ -6734,7 +6773,7 @@
           ? `<div class="message-bubble"><div class="inline-sticker-message">${stickerImage}${inlineText}</div></div>`
           : stickerImage;
       } else {
-        bodyHtml = `<div class="message-bubble"><span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span></div>`;
+        bodyHtml = `<div class="message-bubble"><span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>${renderLinkPreview(msg.content)}</div>`;
       }
 
       let quoteHtml = '';
@@ -6746,9 +6785,9 @@
           + `<div class="quote-text">${escapeHtml(quotePreviewText(quoted))}</div>`
           + `</div>`;
         // 引用は吹き出しの中に入れる。画像・カードのときは上に置く。
-        if (!cards && !image && !sticker) {
+        if (!cards && !image && !file && !sticker) {
           bodyHtml = `<div class="message-bubble">${quoteHtml}`
-            + `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span></div>`;
+            + `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>${renderLinkPreview(msg.content)}</div>`;
           quoteHtml = '';
         }
       }
@@ -6828,6 +6867,7 @@
         el.appendChild(item.kind === 'note' ? buildNoteNode(item.data) : buildMessageNode(item.data));
       });
       hydrateMessageImages();
+      hydrateMessageFiles();
       watchStickerLayout(el);
       requestAnimationFrame(resolveUnloadedLatestGap);
     }
@@ -6856,6 +6896,7 @@
       el.appendChild(buildMessageNode(msg));
 
       hydrateMessageImages();
+      hydrateMessageFiles();
       watchStickerLayout(el);
       if (followNewMessages) scrollMessagesToBottom();
     }
@@ -7016,6 +7057,7 @@
     function messageCopyText(msg) {
       if (!msg) return '';
       if (msg.kind === 'image') return '[画像]';
+      if (msg.kind === 'file') return `[ファイル] ${fileFromMessage(msg)?.name || ''}`;
       return String(msg.content || '');
     }
 
@@ -7562,6 +7604,18 @@
       persistSignedImageCache();
     }
 
+    async function hydrateMessageFiles() {
+      const nodes = Array.from($('messages').querySelectorAll('a.file-attachment[data-file-path]'));
+      if (!nodes.length) return;
+      const wanted = [...new Set(nodes.map((node) => node.dataset.filePath).filter(Boolean))];
+      try {
+        const { data, error } = await sb.storage.from('chat-images').createSignedUrls(wanted, 3600);
+        if (error) throw error;
+        const urls = new Map((data || []).filter((row) => row.path && row.signedUrl).map((row) => [row.path, row.signedUrl]));
+        nodes.forEach((node) => { const url = urls.get(node.dataset.filePath); if (url) node.href = url; });
+      } catch (error) { console.error('Sign file url error:', error); }
+    }
+
     function pickChatImage() {
       if (!currentGroupId || uploadingImage) return;
       if (!requireCurrentRoomSend()) return;
@@ -7579,8 +7633,29 @@
       return /^image\/(jpeg|png|webp|gif)$/.test(type) || /\.(jpe?g|png|webp|gif)$/.test(name);
     }
 
+    const CHAT_FILE_MAX_BYTES = 10 * 1024 * 1024;
+    const CHAT_FILE_MIMES = new Set([
+      'application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain', 'text/csv', 'application/zip'
+    ]);
+
+    function isSupportedChatFile(file) {
+      if (!file || Number(file.size) > CHAT_FILE_MAX_BYTES) return false;
+      if (isImageFile(file)) return true;
+      const type = String(file.type || '').toLowerCase();
+      const name = String(file.name || '').toLowerCase();
+      return CHAT_FILE_MIMES.has(type) || /\.(pdf|doc|docx|xls|xlsx|txt|csv|zip)$/.test(name);
+    }
+
     function imageFilesFromList(list) {
       return Array.from(list || []).filter(isImageFile);
+    }
+
+    function chatFilesFromList(list) {
+      return Array.from(list || []).filter(isSupportedChatFile);
     }
 
     function isFileDrag(event) {
@@ -7596,8 +7671,8 @@
       if (card) {
         const store = myGroups.find((g) => g.id === currentGroupId);
         card.textContent = store && store.is_store_room
-          ? '画像をドロップして送信（メディア閲覧へ保存）'
-          : '画像をドロップして送信';
+          ? '画像をドロップして送信（メディア閲覧へ保存）／PDF・Office等のファイルにも対応'
+          : '画像・ファイルをドロップして送信';
       }
     }
 
@@ -7632,6 +7707,15 @@
       return { path, width, height };
     }
 
+    async function uploadChatFile(file, groupId) {
+      if (!isSupportedChatFile(file)) throw new Error('対応形式または容量上限（10MB）を確認してください');
+      const ext = String(file.name || '').toLowerCase().match(/\.[a-z0-9]{1,8}$/)?.[0] || '.bin';
+      const path = `groups/${groupId}/${crypto.randomUUID()}${ext}`;
+      const { error } = await sb.storage.from('chat-images').upload(path, file, { contentType: file.type || 'application/octet-stream', cacheControl: '3600' });
+      if (error) throw error;
+      return { path, name: String(file.name || '添付ファイル').slice(0, 180), mime: String(file.type || 'application/octet-stream').slice(0, 120), size: Number(file.size) || 0 };
+    }
+
     async function archiveChatImageInMediaLibrary(messageId, groupId) {
       const { data: sessionData } = await sb.auth.getSession();
       const accessToken = String(sessionData?.session?.access_token || '');
@@ -7649,6 +7733,7 @@
     }
 
     async function sendChatImage(file) {
+      if (!isImageFile(file)) return sendChatFile(file);
       if (!currentGroupId || !currentUser || uploadingImage) return;
       if (!requireCurrentRoomSend()) return;
       uploadingImage = true;
@@ -7695,6 +7780,34 @@
       }
     }
 
+    async function sendChatFile(file) {
+      if (!currentGroupId || !currentUser || uploadingImage) return;
+      if (!requireCurrentRoomSend()) return;
+      uploadingImage = true;
+      $('chatImageInput').disabled = true;
+      try {
+        const attachment = await uploadChatFile(file, currentGroupId);
+        const { data, error } = await sb.from('chat_messages').insert({
+          group_id: currentGroupId, user_id: currentUser.id, username: currentUser.username,
+          content: `[${attachment.name}]`, kind: 'file',
+          payload: { v: 1, kind: 'file', file: attachment }, is_silent: isSilentSendActive === true
+        }).select(MESSAGE_COLUMNS).single();
+        if (error) throw error;
+        lastMessages[data.group_id] = data;
+        followNewMessages = true;
+        if (viewHasLatest) addMessageToUI(data); else await jumpToLatest();
+        renderGroups();
+        dispatchPushForMessage(data.id);
+      } catch (error) {
+        console.error('Send file error:', error);
+        alert(`ファイルの送信に失敗しました: ${error.message || error}`);
+      } finally {
+        uploadingImage = false;
+        $('chatImageInput').disabled = false;
+        $('chatImageInput').value = '';
+      }
+    }
+
     function askSendModeForFiles(files) {
       const list = Array.from(files || []).filter(Boolean);
       if (!list.length || !currentGroupId || !currentUser) return;
@@ -7703,8 +7816,8 @@
       const hint = $('sendModeHint');
       if (hint) {
         hint.textContent = list.length > 1
-          ? `この画像 ${list.length} 件を今すぐ送りますか？ 予約配信も選べます。`
-          : 'この画像を今すぐ送りますか？ 予約配信も選べます。';
+          ? `このファイル ${list.length} 件を今すぐ送りますか？ 予約配信も選べます。`
+          : 'このファイルを今すぐ送りますか？ 予約配信も選べます。';
       }
       $('sendModeOverlay').classList.remove('hidden');
       document.body.classList.add('modal-open');
@@ -7731,6 +7844,10 @@
 
     function chooseSendLater() {
       if (!pendingSendFiles.length) return;
+      if (pendingSendFiles.some((file) => !isImageFile(file))) {
+        alert('PDF・Office等のファイルは、まず今すぐ送信してください。');
+        return;
+      }
       scheduleTarget = 'files';
       $('sendModeOverlay').classList.add('hidden');
       openScheduleSend();
@@ -9079,7 +9196,9 @@
     $('chatImageInput').addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0];
       e.target.value = '';
-      if (file) askSendModeForFiles([file]);
+      if (!file) return;
+      if (!isSupportedChatFile(file)) { showNotice('対応形式または容量上限（10MB）を確認してください'); return; }
+      askSendModeForFiles([file]);
     });
 
     document.addEventListener('dragenter', (e) => {
@@ -9102,9 +9221,9 @@
       e.preventDefault();
       setChatDropActive(false);
       if (!currentGroupId || !canCurrentUserSend()) return;
-      const files = imageFilesFromList(e.dataTransfer && e.dataTransfer.files);
+      const files = chatFilesFromList(e.dataTransfer && e.dataTransfer.files);
       if (!files.length) {
-        showNotice('画像（JPEG / PNG / WebP / GIF）をドロップしてください');
+        showNotice('画像・PDF・Office・CSV・ZIP（10MB以内）をドロップしてください');
         return;
       }
       askSendModeForFiles(files);
