@@ -4661,19 +4661,24 @@ async function issueChatJournalLoginLink(
   }
   const userId = await authenticateChatMember(req, supabase, groupId, "view")
 
-  // 売上の質問と回答が参加者全員に見えるのを避けるため1対1限定。
-  const { data: group, error: groupError } = await supabase
-    .from("chat_groups")
-    .select("is_direct")
-    .eq("id", groupId)
-    .maybeSingle()
-  if (groupError) {
-    throw { status: 500, message: `Failed to load room: ${groupError.message}` } satisfies AppError
+  // 売上の質問と回答が他の人間に見えるのを避けたいだけなので、判定は
+  // is_direct フラグ（自動作成のDMかどうか）ではなく「人間メンバーが
+  // 自分1人だけか」で行う。利用者が自分でBotを招待して作った2人部屋
+  // （is_direct=false）も、参加している人間は自分だけなら同じ条件を満たす。
+  const { data: memberRows, error: memberError } = await supabase
+    .from("chat_group_members")
+    .select("user_id, chat_users!inner(is_bot)")
+    .eq("group_id", groupId)
+  if (memberError) {
+    throw { status: 500, message: `Failed to load room members: ${memberError.message}` } satisfies AppError
   }
-  if (!group || (group as { is_direct?: unknown }).is_direct !== true) {
+  const humanMemberIds = (Array.isArray(memberRows) ? memberRows : [])
+    .filter((row) => (row as { chat_users?: { is_bot?: unknown } }).chat_users?.is_bot !== true)
+    .map((row) => String((row as { user_id?: unknown }).user_id ?? ""))
+  if (humanMemberIds.length !== 1 || humanMemberIds[0] !== userId) {
     throw {
       status: 403,
-      message: "電子ジャーナルへの質問は1対1のトークでのみ使えます。",
+      message: "電子ジャーナルへの質問は、自分以外の人がいないトークでのみ使えます。",
     } satisfies AppError
   }
 

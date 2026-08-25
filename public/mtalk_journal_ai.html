@@ -98,7 +98,7 @@
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
           showNotice(body.error || `接続に失敗しました（HTTP ${res.status}）`,
-            '店舗Bot（例: Bistro CAVACAVA）との1対1のトークから開いてください。');
+            '店舗Botとの、自分以外の人がいないトークから開いてください。');
           return;
         }
         loginToken = String(body.login_token || '');
