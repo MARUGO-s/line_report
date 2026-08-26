@@ -124,6 +124,42 @@ Deno.test("一般的な使い方質問にはM-talk全体概要を渡す", () => 
   }
 })
 
+Deno.test("仕組み・全体像の質問を使い方質問として扱う", () => {
+  for (
+    const q of [
+      "M-talkの仕組みを教えて",
+      "M-talkとは何ですか",
+      "雑談AIとジャーナルに聞くの違いは？",
+      "なぜ参加前のメッセージは見えないの？",
+    ]
+  ) {
+    assertEquals(isMtalkHelpQuestion(q), true, q)
+  }
+})
+
+Deno.test("仕組みの質問には全体像セクションを根拠として渡す", () => {
+  const reference = buildMtalkHelpReference("M-talkの仕組みを教えて")
+  if (
+    !reference.includes("M-talkの仕組み・全体像") ||
+    !reference.includes("AIは2種類あります") ||
+    !reference.includes("権限は、M-talk全体の利用可否")
+  ) {
+    throw new Error("仕組み・全体像の説明が参照文へ入りませんでした")
+  }
+})
+
+Deno.test("具体的な質問でも仕組みと全機能索引を必ず添える", () => {
+  const reference = buildMtalkHelpReference("画像はどうやって送りますか？")
+  // 質問に直接関係する詳細
+  if (!reference.includes("入力欄左の「＋」")) {
+    throw new Error("画像送信の具体手順が入りませんでした")
+  }
+  // 背景（仕組み）と、他機能への案内に使える全機能索引を常に添える
+  if (!reference.includes("M-talkの仕組み・全体像") || !reference.includes("全機能の使い方一覧")) {
+    throw new Error("仕組みと全機能索引が常時添付されていません")
+  }
+})
+
 Deno.test("通常の雑談には使い方マニュアルを注入しない", () => {
   assertEquals(isMtalkHelpQuestion("今日は暑いですね"), false)
   const system = buildCasualSystemPrompt({

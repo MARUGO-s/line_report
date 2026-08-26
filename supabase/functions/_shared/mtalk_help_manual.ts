@@ -27,7 +27,28 @@ export const MTALK_HELP_OVERVIEW = [
   '店舗Botがいるルームでは、レシート登録、#メモ、売上等の検索、電子ジャーナルに基づく質問も利用できます。',
 ].join('\n')
 
+/** 仕組み・全体像を説明するセクションのID。どんな質問でも背景として常に添える。 */
+export const MTALK_SYSTEM_OVERVIEW_SECTION_ID = 'system-overview'
+
 export const MTALK_HELP_SECTIONS: MtalkHelpSection[] = [
+  {
+    id: MTALK_SYSTEM_OVERVIEW_SECTION_ID,
+    title: 'M-talkの仕組み・全体像',
+    keywords: [
+      '仕組み', 'しくみ', '全体像', '構成', 'システム', 'とは', 'どういう', 'どんな', 'なぜ',
+      '違い', 'ちがい', '概要', 'できること', '機能', 'ai', 'エーアイ', '人工知能', 'ボット',
+      'bot', '安全', 'セキュリティ', 'プライバシー', 'データ', '保存', '対応', 'ブラウザ', 'アプリ', 'pwa',
+    ],
+    content: [
+      'M-talkは、ブラウザで使う社内チャットです。ログイン中の本人の権限で動き、参加しているルームのメッセージだけを読み書きできます。',
+      'ルームには「1対1」「複数人グループ」「店舗Botルーム」があります。店舗ルームには店舗Botが入り、レシート登録・#メモ・売上などの検索・電子ジャーナルAIといった業務機能が使えます。',
+      'AIは2種類あります。(1)雑談・使い方AI：使い方の案内や簡単な相談に答えます。店舗の正確な売上・客数などの数字には答えません。(2)ジャーナルに聞く：電子ジャーナルの実データを根拠に、売上や客数などの正確な数字へ答える専用機能です。数字が必要なときは入力欄の「＋」→「ジャーナルに聞く」を使います。',
+      '通知はWeb Push（ブラウザ通知）で届きます。iPhone・iPadは、ホーム画面に追加したアプリ版で開いたときだけ通知を受け取れます。',
+      '画像やファイルは非公開の保管場所に保存され、表示のたびに一時的なURLで読み込みます。参加した時点より前のメッセージは、仕組み上あとから取得できません。',
+      '権限は、M-talk全体の利用可否と、ルームごとの「閲覧・送信・招待・管理」の4種類で決まります。権限の変更はM-talk管理者が行います。',
+      'この仕組みに書かれていないこと（他アプリの機能や、店舗の実データそのもの）は推測せず、正確な数字は「ジャーナルに聞く」へ案内してください。',
+    ].join('\n'),
+  },
   {
     id: 'start-login-profile',
     title: 'ログイン・新規登録・プロフィール',
@@ -294,6 +315,21 @@ export function isMtalkHelpQuestion(question: string): boolean {
     'できない',
     '見えない',
     '送れない',
+    '仕組み',
+    'しくみ',
+    '全体像',
+    'とは',
+    'どういう',
+    'なぜ',
+    'なんで',
+    '違い',
+    'ちがい',
+    '安全',
+    'セキュリティ',
+    'プライバシー',
+    '対応',
+    'なんですか',
+    'なんですが',
   ]
   return helpIntents.some((intent) => normalizedQuestion.includes(intent)) ||
     selectMtalkHelpSections(question, 1).some((entry) => entry.score >= 4)
@@ -309,23 +345,30 @@ export function buildMtalkHelpReference(
 ): string {
   if (!isMtalkHelpQuestion(question)) return ''
   const limit = Math.max(1, options.limit ?? 3)
-  const maxChars = Math.max(400, options.maxChars ?? 2600)
+  const maxChars = Math.max(400, options.maxChars ?? 4200)
   const selections = selectMtalkHelpSections(question, limit)
+  const selectedIds = new Set(selections.map((entry) => entry.section.id))
   const parts = [`【M-talk全体概要】\n${MTALK_HELP_OVERVIEW}`]
 
-  if (selections.length === 0) {
-    const index = MTALK_HELP_SECTIONS
-      .map((section) => {
-        const firstSentence = section.content.split('\n')[0]
-        return `・${section.title}: ${firstSentence}`
-      })
-      .join('\n')
-    parts.push(`【全機能の使い方一覧】\n${index}`)
-  } else {
-    for (const { section } of selections) {
-      parts.push(`【${section.title}】\n${section.content}`)
-    }
+  // 仕組み・全体像は「なぜ」「どういう仕組み」などにも答えられるよう常に添える。
+  const overviewSection = MTALK_HELP_SECTIONS.find(
+    (section) => section.id === MTALK_SYSTEM_OVERVIEW_SECTION_ID,
+  )
+  if (overviewSection && !selectedIds.has(overviewSection.id)) {
+    parts.push(`【${overviewSection.title}】\n${overviewSection.content}`)
   }
+
+  // 質問に関連する詳細セクション（関連度順）。
+  for (const { section } of selections) {
+    parts.push(`【${section.title}】\n${section.content}`)
+  }
+
+  // 別の機能を尋ねられても案内を続けられるよう、全機能の索引を常に添える。
+  const index = MTALK_HELP_SECTIONS
+    .filter((section) => section.id !== MTALK_SYSTEM_OVERVIEW_SECTION_ID)
+    .map((section) => `・${section.title}: ${section.content.split('\n')[0]}`)
+    .join('\n')
+  parts.push(`【全機能の使い方一覧】\n${index}`)
 
   const reference = parts.join('\n\n')
   return reference.length <= maxChars ? reference : `${reference.slice(0, maxChars)}…`
