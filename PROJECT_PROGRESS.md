@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-08-26 - 1対1 AI返信が途中で切れる不具合を修正
+
+- Symptom: 使い方の回答が「右側の紙飛」など文の途中で切れていた。生成トークン上限 `max_tokens=500` が小さく、推論モデル `gpt-oss-120b` が内部思考でも枠を消費して本文を出し切れなかった。
+- Fix: 基本 `MAX_TOKENS` を1400、gpt-ossは最低2000へ引き上げ、`max_completion_tokens`、`reasoning_effort='low'`、`reasoning_format='hidden'` を指定して本文枠を確保。`REPLY_MAX_CHARS` は1800（DB上限2000内）。さらに `clampReplyForMtalk()` を追加し、万一上限を超えても句点・改行までで止めて文の途中で切らない。システム指示も「使い方は文字数を削らず全項目を出し、途中で打ち切らない」に更新。
+- Safety: DBの本文上限2000文字は超えない。雑談は従来どおり短文（目安3文以内）を維持。
+- Test: 文境界での安全な切り詰めに加え、gpt-ossへ2000トークン・low/hidden設定が実際のリクエストへ入ることを検証し、`tests/mtalk_casual_chat.test.ts` 16件成功。
+
 ### 2026-08-26 - 1対1 AI返信を項目ごとに空行で区切る見やすいレイアウトへ
 
 - Symptom: Markdown記号は消えたものの、箇条書きが1行ずつ詰まって表示され、まだ読みづらかった。

@@ -16,9 +16,33 @@ type DbClient = any
 const HISTORY_LIMIT = 12
 const HISTORY_CONTENT_MAX_CHARS = 800
 const QUESTION_MAX_CHARS = 2000
-const REPLY_MAX_CHARS = 1200
-const MAX_TOKENS = 500
+// M-talkの本文はDBポリシーで2000文字まで。使い方の説明は項目が多く長くなる
+// ため、途中で切れないよう安全マージン内で広めに確保する。
+const REPLY_MAX_CHARS = 1800
+// 非推論モデル向けの基本値。gpt-ossは内部思考でも枠を使うため、呼び出し時に
+// 最低2000へ引き上げ、reasoning_effort=low / reasoning_format=hiddenを付ける。
+const MAX_TOKENS = 1400
 const TIMEOUT_MS = 20000
+
+/**
+ * 返信が長すぎる場合でも、文や項目の途中で切らない。上限手前で最後の
+ * 句点・感嘆・改行までを残す（見つからなければそのまま切る）。
+ */
+export function clampReplyForMtalk(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  const head = text.slice(0, limit)
+  const boundary = Math.max(
+    head.lastIndexOf('。'),
+    head.lastIndexOf('！'),
+    head.lastIndexOf('？'),
+    head.lastIndexOf('\n'),
+  )
+  if (boundary >= Math.floor(limit / 2)) {
+    const clipped = head[boundary] === '\n' ? head.slice(0, boundary) : head.slice(0, boundary + 1)
+    return clipped.trim()
+  }
+  return head.trim()
+}
 
 export function buildCasualSystemPrompt(params: {
   storeName: string
@@ -27,8 +51,8 @@ export function buildCasualSystemPrompt(params: {
   const helpReference = buildMtalkHelpReference(params.question)
   return [
     `あなたは${params.storeName || 'この店舗'}のスタッフ専用チャットの、雑談・簡単な相談相手です。`,
-    '自然な日本語で、短く親しみやすく答えてください（目安3文以内）。',
-    'ただしM-talkの使い方を聞かれたときは、必要なら箇条書きや手順を使い、操作するボタン名・場所を具体的に説明してください。',
+    '雑談や短い相談には、自然な日本語で短く親しみやすく答えてください（目安3文以内）。',
+    'M-talkの使い方を聞かれたときは、文字数を無理に削らず、関係する項目をすべて挙げ、各項目でボタン名・場所・手順まで具体的に説明してください。途中で説明を打ち切らないでください。',
     'M-talkはプレーンテキスト表示です。Markdown記法（**太字**、# 見出し、```コード```）は使わないでください。',
     '手順や機能を並べるときは「- 項目名：説明」の形で1項目ずつ書き、項目と項目の間には空行を1行入れて、ぎゅっと詰めずに見やすく区切ってください。',
     '1つの項目の中で補足を並べるときは、行頭に半角スペース2つを付けた「  - 補足」で字下げしてください。',
@@ -223,6 +247,8 @@ export async function generateCasualReply(
   })
 
   const model = resolveGroqTextModel(Deno.env.get('MTALK_CASUAL_CHAT_MODEL'), GROQ_TEXT_PRIMARY_MODEL)
+  const isGptOss = model.toLowerCase().includes('gpt-oss')
+  const completionTokens = isGptOss ? Math.max(MAX_TOKENS, 2000) : MAX_TOKENS
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
@@ -235,7 +261,9 @@ export async function generateCasualReply(
       body: JSON.stringify({
         model,
         temperature: 0.4,
-        max_tokens: MAX_TOKENS,
+        max_tokens: completionTokens,
+        max_completion_tokens: completionTokens,
+        ...(isGptOss ? { reasoning_effort: 'low', reasoning_format: 'hidden' } : {}),
         messages: [
           { role: 'system', content: system },
           ...history,
@@ -252,7 +280,7 @@ export async function generateCasualReply(
     const text = formatCasualReplyForMtalk(String(
       (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content ?? '',
     ))
-    return text ? text.slice(0, REPLY_MAX_CHARS).trim() : null
+    return text ? clampReplyForMtalk(text, REPLY_MAX_CHARS) : null
   } catch (err) {
     console.error('generateCasualReply threw:', err instanceof Error ? err.message : String(err))
     return null

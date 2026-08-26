@@ -1,5 +1,6 @@
 import {
   buildCasualSystemPrompt,
+  clampReplyForMtalk,
   formatCasualReplyForMtalk,
   generateCasualReply,
   isSoloHumanRoom,
@@ -172,6 +173,18 @@ Deno.test("AIへMarkdownを使わずM-talk向けプレーンテキストで答�
   ) {
     throw new Error("M-talkの表示形式に合わせた出力指示がありません")
   }
+  if (!system.includes("途中で説明を打ち切らないでください")) {
+    throw new Error("使い方の説明を途中で切らない指示がありません")
+  }
+})
+
+Deno.test("長すぎる返信は文の途中で切らず、句点までで止める", () => {
+  const body = "一つ目の文です。二つ目の文です。三つ目の文です。"
+  const clamped = clampReplyForMtalk(body, 14)
+  // 14文字目は「二つ目の文」の途中だが、直前の句点までで止める。
+  assertEquals(clamped, "一つ目の文です。")
+  // 上限以内ならそのまま返す。
+  assertEquals(clampReplyForMtalk(body, 999), body)
 })
 
 Deno.test("AIのMarkdown回答を読みやすいM-talk用テキストへ整形する", () => {
@@ -226,8 +239,10 @@ Deno.test("Markdown表・コードフェンス・水平区切りをプレーン�
 Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整形される", async () => {
   const originalFetch = globalThis.fetch
   Deno.env.set("GROQ_API_KEY", "test-key")
-  globalThis.fetch = () =>
-    Promise.resolve(new Response(JSON.stringify({
+  let requestBody: Record<string, unknown> | null = null
+  globalThis.fetch = (_input, init) => {
+    requestBody = JSON.parse(String(init?.body || "{}"))
+    return Promise.resolve(new Response(JSON.stringify({
       choices: [{
         message: {
           content: [
@@ -241,6 +256,7 @@ Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整�
       status: 200,
       headers: { "Content-Type": "application/json" },
     }))
+  }
 
   const chain = {
     select: () => chain,
@@ -268,6 +284,10 @@ Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整�
       "▶ 画像送信",
       "　左の「＋」を押します。",
     ].join("\n"))
+    assertEquals(requestBody?.max_tokens, 2000, "gpt-ossの推論込み出力枠")
+    assertEquals(requestBody?.max_completion_tokens, 2000, "gpt-ossの完了トークン枠")
+    assertEquals(requestBody?.reasoning_effort, "low", "推論を抑えて本文枠を確保")
+    assertEquals(requestBody?.reasoning_format, "hidden", "内部思考を本文へ出さない")
   } finally {
     globalThis.fetch = originalFetch
     Deno.env.delete("GROQ_API_KEY")
