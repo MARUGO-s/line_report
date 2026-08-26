@@ -19,6 +19,9 @@ import { generateCasualReply, isSoloHumanRoom } from "../_shared/mtalk_casual_ch
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
 const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
+// 「M-talkに貼る」でジャーナルレポートAIの回答を貼り付けた投稿の目印。
+// jnl2txt.html の postAiAnswerToMtalk が本文の先頭へ付ける。
+const JOURNAL_PASTE_PREFIX_RE = /^\[電子ジャーナル\]/
 
 const CHAT_BOT_USER_ID = "00000000-0000-4000-8000-00000000b071"
 const CHAT_BOT_USERNAME = "予約通知"
@@ -350,6 +353,12 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const fromDispatch = String(body.store_key ?? "").trim()
   const resolved = await resolveRoomStoreKey(supabase, group, groupId)
   const text = String(message.content ?? "").trim()
+  // 「M-talkに貼る」で貼り付けたジャーナルレポートAIの回答（本文が
+  // 「[電子ジャーナル]」で始まる）には、雑談AIも含めBotが一切反応しない。
+  // 貼り付けた分析へさらにAIが返信すると会話が二重になり紛らわしいため。
+  if (JOURNAL_PASTE_PREFIX_RE.test(text)) {
+    return json({ ok: true, skipped: true, reason: "journal paste" }, 200)
+  }
   const candidateStoreKey = fromDispatch || String(resolved.storeKey ?? "").trim()
   const activeStoreBot = candidateStoreKey
     ? await loadChatStoreBot(supabase, candidateStoreKey)

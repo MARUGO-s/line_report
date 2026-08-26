@@ -1,5 +1,11 @@
 # LINE Report Project Progress
 
+### 2026-08-26 - 貼り付けたジャーナル回答に雑談AIが返信しないよう修正
+
+- Symptom: 「M-talkに貼る」で貼ったジャーナルレポートAIの回答（本文が「[電子ジャーナル]」で始まる）に対し、店舗Botとの1対1で雑談AIがさらに返信していた。
+- Fix: `chat-knowledge` の handleDispatch 入口に `JOURNAL_PASTE_PREFIX_RE`（`^[電子ジャーナル]`）ガードを追加し、貼り付け投稿にはBotが一切反応せずスキップするようにした。雑談AI・設定・検索・スケジュール登録より手前に置く。
+- Test: `tests/mtalk_journal_paste_format.test.mjs` にガードの存在と位置、jnl2txt側接頭辞との一致を検証するケースを追加（合計100件成功）。
+
 ### 2026-08-26 - M-talk管理画面へルームゴミ箱とBot削除・復元を追加
 
 - Request: M-talk管理画面からも、通常ルームを「ゴミ箱へ移動 → 復元 / 完全削除」の順で管理できるようにする。Botの削除は管理画面だけに限定し、通常のM-talk画面では削除不可を維持する。
