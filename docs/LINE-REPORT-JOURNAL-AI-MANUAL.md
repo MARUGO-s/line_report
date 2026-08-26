@@ -346,9 +346,10 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 数値は確定集計だけを正本にし、資料や外部情報は背景・仮説として扱います。
 - ランチ／ディナー、客単価、F/D比率、曜日・時間帯、商品、ワイン点数・ml、定休、施策との対応を重視します。
 - 根拠がない季節コースや施策を事実として断定しません。定休日を機会損失と誤診しません。
+- Grok／Perplexity等の外部知見は戦略・改善意図の質問で必要な場合だけ追加し、単純な数値照会では検索しません。
 - 生成結果はAI分析履歴へ自動保存され、ダッシュボードでは売上・客単価・F/D・昼夜・曜日・時間帯・売れ筋等を確認できます。
 
-**検索語:** 標準ai分析 / ai分析 / コンサル分析 / 経営分析 / ワイン戦略 / ダッシュボード / 履歴 / 根拠 / 外部知見 / luna / claude
+**検索語:** 標準ai分析 / ai分析 / コンサル分析 / 経営分析 / ワイン戦略 / ダッシュボード / 履歴 / 根拠 / 外部知見 / 外部検索 / grok / perplexity / 数値照会 / 毎回検索 / 戦略質問 / luna / claude
 
 **主な実装根拠:** `supabase/functions/ai-analyze/index.ts` / `supabase/functions/_shared/journal_ai_orchestrate.ts` / `public/jnm/jnl2txt.html`
 
@@ -445,11 +446,12 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 来客予測は蓄積実績、曜日、イベント、天気、動員数等を使い、客数と売上の今後14日を作ります。
 - レガシー乗算モデルとポアソン回帰GLM等をバックテストし、拡張窓MAPEが良いモデルを自動採用します。
+- 東京ドーム本体とカナデビア／後楽園等の小ホールは会場規模・イベント種別を分け、小ホールをドーム本体と同じ係数へ固定しません。
 - 毎日の学習処理で係数・予測・精度履歴を更新します。データが増えるほど検証材料は増えますが、必ず精度が上がると断定はしません。
 - AI学習進化ページでは客数・売上MAPE、学習データ量、採用モデル、信頼度、学習曲線、品質基準、自己進化の準備状況を確認します。
 - MAPEは低いほど誤差が小さい指標です。基準を下回っても予測を停止せず、継続学習します。
 
-**検索語:** 来客予測 / 予測客数 / 予測売上 / 14日 / mape / 予測誤差 / 学習 / 進化 / モデル選択 / glm / ポアソン / 乗算モデル / 毎朝5時 / 毎日5時
+**検索語:** 来客予測 / 予測客数 / 予測売上 / 14日 / mape / 予測誤差 / 学習 / 進化 / モデル選択 / glm / ポアソン / 乗算モデル / 小ホール / イベント係数 / 会場規模 / 同じ係数 / 毎朝5時 / 毎日5時
 
 **主な実装根拠:** `public/foodcourt-evolution.html` / `supabase/functions/foodcourt-forecast-cron/index.ts` / `supabase/functions/_shared/foodcourt_forecast_utils.ts` / `tests/foodcourt_forecast_utils.test.ts`
 
@@ -489,9 +491,10 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 天気は日次取得し、イベント・曜日とともにフードコート分析と予測へ結び付けます。古いキャッシュや予報・実績の違いに注意します。
 - 週次イベント配信はルーム設定の曜日・時刻に従い、原則今後2週間を会場別のLINE Flexで送ります。二重送信防止ログを持ちます。
 - 日本戦PVは、公式確認済みなら「PV決定」、営業時間外の未確定試合は必要時に「要確認」として区別し、未確認情報を決定事項として断定しません。
+- 東京ドーム本体と小ホールは同列に扱わず、会場規模と主因イベントを分けて表示・予測します。
 - PVやイベントの大集客が自店舗売上へ同じ割合で直結するとは限らず、競技・会場・時間帯・他イベントとの重なりを分けて分析します。
 
-**検索語:** 東京ドームイベント / カナデビア / 後楽園ホール / 天気cron / 週次イベント配信 / 2週間 / pv / パブリックビューイング / 日本戦 / 深夜 / 要確認 / pv決定 / アラート
+**検索語:** 東京ドームイベント / カナデビア / 後楽園ホール / 天気cron / 週次イベント配信 / 2週間 / pv / パブリックビューイング / 日本戦 / 深夜 / 要確認 / pv決定 / アラート / 小ホール / イベント係数 / 会場規模 / 同じ係数
 
 **主な実装根拠:** `public/foodcourt.html` / `supabase/functions/tokyo-dome-events-cron/index.ts` / `supabase/functions/tokyo-dome-weekly-cron/index.ts` / `supabase/functions/pv-japan-alert-cron/index.ts` / `supabase/functions/weather-daily-cron/index.ts` / `supabase/functions/_shared/tokyo_dome_schedule.ts`
 
@@ -539,7 +542,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - M-talk管理画面はLINEユーザー管理とは別に、M-talk利用停止、論理削除、ルーム権限、テンプレート、一括設定、監査・復元、ルーム／Botのゴミ箱を扱います。
 - グループにはLINE公式アカウントを1体しか参加させられないため、店舗Botの選択を混同しないようにします。
 
-**検索語:** 管理画面 / 接続設定 / 利用状況 / webhook設定 / ログ / アクセス履歴 / ユーザー権限 / 承認 / 管理bot / 許可 / 不許可 / 新規ルーム / 自動連携
+**検索語:** 管理画面 / 接続設定 / 利用状況 / webhook設定 / ログ / アクセス履歴 / ユーザー権限 / 承認 / 管理bot / 許可 / 不許可 / 新規ルーム / 自動連携 / グループに店舗bot / botを2体 / 公式アカウント1体 / 1体しか / 2体入れ
 
 **主な実装根拠:** `public/index.html` / `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `supabase/functions/_shared/line_admin_webhook.ts` / `supabase/functions/_shared/line_user_approval.ts`
 
@@ -567,7 +570,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 監査ログは変更前後を記録し、競合がない場合に限り一度だけ復元できます。復元操作そのものも監査されます。
 - 管理画面では通常ルームのゴミ箱・復元・完全削除と、Botの論理削除・復元を行えます。通常M-talk画面からBotは削除できません。
 
-**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / ルームゴミ箱
+**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / botを削除 / botは削除 / 通常画面 / 普通のトーク画面 / トーク画面から削除 / ルームゴミ箱
 
 **主な実装根拠:** `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `docs/CHAT-ADMIN-PERMISSIONS.md` / `tests/chat_admin_permissions.test.mjs` / `tests/chat_admin_templates.test.mjs`
 
@@ -685,10 +688,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 過去の売上予測・MAPE履歴は専用UIで閲覧できますが、通常の新しいAI回答へ過去予測の当たり外れを自動再投入してはいません。
 - 過去のAI分析文章は閲覧履歴であり、新しい回答の事実ソースとして再利用せず、保存レポートから数値を再計算します。
 - 資料の施策効果インサイト生成APIはありますが、Journal画面・LINE・定期処理から自動実行する現行導線は確認できません。
+- Grok／Perplexity等の外部検索は戦略・改善質問で必要な場合だけ行い、単純な数値照会では実行しません。
 - 予約を使う集客構造分析はBistro CAVACAVAの2026年5月以降が現行対象で、開始前や他店舗を予約0件・飛び込み100%として扱いません。
 - 外部サービスの接続状態、ルームの現在設定、最新店舗数値は資料だけで確定できないため、対象画面・管理者・実データで確認します。
 
-**検索語:** 対応範囲 / 未対応 / 未統合 / 入っていない / まだ入っていない / 使われていない / 制限 / 既知の課題 / データがない / 予約開始月 / cavacava / 2026年5月 / 天候 / mape履歴 / 過去ai分析 / generate-insight / 自動生成 / 何が使われない
+**検索語:** 対応範囲 / 未対応 / 未統合 / 入っていない / まだ入っていない / 使われていない / 制限 / 既知の課題 / データがない / 予約開始月 / cavacava / 2026年5月 / 天候 / mape履歴 / 過去ai分析 / 過去のai分析文章 / ai分析文 / 次の回答 / 再利用 / journalの天気 / 天気と気温 / 気温 / 通常aiチャット / grok / perplexity / 数値照会 / 外部検索 / generate-insight / 自動生成 / 何が使われない
 
 **主な実装根拠:** `docs/JOURNAL-REPORT-FEATURES.md` / `docs/RESERVATION-AI-COVERAGE.md` / `scripts/verify-journal-ai-data-flow.mjs` / `supabase/functions/_shared/line_report_help_manual.ts`
 
