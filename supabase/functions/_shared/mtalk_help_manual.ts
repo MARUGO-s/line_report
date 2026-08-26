@@ -18,7 +18,9 @@
 import {
   buildLineReportHelpIndex,
   isLineReportHelpQuestion,
+  lineReportHelpSourcesForCode,
   selectLineReportHelpSections,
+  wantsLineReportImplementationDetails,
 } from './line_report_help_manual.ts'
 
 export interface MtalkHelpSection {
@@ -366,6 +368,7 @@ export function buildMtalkHelpReference(
   const maxChars = Math.max(800, options.maxChars ?? 6800)
   const selections = selectMtalkHelpSections(question, mtalkLimit)
   const lineReportSelections = selectLineReportHelpSections(question, lineReportLimit)
+  const includeImplementationSources = wantsLineReportImplementationDetails(question)
   const selectedIds = new Set(selections.map((entry) => entry.section.id))
   const parts = [
     '【回答の基本】\n質問された範囲だけを、最初に結論、その後に必要な手順・理由・注意点の順で簡潔に答える。索引全体を回答へ書き写さない。質問が曖昧なら、推測せず確認を1つだけ行う。',
@@ -389,8 +392,12 @@ export function buildMtalkHelpReference(
   // 全資料を毎回渡さないことで、回答を短く保ちながら必要な根拠を深くする。
   parts.push(`【LINE Report / Journal Report 区分索引】\n${buildLineReportHelpIndex()}`)
   for (const { section } of lineReportSelections) {
+    const sources = includeImplementationSources
+      ? lineReportHelpSourcesForCode(section.code)
+      : []
     parts.push(
-      `【${section.code} ${section.title}】\n要点: ${section.summary}\n${section.content}`,
+      `【${section.code} ${section.title}】\n要点: ${section.summary}\n${section.content}` +
+        (sources.length ? `\n実装根拠: ${sources.join(' / ')}` : ''),
     )
   }
 

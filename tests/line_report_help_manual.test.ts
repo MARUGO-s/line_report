@@ -2,15 +2,18 @@ import {
   buildLineReportHelpIndex,
   isLineReportHelpQuestion,
   LINE_REPORT_HELP_CATEGORIES,
+  LINE_REPORT_HELP_SECTION_SOURCES,
   LINE_REPORT_HELP_SECTIONS,
-  renderLineReportHelpManualMarkdown,
+  lineReportHelpSourcesForCode,
   selectLineReportHelpSections,
+  wantsLineReportImplementationDetails,
 } from "../supabase/functions/_shared/line_report_help_manual.ts"
 import {
   buildMtalkHelpReference,
   isMtalkHelpQuestion,
 } from "../supabase/functions/_shared/mtalk_help_manual.ts"
 import { buildCasualSystemPrompt } from "../supabase/functions/_shared/mtalk_casual_chat.ts"
+import { buildLineReportHelpDocument } from "../scripts/generate-line-report-help-manual.ts"
 
 function assertEquals(actual: unknown, expected: unknown, label = ""): void {
   const a = JSON.stringify(actual)
@@ -19,8 +22,8 @@ function assertEquals(actual: unknown, expected: unknown, label = ""): void {
 }
 
 Deno.test("統合資料は区分・項目ID・索引コードが重複せず全項目が分類される", () => {
-  assertEquals(LINE_REPORT_HELP_CATEGORIES.length, 11, "major category count")
-  assertEquals(LINE_REPORT_HELP_SECTIONS.length, 32, "indexed section count")
+  assertEquals(LINE_REPORT_HELP_CATEGORIES.length, 12, "major category count")
+  assertEquals(LINE_REPORT_HELP_SECTIONS.length, 44, "indexed section count")
   const categoryIds = LINE_REPORT_HELP_CATEGORIES.map((category) => category.id)
   const sectionIds = LINE_REPORT_HELP_SECTIONS.map((section) => section.id)
   const sectionCodes = LINE_REPORT_HELP_SECTIONS.map((section) => section.code)
@@ -38,6 +41,26 @@ Deno.test("統合資料は区分・項目ID・索引コードが重複せず全�
     }
     if (!section.summary.trim() || !section.content.trim() || section.keywords.length < 3) {
       throw new Error(`項目 ${section.code} の概要・本文・キーワードが不足しています`)
+    }
+  }
+})
+
+Deno.test("全項目が実装根拠を持ち、参照先がリポジトリ内に存在する", async () => {
+  const sectionCodes = new Set(LINE_REPORT_HELP_SECTIONS.map((section) => section.code))
+  assertEquals(
+    Object.keys(LINE_REPORT_HELP_SECTION_SOURCES).sort(),
+    [...sectionCodes].sort(),
+    "source-map codes match sections",
+  )
+  for (const section of LINE_REPORT_HELP_SECTIONS) {
+    const sources = lineReportHelpSourcesForCode(section.code)
+    if (!sources.length) throw new Error(`${section.code} に実装根拠がありません`)
+    for (const source of sources) {
+      try {
+        await Deno.stat(new URL(`../${source}`, import.meta.url))
+      } catch {
+        throw new Error(`${section.code} の実装根拠が存在しません: ${source}`)
+      }
     }
   }
 })
@@ -60,7 +83,7 @@ Deno.test("人間向け統合マニュアルは実行時資料から生成され
   const actual = await Deno.readTextFile(
     new URL("../docs/LINE-REPORT-JOURNAL-AI-MANUAL.md", import.meta.url),
   )
-  assertEquals(actual, renderLineReportHelpManualMarkdown())
+  assertEquals(actual, await buildLineReportHelpDocument())
 })
 
 Deno.test("代表的な質問を正しいLINE Report／Journal Report項目へ振り分ける", () => {
@@ -72,11 +95,20 @@ Deno.test("代表的な質問を正しいLINE Report／Journal Report項目へ�
     ["商品コード0023の2026年の売れ行きはどう調べる？", "journal-product-course"],
     ["Journal Reportで予測のMAPEを見る場所は？", "journal-reservations-forecast"],
     ["小口現金で内税と外税をどう使う？", "petty-cash"],
+    ["売上の日次セルを手入力で直すコードは？", "manual-sales-sheets-prompts"],
+    ["メディア画面へPDF文書をアップロードして閲覧許可を付けたい", "media-document-library"],
+    ["LINE Report電子ジャーナルとJournal Reportは何が違う？", "pos-journal-vs-journal-report"],
     ["フードコートの来客予測はどう学習する？", "foodcourt-forecast-evolution"],
     ["フードコート日報の動員数はどこへ反映される？", "foodcourt-daily-weekly"],
+    ["フードコートのRAGと蒸留は本当に自動学習ですか？", "foodcourt-learning-assets"],
+    ["東京ドーム週次配信と日本戦PVアラートの違いは？", "foodcourt-events-alerts"],
     ["自店舗のGoogle口コミを更新したい", "store-reviews"],
     ["周辺競合の口コミと競合圧力について教えて", "competitor-reviews"],
     ["AI使用料とシステムマップは誰が見られる？", "ai-usage-system-map"],
+    ["M-talk管理の監査ログから権限を復元できますか？", "mtalk-admin-audit"],
+    ["Journal AIにまだ入っていないデータは何ですか？", "known-coverage-limits"],
+    ["Edge Functionsとadmin-apiの役割をコード構成から教えて", "edge-functions-api"],
+    ["cloudflare-workerやsrc/server.jsは今の本番ですか？", "auxiliary-legacy-code"],
   ] as const
 
   for (const [question, expectedId] of cases) {
@@ -100,6 +132,10 @@ Deno.test("LINE Report／Journal Reportの質問は統合マニュアル対象�
       "フードコートの週次報告はどこですか",
       "自店舗口コミと競合口コミの違いは？",
       "システムマップでは何が見られますか",
+      "メディア画面の文書閲覧許可について",
+      "Journal AIで未統合のデータを教えて",
+      "admin-apiの実装はどこですか",
+      "OCRブリッジと現在のレシート解析の違いは？",
     ]
   ) {
     assertEquals(isLineReportHelpQuestion(question), true, question)
@@ -126,6 +162,23 @@ Deno.test("統合参照は区分索引と質問に関連する詳細を含み、
   }
 })
 
+Deno.test("全44項目をタイトルで検索でき、参照資料が途中で切れない", () => {
+  for (const section of LINE_REPORT_HELP_SECTIONS) {
+    const question = `${section.title}について教えて`
+    const selected = selectLineReportHelpSections(question, 4)
+    if (!selected.some((entry) => entry.section.code === section.code)) {
+      throw new Error(`${section.code} をタイトルから検索できません`)
+    }
+    const reference = buildMtalkHelpReference(question)
+    if (reference.endsWith("…")) {
+      throw new Error(`${section.code} の参照資料が途中で切れました: ${reference.length}文字`)
+    }
+    if (!reference.includes(`【${section.code} ${section.title}】`)) {
+      throw new Error(`${section.code} の詳細が統合参照へ入りませんでした`)
+    }
+  }
+})
+
 Deno.test("回答指示は正確な根拠と簡潔さを両立し、索引をそのまま読み上げない", () => {
   const system = buildCasualSystemPrompt({
     storeName: "テスト店",
@@ -141,6 +194,23 @@ Deno.test("回答指示は正確な根拠と簡潔さを両立し、索引をそ
     ]
   ) {
     if (!system.includes(required)) throw new Error(`回答指示に「${required}」がありません`)
+  }
+})
+
+Deno.test("コード・APIの質問だけ実装根拠を添え、通常の使い方回答は簡潔に保つ", () => {
+  const implementationQuestion = "予算登録の実装コードとAPIはどこですか？"
+  assertEquals(wantsLineReportImplementationDetails(implementationQuestion), true)
+  const implementationReference = buildMtalkHelpReference(implementationQuestion)
+  if (
+    !implementationReference.includes("実装根拠:") ||
+    !implementationReference.includes("budget_entry_flow.ts")
+  ) {
+    throw new Error("実装質問へソースコードの根拠が入りませんでした")
+  }
+
+  const usageReference = buildMtalkHelpReference("予算登録のやり方を教えて")
+  if (usageReference.includes("実装根拠:")) {
+    throw new Error("通常の使い方回答へ不要なソース一覧が入りました")
   }
 })
 

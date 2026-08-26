@@ -115,9 +115,14 @@ Supabase の Auth / Realtime / Storage / Edge Function で動く静的Webアプ�
 M-talkの操作を自然な文章で質問できる。
 
 AIはM-talk用 `mtalk_help_manual.ts` と、LINE Report／Journal Report用
-`line_report_help_manual.ts` を横断する。統合資料は11区分・32項目に分類され、
+`line_report_help_manual.ts` を横断する。統合資料は12区分・44項目に分類され、
 質問に関連する詳細だけを区分索引から選ぶ。人間向けには
 `LINE-REPORT-JOURNAL-AI-MANUAL.md` を自動生成する。
+
+統合資料の各項目には実装根拠ファイルがあり、コード・APIについて聞かれた場合だけ
+関連ソースも参照する。`help:check` が公開画面・Edge Function・共有モジュール・
+GAS／OCR／補助・レガシーコード・管理APIルートの未分類を検出するため、新機能だけ
+マニュアルから漏れる状態を防ぐ。
 
 具体的な質問は「結論→必要な手順／理由→注意点」の順で簡潔に答え、索引全体や
 関係のない機能は並べない。ボタン名や操作場所は省略せず、マニュアルにない機能は

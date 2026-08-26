@@ -15,16 +15,17 @@
 | 区分 | 内容 | 項目 |
 |---|---|---|
 | SYS 全体像・画面・ログイン | LINE Report、M-talk、Journal Report、管理画面の役割と入口 | SYS-01 LINE Report全体の役割分担<br>SYS-02 主な画面とログイン・店舗範囲 |
-| SAL 売上・レシート・予算 | LINEレシート、売上照会、予算、Excel、売上分析と定期レポート | SAL-01 LINEコマンドと入力の使い分け<br>SAL-02 LINEレシート解析・売上登録<br>SAL-03 レシート修正・削除・同日重複<br>SAL-04 月間予算・日別配分・売上照会<br>SAL-05 Excel取込・売上分析・定期レポート |
+| SAL 売上・レシート・予算 | LINEレシート、売上照会、予算、Excel、売上分析と定期レポート | SAL-01 LINEコマンドと入力の使い分け<br>SAL-02 LINEレシート解析・売上登録<br>SAL-03 レシート修正・削除・同日重複<br>SAL-04 月間予算・日別配分・売上照会<br>SAL-05 Excel取込・売上分析・定期レポート<br>SAL-06 手入力売上・売上シート・店舗別解析設定 |
 | RSV 予約・カレンダー | Gmail自動取込、予約スクショ、予約表、本日の予約 | RSV-01 予約メール・スクショ・予約表 |
-| OPS 店舗運用・権限・小口 | ルーム設定、配信、検索、メディア、小口現金とトラブル対応 | OPS-01 ルーム設定・権限・セルフ設定<br>OPS-02 検索・メディア・予定の探し方<br>OPS-03 小口現金・経費・出金 |
-| JRN Journal Report基本・取込 | 電子ジャーナル取込、保存レポート、店舗情報と確定集計 | JRN-01 Journal Reportの目的と画面<br>JRN-02 ジャーナル取込・保存レポート・原本<br>JRN-03 確定集計・カテゴリ・ランチ／ディナー<br>JRN-04 店舗情報・営業カレンダー・ワインml |
+| OPS 店舗運用・権限・小口 | ルーム設定、配信、検索、メディア、小口現金とトラブル対応 | OPS-01 ルーム設定・権限・セルフ設定<br>OPS-02 検索・メディア・予定の探し方<br>OPS-03 小口現金・経費・出金<br>OPS-04 メディア・文書ライブラリと閲覧権限 |
+| JRN Journal Report基本・取込 | 電子ジャーナル取込、保存レポート、店舗情報と確定集計 | JRN-01 Journal Reportの目的と画面<br>JRN-02 ジャーナル取込・保存レポート・原本<br>JRN-03 確定集計・カテゴリ・ランチ／ディナー<br>JRN-04 店舗情報・営業カレンダー・ワインml<br>JRN-05 LINE Report電子ジャーナルとJournal Reportの違い |
 | KNW 資料・#メモ・店舗情報 | 資料タブ、LINE #メモ、施策・メニュー・営業カレンダー | KNW-01 資料タブ・施策・メニュー資料<br>KNW-02 LINE #メモ・#日報・添付資料登録 |
 | JAI Journal AI分析・チャット | 確定集計、商品・コード・コース、比較、予約、予測、PDF | JAI-01 標準AI分析の根拠と出力<br>JAI-02 AIチャットで質問できる内容<br>JAI-03 商品・銘柄・商品コード・コース分析<br>JAI-04 予約・飛び込み・売上予測・MAPE<br>JAI-05 履歴・ゴミ箱・管理者機能 |
-| FCT フードコート分析・日報・予測 | テナント実績、イベント・天気、日報、複数AI、来客予測と進化 | FCT-01 フードコート分析の全体像とデータ<br>FCT-02 フードコート複数AI・Q&A・サマリー<br>FCT-03 来客予測・MAPE・AI学習進化<br>FCT-04 フードコート日報・日次履歴・週次報告 |
+| FCT フードコート分析・日報・予測 | テナント実績、イベント・天気、日報、複数AI、来客予測と進化 | FCT-01 フードコート分析の全体像とデータ<br>FCT-02 フードコート複数AI・Q&A・サマリー<br>FCT-03 来客予測・MAPE・AI学習進化<br>FCT-04 フードコート日報・日次履歴・週次報告<br>FCT-05 品質評価・RAG・蒸留・プロンプト候補<br>FCT-06 イベント・天気・週次配信・日本戦PVアラート |
 | REV 口コミ・競合分析 | 自店舗Google口コミ、周辺競合、評価・件数・競合圧力 | REV-01 自店舗Google口コミ<br>REV-02 周辺競合・口コミ・競合圧力 |
-| ADM 管理・利用状況・システム情報 | 管理画面、承認、Webhook、ログ、AI使用量、システムマップ | ADM-01 管理画面・接続設定・承認・ログ<br>ADM-02 AI使用量・システムマップ・利用状況 |
-| SEC 正確性・安全・制限 | 数値の正本、店舗スコープ、非公開保存、回答できる範囲 | SEC-01 回答の正確性・データ保護・回答範囲<br>SEC-02 困ったときの切り分けと案内先 |
+| ADM 管理・利用状況・システム情報 | 管理画面、承認、Webhook、ログ、AI使用量、システムマップ | ADM-01 管理画面・接続設定・承認・ログ<br>ADM-02 AI使用量・システムマップ・利用状況<br>ADM-03 M-talk管理・権限テンプレート・監査復元 |
+| DEV コード構成・API・データ基盤 | 公開画面、Edge Functions、DB・Storage・Realtime、テストとデプロイ | DEV-01 公開画面・フロントエンドの構成<br>DEV-02 Edge Functions・API・Webhookの責務<br>DEV-03 DB・Storage・Realtime・cronの基盤<br>DEV-04 テスト・知識同期・デプロイ<br>DEV-05 補助コード・GAS・OCR・レガシー経路 |
+| SEC 正確性・安全・制限 | 数値の正本、店舗スコープ、非公開保存、回答できる範囲 | SEC-01 回答の正確性・データ保護・回答範囲<br>SEC-02 困ったときの切り分けと案内先<br>SEC-03 現在の対応範囲・未統合データ・既知の制限 |
 
 ## 回答ルール
 
@@ -50,6 +51,8 @@ LINE Report、M-talk、Journal Report、管理画面の役割と入口
 
 **検索語:** line report / lineレポート / 全体 / 全体像 / 仕組み / 構成 / 何ができる / m-talk / mtalk / ジャーナルレポート / journal report / 管理画面 / 違い
 
+**主な実装根拠:** `public/pages-config.js` / `public/index.html` / `public/chat.html` / `public/jnm/jnl2txt.html`
+
 ### SYS-02 主な画面とログイン・店舗範囲
 
 **要点:** どの画面を何に使い、どの店舗まで見られるかを説明する。
@@ -60,6 +63,8 @@ LINE Report、M-talk、Journal Report、管理画面の役割と入口
 - 公開ページから業務DBを直接読むのではなく、認証・店舗範囲を確認する管理APIを通して取得します。
 
 **検索語:** 画面 / ページ / どこ / 入口 / ログイン / 管理トークン / ワンタイムリンク / 店舗選択 / 他店 / 自店 / アクセス / url / メニュー
+
+**主な実装根拠:** `public/auth-session.js` / `supabase/functions/_shared/admin_dashboard_link_auth.ts` / `supabase/functions/admin-api/index.ts`
 
 ## SAL 売上・レシート・予算
 
@@ -77,6 +82,8 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 
 **検索語:** lineコマンド / コマンド / 予算登録 / 売上検索 / 検索 / レシート修正 / レシート削除 / 登録確認 / キャンセル / 設定 / 数字 / 6桁 / 8桁
 
+**主な実装根拠:** `supabase/functions/_shared/line_search_bot.ts` / `supabase/functions/_shared/budget_entry_flow.ts` / `supabase/functions/_shared/store_receipt.ts`
+
 ### SAL-02 LINEレシート解析・売上登録
 
 **要点:** レシート画像を売上へ登録する流れと対象外画像を説明する。
@@ -89,6 +96,8 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 
 **検索語:** レシート / 売上登録 / 画像 / 精算 / ocr / 解析 / 組数 / 客数 / 客単価 / 反射 / 登録されない / 期間集計 / 日計
 
+**主な実装根拠:** `supabase/functions/line-webhook/index.ts` / `supabase/functions/_shared/receipt_vision.ts` / `supabase/functions/_shared/receipt_save_flow.ts`
+
 ### SAL-03 レシート修正・削除・同日重複
 
 **要点:** 解析後の数値修正、削除、同日重複の選択方法を説明する。
@@ -99,6 +108,8 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 - 同じ日のレシートがある場合は「加算」「置き換え」「中止」から選びます。解析結果そのものを消すときは削除操作を使います。
 
 **検索語:** 修正 / 訂正 / 削除 / 重複 / 加算 / 置き換え / 上書き / 同じ日 / 会計組数 / 値を空 / 戻る / 保存して終了
+
+**主な実装根拠:** `supabase/functions/_shared/receipt_correction.ts` / `supabase/functions/_shared/receipt_duplicate.ts` / `supabase/functions/_shared/receipt_line_actions.ts`
 
 ### SAL-04 月間予算・日別配分・売上照会
 
@@ -112,6 +123,8 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 
 **検索語:** 月間予算 / 予算 / 日別予算 / 曜日重み / 休日 / 店休日 / 祝日 / 売上照会 / 日次売上 / 月次売上 / 着地予測 / 進捗
 
+**主な実装根拠:** `public/analytics.html` / `supabase/functions/_shared/budget_entry_flow.ts` / `supabase/functions/_shared/sales_budget_allocation.ts` / `supabase/functions/_shared/admin_receipt_sales.ts`
+
 ### SAL-05 Excel取込・売上分析・定期レポート
 
 **要点:** Excel売上取込、分析画面、定期レポート配信を説明する。
@@ -122,6 +135,22 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 - 売上中間報告は原則毎月16日、月末レポートは翌月1日に指定ルームへ配信し、ON/OFFや送信先はルーム設定で管理します。
 
 **検索語:** excel / エクセル / 売上分析 / analytics / アップロード / 対象期間 / 店舗キー / 中間報告 / 月末レポート / 配信 / 曜日 / 予算進捗
+
+**主な実装根拠:** `public/analytics.html` / `supabase/functions/_shared/daily_sales_import.ts` / `supabase/functions/_shared/receipt_sheets_pilot_sync.ts` / `supabase/functions/receipt-sheets-sync-cron/index.ts`
+
+### SAL-06 手入力売上・売上シート・店舗別解析設定
+
+**要点:** レシート以外の補正入力、売上シート連携、店舗固有解析設定を説明する。
+
+- 売上分析の日次表は、総売上・組数・客数をセル単位で手入力補正できます。送信された列だけを上書きし、空欄で手入力上書きを解除します。
+- 所定のxlsx／csvはドラッグ＆ドロップで解析し、店舗・期間・日数・合計・日別一覧を確認してから既存日へ上書きできます。解析だけではDBへ書かず、確認後に確定します。
+- 月次手入力と日次手入力はレシート集計と区別して保持し、画面では正本・上書きの優先順位に従って表示します。
+- 売上シート導線が設定された店舗では、管理ページからGoogleスプレッドシートを開けます。同期対象・正本方向は店舗ごとの運用設定に従います。
+- 店舗固有のレシート様式は、共通解析ルールを壊さず店舗別追記プロンプトで補強できます。Webhook状態、店舗候補、電話照合等も管理APIで確認します。
+
+**検索語:** 手入力売上 / 手入力 / 日次手入力 / 月次手入力 / セル編集 / 日次セル / セル / 直す / ドラッグ / csv取込 / 売上シート / googleスプレッドシート / sheets pilot / 解析プロンプト / 店舗別プロンプト / webhook状態 / 店舗電話
+
+**主な実装根拠:** `public/analytics.html` / `supabase/functions/_shared/manual_day_sales.ts` / `supabase/functions/_shared/manual_month_sales.ts` / `supabase/functions/_shared/daily_sales_import.ts` / `supabase/functions/_shared/receipt_sheets_pilot_sync.ts` / `supabase/functions/admin-api/index.ts`
 
 ## RSV 予約・カレンダー
 
@@ -139,6 +168,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 予約 / gmail / 食べログ / 一休 / スクショ / 電話予約 / 予約表 / 予約回数 / キャンセル回数 / 過去の予約 / 変更 / カレンダー / 本日の予約
 
+**主な実装根拠:** `public/reservation.html` / `public/mtalk_schedule.html` / `supabase/functions/gmail-alert-cron/index.ts` / `supabase/functions/_shared/reservation_mail_rules.ts` / `supabase/functions/admin-api/index.ts`
+
 ## OPS 店舗運用・権限・小口
 
 ルーム設定、配信、検索、メディア、小口現金とトラブル対応
@@ -154,6 +185,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** ルーム設定 / 権限 / 機能設定 / ai返信完全無し / 予算登録を許可 / レシート解析結果 / セルフ設定 / パスワード / ワンパス / ゴミ箱 / 復元
 
+**主な実装根拠:** `public/index.html` / `public/room_settings.html` / `public/chat-admin.html` / `supabase/functions/_shared/room_config_link.ts` / `supabase/functions/admin-api/index.ts`
+
 ### OPS-02 検索・メディア・予定の探し方
 
 **要点:** 1対1検索と店舗ルームの検索範囲を区別する。
@@ -164,6 +197,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 検索結果は参加・閲覧権限の範囲内だけです。参加前メッセージは取得できません。
 
 **検索語:** 会話検索 / トーク検索 / 予定検索 / カレンダー検索 / メディア検索 / 画像検索 / ファイル検索 / 過去メッセージ / 横断検索 / 検索できない
+
+**主な実装根拠:** `public/message-search.html` / `public/media.html` / `supabase/functions/_shared/line_search_bot.ts` / `supabase/functions/_shared/line_room_message_search.ts` / `supabase/functions/_shared/line_media_store.ts`
 
 ### OPS-03 小口現金・経費・出金
 
@@ -176,6 +211,22 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 通常の自店舗精算レシートは売上扱いであり、経費コマンドを使わない限り小口へ混ぜません。
 
 **検索語:** 小口 / 小口現金 / 経費 / 出金 / レジ出金 / 勘定科目 / 税率 / 外税 / 内税 / 消耗品 / 仕入 / csv
+
+**主な実装根拠:** `public/petty_cash.html` / `supabase/functions/_shared/petty_cash_flow.ts` / `supabase/functions/admin-api/index.ts`
+
+### OPS-04 メディア・文書ライブラリと閲覧権限
+
+**要点:** LINE受信メディアと管理文書の保存・絞り込み・権限・容量を説明する。
+
+- メディア閲覧は、保存許可されたLINE／M-talkルームの画像・動画・音声・ファイルを店舗・ルーム・種別で絞り込み、プレビュー・ダウンロード・削除する画面です。
+- LINE受信メディアはルーム単位で非公開保存し、1ルーム合計20MBを超えると古い順に削除します。OCR用原画像の処理とは別の閲覧用コピーです。
+- 文書ライブラリにはTXT、PDF、DOCX、XLSXをルームへ紐付けてドラッグ＆ドロップでき、一覧、ページング、削除、閲覧許可ユーザーの選択を行えます。
+- M-talkから開くメディア画面は発行元ルームに対応する店舗・ルームへ限定され、管理者向け全件画面より狭い範囲です。
+- 画像・文書本体は非公開Storageに置き、表示・ダウンロード時だけ署名URLを使います。アップロード上限は管理設定と各機能の上限に従います。
+
+**検索語:** メディア閲覧 / メディアライブラリ / 文書 / 資料アップロード / document / 画像 / 動画 / 音声 / ファイル / pdf / docx / xlsx / 閲覧許可 / 容量 / 20mb / 古い順 / 削除
+
+**主な実装根拠:** `public/media.html` / `supabase/functions/_shared/line_media_store.ts` / `supabase/functions/_shared/knowledge_file_extract.ts` / `supabase/functions/admin-api/index.ts`
 
 ## JRN Journal Report基本・取込
 
@@ -193,6 +244,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** journal report / ジャーナルレポート / 目的 / タブ / 使い方タブ / 変換タブ / 店舗情報タブ / 資料タブ / 保存済みレポート / 何ができる
 
+**主な実装根拠:** `public/jnm/index.html` / `public/jnm/jnl2txt.html` / `docs/JOURNAL-REPORT-FEATURES.md`
+
 ### JRN-02 ジャーナル取込・保存レポート・原本
 
 **要点:** POS原本の取込から日別・月間レポート保存までを説明する。
@@ -204,6 +257,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 古い解析版は再作成を促します。印刷やAI分析は現行解析版を前提にします。
 
 **検索語:** lzh / jnl / ジャーナル取込 / 変換 / ドロップ / 解凍 / 文字コード / 保存レポート / 日別 / 月間 / 原本 / 再アップロード / 修復 / 重複
+
+**主な実装根拠:** `public/pos-journal.html` / `public/jnm/jnl2txt.html` / `supabase/functions/_shared/pos_journal.ts` / `supabase/functions/_shared/pos_journal_lha.ts` / `supabase/functions/admin-api/index.ts`
 
 ### JRN-03 確定集計・カテゴリ・ランチ／ディナー
 
@@ -217,6 +272,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 確定集計 / 正本 / saved_reports / pos_journal / 伝票明細 / 商品点数 / ランチ / ディナー / 16時 / フード / 飲料 / 室料 / カテゴリ
 
+**主な実装根拠:** `public/jnm/jnl2txt.html` / `supabase/functions/_shared/pos_journal.ts` / `docs/JOURNAL-AI-CHAT-RULES.md`
+
 ### JRN-04 店舗情報・営業カレンダー・ワインml
 
 **要点:** AIが参照する店舗前提、施策カレンダー、ワイン量換算を説明する。
@@ -228,6 +285,22 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 「どれくらいワインが出たか」が曖昧な場合は、点数・総ml・両方のどれを見たいか確認してから回答します。
 
 **検索語:** 店舗情報 / 定休日 / 定休 / ランチ / ディナー / 特別営業 / カレンダー / イベント / 過去売上同期 / ワイン / ml / グラス / ボトル / ペアリング
+
+**主な実装根拠:** `public/jnm/jnl2txt.html` / `supabase/functions/_shared/journal_sales_sync.ts` / `supabase/functions/admin-api/index.ts`
+
+### JRN-05 LINE Report電子ジャーナルとJournal Reportの違い
+
+**要点:** pos-journal.htmlとJournal Report本体の役割・共有データ・操作差を説明する。
+
+- LINE Report電子ジャーナル（pos-journal.html）は、店舗・月ごとのLZH原本、売上サマリー、日別推移、決済、商品、会計明細、簡易AI分析・質問・PDF・履歴をLINE Reportの共通画面で扱います。
+- Journal Report（public/jnm/jnl2txt.html）は、詳細な取込・保存レポート、店舗情報、資料、標準AI分析、広いAIチャット、商品検索、コホート、予測・MAPE等を扱う専門画面です。
+- 両者は同店舗・同月の原本と保存済みレポートを共有参照します。原本がある日は原本を優先し、ない日だけ保存レポートで補完して二重計上を防ぎます。
+- LINE Report電子ジャーナルの「詳しく分析する」はJournal Reportを別タブで開きます。正確な詳細商品分析や長期比較はJournal Reportが適しています。
+- 電子ジャーナル画面の「PDFにまとめる」は表示中の売上サマリーと商品ランキングを対象とし、原本一覧や全会計明細を含む完全バックアップではありません。
+
+**検索語:** pos-journal / line report電子ジャーナル / journal reportとの違い / 電子ジャーナル画面 / 売上サマリー / 保管ファイル / 詳しく分析する / 共有レポート / pdfにまとめる / どちらを使う
+
+**主な実装根拠:** `public/pos-journal.html` / `public/jnm/jnl2txt.html` / `supabase/functions/_shared/pos_journal.ts` / `supabase/functions/admin-api/index.ts`
 
 ## KNW 資料・#メモ・店舗情報
 
@@ -245,6 +318,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 資料タブ / 資料登録 / 施策 / メニュー / 価格改定 / イベント / マニュアル / 添付 / rag / チャンク / 有効 / 無効 / 論理削除
 
+**主な実装根拠:** `public/jnm/jnl2txt.html` / `supabase/functions/_shared/knowledge_file_extract.ts` / `supabase/functions/admin-api/index.ts` / `docs/JOURNAL-STORE-KNOWLEDGE.md`
+
 ### KNW-02 LINE #メモ・#日報・添付資料登録
 
 **要点:** LINEから店舗資料へ現場メモや添付を登録する方法を説明する。
@@ -256,6 +331,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 成功後の資料はJournal Reportの資料タブで閲覧・編集します。LINE上だけで資料一覧は表示しません。
 
 **検索語:** #メモ / ＃メモ / #日報 / #note / lineメモ / 現場日報 / 引用返信 / 画像メモ / pdfメモ / 資料へ登録 / 登録されない
+
+**主な実装根拠:** `supabase/functions/chat-knowledge/index.ts` / `supabase/functions/line-webhook/index.ts` / `supabase/functions/_shared/knowledge_memo_tag.ts` / `supabase/functions/admin-api/index.ts`
 
 ## JAI Journal AI分析・チャット
 
@@ -273,6 +350,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 標準ai分析 / ai分析 / コンサル分析 / 経営分析 / ワイン戦略 / ダッシュボード / 履歴 / 根拠 / 外部知見 / luna / claude
 
+**主な実装根拠:** `supabase/functions/ai-analyze/index.ts` / `supabase/functions/_shared/journal_ai_orchestrate.ts` / `public/jnm/jnl2txt.html`
+
 ### JAI-02 AIチャットで質問できる内容
 
 **要点:** AIチャットの質問範囲、曖昧質問の確認、PDF保存を説明する。
@@ -284,6 +363,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - M-talkからは1対1の入力欄「＋」→「ジャーナルに聞く」で同じJournal Report AIを開けます。
 
 **検索語:** aiチャット / ジャーナルに聞く / 質問 / 期間比較 / 月次推移 / 客単価 / 曜日 / 時間帯 / 改善案 / pdfにする / clarifier / 確認
+
+**主な実装根拠:** `public/jnm/jnl2txt.html` / `public/mtalk_journal_ai.html` / `supabase/functions/admin-api/index.ts`
 
 ### JAI-03 商品・銘柄・商品コード・コース分析
 
@@ -297,6 +378,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 商品 / 銘柄 / 商品コード / 下4桁 / 0023 / 2103 / 売れ行き / 初出 / 導入月 / コード再利用 / 別名 / コース / ラインナップ / ランキング
 
+**主な実装根拠:** `supabase/functions/_shared/journal_product_index.ts` / `public/jnm/jnl2txt.html` / `supabase/functions/admin-api/index.ts`
+
 ### JAI-04 予約・飛び込み・売上予測・MAPE
 
 **要点:** 予約データの扱いと、保存レポートを使う売上予測・精度確認を説明する。
@@ -309,6 +392,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 予約事実 / 予約vs飛び込み / 飛び込み / 新規 / リピート / チャネル / 食べログ / 一休 / 予測 / 売上予測 / mape / 予測履歴 / 誤差
 
+**主な実装根拠:** `supabase/functions/_shared/reservation_ai_cache.ts` / `supabase/functions/_shared/pos_journal_ai.ts` / `public/jnm/jnl2txt.html` / `supabase/functions/admin-api/index.ts`
+
 ### JAI-05 履歴・ゴミ箱・管理者機能
 
 **要点:** Journalの各履歴、復元、管理者だけの横断機能を説明する。
@@ -319,6 +404,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 店舗スコープのログインでは、自店舗以外の横断機能は表示・利用できません。
 
 **検索語:** 履歴 / ゴミ箱 / 復元 / 論理削除 / 保存済みレポート / 予測履歴 / ai分析履歴 / チャットpdf履歴 / 店舗横断 / ai使用量 / 管理者
+
+**主な実装根拠:** `public/jnm/jnl2txt.html` / `public/jnm/ai-chat-pdf-history.html` / `public/jnm/ai-usage.html` / `supabase/functions/admin-api/index.ts`
 
 ## FCT フードコート分析・日報・予測
 
@@ -336,6 +423,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** フードコート / marugo s / テナント / テナント一覧 / 売上シェア / 東京ドーム / カナデビア / 後楽園 / イベント / 天気 / 動員数 / データ
 
+**主な実装根拠:** `public/foodcourt.html` / `supabase/functions/_shared/foodcourt_compare.ts` / `supabase/functions/_shared/weather_daily.ts` / `supabase/functions/_shared/tokyo_dome_schedule.ts` / `supabase/functions/admin-api/index.ts`
+
 ### FCT-02 フードコート複数AI・Q&A・サマリー
 
 **要点:** コード事前計算と専門・反証・統合AIの役割分担を説明する。
@@ -347,6 +436,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 各AIが本来のモデルを使えず別モデルへ切り替わった場合は、フォールバック事象として記録し画面で確認できます。
 
 **検索語:** 複数ai / 5+1 / 専門ai / 反証ai / 統合ai / 評価ai / q&a / 日次サマリー / 期間サマリー / 週次 / オーケストレーション / 数字を作らない
+
+**主な実装根拠:** `supabase/functions/_shared/foodcourt_compare.ts` / `supabase/functions/_shared/foodcourt_loop_utils.ts` / `supabase/functions/_shared/foodcourt_distillation.ts` / `tests/foodcourt_prompt_evaluation.test.ts`
 
 ### FCT-03 来客予測・MAPE・AI学習進化
 
@@ -360,6 +451,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 来客予測 / 予測客数 / 予測売上 / 14日 / mape / 予測誤差 / 学習 / 進化 / モデル選択 / glm / ポアソン / 乗算モデル / 毎朝5時 / 毎日5時
 
+**主な実装根拠:** `public/foodcourt-evolution.html` / `supabase/functions/foodcourt-forecast-cron/index.ts` / `supabase/functions/_shared/foodcourt_forecast_utils.ts` / `tests/foodcourt_forecast_utils.test.ts`
+
 ### FCT-04 フードコート日報・日次履歴・週次報告
 
 **要点:** 日報入力内容と、AI分析・週次レポートへの接続を説明する。
@@ -371,6 +464,36 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 日報の自己評価は事実ではなく仮説として実績と照合し、整合・不整合を分けて扱います。
 
 **検索語:** フードコート日報 / 日報 / 担当者 / 施策 / 客数考察 / 売上考察 / 動員数 / 課題 / 申し送り / 週次報告 / 週次レポート / アーカイブ
+
+**主な実装根拠:** `public/foodcourt-report.html` / `public/foodcourt-weekly-report.html` / `supabase/functions/_shared/foodcourt_compare.ts` / `supabase/functions/admin-api/index.ts`
+
+### FCT-05 品質評価・RAG・蒸留・プロンプト候補
+
+**要点:** AI回答の評価履歴、教材化、プロンプト改善と現在の実装範囲を説明する。
+
+- Q&A等の品質ループは、正確性・根拠・実用性等を評価し、不合格時に改善点だけを統合AIへ戻します。実行履歴とフィードバックは進化画面で確認できます。
+- 合格・承認された回答はRAG教材候補や蒸留用JSONLとして出力でき、入力・下書き・評価・最終回答の組を将来の改善材料にします。
+- プロンプト評価セット、候補、比較結果、進化準備状況を管理するAPIと画面があります。月次振り返りでは蓄積状況と改善材料を確認します。
+- これらは品質改善の基盤であり、外部モデルが自動的に再学習・ファインチューニングされ続けているという意味ではありません。本格的な蒸留モデル運用は別段階です。
+- 予測モデルの毎日再学習と、文章回答のRAG・評価・蒸留は別の改善ループとして扱います。
+
+**検索語:** 品質評価 / aiループ / 評価軸 / rag / 蒸留 / distillation / 教材 / プロンプト候補 / プロンプト評価 / evaluation set / monthly retrospective / 月次振り返り / evolution readiness
+
+**主な実装根拠:** `public/foodcourt-evolution.html` / `supabase/functions/_shared/foodcourt_loop_utils.ts` / `supabase/functions/_shared/foodcourt_distillation.ts` / `supabase/functions/admin-api/index.ts` / `docs/AI_LOOP_ENGINEERING_DESIGN.md`
+
+### FCT-06 イベント・天気・週次配信・日本戦PVアラート
+
+**要点:** イベント・天気の自動取得と、週次／PV通知の確証ルールを説明する。
+
+- 東京ドーム本体、カナデビアホール、後楽園ホールのイベントは定期取得し、画面、AI分析、予測特徴量へ使います。取得元ごとに独立して処理し、1会場の失敗で全体を止めません。
+- 天気は日次取得し、イベント・曜日とともにフードコート分析と予測へ結び付けます。古いキャッシュや予報・実績の違いに注意します。
+- 週次イベント配信はルーム設定の曜日・時刻に従い、原則今後2週間を会場別のLINE Flexで送ります。二重送信防止ログを持ちます。
+- 日本戦PVは、公式確認済みなら「PV決定」、営業時間外の未確定試合は必要時に「要確認」として区別し、未確認情報を決定事項として断定しません。
+- PVやイベントの大集客が自店舗売上へ同じ割合で直結するとは限らず、競技・会場・時間帯・他イベントとの重なりを分けて分析します。
+
+**検索語:** 東京ドームイベント / カナデビア / 後楽園ホール / 天気cron / 週次イベント配信 / 2週間 / pv / パブリックビューイング / 日本戦 / 深夜 / 要確認 / pv決定 / アラート
+
+**主な実装根拠:** `public/foodcourt.html` / `supabase/functions/tokyo-dome-events-cron/index.ts` / `supabase/functions/tokyo-dome-weekly-cron/index.ts` / `supabase/functions/pv-japan-alert-cron/index.ts` / `supabase/functions/weather-daily-cron/index.ts` / `supabase/functions/_shared/tokyo_dome_schedule.ts`
 
 ## REV 口コミ・競合分析
 
@@ -387,6 +510,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 自店舗口コミ / google口コミ / レビュー / 評価 / 口コミ件数 / place id / 店舗検索 / 口コミ更新 / 登録解除 / 店舗理解資料
 
+**主な実装根拠:** `public/reviews.html` / `supabase/functions/_shared/competitor_review_context.ts` / `supabase/functions/admin-api/index.ts`
+
 ### REV-02 周辺競合・口コミ・競合圧力
 
 **要点:** 競合店の登録・周辺検索・口コミ取得と補助指標の扱いを説明する。
@@ -397,6 +522,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 競合でない店舗は売上分析から外せます。口コミ・競合情報は外部環境の補助材料であり、自店舗売上の確定値や直接因果の証明には使いません。
 
 **検索語:** 競合 / 周辺競合 / 競合店 / 競合口コミ / 競合圧力 / 登録競合 / 近隣検索 / google place id / ai競合 / ai除外 / 売上分析から外す
+
+**主な実装根拠:** `public/reviews.html` / `supabase/functions/_shared/competitor_review_context.ts` / `supabase/functions/review-alert-cron/index.ts`
 
 ## ADM 管理・利用状況・システム情報
 
@@ -414,6 +541,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 管理画面 / 接続設定 / 利用状況 / webhook設定 / ログ / アクセス履歴 / ユーザー権限 / 承認 / 管理bot / 許可 / 不許可 / 新規ルーム / 自動連携
 
+**主な実装根拠:** `public/index.html` / `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `supabase/functions/_shared/line_admin_webhook.ts` / `supabase/functions/_shared/line_user_approval.ts`
+
 ### ADM-02 AI使用量・システムマップ・利用状況
 
 **要点:** AI利用コストと、管理者向けシステム構造・利用量画面を説明する。
@@ -425,6 +554,96 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 公開システムマップにはコード・SQL構造だけを載せ、顧客情報、投稿本文、レシート、添付等の実データは含めません。
 
 **検索語:** ai使用量 / ai使用料 / トークン / 概算費用 / 利用状況 / db容量 / line push / システムマップ / graphify / obsidian / 構成図 / 管理者のみ
+
+**主な実装根拠:** `public/ai-usage.html` / `public/system-map.html` / `supabase/functions/admin-api/index.ts` / `docs/AI_KNOWLEDGE_SYSTEM.md`
+
+### ADM-03 M-talk管理・権限テンプレート・監査復元
+
+**要点:** 本部向けM-talk管理の利用者・ルーム・Bot・監査機能を説明する。
+
+- M-talk管理画面は本部フル管理者専用で、LINEユーザー承認とは別のM-talk利用状態とルーム権限を管理します。
+- ユーザー全体の利用停止・期限付き制限・論理削除と、ルームごとの閲覧・送信・招待・管理権限を設定できます。
+- 権限テンプレートは変更対象をプレビューしてから一括適用し、閲覧権限なしで他権限だけを付ける矛盾を防ぎます。ユーザー別の有効アクセスと拒否理由も確認できます。
+- 監査ログは変更前後を記録し、競合がない場合に限り一度だけ復元できます。復元操作そのものも監査されます。
+- 管理画面では通常ルームのゴミ箱・復元・完全削除と、Botの論理削除・復元を行えます。通常M-talk画面からBotは削除できません。
+
+**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / ルームゴミ箱
+
+**主な実装根拠:** `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `docs/CHAT-ADMIN-PERMISSIONS.md` / `tests/chat_admin_permissions.test.mjs` / `tests/chat_admin_templates.test.mjs`
+
+## DEV コード構成・API・データ基盤
+
+公開画面、Edge Functions、DB・Storage・Realtime、テストとデプロイ
+
+### DEV-01 公開画面・フロントエンドの構成
+
+**要点:** GitHub Pages配信元、主要HTML、共通ブラウザコードの役割を説明する。
+
+- 公開画面はリポジトリのpublic配下をGitHub Pagesへ配信します。既存URL互換のため、主要HTML名はpublic直下で維持します。
+- 管理画面、売上分析、口コミ、予約、メディア、検索、M-talk、フードコート、POS電子ジャーナル等は個別HTMLです。
+- Journal Report本体はpublic/jnm/jnl2txt.htmlで、public/jnm/index.htmlはクエリ等を保って本体へ送る入口です。大きなインラインJavaScriptがあるため、GraphifyだけでなくHTMLを直接確認します。
+- 認証、ページ設定、テーマ、ログアウト、キャッシュ等は共通JavaScriptへ分けています。M-talkはSupabase Auth・Realtimeをブラウザから利用し、業務管理画面はadmin-apiを通します。
+- public/system-map配下は知識更新で生成される構造図です。vendor配下は固定したブラウザライブラリです。
+
+**検索語:** フロントエンド / 公開画面 / public / html / github pages / pages / chat.html / analytics.html / pos-journal.html / jnl2txt.html / 画面のコード
+
+**主な実装根拠:** `public` / `docs/REPOSITORY_STRUCTURE.md` / `.github/workflows/deploy-pages.yml`
+
+### DEV-02 Edge Functions・API・Webhookの責務
+
+**要点:** 主要Edge Functionと中央APIの役割分担を説明する。
+
+- admin-apiは管理画面、売上、予約、小口、POSジャーナル、資料、フードコート、口コミ、M-talk管理等の中央APIです。管理・店舗・ルーム・cronの各スコープを入口で強制します。
+- line-webhookは店舗別LINEイベントを署名検証後に処理し、レシート、検索、予算、経費、予約スクショ、#メモ等へ振り分けます。line-admin-webhookは承認専用です。
+- chat-knowledgeはM-talk店舗ルームのBot処理と1対1の使い方AIを担当し、chat-searchは検索、chat-pushはWeb Pushを担当します。
+- ai-analyzeはJournal Reportの標準AI分析・チャット・確認経路を担当します。Gmail、予約配信、売上レポート、天気、イベント、予測、保持等は用途別cronへ分離しています。
+- verify_jwt=falseの関数もあるため、各関数側のLINE署名、内部シークレット、cronトークン等の認可を必須とします。
+
+**検索語:** edge function / supabase function / admin-api / line-webhook / chat-knowledge / chat-push / chat-search / ai-analyze / webhook / apiルート / どの関数
+
+**主な実装根拠:** `supabase/functions` / `supabase/config.toml` / `.github/workflows/deploy-edge-functions.yml`
+
+### DEV-03 DB・Storage・Realtime・cronの基盤
+
+**要点:** SupabaseのDB隔離、非公開Storage、Realtime、定期処理を説明する。
+
+- 本番のLINE Report業務データは同一Supabaseプロジェクトで管理し、スキーマ変更はsupabase/migrationsのSQLを正本にします。
+- 業務テーブルは公開クライアントから直接読ませず、RLS、権限剥奪、管理API、店舗スコープで多層防御します。M-talkのチャットテーブルはAuth・RLS・ルーム権限で直接利用します。
+- 画像、POS原本、レポートHTML、資料添付等は用途別の非公開Storageへ保存し、閲覧時に期限付き署名URLを発行します。
+- M-talkはSupabase Realtimeでメッセージ、既読、リアクション、個人メモ等を同期し、未読や参加時点の境界もDB側で守ります。
+- 予約、売上レポート、天気、イベント、予測、キャッシュ、保持等はcronとEdge Functionsで定期実行し、重複防止・認証・ログを持ちます。
+
+**検索語:** supabase / データベース / db / テーブル / migration / rls / storage / バケット / 署名url / realtime / cron / pg_cron / 店舗スコープ
+
+**主な実装根拠:** `supabase/migrations` / `docs/SECURITY.md` / `docs/SUPABASE-OWNERSHIP.md`
+
+### DEV-04 テスト・知識同期・デプロイ
+
+**要点:** 静的検査、テスト群、Graphify・Obsidian同期、本番反映手順を説明する。
+
+- npm run checkはブラウザ共通JS、リポジトリ構造、所有Function、Journal AIデータ接続、シェル構文等を検査します。npm run testは知識、構造、チャット、フードコート、予約、レシート、Journal AI、POS Journalを実行します。
+- コード・SQL構造はGraphify、運用・設計文書はObsidian／docsで補い、npm run knowledge:update後にknowledge:checkでハッシュ、SQL coverage、ミラー、秘密情報混入を確認します。
+- 統合AI資料はline_report_help_manual.tsを実行時正本にし、npm run help:updateで人間向けMarkdownを生成し、help:checkとテストでコード入口の網羅と生成一致を検査します。
+- mainへのpush後、GitHub ActionsがpublicをPagesへ配信し、Edge Functions・migrationを本番Supabaseへ反映します。必要な変更だけをデプロイし、ワークフローと本番Functionバージョンを確認します。
+- UI変更はローカルPagesでPC・モバイルを確認し、APIは未認証401、店舗範囲、RLS、実データを変更しないテスト等を用途に応じて確認します。
+
+**検索語:** テスト / test / check / knowledge / graphify / obsidian / デプロイ / github actions / deploy pages / deploy edge functions / 本番反映 / 検証
+
+**主な実装根拠:** `package.json` / `AGENTS.md` / `scripts/update-knowledge-vault.sh` / `scripts/check-knowledge-system.mjs` / `tests`
+
+### DEV-05 補助コード・GAS・OCR・レガシー経路
+
+**要点:** 本番Supabase／Pages経路と、補助・移行・旧ローカルコードを区別する。
+
+- 現在のLINE Report本番はGitHub PagesのpublicとSupabaseのadmin-api・各Edge Function・DBを正本にします。
+- google-apps-script/receipt-sheets-pilotは、売上スプレッドシートの編集・同期を補助するGASです。GASはGitHub ActionsのEdgeデプロイとは別にclasp／スクリプトプロパティ設定が必要です。
+- ocr-bridgeはOCR補助サービス用のPython・Docker構成です。主なLINEレシート解析はSupabase Edge側のreceipt_vision等で動くため、OCRブリッジを全レシートの唯一経路と説明しません。
+- cloudflare-workerは補助・レガシーWebhook経路、src/server.jsとsrc/db.jsは旧LINE-WINE向けローカルExpress／SQLiteです。現行LINE Report本番の管理API・チャット・Journal Reportとは分けます。
+- scripts配下にはデータ掃除、移行、ダミーデータ、POS解析、GAS設定、知識更新、整合検査、ローカルプレビュー等があり、通常利用者の画面機能ではなく開発・運用コマンドです。
+
+**検索語:** 補助コード / レガシー / legacy / cloudflare worker / express / sqlite / ocr bridge / ocrブリッジ / google apps script / gas / clasp / src server / どれが本番 / 古いコード
+
+**主な実装根拠:** `google-apps-script/receipt-sheets-pilot/Code.gs` / `cloudflare-worker/src/index.js` / `ocr-bridge/app.py` / `src/server.js` / `src/db.js` / `docs/REPOSITORY_STRUCTURE.md`
 
 ## SEC 正確性・安全・制限
 
@@ -442,6 +661,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 正確 / 安全 / セキュリティ / プライバシー / 非公開 / 店舗スコープ / 他店舗 / 根拠 / 推測 / 個人情報 / 電話番号 / 何に答えられる
 
+**主な実装根拠:** `docs/SECURITY.md` / `supabase/functions/admin-api/index.ts` / `supabase/functions/_shared/journal_ai_privacy.ts` / `supabase/functions/_shared/admin_dashboard_link_auth.ts`
+
 ### SEC-02 困ったときの切り分けと案内先
 
 **要点:** 症状ごとに、設定・画像・権限・データ有無のどこを確認するかを示す。
@@ -454,6 +675,23 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 困った / トラブル / エラー / 動かない / 来ない / 登録されない / 見えない / 送れない / ログインできない / どこに聞く / 確認方法
 
+**主な実装根拠:** `docs/操作マニュアル.md` / `docs/店舗運用修正記録.md` / `supabase/functions/_shared/line_report_help_manual.ts` / `supabase/functions/_shared/mtalk_help_manual.ts`
+
+### SEC-03 現在の対応範囲・未統合データ・既知の制限
+
+**要点:** 「データが存在する」と「通常AIへ統合済み」を区別し、誤回答を防ぐ。
+
+- Journalの通常AI分析・チャットには多くの確定データを統合しますが、ジャーナル由来の天候・気温は現状、通常AI用テキストへ明示的に全て渡していません。別のPOS Journal AIには天候分析があります。
+- 過去の売上予測・MAPE履歴は専用UIで閲覧できますが、通常の新しいAI回答へ過去予測の当たり外れを自動再投入してはいません。
+- 過去のAI分析文章は閲覧履歴であり、新しい回答の事実ソースとして再利用せず、保存レポートから数値を再計算します。
+- 資料の施策効果インサイト生成APIはありますが、Journal画面・LINE・定期処理から自動実行する現行導線は確認できません。
+- 予約を使う集客構造分析はBistro CAVACAVAの2026年5月以降が現行対象で、開始前や他店舗を予約0件・飛び込み100%として扱いません。
+- 外部サービスの接続状態、ルームの現在設定、最新店舗数値は資料だけで確定できないため、対象画面・管理者・実データで確認します。
+
+**検索語:** 対応範囲 / 未対応 / 未統合 / 入っていない / まだ入っていない / 使われていない / 制限 / 既知の課題 / データがない / 予約開始月 / cavacava / 2026年5月 / 天候 / mape履歴 / 過去ai分析 / generate-insight / 自動生成 / 何が使われない
+
+**主な実装根拠:** `docs/JOURNAL-REPORT-FEATURES.md` / `docs/RESERVATION-AI-COVERAGE.md` / `scripts/verify-journal-ai-data-flow.mjs` / `supabase/functions/_shared/line_report_help_manual.ts`
+
 ## 関連する詳細正本
 
 - `docs/操作マニュアル.md`
@@ -463,3 +701,369 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - `docs/CHAT-TALK-GUIDE.md`
 - `docs/M-TALK-COMPLETE-GUIDE.md`
 - `docs/SECURITY.md`
+
+---
+
+## コード全体精査インベントリ
+
+この節はリポジトリの実コード入口を区分コードへ対応付けた監査表です。
+`npm run help:check` は、新しい入口が未分類のまま追加された場合に失敗します。
+
+- 公開コード入口: 40件
+- Edge Functions: 20件
+- 共有TypeScriptモジュール: 90件
+- 補助・運用・レガシーコード: 37件
+- admin-api静的ルート: 136件
+- SQL migrations: 270件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 63件
+
+### 公開画面・ブラウザコード
+
+| ファイル | 対応する資料区分 |
+|---|---|
+| `public/access-log.js` | ADM-01 / DEV-01 |
+| `public/ai-usage.html` | ADM-02 / DEV-01 |
+| `public/analytics.html` | SAL-04 / SAL-05 / SAL-06 / DEV-01 |
+| `public/app-theme.js` | DEV-01 |
+| `public/auth-session.js` | SYS-02 / SEC-01 / DEV-01 |
+| `public/chat-admin.html` | ADM-01 / ADM-03 / OPS-01 / DEV-01 |
+| `public/chat-sw.js` | OPS-02 / DEV-01 |
+| `public/chat.html` | SYS-01 / OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-01 |
+| `public/chat.webmanifest` | SYS-01 / DEV-01 |
+| `public/foodcourt-evolution.html` | FCT-03 / FCT-05 / DEV-01 |
+| `public/foodcourt-report.html` | FCT-04 / DEV-01 |
+| `public/foodcourt-weekly-report.html` | FCT-04 / FCT-06 / DEV-01 |
+| `public/foodcourt.html` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-01 |
+| `public/index.html` | ADM-01 / ADM-02 / DEV-01 |
+| `public/jnl2txt.html` | JRN-01 / JRN-02 / JAI-01 / JAI-02 / DEV-01 |
+| `public/jnm/ai-chat-pdf-history.html` | JAI-02 / JAI-05 / DEV-01 |
+| `public/jnm/ai-usage.html` | JAI-05 / ADM-02 / DEV-01 |
+| `public/jnm/app-theme.js` | DEV-01 |
+| `public/jnm/auth-session.js` | SYS-02 / SEC-01 / DEV-01 |
+| `public/jnm/index.html` | JRN-01 / DEV-01 |
+| `public/jnm/jnl2txt.html` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / KNW-01 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / JAI-05 / DEV-01 |
+| `public/jnm/journal-ai-client.js` | JAI-01 / JAI-02 / DEV-01 |
+| `public/jnm/journal-ai-privacy.js` | SEC-01 / JAI-01 / DEV-01 |
+| `public/jnm/pages-config.js` | SYS-02 / DEV-01 |
+| `public/line-report.webmanifest` | SYS-01 / DEV-01 |
+| `public/media.html` | OPS-02 / OPS-04 / DEV-01 |
+| `public/menu-logout.js` | SYS-02 / DEV-01 |
+| `public/message-search.html` | OPS-02 / DEV-01 |
+| `public/mtalk_journal_ai.html` | JAI-02 / DEV-01 |
+| `public/mtalk_schedule.html` | RSV-01 / DEV-01 |
+| `public/pages-config.js` | SYS-01 / SYS-02 / DEV-01 |
+| `public/petty_cash.html` | OPS-03 / DEV-01 |
+| `public/pos-journal.html` | JRN-02 / JRN-05 / JAI-04 / DEV-01 |
+| `public/reservation.html` | RSV-01 / DEV-01 |
+| `public/reviews.html` | REV-01 / REV-02 / DEV-01 |
+| `public/room_settings.html` | OPS-01 / RSV-01 / DEV-01 |
+| `public/site-cache.js` | DEV-01 |
+| `public/system-map.html` | ADM-02 / DEV-01 / DEV-04 |
+| `public/system-map/environment.html` | ADM-02 / DEV-04 |
+| `public/system-map/graph.html` | ADM-02 / DEV-04 |
+
+### Edge Functions
+
+| Function | 対応する資料区分 |
+|---|---|
+| `admin-api` | SYS-02 / SAL-04 / SAL-06 / RSV-01 / OPS-03 / OPS-04 / JRN-02 / JRN-05 / KNW-01 / JAI-02 / FCT-01 / FCT-05 / REV-01 / ADM-01 / ADM-03 / DEV-02 / SEC-01 / SEC-03 |
+| `ai-analyze` | JAI-01 / JAI-02 / DEV-02 / SEC-01 |
+| `calendar-tomorrow-cron` | RSV-01 / OPS-01 / DEV-02 |
+| `chat-knowledge` | OPS-01 / KNW-02 / JAI-02 / DEV-02 |
+| `chat-push` | OPS-02 / DEV-02 / SEC-01 |
+| `chat-search` | OPS-02 / DEV-02 |
+| `foodcourt-forecast-cron` | FCT-03 / FCT-05 / DEV-02 |
+| `gmail-alert-cron` | RSV-01 / DEV-02 |
+| `line-admin-webhook` | ADM-01 / DEV-02 / SEC-01 |
+| `line-webhook` | SAL-01 / SAL-02 / RSV-01 / OPS-03 / KNW-02 / DEV-02 / SEC-01 |
+| `pv-japan-alert-cron` | FCT-06 / DEV-02 |
+| `receipt-midreport-cron` | SAL-05 / DEV-02 |
+| `receipt-sheets-sync-cron` | SAL-05 / SAL-06 / DEV-02 |
+| `reservation-ai-cache-cron` | RSV-01 / JAI-04 / DEV-02 |
+| `reservation-today-cron` | RSV-01 / DEV-02 |
+| `review-alert-cron` | REV-01 / REV-02 / DEV-02 |
+| `room-messages-retention-cron` | OPS-01 / SEC-01 / SEC-03 / DEV-02 |
+| `tokyo-dome-events-cron` | FCT-01 / FCT-06 / DEV-02 |
+| `tokyo-dome-weekly-cron` | FCT-04 / FCT-06 / DEV-02 |
+| `weather-daily-cron` | FCT-01 / FCT-06 / DEV-02 |
+
+### 共有TypeScriptモジュール
+
+| モジュール | 対応する資料区分 |
+|---|---|
+| `supabase/functions/_shared/admin_access_log.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/admin_dashboard_link_auth.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/admin_receipt_sales.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/admin_utils.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/auto_link_room.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/bistrocavacava_sheet_push.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/budget_entry_flow.ts` | SAL-01 / SAL-04 / DEV-02 |
+| `supabase/functions/_shared/calendar_tomorrow_reminder.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/chat_bridge.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/chat_flex_card.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/chat_push_payload.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/chat_store_file_bridge.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/clear_store_sheet_budget_tabs.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/competitor_review_context.ts` | REV-01 / REV-02 / DEV-02 |
+| `supabase/functions/_shared/daily_sales_import.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_attendance.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_compare.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_distillation.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_forecast_utils.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_loop_utils.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/google_service_account_auth.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/google_sheets_client.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/groq_model.ts` | JAI-01 / FCT-02 / DEV-02 |
+| `supabase/functions/_shared/japanese_holidays.ts` | SAL-04 / FCT-03 / DEV-02 |
+| `supabase/functions/_shared/job_titles.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/journal_ai_orchestrate.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/journal_ai_privacy.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/journal_product_index.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/journal_sales_sync.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/knowledge_file_extract.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
+| `supabase/functions/_shared/knowledge_memo_tag.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
+| `supabase/functions/_shared/line_admin_webhook.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/line_client.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_display_names.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_flex_messages.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_media_store.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_report_help_coverage.ts` | DEV-04 |
+| `supabase/functions/_shared/line_report_help_manual.ts` | DEV-04 |
+| `supabase/functions/_shared/line_room_message_search.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_room_messages.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_room_search_archive.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_search_bot.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/line_user_approval.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/line_webhook_delivery_log.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/manual_day_sales.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/manual_month_sales.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/marugo_group_stores.ts` | SYS-01 / DEV-02 |
+| `supabase/functions/_shared/mtalk_casual_chat.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/mtalk_help_manual.ts` | OPS-01 / OPS-02 / JAI-02 / DEV-04 |
+| `supabase/functions/_shared/mtalk_room_id.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/mtalk_room_settings.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/mtalk_schedule_register.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/mtalk_search.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/paged_row_scan.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/petty_cash_flow.ts` | OPS-03 / DEV-02 |
+| `supabase/functions/_shared/pos_journal.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/pos_journal_ai.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/pos_journal_lha.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_correction.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_duplicate.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_flex_reply.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_line_actions.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_parse.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_prompt.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_reply_context.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_report_aggregate.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_save_flow.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_sheets_gas_config.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/receipt_sheets_pilot_sync.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/receipt_sheets_store_catalog.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/receipt_sheets_tab_resolve.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/receipt_store_mismatch.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_store_name_match.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_store_name_resolve.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_types.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_vision.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/reservation_ai_cache.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/reservation_calendar_link.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/reservation_calendar_link_request.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/reservation_mail_rules.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/room_config_link.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/room_hard_delete.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/sales_budget_allocation.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/search_help_guide.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
+| `supabase/functions/_shared/store_receipt.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/store_receipt_phones.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/store_receipt_query.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/tokyo_dome_schedule.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/weather_daily.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/web_push.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+
+### 補助・運用・レガシーコード
+
+| ファイル | 対応する資料区分 |
+|---|---|
+| `cloudflare-worker/package.json` | DEV-05 / SEC-01 |
+| `cloudflare-worker/src/index.js` | DEV-05 / SEC-01 |
+| `cloudflare-worker/wrangler.toml` | DEV-05 / SEC-01 |
+| `google-apps-script/receipt-sheets-pilot/.clasp.json` | SAL-06 / DEV-05 |
+| `google-apps-script/receipt-sheets-pilot/Code.gs` | SAL-06 / DEV-05 |
+| `google-apps-script/receipt-sheets-pilot/appsscript.json` | SAL-06 / DEV-05 |
+| `ocr-bridge/Dockerfile` | SAL-02 / DEV-05 |
+| `ocr-bridge/app.py` | SAL-02 / DEV-05 |
+| `ocr-bridge/requirements.txt` | SAL-02 / DEV-05 |
+| `schema.sql` | DEV-05 |
+| `scripts/check-graphify-sql-coverage.mjs` | DEV-04 |
+| `scripts/check-knowledge-system.mjs` | DEV-04 |
+| `scripts/check-line-report-help-coverage.ts` | DEV-04 |
+| `scripts/check-supabase-ownership.mjs` | DEV-04 |
+| `scripts/cleanup-bistrocavacava-dummy-data.mjs` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/clear-store-budget-data.mjs` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/delete-wrong-month-budget.sh` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/dummy-sales-seed.sh` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/ensure-graphify-sql-parser.sh` | DEV-04 |
+| `scripts/generate-knowledge-system.mjs` | DEV-04 |
+| `scripts/generate-line-report-help-manual.ts` | DEV-04 |
+| `scripts/import-profile-icons.mjs` | OPS-01 / DEV-04 |
+| `scripts/local-line-report-pages.sh` | DEV-04 |
+| `scripts/migrate-bistrocavacava-jhpm-to-hocbn.mjs` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/open-local-admin.sh` | DEV-04 |
+| `scripts/parse-pos-journal.py` | JRN-02 / JRN-05 / DEV-04 |
+| `scripts/purge-sales-except-allowed-stores.mjs` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/refresh-system-map.sh` | DEV-04 |
+| `scripts/search-knowledge-vault.mjs` | DEV-04 |
+| `scripts/setup-gas-clasp-properties.sh` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/setup-gas-sync-config.sh` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
+| `scripts/supabase-db-push-reconcile.sh` | DEV-04 |
+| `scripts/update-knowledge-vault.sh` | DEV-04 |
+| `scripts/verify-journal-ai-data-flow.mjs` | DEV-04 |
+| `scripts/verify-journal-sales-sync-toggle.sh` | DEV-04 |
+| `src/db.js` | DEV-05 |
+| `src/server.js` | DEV-05 |
+
+### admin-api静的ルート
+
+| APIパス | 対応する資料区分 |
+|---|---|
+| `/access/events` | ADM-01 / ADM-02 / DEV-02 |
+| `/actions/run-summary` | SAL-05 / ADM-01 / DEV-02 |
+| `/actions/test-receipt-report` | SAL-05 / ADM-01 / DEV-02 |
+| `/analytics/holidays` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/analytics/monthly` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/auth/chat-journal-login` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/chat-media-login` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/link-login` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/logout` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/room-config-login` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/session` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/token` | SYS-02 / SEC-01 / DEV-02 |
+| `/auth/verify` | SYS-02 / SEC-01 / DEV-02 |
+| `/calendar-events/search` | OPS-02 / RSV-01 / DEV-02 |
+| `/chat-admin` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/chat-admin/` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/chat-admin/state` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/chat-admin/templates` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/chat-admin/templates/apply` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/chat-media-archive` | OPS-02 / OPS-04 / DEV-02 |
+| `/chat-media-link` | OPS-02 / OPS-04 / DEV-02 |
+| `/chat-media-view` | OPS-02 / OPS-04 / DEV-02 |
+| `/chat-room-config` | OPS-01 / DEV-02 |
+| `/chat-room-purge` | OPS-01 / DEV-02 |
+| `/chat-schedule` | RSV-01 / OPS-01 / DEV-02 |
+| `/chat-schedule/event` | RSV-01 / OPS-01 / DEV-02 |
+| `/chat-schedule/reservation` | RSV-01 / OPS-01 / DEV-02 |
+| `/documents` | OPS-02 / OPS-04 / DEV-02 |
+| `/documents/` | OPS-02 / OPS-04 / DEV-02 |
+| `/foodcourt/ai-distillation-dataset` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/ai-fallback-events` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/ai-fallback-events/ack` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/ai-loop-feedback` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/ai-loop-runs` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/ai-rag` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/ask` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/daily-logs` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/daily-summary` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/daily-summary/list` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/dome-weekly` | FCT-01 / FCT-04 / FCT-06 / DEV-02 |
+| `/foodcourt/events/attendance` | FCT-01 / FCT-04 / FCT-06 / DEV-02 |
+| `/foodcourt/evolution-history` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/evolution-readiness` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/monthly-retrospective` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/period-summary` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/prompt-candidates` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/prompt-evaluation-sets` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/prompt-evaluation-sets/bootstrap` | FCT-02 / FCT-05 / DEV-02 |
+| `/foodcourt/qa-history` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/reports` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/weekly-report` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/foodcourt/weekly-report/list` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / DEV-02 |
+| `/gmail/account` | RSV-01 / JAI-04 / DEV-02 |
+| `/media` | OPS-02 / OPS-04 / DEV-02 |
+| `/media/` | OPS-02 / OPS-04 / DEV-02 |
+| `/messages/search` | OPS-02 / DEV-02 |
+| `/permissions/users` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/permissions/users/` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/permissions/users/backfill` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/petty-cash` | OPS-03 / DEV-02 |
+| `/petty-cash/receipt-image` | OPS-03 / DEV-02 |
+| `/petty-cash/receipt-media` | OPS-03 / DEV-02 |
+| `/pos-journals` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/ai-analysis` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/ai-ask` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/ai-history` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/ai-history/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/chat-pdf-history` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/chat-pdf-history/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/cohort-compare` | JAI-03 / DEV-02 |
+| `/pos-journals/download` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/file` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/knowledge` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/analyze-image` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/download` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/generate-insight` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/item` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/items` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/process` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/process-line-post` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/knowledge/upload` | KNW-01 / KNW-02 / DEV-02 |
+| `/pos-journals/product-cohort` | JAI-03 / DEV-02 |
+| `/pos-journals/product-index/rebuild` | JAI-03 / DEV-02 |
+| `/pos-journals/product-search` | JAI-03 / DEV-02 |
+| `/pos-journals/report-ai-history` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/report-ai-history/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/sales-forecasts` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/sales-forecasts/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/saved-reports` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/saved-reports/cross-store-summary` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/saved-reports/html` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/saved-reports/html-offload` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/saved-reports/item` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/store-ops` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/upload` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/receipts/analysis-prompt` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/competitors` | REV-02 / DEV-02 |
+| `/receipts/competitors/nearby-search` | REV-02 / DEV-02 |
+| `/receipts/competitors/refresh` | REV-02 / DEV-02 |
+| `/receipts/daily-receipts` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/receipts/daily-receipts-import` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/sales` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/receipts/sales-budget` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/receipts/sales-daily-budget` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/receipts/sales-manual-days` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/sales-manual-days/import` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/sales-manual-months` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/sheets-pilot-link` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/store-options` | SAL-02 / SAL-04 / SAL-05 / DEV-02 |
+| `/receipts/store-receipt-phones` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/receipts/store-reviews` | REV-01 / DEV-02 |
+| `/receipts/store-reviews/profile/ensure` | REV-01 / DEV-02 |
+| `/receipts/store-reviews/refresh` | REV-01 / DEV-02 |
+| `/receipts/store-reviews/search` | REV-01 / DEV-02 |
+| `/receipts/webhook-status` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
+| `/reservations/ai-cache/rebuild` | RSV-01 / JAI-04 / DEV-02 |
+| `/reservations/ai-facts` | RSV-01 / JAI-04 / DEV-02 |
+| `/reservations/calendar` | RSV-01 / JAI-04 / DEV-02 |
+| `/reservations/customer-suggest` | RSV-01 / JAI-04 / DEV-02 |
+| `/reservations/event` | RSV-01 / JAI-04 / DEV-02 |
+| `/reservations/search` | RSV-01 / JAI-04 / DEV-02 |
+| `/room-config` | OPS-01 / DEV-02 |
+| `/rooms/` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/rooms/purge` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/rooms/refresh-names` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/rooms/restore` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/rooms/sync-chat-members` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/settings/console` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/settings/global` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/settings/media-upload-limit` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/settings/rooms` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/settings/rooms/` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/state` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/usage/ai-cost` | ADM-02 / DEV-02 |
+| `/usage/push-monthly` | ADM-02 / DEV-02 |
+| `/weather/daily` | FCT-01 / FCT-06 / DEV-02 |
+
+動的IDを含む正規表現ルートは、`/chat-admin/` 等の親プレフィックスとEdge Function責務で監査します。
+DBの全SQLは `npm run knowledge:update` / `knowledge:check` のSQL coverageで別途全件確認します。
