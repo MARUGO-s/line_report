@@ -449,7 +449,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     return json({ ok: done, processed: true, kind: "journal-archive" }, 200)
   }
 
-  // LINE と同じ: #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。
+  // #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。
   if (message.kind === "image" || imagePathFromPayload(message.payload)) {
     const image = imagePathFromPayload(message.payload)
     if (!image) {

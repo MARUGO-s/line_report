@@ -160,7 +160,7 @@ export async function saveStoreRoomFileToMediaLibrary(
     bytes: Uint8Array
   },
 ): Promise<{ saved: boolean; lineMessageId: string; roomId: string; reason?: string }> {
-  // M-talkからの投稿を、同じ店舗の任意のLINEルーム（例: エリア会議）へ
+  // M-talkからの投稿を、同じ店舗の別のルーム（例: エリア会議）へ
   // 保存してはいけない。投稿元のM-talkルームを常に保存先にする。
   const roomId = `mtalk-group-${params.groupId}`
   const lineMessageId = mtalkMediaMessageId(params.groupId, params.chatMessageId)
@@ -362,7 +362,7 @@ export async function handleStoreRoomReceiptCommand(
   if (!registry) return false
   // 保留状態（重複確認・修正・店舗不一致）の会話キーは (room_id, user_id)。
   // 画像側は投稿元の M-talk ルームで保留を書くので、ここも同じ ID で引く。
-  // 店舗の LINE ルームを優先すると保留が見つからず、「置き換え」等に無反応になる。
+  // 別のルームを優先すると保留が見つからず、「置き換え」等に無反応になる。
   const roomId = `mtalk-group-${params.groupId}`
   const reply = await handleStoreReceiptTextMessage(
     supabase,
@@ -406,5 +406,5 @@ export async function postStoreRoomLineStyleReply(
     content: result.text,
     kind: 'text',
   })
-  if (error) console.error('store room LINE-style reply failed:', error.message)
+  if (error) console.error('store room M-talk reply failed:', error.message)
 }
