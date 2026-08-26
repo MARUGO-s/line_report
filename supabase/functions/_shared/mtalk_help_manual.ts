@@ -1,15 +1,14 @@
 /**
- * M-talk / LINE Report / Journal Report の使い方を、
+ * M-talk / Journal Report の使い方を、
  * 1対1トークのAIが横断参照するためのマニュアル入口。
  *
  * 正本:
  * - docs/CHAT-TALK-GUIDE.md
  * - docs/M-TALK-COMPLETE-GUIDE.md
- * - docs/操作マニュアル.md
  * - docs/JOURNAL-REPORT-FEATURES.md
  * - docs/JOURNAL-AI-CHAT-RULES.md
  *
- * LINE Report / Journal Report の統合知識本体:
+ * Journal Report の統合知識本体:
  * - supabase/functions/_shared/line_report_help_manual.ts
  *
  * 利用者向け機能を変更した場合は、正本と対応するマニュアルデータを同時に更新する。
@@ -388,9 +387,9 @@ export function buildMtalkHelpReference(
     parts.push(`【${section.title}】\n${section.content}`)
   }
 
-  // LINE Report / Journal Report はカテゴリ索引＋質問に近い詳細だけを渡す。
+  // M-talk / Journal Report はカテゴリ索引＋質問に近い詳細だけを渡す。
   // 全資料を毎回渡さないことで、回答を短く保ちながら必要な根拠を深くする。
-  parts.push(`【LINE Report / Journal Report 区分索引】\n${buildLineReportHelpIndex()}`)
+  parts.push(`【M-talk / Journal Report 区分索引】\n${buildLineReportHelpIndex()}`)
   for (const { section } of lineReportSelections) {
     const sources = includeImplementationSources
       ? lineReportHelpSourcesForCode(section.code)

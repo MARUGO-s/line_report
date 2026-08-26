@@ -1,7 +1,7 @@
 # トーク（chat.html）ガイド
 
 社内連絡用のグループチャット。`public/chat.html`（1ファイル・約9,900行、UI/CSS/ロジックを全て内包）が
-Supabase Auth / Realtime / Storage / Edge Function と組んで動く、LINE風の1画面SPA。
+Supabase Auth / Realtime / Storage / Edge Function と組んで動く、M-talkの1画面SPA。
 
 - 本番: `https://marugo-s.github.io/line_report/chat.html`
 - Supabase プロジェクト: `hocbnifuactbvmyjraxy`
@@ -18,7 +18,7 @@ Supabase Auth / Realtime / Storage / Edge Function と組んで動く、LINE風�
 
 ```
 public/chat.html
-├─ <style>            … 全CSS（テーマは1色固定、ダーク基調のLINE風UI）
+├─ <style>            … 全CSS（テーマは1色固定、ダーク基調のUI）
 ├─ <body>             … サイドバー / メイン画面 / 各種オーバーレイの静的マークアップ
 └─ <script>           … 状態管理・Supabaseクエリ・DOM描画（約6,800行、関数400個超）
 ```
@@ -328,7 +328,7 @@ PCではポインタの右クリック（`contextmenu`）で同じ操作をメ�
 2. 画像は送信前に長辺1600px・JPEG品質0.82へ縮小（`prepareChatImage()`）。
 3. `askSendModeForFiles()` が「今すぐ送る／予約配信」の選択を挟む
    （非画像ファイルは予約配信不可。「まず今すぐ送信してください」と案内）。
-4. 画像を送ると、店舗の売上解析用メディア台帳（LINEと共通）へもアーカイブを試みる
+4. 画像を送ると、店舗の売上解析用メディア台帳へもアーカイブを試みる
    （`archiveChatImageInMediaLibrary()`。失敗してもメッセージ送信自体は成功扱い）。
 
 ### アプリ内プレビューの実装
@@ -390,7 +390,7 @@ iPhoneの「高効率」設定で出る`.heic`は、送信時にJPEGへ変換し
 1. **トーク履歴・メッセージ検索**: サイドバー上部の検索欄にフォーカスを移すだけ
    （実体は§3の全文検索）。
 2. **予定・予約カレンダーを開く**: `mtalk_schedule.html` を開く。予約タブ（Gmail予約
-   取込＋手入力の店舗データ）と予定タブ（同じM-talkルーム・同じ店舗キーのLINEルームの
+   取込＋手入力の店舗データ）と予定タブ（同じM-talkルーム・同じ店舗キーのM-talkルームの
    カレンダー予定）をタブ切替で見る。閲覧は`can_view`、追加・編集・キャンセルは
    `can_manage`が必要。
 3. **写真・メディアライブラリ**: 店舗Botがいるルームでのみ表示。既存の`media.html`を、
@@ -571,8 +571,8 @@ AIロジックには一切触れない）。回答に「💬 M-talkに貼る」�
 Journal Reportの「資料」へ登録し、Botが結果を返す。
 
 - テキスト: `#メモ 本文`でそのまま資料になる。
-- 画像・ファイル: `#メモ`が無ければ画像はメディア閲覧へ保存し、レシートならLINEと
-  同じ解析・同じ売上レポートカードを返す。
+- 画像・ファイル: `#メモ`が無ければ画像はメディア閲覧へ保存し、レシートなら同じ
+  解析・同じ売上レポートカードを返す。
 - URL: 本文中の`http(s)`リンクは安全なリンクカードとして表示する（別タブで開くのみ、
   M-talk側では外部ページの本文や認証情報を取得しない）。
 - `chat-knowledge`はpg_netの内部シークレットで認可され、ゲートウェイのJWT検証は
@@ -582,8 +582,8 @@ Journal Reportの「資料」へ登録し、Botが結果を返す。
 
 ## 18. 予約通知の複製（Bot発のカードメッセージ）
 
-予約通知のトーク配信はLINEと**同じcronで発火するが、送信は独立**（LINEの成否を
-待たない）。対応するM-talkルームは`room_summary_settings.chat_group_id`、無ければ
+予約通知のトーク配信は**同じcronで発火するが、送信は独立**（M-talkへの送信成功で
+通知を完了し、外部要因の遅延や失敗の影響を受けない）。対応するM-talkルームは`room_summary_settings.chat_group_id`、無ければ
 同じ店舗キーのトーク。カードの本文は`kind='card'`として`service_role`のみが作成でき、
 クライアントからの`card`偽装は`chat_set_message_author`トリガで弾かれる。
 
@@ -606,7 +606,7 @@ Journal Reportの「資料」へ登録し、Botが結果を返す。
 `chat_messages`（直近12件）をそのまま使い、Markdownは使わずプレーンテキストへ
 整形してから通常の`text`メッセージとして保存する。
 
-雑談AIはM-talk・LINE Report・Journal Reportの使い方に関する自然文の質問にも、
+雑談AIはM-talk・Journal Reportの使い方に関する自然文の質問にも、
 統合ヘルプ資料（`supabase/functions/_shared/mtalk_help_manual.ts` /
 `line_report_help_manual.ts`、人間向け自動生成版は
 `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md`）を参照して回答する。
