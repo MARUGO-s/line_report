@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-08-26 - 1対1 AI返信のMarkdown記号を読みやすい表示へ整形
+
+- Symptom: 店舗Botとの1対1でM-talkの使い方を質問すると、AI回答の `**太字**`、`-` 箇条書き、`##` 見出しなどがMarkdown記号のまま吹き出しへ表示されていた。M-talkの通常メッセージはMarkdownを描画しないプレーンテキスト表示。
+- Fix: `mtalk_casual_chat.ts` のシステム指示へ「Markdownを使わず、箇条書きは `・`、小見出しは `■`」を追加。さらに `formatCasualReplyForMtalk()` を通してから `chat_messages` へ保存し、見出し・箇条書き・強調・リンク・表・コードフェンス・水平線を読みやすいプレーンテキストへ変換する。
+- Safety: HTMLを描画せず従来どおり `kind='text'` の本文として保存するため、XSS面の表示境界は変更しない。プロンプトにモデルが従わない場合も保存直前の整形で記号露出を防ぐ。
+- Test: スクリーンショット相当の使い方回答、表・コードフェンス・水平線、Markdown禁止指示、Groq応答から保存前整形までの経路を追加し、`tests/mtalk_casual_chat.test.ts` 15件成功。`npm run test:chat` はDeno 15件＋Node 103件成功。
+
 ### 2026-08-26 - 「M-talkに貼る」の長いジャーナル回答を全文表示
 
 - Symptom: ジャーナルレポートAIの長い回答を「M-talkに貼る」で投稿すると、`postAiAnswerToMtalk` の `pretty.slice(0, 1700)` により途中で切れていた。DBの通常ユーザー投稿ポリシーは本文2000文字まで。

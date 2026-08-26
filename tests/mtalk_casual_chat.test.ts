@@ -1,5 +1,6 @@
 import {
   buildCasualSystemPrompt,
+  formatCasualReplyForMtalk,
   generateCasualReply,
   isSoloHumanRoom,
 } from "../supabase/functions/_shared/mtalk_casual_chat.ts"
@@ -156,5 +157,105 @@ Deno.test("数値質問はジャーナルに聞くを開くよう明確に案内
   }
   if (!system.includes("店舗の実データに基づく具体的な数字には絶対に答えないでください")) {
     throw new Error("数値を答えない安全指示がありません")
+  }
+})
+
+Deno.test("AIへMarkdownを使わずM-talk向けプレーンテキストで答えるよう指示する", () => {
+  const system = buildCasualSystemPrompt({
+    storeName: "テスト店",
+    question: "使用方法を教えてください",
+  })
+  if (!system.includes("Markdown記法") || !system.includes("箇条書きは行頭を「・」")) {
+    throw new Error("M-talkの表示形式に合わせた出力指示がありません")
+  }
+})
+
+Deno.test("AIのMarkdown回答を読みやすいM-talk用テキストへ整形する", () => {
+  const formatted = formatCasualReplyForMtalk([
+    "M-talk の基本的な使い方は以下の通りです。",
+    "",
+    "- **ログイン／新規登録**：メールアドレスとパスワードでサインイン。",
+    "- **画像・ファイル・スタンプ**：入力欄左の **「＋」** を押します。",
+    "  - 「画像・ファイル」から写真や書類を選択",
+    "  - 顔マーク **「☺」** からスタンプを選択",
+    "## 検索",
+    "[トーク検索](https://example.com)を利用できます。",
+  ].join("\n"))
+
+  assertEquals(formatted, [
+    "M-talk の基本的な使い方は以下の通りです。",
+    "",
+    "・ログイン／新規登録：メールアドレスとパスワードでサインイン。",
+    "・画像・ファイル・スタンプ：入力欄左の「＋」を押します。",
+    "　・「画像・ファイル」から写真や書類を選択",
+    "　・顔マーク「☺」からスタンプを選択",
+    "■ 検索",
+    "トーク検索（https://example.com）を利用できます。",
+  ].join("\n"))
+})
+
+Deno.test("Markdown表・コードフェンス・水平区切りをプレーンテキスト化する", () => {
+  const formatted = formatCasualReplyForMtalk([
+    "| 項目 | 操作 |",
+    "|---|---|",
+    "| 送信 | 紙飛行機を押す |",
+    "---",
+    "```",
+    "Shift+Enterで改行",
+    "```",
+  ].join("\n"))
+
+  assertEquals(formatted, [
+    "項目：操作",
+    "送信：紙飛行機を押す",
+    "────────",
+    "　Shift+Enterで改行",
+  ].join("\n"))
+})
+
+Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整形される", async () => {
+  const originalFetch = globalThis.fetch
+  Deno.env.set("GROQ_API_KEY", "test-key")
+  globalThis.fetch = () =>
+    Promise.resolve(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: [
+            "M-talkの使い方です。",
+            "- **メッセージ送信**：入力欄へ文字を入力します。",
+            "- **画像送信**：左の **「＋」** を押します。",
+          ].join("\n"),
+        },
+      }],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))
+
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    lt: () => chain,
+    order: () => chain,
+    limit: () => Promise.resolve({ data: [], error: null }),
+  }
+  const sb = { from: () => chain }
+
+  try {
+    const result = await generateCasualReply(sb, {
+      groupId: 1,
+      messageId: 100,
+      storeName: "テスト店",
+      botUserId: "bot1",
+      question: "使い方を教えて",
+    })
+    assertEquals(result, [
+      "M-talkの使い方です。",
+      "・メッセージ送信：入力欄へ文字を入力します。",
+      "・画像送信：左の「＋」を押します。",
+    ].join("\n"))
+  } finally {
+    globalThis.fetch = originalFetch
+    Deno.env.delete("GROQ_API_KEY")
   }
 })
