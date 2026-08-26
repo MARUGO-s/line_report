@@ -115,12 +115,13 @@ Deno.test("一般的な使い方質問にはM-talk全体概要を渡す", () => 
   const reference = buildMtalkHelpReference("M-talkでは何ができますか？")
   if (
     !reference.includes("M-talk全体概要") ||
-    !reference.includes("全機能の使い方一覧") ||
+    !reference.includes("M-talk機能索引") ||
+    !reference.includes("LINE Report / Journal Report 区分索引") ||
     !reference.includes("予約配信") ||
     !reference.includes("Keepメモ") ||
     !reference.includes("権限・閲覧専用")
   ) {
-    throw new Error("全体概要と全機能一覧が参照文へ入りませんでした")
+    throw new Error("全体概要と統合索引が参照文へ入りませんでした")
   }
 })
 
@@ -154,8 +155,12 @@ Deno.test("具体的な質問でも仕組みと全機能索引を必ず添える
   if (!reference.includes("入力欄左の「＋」")) {
     throw new Error("画像送信の具体手順が入りませんでした")
   }
-  // 背景（仕組み）と、他機能への案内に使える全機能索引を常に添える
-  if (!reference.includes("M-talkの仕組み・全体像") || !reference.includes("全機能の使い方一覧")) {
+  // 背景（仕組み）と、他機能への案内に使える統合索引を常に添える
+  if (
+    !reference.includes("M-talkの仕組み・全体像") ||
+    !reference.includes("M-talk機能索引") ||
+    !reference.includes("LINE Report / Journal Report 区分索引")
+  ) {
     throw new Error("仕組みと全機能索引が常時添付されていません")
   }
 })
@@ -176,7 +181,10 @@ Deno.test("M-talkの使い方質問には関連マニュアルをシステム指
     storeName: "テスト店",
     question: "個人メモは他の人に見えますか？",
   })
-  if (!system.includes("M-talk使い方マニュアル") || !system.includes("他の参加者、Bot、管理画面、Web Pushには表示されません")) {
+  if (
+    !system.includes("LINE Report / Journal Report / M-talk 統合マニュアル") ||
+    !system.includes("他の参加者、Bot、管理画面、Web Pushには表示されません")
+  ) {
     throw new Error("個人メモのマニュアルがシステム指示へ入りませんでした")
   }
   if (!system.includes("マニュアルに書かれていない機能・場所・手順は推測で作らず")) {
@@ -209,7 +217,7 @@ Deno.test("AIへMarkdownを使わずM-talk向けプレーンテキストで答�
   ) {
     throw new Error("M-talkの表示形式に合わせた出力指示がありません")
   }
-  if (!system.includes("途中で説明を打ち切らないでください")) {
+  if (!system.includes("回答を文の途中で打ち切らないでください")) {
     throw new Error("使い方の説明を途中で切らない指示がありません")
   }
 })

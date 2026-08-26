@@ -114,11 +114,14 @@ Supabase の Auth / Realtime / Storage / Edge Function で動く静的Webアプ�
 「画像はどう送る？」「通知が来ない」「個人メモは他の人に見える？」など、
 M-talkの操作を自然な文章で質問できる。
 
-AIは `supabase/functions/_shared/mtalk_help_manual.ts` の利用者向けマニュアルから、
-質問に関連する項目だけを選んで参照する。ボタン名や操作場所を具体的に答え、
-マニュアルにない機能は推測しない。マニュアルの内容は本書と
-`CHAT-TALK-GUIDE.md` を正本とし、M-talkの利用者向け機能を変更するときは
-3ファイルを同時に更新する。
+AIはM-talk用 `mtalk_help_manual.ts` と、LINE Report／Journal Report用
+`line_report_help_manual.ts` を横断する。統合資料は11区分・32項目に分類され、
+質問に関連する詳細だけを区分索引から選ぶ。人間向けには
+`LINE-REPORT-JOURNAL-AI-MANUAL.md` を自動生成する。
+
+具体的な質問は「結論→必要な手順／理由→注意点」の順で簡潔に答え、索引全体や
+関係のない機能は並べない。ボタン名や操作場所は省略せず、マニュアルにない機能は
+推測しない。
 
 通常の雑談・簡単な相談にも応じるが、売上・客数などの正確な店舗実績は
 通常会話では答えず、「ジャーナルに聞く」へ案内する。

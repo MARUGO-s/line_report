@@ -1,13 +1,25 @@
 /**
- * M-talk の使い方を、1対1トークのAIが参照するためのマニュアル。
+ * M-talk / LINE Report / Journal Report の使い方を、
+ * 1対1トークのAIが横断参照するためのマニュアル入口。
  *
  * 正本:
  * - docs/CHAT-TALK-GUIDE.md
  * - docs/M-TALK-COMPLETE-GUIDE.md
+ * - docs/操作マニュアル.md
+ * - docs/JOURNAL-REPORT-FEATURES.md
+ * - docs/JOURNAL-AI-CHAT-RULES.md
  *
- * M-talk の利用者向け機能を変更した場合は、正本とこのファイルを同時に更新する。
+ * LINE Report / Journal Report の統合知識本体:
+ * - supabase/functions/_shared/line_report_help_manual.ts
+ *
+ * 利用者向け機能を変更した場合は、正本と対応するマニュアルデータを同時に更新する。
  * endpoint、鍵、顧客情報、メッセージ本文、実際の売上などは書かない。
  */
+import {
+  buildLineReportHelpIndex,
+  isLineReportHelpQuestion,
+  selectLineReportHelpSections,
+} from './line_report_help_manual.ts'
 
 export interface MtalkHelpSection {
   id: string
@@ -331,7 +343,8 @@ export function isMtalkHelpQuestion(question: string): boolean {
     'なんですか',
     'なんですが',
   ]
-  return helpIntents.some((intent) => normalizedQuestion.includes(intent)) ||
+  return isLineReportHelpQuestion(question) ||
+    helpIntents.some((intent) => normalizedQuestion.includes(intent)) ||
     selectMtalkHelpSections(question, 1).some((entry) => entry.score >= 4)
 }
 
@@ -341,14 +354,23 @@ export function isMtalkHelpQuestion(question: string): boolean {
  */
 export function buildMtalkHelpReference(
   question: string,
-  options: { limit?: number; maxChars?: number } = {},
+  options: {
+    limit?: number
+    lineReportLimit?: number
+    maxChars?: number
+  } = {},
 ): string {
   if (!isMtalkHelpQuestion(question)) return ''
-  const limit = Math.max(1, options.limit ?? 3)
-  const maxChars = Math.max(400, options.maxChars ?? 4200)
-  const selections = selectMtalkHelpSections(question, limit)
+  const mtalkLimit = Math.max(1, options.limit ?? 3)
+  const lineReportLimit = Math.max(1, options.lineReportLimit ?? 4)
+  const maxChars = Math.max(800, options.maxChars ?? 6800)
+  const selections = selectMtalkHelpSections(question, mtalkLimit)
+  const lineReportSelections = selectLineReportHelpSections(question, lineReportLimit)
   const selectedIds = new Set(selections.map((entry) => entry.section.id))
-  const parts = [`【M-talk全体概要】\n${MTALK_HELP_OVERVIEW}`]
+  const parts = [
+    '【回答の基本】\n質問された範囲だけを、最初に結論、その後に必要な手順・理由・注意点の順で簡潔に答える。索引全体を回答へ書き写さない。質問が曖昧なら、推測せず確認を1つだけ行う。',
+    `【M-talk全体概要】\n${MTALK_HELP_OVERVIEW}`,
+  ]
 
   // 仕組み・全体像は「なぜ」「どういう仕組み」などにも答えられるよう常に添える。
   const overviewSection = MTALK_HELP_SECTIONS.find(
@@ -363,12 +385,21 @@ export function buildMtalkHelpReference(
     parts.push(`【${section.title}】\n${section.content}`)
   }
 
-  // 別の機能を尋ねられても案内を続けられるよう、全機能の索引を常に添える。
-  const index = MTALK_HELP_SECTIONS
+  // LINE Report / Journal Report はカテゴリ索引＋質問に近い詳細だけを渡す。
+  // 全資料を毎回渡さないことで、回答を短く保ちながら必要な根拠を深くする。
+  parts.push(`【LINE Report / Journal Report 区分索引】\n${buildLineReportHelpIndex()}`)
+  for (const { section } of lineReportSelections) {
+    parts.push(
+      `【${section.code} ${section.title}】\n要点: ${section.summary}\n${section.content}`,
+    )
+  }
+
+  // M-talk側も索引しやすいよう、詳細本文ではなくタイトルだけの短い索引を添える。
+  const mtalkIndex = MTALK_HELP_SECTIONS
     .filter((section) => section.id !== MTALK_SYSTEM_OVERVIEW_SECTION_ID)
-    .map((section) => `・${section.title}: ${section.content.split('\n')[0]}`)
-    .join('\n')
-  parts.push(`【全機能の使い方一覧】\n${index}`)
+    .map((section) => section.title)
+    .join(' / ')
+  parts.push(`【M-talk機能索引】\n${mtalkIndex}`)
 
   const reference = parts.join('\n\n')
   return reference.length <= maxChars ? reference : `${reference.slice(0, maxChars)}…`

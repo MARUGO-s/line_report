@@ -35,6 +35,7 @@
 | [REPOSITORY_STRUCTURE.md](./REPOSITORY_STRUCTURE.md) | 開発・AI | ルート公開ファイルを残す理由、各ディレクトリの役割、`.local/`の配置ルール |
 | [AI_KNOWLEDGE_SYSTEM.md](./AI_KNOWLEDGE_SYSTEM.md) | AI・開発 | Graphify（コード/SQL）・Obsidian（手書き/既存文書ミラー）・AI作業循環・環境図・更新/検査コマンド |
 | [AI_CONTEXT.md](./AI_CONTEXT.md) | AI | `knowledge:update`で生成する短縮コンテキスト。作業開始時の情報源順位・必須フロー |
+| [LINE-REPORT-JOURNAL-AI-MANUAL.md](./LINE-REPORT-JOURNAL-AI-MANUAL.md) | 運用・AI・開発 | **1対1 AIの統合資料** — LINE Report／Journal Reportを11区分・32項目・検索コード付きで整理。フードコート、口コミ、管理画面も含み、`line_report_help_manual.ts`から自動生成 |
 | [M-TALK-COMPLETE-GUIDE.md](./M-TALK-COMPLETE-GUIDE.md) | 運用・開発・説明 | **M-talk統合版** — 概要／使い方／通知／権限／管理／セキュリティ／技術構成／トラブルシュートを1ファイルに。各領域の正本は CHAT-TALK-GUIDE・CHAT-ADMIN-PERMISSIONS・SECURITY |
 | [CHAT-TALK-GUIDE.md](./CHAT-TALK-GUIDE.md) | 運用・開発 | **トーク（chat.html）** — 利用条件、発言種別（text/card/image）、予約通知の複製、画像の非公開バケット、検索、既読・リアクション・返信・メンション |
 | [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md) | 運用・開発 | **M-talk専用管理** — ユーザー利用停止・論理削除、1対1／ルーム別の閲覧・送信・招待・管理権限、管理API、監査 |
