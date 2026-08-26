@@ -3214,7 +3214,7 @@
     // Inline personal-note mode hands its text to the existing note persistence path.
     let pendingPrivateNoteContent = null;
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
-    const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key';
+    const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key, bot_deleted_at';
     const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at';
     const STORE_BOT_LOGOS = Object.freeze({
       marugo: 'icons/store-bots/marugo.svg',
@@ -4676,6 +4676,7 @@
         const { data, error } = await sb
           .from('chat_users')
           .select(CHAT_USER_COLUMNS)
+          .is('bot_deleted_at', null)
           .order('username');
         if (error) throw error;
         registeredUsers = data || [];
@@ -5038,7 +5039,7 @@
           sb.from('chat_group_members')
             .select('user_id, chat_users(id, username, icon_url, is_bot, store_key)')
             .eq('group_id', currentGroupId),
-          sb.from('chat_users').select(CHAT_USER_COLUMNS).order('username')
+          sb.from('chat_users').select(CHAT_USER_COLUMNS).is('bot_deleted_at', null).order('username')
         ]);
         if (memberRes.error) throw memberRes.error;
         if (userRes.error) throw userRes.error;

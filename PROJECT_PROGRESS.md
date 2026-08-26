@@ -1,5 +1,13 @@
 # LINE Report Project Progress
 
+### 2026-08-26 - M-talk管理画面へルームゴミ箱とBot削除・復元を追加
+
+- Request: M-talk管理画面からも、通常ルームを「ゴミ箱へ移動 → 復元 / 完全削除」の順で管理できるようにする。Botの削除は管理画面だけに限定し、通常のM-talk画面では削除不可を維持する。
+- DB: `20260901020000_chat_admin_room_trash_and_bot_archive.sql` を追加。`chat_admin_trash_group` / `chat_admin_restore_group` / `chat_admin_remove_bot` / `chat_admin_restore_bot` はservice_role専用。Botは `bot_deleted_at` による論理削除で、過去メッセージ・所属履歴を保持する。削除済みBot名義の新規投稿はDBトリガで拒否する。
+- API/UI: `chat-admin.html` に「ゴミ箱」タブ、通常ルームの「ゴミ箱へ」、ゴミ箱内の「復元 / 完全削除」、Bot行の「Bot削除 / Bot復元」を追加。完全削除はルーム名再入力、Bot削除はBot名再入力＋最終確認。店舗固定ルームは対象外。
+- Safety: 管理APIは本部フル管理セッション限定。通常の `chat.html` にはBot管理APIを追加していない。削除済みBotを店舗Bot解決・予約通知・検索応答から除外し、店舗Botが削除済みのときに汎用Botへフォールバックしない。
+- Verification: 本番DBへマイグレーション適用済み。トランザクション内実テストを全件ROLLBACKし、anon/authenticated実行不可・service_roleのみ可・ゴミ箱/復元・Bot削除中の投稿拒否・Bot復元を確認。`npm run test:chat` 99件成功。PC幅1440pxとモバイル幅で管理画面を確認。
+
 ### 2026-08-25 - 「M-talkに貼る」をMarkdownのまま貼らず読みやすく整形
 
 - Request: 「ジャーナルに聞く」の分析結果を「M-talkに貼る」で貼ると、Markdown（`##`・`**`・表）のまま出力されるので、見やすい形にまとめて貼る。

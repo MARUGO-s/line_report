@@ -42,13 +42,15 @@ export async function resolveMtalkRoomStoreKey(
 
   const { data: users, error: userError } = await supabase
     .from("chat_users")
-    .select("id, is_bot, store_key")
+    .select("id, is_bot, store_key, bot_deleted_at")
     .in("id", userIds)
   if (userError) return { storeKey: fromGroup || null, roomName }
 
   const keys = [...new Set(
     (Array.isArray(users) ? users : [])
-      .filter((row: { is_bot?: boolean }) => row.is_bot)
+      .filter((row: { is_bot?: boolean; bot_deleted_at?: string | null }) => (
+        row.is_bot && !row.bot_deleted_at
+      ))
       .map((row: { store_key?: string }) => String(row.store_key ?? "").trim())
       .filter(Boolean),
   )]
@@ -68,6 +70,7 @@ export async function loadMtalkStoreBot(
     .select("id, username")
     .eq("is_bot", true)
     .eq("store_key", key)
+    .is("bot_deleted_at", null)
     .maybeSingle()
   if (error || !data) return null
   const id = String((data as { id?: string }).id ?? "").trim()

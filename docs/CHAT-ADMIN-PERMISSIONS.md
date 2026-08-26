@@ -41,7 +41,10 @@ Data APIを直接呼ばれてもDBのRLS・RPC・Storage policyで同じ判定�
 | `deleted_at` | M-talk上の論理削除。再ログインしても利用不可 |
 
 既存ユーザーと新規登録ユーザーは、現在の利用方法を壊さないため既定で有効。
-Botは管理画面から停止・削除できない。
+Botの削除・復元は、通常のM-talk画面では行えず、**本部フル管理セッションの
+`chat-admin.html`だけ**で行う。物理削除はせず `chat_users.bot_deleted_at`
+による論理削除とし、過去メッセージ・所属履歴を保持する。削除済みBot名義の
+新規投稿はDBトリガで拒否し、店舗Bot解決・予約通知・検索応答の候補からも外す。
 
 ### ルーム別（`chat_group_members`）
 
@@ -63,6 +66,11 @@ Botは管理画面から停止・削除できない。
 | PATCH | `/chat-admin/users/:id` | 全体利用と3つの全体権限、一時制限・理由 |
 | POST | `/chat-admin/users/:id/remove` | 表示名再入力後にM-talkだけ論理削除 |
 | POST | `/chat-admin/users/:id/restore` | 論理削除を解除 |
+| POST | `/chat-admin/bots/:id/remove` | Bot名の再入力後にBotを論理削除 |
+| POST | `/chat-admin/bots/:id/restore` | 論理削除したBotを復元 |
+| POST | `/chat-admin/rooms/:id/trash` | 店舗固定以外のルームをゴミ箱へ移動 |
+| POST | `/chat-admin/rooms/:id/restore` | ゴミ箱のルームを復元 |
+| POST | `/chat-admin/rooms/:id/purge` | ルーム名再入力後にゴミ箱のルームを完全削除 |
 | PATCH | `/chat-admin/rooms/:id/members/:userId` | 4つのルーム権限を更新 |
 | DELETE | `/chat-admin/rooms/:id/members/:userId` | 通常ルームの4権限を無効化（履歴保持・再設定可） |
 | GET | `/chat-admin/templates` | 権限テンプレート一覧と一括適用の上限 |
@@ -99,7 +107,23 @@ Botは管理画面から停止・削除できない。
 - `chat-icons`の書込みは本人のパス、または管理可能ルームのパスだけに限定する。
 - `chat-images`は`can_view`で閲覧、`can_send`で保存する。
 
-ルームの完全削除は復元不能なため、`can_manage`だけでは許可せず、従来どおり作成者本人に限定する。
+通常のM-talk画面では、ルームの完全削除は復元不能なため、`can_manage`だけでは許可せず
+作成者本人に限定する。M-talk管理画面では本部フル管理セッションに限り、
+店舗固定以外のルームを「ゴミ箱へ移動 → 復元 / 完全削除」の順で操作できる。
+完全削除にはルーム名の再入力と最終確認が必要で、監査ログへ記録する。
+
+## 管理画面のルームゴミ箱とBot削除
+
+- 「すべて / ルーム / 1対1」はゴミ箱のルームを除外し、「ゴミ箱」タブへ分離する。
+- 店舗固定ルームは管理画面からもゴミ箱・完全削除できない。
+- ゴミ箱のルームは送信・参加・権限変更を行えず、「復元」「完全削除」だけを表示する。
+- 完全削除で消えるのは対象ルームのメッセージ・画像・ルーム予定・ルームスコープデータだけ。
+  他のルーム、店舗の予約・売上・資料には触れない。
+- Bot削除は `bot_deleted_at` を設定する論理削除。`chat_users` と過去メッセージ、
+  既存の所属行は保持する。
+- Bot削除中は新規投稿をDBトリガで拒否し、Bot検索・店舗Bot解決から除外する。
+- Bot名の再入力＋二段階確認が必要。管理画面から復元できる。
+- 管理RPCはすべて `service_role` 専用で、`anon` / `authenticated` には実行権限を与えない。
 
 署名済みの画像URLは発行後最大1時間有効。権限取消後の新しいURL発行は拒否するが、
 発行済みURLを即時失効させる仕様ではない。

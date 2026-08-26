@@ -72,10 +72,27 @@ async function replyInRoom(
   text: string,
   asUser?: { id: string; username: string } | null,
 ): Promise<void> {
+  let userId = String(asUser?.id ?? "").trim()
+  let username = String(asUser?.username ?? "").trim()
+  if (!userId) {
+    const { data: defaultBot, error: defaultBotError } = await supabase
+      .from("chat_users")
+      .select("id, username")
+      .eq("id", CHAT_BOT_USER_ID)
+      .eq("is_bot", true)
+      .is("bot_deleted_at", null)
+      .maybeSingle()
+    if (defaultBotError || !defaultBot?.id) {
+      console.warn("chat-knowledge default bot is deleted or missing:", defaultBotError?.message ?? "")
+      return
+    }
+    userId = String(defaultBot.id)
+    username = String(defaultBot.username || CHAT_BOT_USERNAME)
+  }
   const { error } = await supabase.from("chat_messages").insert({
     group_id: groupId,
-    user_id: asUser?.id || CHAT_BOT_USER_ID,
-    username: asUser?.username || CHAT_BOT_USERNAME,
+    user_id: userId,
+    username: username || CHAT_BOT_USERNAME,
     content: text,
     kind: "text",
   })
@@ -333,6 +350,13 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const fromDispatch = String(body.store_key ?? "").trim()
   const resolved = await resolveRoomStoreKey(supabase, group, groupId)
   const text = String(message.content ?? "").trim()
+  const candidateStoreKey = fromDispatch || String(resolved.storeKey ?? "").trim()
+  const activeStoreBot = candidateStoreKey
+    ? await loadChatStoreBot(supabase, candidateStoreKey)
+    : null
+  if (candidateStoreKey && !activeStoreBot) {
+    return json({ ok: true, skipped: true, reason: "store bot deleted or missing" }, 200)
+  }
 
   const calendarRoomId = mtalkSyntheticRoomId(groupId)
   const calendarFlags = await loadMtalkRoomFlags(supabase, groupId)
@@ -348,10 +372,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     })
     if (registered.handled) {
       if (registered.replyText) {
-        const storeBotForCal = (fromDispatch || resolved.storeKey)
-          ? await loadChatStoreBot(supabase, fromDispatch || String(resolved.storeKey ?? ""))
-          : null
-        await replyInRoom(supabase, groupId, registered.replyText, storeBotForCal)
+        await replyInRoom(supabase, groupId, registered.replyText, activeStoreBot)
       }
       return json({ ok: true, processed: true, kind: "schedule" }, 200)
     }
@@ -359,12 +380,9 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
 
   if (SETTINGS_TRIGGER_WORDS.has(text)) {
     const ensured = await ensureMtalkRoomSettings(supabase, groupId)
-    const storeBotForSettings = (fromDispatch || resolved.storeKey)
-      ? await loadChatStoreBot(supabase, fromDispatch || String(resolved.storeKey ?? ""))
-      : null
     const url = `${ROOM_SETTINGS_PAGE}?from=chat&group_id=${groupId}&v=202608201340`
     if (!ensured) {
-      await replyInRoom(supabase, groupId, "このルームの設定を開けませんでした。少し時間をおいて、もう一度「設定」と送ってください。", storeBotForSettings)
+      await replyInRoom(supabase, groupId, "このルームの設定を開けませんでした。少し時間をおいて、もう一度「設定」と送ってください。", activeStoreBot)
       return json({ ok: false, error: "ensure settings failed" }, 500)
     }
     await postChatCard(supabase, {
@@ -379,7 +397,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
         }],
         action: { label: "設定ページを開く", url, style: "primary" },
       }],
-      asUser: storeBotForSettings,
+      asUser: activeStoreBot,
     })
     return json({ ok: true, processed: true, kind: "room-config" }, 200)
   }
@@ -388,11 +406,11 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     await replyInRoom(supabase, groupId, "このルームには複数の店舗Botがいるため処理できません。店舗Botは1つにしてください。")
     return json({ ok: true, skipped: true, reason: "ambiguous store bot" }, 200)
   }
-  const storeKey = fromDispatch || String(resolved.storeKey ?? "").trim()
+  const storeKey = candidateStoreKey
   if (!storeKey) {
     return json({ ok: true, skipped: true, reason: "not store room" }, 200)
   }
-  const storeBot = await loadChatStoreBot(supabase, storeKey)
+  const storeBot = activeStoreBot
   const flags = await loadMtalkRoomFlags(supabase, groupId)
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()

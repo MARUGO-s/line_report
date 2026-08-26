@@ -227,8 +227,22 @@ export async function postChatCard(
   if (!content) return { ok: false, error: 'empty text fallback' }
 
   const payload: ChatCardPayload = { v: 1, kind: options.kind, cards }
-  const asUserId = String(options.asUser?.id ?? '').trim() || CHAT_BOT_USER_ID
-  const asUsername = String(options.asUser?.username ?? '').trim() || CHAT_BOT_USERNAME
+  let asUserId = String(options.asUser?.id ?? '').trim()
+  let asUsername = String(options.asUser?.username ?? '').trim()
+  if (!asUserId) {
+    const { data: defaultBot, error: defaultBotError } = await supabase
+      .from('chat_users')
+      .select('id, username')
+      .eq('id', CHAT_BOT_USER_ID)
+      .eq('is_bot', true)
+      .is('bot_deleted_at', null)
+      .maybeSingle()
+    if (defaultBotError) return { ok: false, error: `default chat bot lookup failed: ${defaultBotError.message}` }
+    asUserId = String(defaultBot?.id ?? '').trim()
+    asUsername = String(defaultBot?.username ?? '').trim() || CHAT_BOT_USERNAME
+    if (!asUserId) return { ok: false, error: 'default chat bot is deleted or missing' }
+  }
+  if (!asUsername) asUsername = CHAT_BOT_USERNAME
 
   try {
     const { data, error } = await supabase

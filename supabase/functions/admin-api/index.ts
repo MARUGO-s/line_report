@@ -17,7 +17,12 @@ import {
 } from "../_shared/knowledge_file_extract.ts"
 import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from "../_shared/knowledge_memo_tag.ts"
 import { isJobTitleLabel, JOB_TITLE_OPTIONS, jobTitleSortRank } from "../_shared/job_titles.ts"
-import { purgeLineAdminRoom, purgeMtalkGroup, restoreLineAdminRoom } from "../_shared/room_hard_delete.ts"
+import {
+  purgeLineAdminRoom,
+  purgeMtalkGroup,
+  purgeMtalkGroupAsAdmin,
+  restoreLineAdminRoom,
+} from "../_shared/room_hard_delete.ts"
 import {
   isMarugoGroupStoreLabel,
   MARUGO_GROUP_STORE_OPTIONS,
@@ -1655,6 +1660,37 @@ Deno.serve(async (req, info) => {
         const body = await parseJson(workReq)
         if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
         return json(await revertChatAdminAudit(supabase, auditId, body, actorLabel), 200)
+      }
+
+      const roomActionMatch = /^\/chat-admin\/rooms\/(\d+)\/(trash|restore|purge)$/i.exec(path)
+      if (roomActionMatch && req.method === "POST") {
+        const groupId = Number(roomActionMatch[1])
+        if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+          throw { status: 400, message: "Invalid room id." } satisfies AppError
+        }
+        const action = roomActionMatch[2].toLowerCase()
+        const body = await parseJson(workReq)
+        if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        if (action === "trash") {
+          return json(await trashChatAdminRoom(supabase, groupId, actorLabel), 200)
+        }
+        if (action === "restore") {
+          return json(await restoreChatAdminRoom(supabase, groupId, actorLabel), 200)
+        }
+        return json(await purgeChatAdminRoom(supabase, groupId, body, actorLabel), 200)
+      }
+
+      const botActionMatch = /^\/chat-admin\/bots\/([0-9a-f-]{36})\/(remove|restore)$/i.exec(path)
+      if (botActionMatch && req.method === "POST") {
+        const botId = botActionMatch[1].toLowerCase()
+        if (!isUuid(botId)) throw { status: 400, message: "Invalid bot id." } satisfies AppError
+        const action = botActionMatch[2].toLowerCase()
+        if (action === "remove") {
+          const body = await parseJson(workReq)
+          if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+          return json(await removeChatAdminBot(supabase, botId, body, actorLabel), 200)
+        }
+        return json(await restoreChatAdminBot(supabase, botId, actorLabel), 200)
       }
 
       const memberMatch = /^\/chat-admin\/rooms\/(\d+)\/members\/([0-9a-f-]{36})$/i.exec(path)
@@ -4166,7 +4202,7 @@ async function fetchChatAdminState(
   const [usersResult, accessResult, groupsResult, membersResult, auditResult] = await Promise.all([
     supabase
       .from("chat_users")
-      .select("id, username, icon_url, created_at, is_bot, store_key")
+      .select("id, username, icon_url, created_at, is_bot, store_key, bot_deleted_at, bot_deleted_by")
       .order("created_at", { ascending: true })
       .limit(5000),
     supabase
@@ -4175,7 +4211,7 @@ async function fetchChatAdminState(
       .limit(5000),
     supabase
       .from("chat_groups")
-      .select("id, group_name, icon_url, created_by, created_at, is_direct, is_store_room, store_key, trashed_at")
+      .select("id, group_name, icon_url, created_by, created_at, is_direct, is_store_room, store_key, trashed_at, trashed_by")
       .order("created_at", { ascending: false })
       .limit(5000),
     supabase
@@ -4259,6 +4295,7 @@ async function fetchChatAdminState(
         username: user.username ?? "不明なユーザー",
         icon_url: user.icon_url ?? null,
         is_bot: user.is_bot === true,
+        bot_deleted_at: user.bot_deleted_at ?? null,
         user_deleted_at: access.deleted_at ?? null,
         user_access_enabled: access.access_enabled !== false,
       }
@@ -4268,6 +4305,8 @@ async function fetchChatAdminState(
 
   const now = Date.now()
   const humanUsers = users.filter((user) => user["is_bot"] !== true)
+  const botUsers = users.filter((user) => user["is_bot"] === true)
+  const deletedBots = botUsers.filter((user) => Boolean(user["bot_deleted_at"]))
   const deletedUsers = humanUsers.filter((user) => Boolean((user.access as Record<string, unknown>).deleted_at))
   const suspendedUsers = humanUsers.filter((user) => {
     const access = user.access as Record<string, unknown>
@@ -4282,7 +4321,8 @@ async function fetchChatAdminState(
       active_users: activeUsers,
       suspended_users: suspendedUsers.length,
       deleted_users: deletedUsers.length,
-      bot_users: users.length - humanUsers.length,
+      bot_users: botUsers.length - deletedBots.length,
+      deleted_bot_users: deletedBots.length,
       group_rooms: rooms.filter((room) => room["is_direct"] !== true && !room["trashed_at"]).length,
       direct_rooms: rooms.filter((room) => room["is_direct"] === true && !room["trashed_at"]).length,
       trashed_rooms: rooms.filter((room) => Boolean(room["trashed_at"])).length,
@@ -4327,6 +4367,107 @@ async function updateChatAdminUserAccess(
     throw { status: conflict ? 409 : 400, message: conflict ? "別の管理者が先に更新しました。再読み込みしてやり直してください。" : error.message } satisfies AppError
   }
   return { ok: true, access: data }
+}
+
+async function trashChatAdminRoom(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.rpc("chat_admin_trash_group", {
+    p_group_id: groupId,
+    p_actor: actor,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return { ok: true, room: data }
+}
+
+async function restoreChatAdminRoom(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.rpc("chat_admin_restore_group", {
+    p_group_id: groupId,
+    p_actor: actor,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return { ok: true, room: data }
+}
+
+async function purgeChatAdminRoom(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data: group, error } = await supabase
+    .from("chat_groups")
+    .select("id, group_name, created_by, is_direct, is_store_room, store_key, trashed_at")
+    .eq("id", groupId)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `ルームの確認に失敗しました: ${error.message}` } satisfies AppError
+  if (!group) throw { status: 404, message: "ルームが見つかりません。" } satisfies AppError
+  if (group.is_store_room) {
+    throw { status: 403, message: "店舗固定ルームは削除できません。" } satisfies AppError
+  }
+  if (!group.trashed_at) {
+    throw { status: 400, message: "先にゴミ箱へ入れてから完全削除してください。" } satisfies AppError
+  }
+  const roomName = String(group.group_name ?? "").trim() || String(groupId)
+  const confirmName = String(body.confirm_name ?? "").trim()
+  if (!confirmName || confirmName !== roomName) {
+    throw { status: 400, message: "確認用のルーム名が一致しません。" } satisfies AppError
+  }
+
+  const purged = await purgeMtalkGroupAsAdmin(supabase, groupId)
+  const { error: auditError } = await supabase.from("chat_admin_audit_log").insert({
+    action: "room_purge",
+    group_id: groupId,
+    actor,
+    before_state: group,
+    after_state: { purged: true, counts: purged.counts },
+  })
+  if (auditError) {
+    console.error("chat-admin room purge audit failed:", auditError.message)
+  }
+  return {
+    ok: true,
+    ...purged,
+    audit_recorded: !auditError,
+  }
+}
+
+async function removeChatAdminBot(
+  supabase: ReturnType<typeof createClient<any>>,
+  botId: string,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const confirmUsername = String(body.confirm_username ?? "").trim()
+  if (!confirmUsername) {
+    throw { status: 400, message: "確認のためBot名を入力してください。" } satisfies AppError
+  }
+  const { data, error } = await supabase.rpc("chat_admin_remove_bot", {
+    p_user_id: botId,
+    p_actor: actor,
+    p_confirm_username: confirmUsername,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return { ok: true, bot: data, history_preserved: true, memberships_preserved: true }
+}
+
+async function restoreChatAdminBot(
+  supabase: ReturnType<typeof createClient<any>>,
+  botId: string,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.rpc("chat_admin_restore_bot", {
+    p_user_id: botId,
+    p_actor: actor,
+  })
+  if (error) throw chatAdminRpcError(error)
+  return { ok: true, bot: data }
 }
 
 async function removeChatAdminUser(
@@ -4667,13 +4808,15 @@ async function issueChatJournalLoginLink(
   // （is_direct=false）も、参加している人間は自分だけなら同じ条件を満たす。
   const { data: memberRows, error: memberError } = await supabase
     .from("chat_group_members")
-    .select("user_id, chat_users!inner(is_bot)")
+    .select("user_id, chat_users!inner(is_bot, bot_deleted_at)")
     .eq("group_id", groupId)
   if (memberError) {
     throw { status: 500, message: `Failed to load room members: ${memberError.message}` } satisfies AppError
   }
   const humanMemberIds = (Array.isArray(memberRows) ? memberRows : [])
-    .filter((row) => (row as { chat_users?: { is_bot?: unknown } }).chat_users?.is_bot !== true)
+    .filter((row) => (
+      (row as { chat_users?: { is_bot?: unknown } }).chat_users?.is_bot !== true
+    ))
     .map((row) => String((row as { user_id?: unknown }).user_id ?? ""))
   if (humanMemberIds.length !== 1 || humanMemberIds[0] !== userId) {
     throw {

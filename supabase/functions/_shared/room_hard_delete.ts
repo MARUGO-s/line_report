@@ -133,6 +133,56 @@ export async function purgeMtalkGroup(
   return { group_id: id, room_id: roomId, counts }
 }
 
+/**
+ * M-talk管理画面（本部フル管理セッション）からの完全削除。
+ * 呼び出し元のadmin-apiが管理セッションを検証済みであることを前提に、
+ * 作成者本人の条件だけを管理者権限へ置き換える。
+ *
+ * 店舗固定ルーム禁止・先にゴミ箱へ入れる・対象group_idだけを削除、という
+ * 安全条件は通常のpurgeMtalkGroupと同じ。
+ */
+export async function purgeMtalkGroupAsAdmin(
+  supabase: DbClient,
+  groupId: number,
+): Promise<{ group_id: number; room_id: string; counts: RoomPurgeCounts }> {
+  const id = Number(groupId)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw { status: 400, message: "ルームが指定されていません。" }
+  }
+
+  const { data: group, error } = await supabase
+    .from("chat_groups")
+    .select("id, group_name, is_store_room, trashed_at")
+    .eq("id", id)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `ルームの確認に失敗しました: ${error.message}` }
+  if (!group) throw { status: 404, message: "ルームが見つかりません。" }
+  if (group.is_store_room) throw { status: 403, message: "店舗固定ルームは削除できません。" }
+  if (!group.trashed_at) {
+    throw { status: 400, message: "先にゴミ箱へ入れてから完全削除してください。" }
+  }
+
+  const roomId = mtalkSyntheticRoomId(id)
+  const counts: RoomPurgeCounts = {}
+  counts.chat_images = await removeChatImagePrefix(supabase, id)
+  Object.assign(counts, await purgeRoomScopedData(supabase, roomId))
+
+  const { error: deleteGroupError, count } = await supabase
+    .from("chat_groups")
+    .delete({ count: "exact" })
+    .eq("id", id)
+    .eq("is_store_room", false)
+    .not("trashed_at", "is", null)
+  if (deleteGroupError) {
+    throw { status: 500, message: `ルームの削除に失敗しました: ${deleteGroupError.message}` }
+  }
+  if ((count ?? 0) !== 1) {
+    throw { status: 409, message: "ルームを削除できませんでした。他のルームは変更していません。" }
+  }
+  counts.chat_groups = 1
+  return { group_id: id, room_id: roomId, counts }
+}
+
 export async function purgeLineAdminRoom(
   supabase: DbClient,
   roomId: string,

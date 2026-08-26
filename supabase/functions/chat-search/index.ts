@@ -98,10 +98,22 @@ function helpCard() {
 
 async function postReply(supabase: any, groupId: number, bot: { id: string; username: string } | null, reply: { text: string; card?: unknown }) {
   const payload = reply.card ? { v: 1, kind: "search", cards: [reply.card] } : null
+  let asBot = bot
+  if (!asBot) {
+    const { data: fallback } = await supabase
+      .from("chat_users")
+      .select("id, username")
+      .eq("id", FALLBACK_BOT_ID)
+      .eq("is_bot", true)
+      .is("bot_deleted_at", null)
+      .maybeSingle()
+    if (!fallback?.id) throw new Error("返信に使えるBotがありません。")
+    asBot = { id: String(fallback.id), username: String(fallback.username || "予約通知") }
+  }
   const { error } = await supabase.from("chat_messages").insert({
     group_id: groupId,
-    user_id: bot?.id || FALLBACK_BOT_ID,
-    username: bot?.username || "予約通知",
+    user_id: asBot.id,
+    username: asBot.username,
     content: reply.text,
     // chat_messages.kind は表示形式、payload.kind はカードの用途。
     // DB制約で許可されるカード形式は必ず "card" にする。
@@ -138,7 +150,7 @@ Deno.serve(async (req) => {
   const roomId = `mtalk-dm-${groupId}`
 
   const [{ data: botRow }, { data: settings }, { data: personalSettings }] = await Promise.all([
-    supabase.from("chat_users").select("id, username").eq("is_bot", true).eq("store_key", storeKey).maybeSingle(),
+    supabase.from("chat_users").select("id, username").eq("is_bot", true).eq("store_key", storeKey).is("bot_deleted_at", null).maybeSingle(),
     supabase.from("room_summary_settings").select("calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, media_file_access_enabled, receipt_midreport_enabled, receipt_monthend_report_enabled"),
     supabase.from("room_summary_settings").select("bot_reply_hard_mute_enabled").eq("room_id", roomId).maybeSingle(),
   ])

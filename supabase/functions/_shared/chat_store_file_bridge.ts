@@ -75,6 +75,7 @@ export async function loadChatStoreBot(supabase: DbClient, storeKey: string): Pr
     .select('id, username, store_key')
     .eq('is_bot', true)
     .eq('store_key', key)
+    .is('bot_deleted_at', null)
     .maybeSingle()
   if (error) {
     console.warn('loadChatStoreBot failed:', error.message)
@@ -112,7 +113,7 @@ export async function resolveRoomStoreKey(
 
   const { data: users, error: userError } = await supabase
     .from('chat_users')
-    .select('id, is_bot, store_key')
+    .select('id, is_bot, store_key, bot_deleted_at')
     .in('id', userIds)
   if (userError) {
     console.warn('resolveRoomStoreKey users failed:', userError.message)
@@ -120,7 +121,10 @@ export async function resolveRoomStoreKey(
   }
   const keys = [...new Set(
     (Array.isArray(users) ? users : [])
-      .filter((row) => (row as { is_bot?: boolean }).is_bot)
+      .filter((row) => (
+        (row as { is_bot?: boolean }).is_bot
+        && !(row as { bot_deleted_at?: string | null }).bot_deleted_at
+      ))
       .map((row) => String((row as { store_key?: string }).store_key ?? '').trim())
       .filter(Boolean),
   )]

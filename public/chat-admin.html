@@ -203,12 +203,12 @@
         </section>
 
         <section class="panel" id="users">
-          <div class="panel-head"><div><h2>ユーザー</h2><p>全体利用と M-talk 内で可能な操作を設定します。Botは変更できません。</p></div><div class="tools"><select id="userStatus"><option value="all">すべて</option><option value="active">利用中</option><option value="suspended">停止中</option><option value="deleted">削除済み</option><option value="bot">Bot</option></select><input id="userSearch" type="search" placeholder="表示名・IDで検索"></div></div>
+          <div class="panel-head"><div><h2>ユーザー</h2><p>全体利用と M-talk 内で可能な操作を設定します。Botの削除・復元はこの管理画面だけで行えます。</p></div><div class="tools"><select id="userStatus"><option value="all">すべて</option><option value="active">利用中</option><option value="suspended">停止中</option><option value="deleted">削除済み</option><option value="bot">Bot</option><option value="deleted_bot">削除済みBot</option></select><input id="userSearch" type="search" placeholder="表示名・IDで検索"></div></div>
           <div class="table-wrap"><table><thead><tr><th>ユーザー</th><th>状態</th><th>参加ルーム</th><th>1対1</th><th>グループ作成</th><th>ユーザー参照</th><th></th></tr></thead><tbody id="userRows"></tbody></table></div>
         </section>
 
         <section class="panel" id="rooms">
-          <div class="panel-head"><div><h2>ルーム / 1対1</h2><p>参加者ごとに閲覧・送信・招待・管理を設定します。</p></div><div class="tools"><div class="tabs" id="roomTabs"><button class="tab active" type="button" data-room-tab="all">すべて</button><button class="tab" type="button" data-room-tab="group">ルーム</button><button class="tab" type="button" data-room-tab="direct">1対1</button></div><input id="roomSearch" type="search" placeholder="ルーム名で検索"></div></div>
+          <div class="panel-head"><div><h2>ルーム / 1対1</h2><p>権限設定と、ゴミ箱への移動・復元・完全削除を管理します。</p></div><div class="tools"><div class="tabs" id="roomTabs"><button class="tab active" type="button" data-room-tab="all">すべて</button><button class="tab" type="button" data-room-tab="group">ルーム</button><button class="tab" type="button" data-room-tab="direct">1対1</button><button class="tab" type="button" data-room-tab="trash">ゴミ箱</button></div><input id="roomSearch" type="search" placeholder="ルーム名で検索"></div></div>
           <div class="room-layout"><div class="room-list" id="roomRows"></div><div class="room-detail" id="roomDetail"><div class="empty">左からルームを選択してください</div></div></div>
         </section>
 
@@ -280,8 +280,8 @@
     function toLocalInput(value) { if (!value) return ''; const d = new Date(value); if (!Number.isFinite(d.getTime())) return ''; const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
     function avatarHtml(user, sizeClass) { const name = String(user.username || '?'); const inner = user.icon_url ? '<img src="' + escapeHtml(user.icon_url) + '" alt="">' : escapeHtml(name.slice(0,1)); return '<span class="avatar ' + (sizeClass || '') + '">' + inner + '</span>'; }
     function isRestrictionActive(access) { return !!(access && access.restricted_until && new Date(access.restricted_until).getTime() > Date.now()); }
-    function userStatus(user) { const access = user.access || {}; if (user.is_bot) return 'bot'; if (access.deleted_at) return 'deleted'; if (access.access_enabled === false || isRestrictionActive(access)) return 'suspended'; return 'active'; }
-    function statusBadge(user) { const value = userStatus(user); const map = {active:['ok','利用中'],suspended:['warn','停止中'],deleted:['danger','削除済み'],bot:['','Bot']}; const item = map[value]; return '<span class="badge ' + item[0] + '">' + item[1] + '</span>'; }
+    function userStatus(user) { const access = user.access || {}; if (user.is_bot) return user.bot_deleted_at ? 'deleted_bot' : 'bot'; if (access.deleted_at) return 'deleted'; if (access.access_enabled === false || isRestrictionActive(access)) return 'suspended'; return 'active'; }
+    function statusBadge(user) { const value = userStatus(user); const map = {active:['ok','利用中'],suspended:['warn','停止中'],deleted:['danger','削除済み'],bot:['','Bot'],deleted_bot:['danger','削除済みBot']}; const item = map[value]; return '<span class="badge ' + item[0] + '">' + item[1] + '</span>'; }
     function toast(message, isError) { const el = $('toast'); el.textContent = message; el.className = 'toast' + (isError ? ' error' : ''); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 4200); }
     function setBusy(value) {
       state.busyDepth = Math.max(0, state.busyDepth + (value ? 1 : -1));
@@ -350,7 +350,7 @@
     }
 
     function renderSummary() {
-      const items = [['active_users','利用中'],['suspended_users','停止中'],['deleted_users','削除済み'],['bot_users','Bot'],['group_rooms','ルーム'],['direct_rooms','1対1']];
+      const items = [['active_users','利用中'],['suspended_users','停止中'],['deleted_users','削除済み'],['bot_users','Bot'],['deleted_bot_users','削除済みBot'],['group_rooms','ルーム'],['direct_rooms','1対1']];
       $('summaryGrid').innerHTML = items.map(([key,label]) => '<div class="metric"><span>' + label + '</span><strong>' + Number(state.summary[key] || 0).toLocaleString('ja-JP') + '</strong></div>').join('');
     }
 
@@ -361,21 +361,37 @@
     function renderUsers() {
       const users = filteredUsers();
       $('userRows').innerHTML = users.length ? users.map((user) => {
-        const access = user.access || {}; const locked = user.is_bot === true; const deleted = !!access.deleted_at;
+        const access = user.access || {}; const locked = user.is_bot === true; const deleted = !!access.deleted_at; const botDeleted = locked && !!user.bot_deleted_at;
+        const actions = locked
+          ? '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button>' + (botDeleted ? '<button class="btn" type="button" data-restore-bot="' + escapeHtml(user.id) + '">Bot復元</button>' : '<button class="btn ghost-danger" type="button" data-remove-bot="' + escapeHtml(user.id) + '">Bot削除</button>')
+          : '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button><button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '">' + (deleted ? '復元' : '権限設定') + '</button>' + (!deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '');
         return '<tr><td><div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (locked ? ' <span class="badge">Bot</span>' : '') + '</strong><small>' + escapeHtml(user.id) + '</small></div></div></td>' +
           '<td>' + statusBadge(user) + (access.restriction_reason ? '<small style="display:block;margin-top:4px;color:var(--muted)">' + escapeHtml(access.restriction_reason) + '</small>' : '') + '</td>' +
           '<td>' + Number(user.room_count || 0) + '</td><td>' + boolBadge(access.can_start_direct) + '</td><td>' + boolBadge(access.can_create_group) + '</td><td>' + boolBadge(access.can_browse_users) + '</td>' +
-          '<td><div class="row-actions"><button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button><button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '" ' + (locked ? 'disabled title="Botは変更できません"' : '') + '>' + (deleted ? '復元' : '権限設定') + '</button>' + (!locked && !deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '') + '</div></td></tr>';
+          '<td><div class="row-actions">' + actions + '</div></td></tr>';
       }).join('') : '<tr><td colspan="7" class="empty">該当するユーザーはいません</td></tr>';
     }
     function boolBadge(value) { return value === false ? '<span class="badge danger">不可</span>' : '<span class="badge ok">可</span>'; }
 
     function filteredRooms() {
       const query = $('roomSearch').value.trim().toLowerCase();
-      return state.rooms.filter((room) => (state.roomTab === 'all' || (state.roomTab === 'direct' ? room.is_direct : !room.is_direct)) && (!query || String(room.group_name || '').toLowerCase().includes(query) || String(room.id).includes(query)));
+      return state.rooms.filter((room) => {
+        if (state.roomTab === 'trash') {
+          if (!room.trashed_at) return false;
+        } else {
+          if (room.trashed_at) return false;
+          if (state.roomTab === 'direct' && !room.is_direct) return false;
+          if (state.roomTab === 'group' && room.is_direct) return false;
+        }
+        return !query || String(room.group_name || '').toLowerCase().includes(query) || String(room.id).includes(query);
+      });
     }
     function renderRooms() {
       const rooms = filteredRooms();
+      if (state.selectedRoomId && !rooms.some((room) => Number(room.id) === Number(state.selectedRoomId))) {
+        state.selectedRoomId = rooms.length ? Number(rooms[0].id) : null;
+        state.selectedMembers = new Set();
+      }
       $('roomRows').innerHTML = rooms.length ? rooms.map((room) => '<button class="room-item ' + (Number(room.id) === Number(state.selectedRoomId) ? 'active' : '') + '" type="button" data-room-id="' + room.id + '"><span class="room-item-head"><strong>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</strong><span class="badge ' + (room.trashed_at ? 'danger' : '') + '">' + (room.is_direct ? '1対1' : 'ルーム') + '</span></span><small>ID ' + room.id + ' ・ ' + Number(room.member_count || 0) + '人' + (room.trashed_at ? ' ・ ゴミ箱' : '') + '</small></button>').join('') : '<div class="empty">該当するルームはありません</div>';
       renderRoomDetail();
     }
@@ -384,12 +400,18 @@
       if (!room) { $('roomDetail').innerHTML = '<div class="empty">左からルームを選択してください</div>'; return; }
       const members = Array.isArray(room.members) ? room.members : [];
       const rows = members.length ? members.map((member) => {
-        const locked = member.is_bot === true; const user = {username:member.username,icon_url:member.icon_url};
+        const locked = member.is_bot === true || !!room.trashed_at; const user = {username:member.username,icon_url:member.icon_url};
         return '<div class="member-row" data-member-id="' + escapeHtml(member.user_id) + '"><label class="member-cell center"><input type="checkbox" data-member-select="' + escapeHtml(member.user_id) + '"' + (state.selectedMembers.has(member.user_id) ? ' checked' : '') + (locked ? ' disabled' : '') + '></label><div class="member-cell"><div class="member-name">' + avatarHtml(user) + '<div><strong>' + escapeHtml(member.username || '不明なユーザー') + '</strong>' + (locked ? '<span class="badge">Bot</span>' : '') + (member.user_deleted_at ? '<span class="badge danger">削除済み</span>' : '') + '</div></div></div>' +
           memberPermission('can_view',member,locked,room.is_direct) + memberPermission('can_send',member,locked,room.is_direct) + memberPermission('can_invite',member,locked,room.is_direct) + memberPermission('can_manage',member,locked,room.is_direct) +
           '<div class="member-cell center"><button class="btn ghost-danger" type="button" data-remove-member="' + escapeHtml(member.user_id) + '" ' + (locked || room.is_direct ? 'disabled title="1対1とBotはアクセス解除できません"' : '') + '>解除</button></div></div>';
       }).join('') : '<div class="empty" style="grid-column:1/-1">メンバーはいません</div>';
-      $('roomDetail').innerHTML = '<h3>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + Number(room.id) + ' / ' + members.length + '人</p>' + templateBarHtml(room) + '<div class="table-wrap"><div class="perm-grid"><div class="perm-head"></div><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
+      const roomName = room.group_name || (room.is_direct ? '1対1トーク' : '名称なし');
+      const roomActions = room.is_store_room
+        ? '<span class="badge">店舗固定ルームは削除不可</span>'
+        : (room.trashed_at
+          ? '<button class="btn" type="button" data-restore-room="' + Number(room.id) + '">復元</button><button class="btn ghost-danger" type="button" data-purge-room="' + Number(room.id) + '">完全削除</button>'
+          : '<button class="btn ghost-danger" type="button" data-trash-room="' + Number(room.id) + '">ゴミ箱へ</button>');
+      $('roomDetail').innerHTML = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><h3>' + escapeHtml(roomName) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + Number(room.id) + ' / ' + members.length + '人' + (room.trashed_at ? ' / ゴミ箱' : '') + '</p></div><div class="row-actions">' + roomActions + '</div></div>' + (room.trashed_at ? '<div class="notice" style="margin:12px 0">ゴミ箱のルームには送信・参加できません。復元するか、ルーム名を確認入力して完全削除できます。</div>' : '') + templateBarHtml(room) + '<div class="table-wrap"><div class="perm-grid"><div class="perm-head"></div><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
     }
     function memberPermission(name,member,locked,isDirect) { const unavailable = locked || (isDirect && (name === 'can_invite' || name === 'can_manage')) || (name !== 'can_view' && member.can_view !== true); return '<label class="member-cell center" title="' + name + '"><input type="checkbox" data-member-permission="' + name + '" ' + (member[name] === true ? 'checked' : '') + (unavailable ? ' disabled' : '') + '></label>'; }
 
@@ -438,6 +460,40 @@
       const user = state.selectedUser; if (!user || user.is_bot || !confirm(user.username + ' をM-talkへ復元しますか？')) return;
       await mutate('/chat-admin/users/' + encodeURIComponent(user.id) + '/restore', {method:'POST',body:'{}'}, 'ユーザーを復元しました'); $('userDialog').close();
     }
+    async function removeBot(botId) {
+      const bot = state.users.find((item) => item.id === botId); if (!bot || !bot.is_bot || bot.bot_deleted_at) return;
+      if (!confirm(bot.username + ' を削除状態にしますか？\n\n過去メッセージと所属履歴は保持されますが、このBotは新しい投稿・予約通知・検索応答に使用されなくなります。通常のM-talk画面からは削除できません。')) return;
+      const typed = prompt('確認のためBot名「' + bot.username + '」を入力してください'); if (typed === null) return;
+      if (typed.trim() !== String(bot.username || '').trim()) { alert('Bot名が一致しません。削除を中止しました。'); return; }
+      if (!confirm('最終確認です。' + bot.username + ' を管理画面から削除状態にしますか？')) return;
+      await mutate('/chat-admin/bots/' + encodeURIComponent(bot.id) + '/remove', {method:'POST',body:JSON.stringify({confirm_username:typed.trim()})}, 'Botを削除状態にしました');
+    }
+    async function restoreBot(botId) {
+      const bot = state.users.find((item) => item.id === botId); if (!bot || !bot.is_bot || !bot.bot_deleted_at) return;
+      if (!confirm(bot.username + ' を復元し、Bot機能を再び有効にしますか？')) return;
+      await mutate('/chat-admin/bots/' + encodeURIComponent(bot.id) + '/restore', {method:'POST',body:'{}'}, 'Botを復元しました');
+    }
+    async function trashRoom(groupId) {
+      const room = state.rooms.find((item) => Number(item.id) === Number(groupId)); if (!room || room.is_store_room || room.trashed_at) return;
+      if (!confirm('「' + (room.group_name || room.id) + '」をゴミ箱へ移動しますか？\n履歴は保持され、ゴミ箱から復元できます。')) return;
+      await mutate('/chat-admin/rooms/' + room.id + '/trash', {method:'POST',body:'{}'}, 'ルームをゴミ箱へ移動しました');
+      state.roomTab = 'trash'; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item.dataset.roomTab === 'trash')); renderRooms();
+    }
+    async function restoreRoom(groupId) {
+      const room = state.rooms.find((item) => Number(item.id) === Number(groupId)); if (!room || room.is_store_room || !room.trashed_at) return;
+      if (!confirm('「' + (room.group_name || room.id) + '」をゴミ箱から復元しますか？')) return;
+      await mutate('/chat-admin/rooms/' + room.id + '/restore', {method:'POST',body:'{}'}, 'ルームを復元しました');
+      state.roomTab = 'all'; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item.dataset.roomTab === 'all')); renderRooms();
+    }
+    async function purgeRoom(groupId) {
+      const room = state.rooms.find((item) => Number(item.id) === Number(groupId)); if (!room || room.is_store_room || !room.trashed_at) return;
+      const roomName = String(room.group_name || room.id);
+      const typed = prompt('完全削除すると、このルームのメッセージ・画像・予定は復元できません。\n確認のためルーム名「' + roomName + '」を入力してください'); if (typed === null) return;
+      if (typed.trim() !== roomName.trim()) { alert('ルーム名が一致しません。完全削除を中止しました。'); return; }
+      if (!confirm('最終確認です。「' + roomName + '」を完全に削除しますか？\nこの操作は元に戻せません。')) return;
+      await mutate('/chat-admin/rooms/' + room.id + '/purge', {method:'POST',body:JSON.stringify({confirm_name:typed.trim()})}, 'ルームを完全に削除しました');
+      state.selectedRoomId = null; renderRooms();
+    }
     async function updateMember(target) {
       const room = state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId)); const row = target.closest('[data-member-id]'); if (!room || !row) return;
       const member = room.members.find((item) => item.user_id === row.dataset.memberId); if (!member || member.is_bot) return;
@@ -456,7 +512,7 @@
     }
     const PERMISSION_KEYS = ['can_view','can_send','can_invite','can_manage'];
     const PERMISSION_LABELS = {can_view:'閲覧',can_send:'送信',can_invite:'招待',can_manage:'管理'};
-    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元'};
+    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',bot_remove:'Botの削除',bot_restore:'Botの復元',room_trash:'ルームをゴミ箱へ移動',room_restore:'ルームの復元',room_purge:'ルームの完全削除',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元'};
     const REASON_LABELS = {user_deleted:'M-talkから削除済み',user_disabled:'全体で利用停止中',user_restricted:'期限付きで停止中',room_view_denied:'このルームは閲覧不可',room_send_denied:'送信不可',room_invite_denied:'招待不可',room_manage_denied:'管理不可',room_direct_locked:'1対1のため招待・管理は不可',room_trashed:'ルームがゴミ箱にある'};
     function actionLabel(value) { return ACTION_LABELS[String(value || '')] || String(value || ''); }
     function permText(perms) { return PERMISSION_KEYS.map((key) => PERMISSION_LABELS[key] + (perms && perms[key] === true ? '○' : '×')).join(' '); }
@@ -631,7 +687,7 @@
     $('logoutBtn').addEventListener('click', async () => { try { await AUTH.logout({logoutUrl:apiUrl('/auth/logout'),adminSurface:ADMIN_SURFACE}); } finally { showLogin(); } });
     $('refreshBtn').addEventListener('click', () => loadState().catch((error) => toast(error.message,true)));
     $('userSearch').addEventListener('input', renderUsers); $('userStatus').addEventListener('change', renderUsers); $('roomSearch').addEventListener('input', renderRooms);
-    $('userRows').addEventListener('click', (event) => { const edit = event.target.closest('[data-edit-user]'); const toggle = event.target.closest('[data-toggle-access]'); const access = event.target.closest('[data-user-access]'); if (edit) openUserDialog(edit.dataset.editUser); if (toggle) toggleUserAccess(toggle.dataset.toggleAccess).catch(() => {}); if (access) openAccessDialog(access.dataset.userAccess).catch((error) => toast(error.message || String(error), true)); });
+    $('userRows').addEventListener('click', (event) => { const edit = event.target.closest('[data-edit-user]'); const toggle = event.target.closest('[data-toggle-access]'); const access = event.target.closest('[data-user-access]'); const removeBotBtn = event.target.closest('[data-remove-bot]'); const restoreBotBtn = event.target.closest('[data-restore-bot]'); if (edit) openUserDialog(edit.dataset.editUser); if (toggle) toggleUserAccess(toggle.dataset.toggleAccess).catch(() => {}); if (access) openAccessDialog(access.dataset.userAccess).catch((error) => toast(error.message || String(error), true)); if (removeBotBtn) removeBot(removeBotBtn.dataset.removeBot).catch(() => {}); if (restoreBotBtn) restoreBot(restoreBotBtn.dataset.restoreBot).catch(() => {}); });
     $('roomTabs').addEventListener('click', (event) => { const tab = event.target.closest('[data-room-tab]'); if (!tab) return; state.roomTab=tab.dataset.roomTab; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item===tab)); renderRooms(); });
     $('roomRows').addEventListener('click', (event) => { const row=event.target.closest('[data-room-id]'); if (!row) return; state.selectedRoomId=Number(row.dataset.roomId); state.selectedMembers=new Set(); renderRooms(); });
     $('roomDetail').addEventListener('change', (event) => {
@@ -642,6 +698,9 @@
     });
     $('roomDetail').addEventListener('click', (event) => {
       const button=event.target.closest('[data-remove-member]'); if (button) { removeMember(button.dataset.removeMember).catch(() => {}); return; }
+      const trashBtn=event.target.closest('[data-trash-room]'); if (trashBtn) { trashRoom(trashBtn.dataset.trashRoom).catch(() => {}); return; }
+      const restoreBtn=event.target.closest('[data-restore-room]'); if (restoreBtn) { restoreRoom(restoreBtn.dataset.restoreRoom).catch(() => {}); return; }
+      const purgeBtn=event.target.closest('[data-purge-room]'); if (purgeBtn) { purgeRoom(purgeBtn.dataset.purgeRoom).catch(() => {}); return; }
       if (event.target.closest('#templatePreviewBtn')) previewTemplate().catch((error) => toast(error.message || String(error), true));
     });
     $('auditRows').addEventListener('click', (event) => { const button = event.target.closest('[data-revert-audit]'); if (button) openRevertDialog(button.dataset.revertAudit).catch((error) => toast(error.message || String(error), true)); });
