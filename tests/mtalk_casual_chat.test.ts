@@ -116,7 +116,7 @@ Deno.test("一般的な使い方質問にはM-talk全体概要を渡す", () => 
   if (
     !reference.includes("M-talk全体概要") ||
     !reference.includes("M-talk機能索引") ||
-    !reference.includes("LINE Report / Journal Report 区分索引") ||
+    !reference.includes("M-talk / Journal Report 区分索引") ||
     !reference.includes("予約配信") ||
     !reference.includes("Keepメモ") ||
     !reference.includes("権限・閲覧専用")
@@ -159,7 +159,7 @@ Deno.test("具体的な質問でも仕組みと全機能索引を必ず添える
   if (
     !reference.includes("M-talkの仕組み・全体像") ||
     !reference.includes("M-talk機能索引") ||
-    !reference.includes("LINE Report / Journal Report 区分索引")
+    !reference.includes("M-talk / Journal Report 区分索引")
   ) {
     throw new Error("仕組みと全機能索引が常時添付されていません")
   }
@@ -182,7 +182,7 @@ Deno.test("M-talkの使い方質問には関連マニュアルをシステム指
     question: "個人メモは他の人に見えますか？",
   })
   if (
-    !system.includes("LINE Report / Journal Report / M-talk 統合マニュアル") ||
+    !system.includes("M-talk / Journal Report 統合マニュアル") ||
     !system.includes("他の参加者、Bot、管理画面、Web Pushには表示されません")
   ) {
     throw new Error("個人メモのマニュアルがシステム指示へ入りませんでした")

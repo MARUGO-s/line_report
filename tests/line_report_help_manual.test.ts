@@ -23,7 +23,7 @@ function assertEquals(actual: unknown, expected: unknown, label = ""): void {
 
 Deno.test("統合資料は区分・項目ID・索引コードが重複せず全項目が分類される", () => {
   assertEquals(LINE_REPORT_HELP_CATEGORIES.length, 12, "major category count")
-  assertEquals(LINE_REPORT_HELP_SECTIONS.length, 44, "indexed section count")
+  assertEquals(LINE_REPORT_HELP_SECTIONS.length, 45, "indexed section count")
   const categoryIds = LINE_REPORT_HELP_CATEGORIES.map((category) => category.id)
   const sectionIds = LINE_REPORT_HELP_SECTIONS.map((section) => section.id)
   const sectionCodes = LINE_REPORT_HELP_SECTIONS.map((section) => section.code)
@@ -176,9 +176,60 @@ Deno.test("否定形・分離語・類似機能の質問でも正しい項目を
   }
 })
 
+Deno.test("過去の売上登録は一括取込へ、当日の売上登録はレシートへ振り分ける", () => {
+  // 「過去の売上登録方法」でレシート画像（当日1日分）の手順を答えてしまう誤りの回帰防止。
+  for (
+    const question of [
+      "過去の売上登録方法",
+      "過去の売上をまとめて登録したい",
+      "先月の売上を後から登録するには？",
+      "過去分の売上を一括取込したい",
+    ]
+  ) {
+    const selected = selectLineReportHelpSections(question, 4)
+    const codes = selected.map((entry) => entry.section.code)
+    if (!codes.includes("SAL-07")) {
+      throw new Error(`${question}\nexpected SAL-07\nactual: ${codes.join(", ")}`)
+    }
+    const past = selected.find((entry) => entry.section.code === "SAL-07")
+    const receipt = selected.find((entry) => entry.section.code === "SAL-02")
+    if (receipt && past && receipt.score >= past.score) {
+      throw new Error(
+        `${question}: SAL-02(${receipt.score}) が SAL-07(${past.score}) 以上です`,
+      )
+    }
+  }
+
+  // 当日の売上登録は従来どおりレシート解析（SAL-02）が最上位であること。
+  const todaySelected = selectLineReportHelpSections("売上登録のやり方", 4)
+  if (todaySelected[0]?.section.code !== "SAL-02") {
+    throw new Error(
+      `売上登録のやり方: expected SAL-02 first, actual ${
+        todaySelected.map((entry) => entry.section.code).join(", ")
+      }`,
+    )
+  }
+
+  // AIへ渡す参照に、正しい経路と「レシートではない」根拠が両方入ること。
+  const reference = buildMtalkHelpReference("過去の売上登録方法")
+  for (
+    const expected of [
+      "SAL-07",
+      "過去の日次売上を一括取込",
+      "月次日別売上管理表",
+      "レシート画像はその日1日分の登録専用です",
+      "M-talkのトークへExcelを送っても一括取込は行われません",
+    ]
+  ) {
+    if (!reference.includes(expected)) {
+      throw new Error(`過去の売上登録方法: 参照資料に ${expected} がありません`)
+    }
+  }
+})
+
 Deno.test("統合参照は区分索引と質問に関連する詳細を含み、通常例では途中切れしない", () => {
   const cases = [
-    ["予算登録と売上照会の違い", ["LINE Report / Journal Report 区分索引", "SAL-04", "必ず最初に「予算登録」"]],
+    ["予算登録と売上照会の違い", ["M-talk / Journal Report 区分索引", "SAL-04", "必ず最初に「予算登録」"]],
     ["Journal Reportの商品コード下4桁について", ["JAI-03", "0023年と誤解", "別名履歴"]],
     ["LINEの予約スクショの仕組み", ["RSV-01", "氏名と電話", "予約回数"]],
     ["Journalの資料と#メモの違い", ["KNW-01", "KNW-02", "金額の正本にはしません"]],
@@ -195,7 +246,7 @@ Deno.test("統合参照は区分索引と質問に関連する詳細を含み、
   }
 })
 
-Deno.test("全44項目をタイトルで検索でき、参照資料が途中で切れない", () => {
+Deno.test("全45項目をタイトルで検索でき、参照資料が途中で切れない", () => {
   for (const section of LINE_REPORT_HELP_SECTIONS) {
     const question = `${section.title}について教えて`
     const selected = selectLineReportHelpSections(question, 4)
