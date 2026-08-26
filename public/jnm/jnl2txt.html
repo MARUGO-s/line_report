@@ -16777,6 +16777,56 @@ function mtalkPlainTextFromMarkdown(md) {
 }
 
 /**
+ * 整形済みテキストを、M-talkの本文上限（DBポリシーで最大2000文字）に収まる
+ * 複数メッセージへ分割する。全断片を「[電子ジャーナル]」始まりにするので、
+ * chat-knowledge のガードでBotが反応しない。行単位で詰め、超長行は文字で割る。
+ */
+function buildMtalkJournalPasteMessages(question, pretty) {
+  const LIMIT = 1900; // DB上限2000に対する安全マージン。
+  const q = String(question || '').trim();
+  const firstHeader = q ? `[電子ジャーナル] ${q}\n\n` : '[電子ジャーナル]\n';
+  const body = String(pretty || '').trim();
+  if (!body) return [firstHeader.trim()];
+
+  // まず本文を「断片」に詰める。1つ目は firstHeader 分だけ余白を減らす。
+  const contHeaderReserve = 40; // 「[電子ジャーナル]（続き NN/NN）\n」の想定最大長。
+  const segments = [];
+  let budget = LIMIT - firstHeader.length;
+  let current = '';
+  const pushCurrent = () => { if (current) { segments.push(current); current = ''; } };
+  const rawLines = body.split('\n');
+  const lines = [];
+  // 予算を超える単独行は、境界で切れないよう文字単位で分割しておく。
+  // 先頭メッセージは firstHeader 分だけ余白が小さいので、そちらも考慮する。
+  const maxLine = LIMIT - Math.max(contHeaderReserve, firstHeader.length);
+  for (const line of rawLines) {
+    if (line.length <= maxLine) { lines.push(line); continue; }
+    for (let i = 0; i < line.length; i += maxLine) lines.push(line.slice(i, i + maxLine));
+  }
+  for (const line of lines) {
+    const addition = current ? `\n${line}` : line;
+    if (current && current.length + addition.length > budget) {
+      pushCurrent();
+      budget = LIMIT - contHeaderReserve; // 2つ目以降は続きヘッダー分を確保。
+    }
+    current += current ? `\n${line}` : line;
+    // 空にした直後に単独行がそのまま入るケースの予算調整。
+    if (segments.length === 0 && current.length > budget) {
+      // 先頭断片が予算超（超長行のみ等）の場合はそのまま確定。
+    }
+  }
+  pushCurrent();
+
+  const total = segments.length;
+  if (total <= 1) return [firstHeader + (segments[0] || '')];
+  return segments.map((seg, i) => (
+    i === 0
+      ? firstHeader + seg
+      : `[電子ジャーナル]（続き ${i + 1}/${total}）\n${seg}`
+  ));
+}
+
+/**
  * この回答をM-talkのトークへ書き戻す。
  * M-talk 側のログイン(Supabase Auth)が要る。同一オリジンなのでセッションは共有される。
  */
@@ -16813,16 +16863,23 @@ async function postAiAnswerToMtalk(button, question, answer) {
     // M-talkのトークは通常テキスト表示なので、Markdown記法(##・**・表)をそのまま貼ると
     // 記号だらけで読みにくい。貼る直前に、見やすいプレーンテキストへ整形する。
     const pretty = mtalkPlainTextFromMarkdown(body);
-    const content = (q ? `[電子ジャーナル] ${q}\n\n` : '[電子ジャーナル]\n')
-      + pretty.slice(0, 1700);
-    const { error } = await sb.from('chat_messages').insert({
-      group_id: MTALK_GROUP_ID,
-      user_id: userId,
-      username: me?.username || '',
-      content,
-    });
-    if (error) throw new Error(error.message);
-    button.textContent = '✅ 貼りました';
+    // M-talkの本文はDBポリシーで1〜2000文字に制限されている。長い分析は途中で
+    // 切れないよう、この上限内に収まる複数メッセージへ分割して順番に貼る。
+    // すべての断片を「[電子ジャーナル]」始まりにして、chat-knowledge 側のガードで
+    // Botが返信しないようにする（途中の断片へも反応させない）。
+    const messages = buildMtalkJournalPasteMessages(q, pretty);
+    const username = me?.username || '';
+    for (let i = 0; i < messages.length; i += 1) {
+      button.textContent = messages.length > 1 ? `送信中... (${i + 1}/${messages.length})` : '送信中...';
+      const { error } = await sb.from('chat_messages').insert({
+        group_id: MTALK_GROUP_ID,
+        user_id: userId,
+        username,
+        content: messages[i],
+      });
+      if (error) throw new Error(error.message);
+    }
+    button.textContent = messages.length > 1 ? `✅ 貼りました (${messages.length}件)` : '✅ 貼りました';
     setTimeout(() => { button.textContent = original; button.disabled = false; }, 2000);
   } catch (error) {
     alert(`M-talkへ貼れませんでした: ${error && error.message ? error.message : error}`);
