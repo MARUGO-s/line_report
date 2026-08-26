@@ -4,8 +4,10 @@
  * 取り込まずに「一致しない」ことだけを返信する、という分岐を検証する。
  */
 import {
+  isDailySalesTemplateRequestText,
   isDailySalesWorkbookName,
   processMtalkDailySalesFile,
+  replyDailySalesTemplateDownload,
 } from "../supabase/functions/_shared/mtalk_daily_sales_import.ts"
 
 function assertEquals(actual: unknown, expected: unknown, label = ""): void {
@@ -161,6 +163,55 @@ Deno.test("店舗が一致しても金額未入力なら登録せず、入力場
   }
   if (deleted.some((t) => t.startsWith("line_receipt__"))) {
     throw new Error("金額未入力なのに既存レシートを削除しています")
+  }
+})
+
+Deno.test("テンプレートを求める発言を、LINE版と同じ言葉で判定する", () => {
+  for (
+    const text of [
+      "日別売上管理表",
+      "月次日別売上管理表",
+      "売上管理表テンプレート",
+      "excelテンプレート",
+      "売上のフォーマットください",
+      "日別のひな形ほしい",
+    ]
+  ) {
+    assertEquals(isDailySalesTemplateRequestText(text), true, text)
+  }
+  for (
+    const text of [
+      "売上登録のやり方",
+      "テンプレート",
+      "フォーマット",
+      "",
+      "予算登録",
+    ]
+  ) {
+    assertEquals(isDailySalesTemplateRequestText(text), false, text)
+  }
+})
+
+Deno.test("M-talkの店舗ルームでテンプレートを求めると、ダウンロードリンク付きカードを返す", async () => {
+  const { supabase, inserted } = makeStub()
+  await replyDailySalesTemplateDownload(supabase, {
+    groupId: 12,
+    storeKey: "bistrocavacava",
+    asUser: { id: "bot", username: "店舗Bot" },
+  })
+  const text = postedText(inserted)
+  if (!text.includes("ダウンロード")) {
+    throw new Error(`テンプレート案内にダウンロードURLがありません:\n${text}`)
+  }
+  if (!text.includes("line-webhook/bistrocavacava?download=daily_sales_management_xlsx")) {
+    throw new Error(`URLがline-webhookの配布経路と一致しません:\n${text}`)
+  }
+  const card = inserted.find((row) => row.table === "chat_messages")?.row.payload as
+    | { cards?: Array<{ action?: { url?: string } }> }
+    | undefined
+  const actionUrl = card?.cards?.[0]?.action?.url ?? ""
+  if (!actionUrl.includes("download=daily_sales_management_xlsx")) {
+    throw new Error(`カードのボタンURLにテンプレートキーがありません: ${actionUrl}`)
   }
 })
 

@@ -18,8 +18,10 @@ import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
 import { generateCasualReply, isSoloHumanRoom } from "../_shared/mtalk_casual_chat.ts"
 import {
   handleMtalkDailySalesCommand,
+  isDailySalesTemplateRequestText,
   isDailySalesWorkbookName,
   processMtalkDailySalesFile,
+  replyDailySalesTemplateDownload,
 } from "../_shared/mtalk_daily_sales_import.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
@@ -428,6 +430,13 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const flags = await loadMtalkRoomFlags(supabase, groupId)
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
+
+  // 「日別売上管理表」等のテンプレート要求。検索・雑談AIより先に見る
+  // （LINE版の isDailySalesTemplateRequestText と同じ言葉に反応させる）。
+  if (text && isDailySalesTemplateRequestText(text)) {
+    await replyDailySalesTemplateDownload(supabase, { groupId, storeKey, asUser: storeBot })
+    return json({ ok: true, processed: true, kind: "daily-sales-template" }, 200)
+  }
 
   const registry = await loadStoreRegistryRow(supabase, storeKey)
   if (registry && message.kind !== "image" && !imagePathFromPayload(message.payload)) {

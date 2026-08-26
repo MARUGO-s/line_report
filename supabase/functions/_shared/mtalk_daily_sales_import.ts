@@ -34,8 +34,79 @@ const CONFIRM_COMMAND_PREFIX = '売上取込'
 const CONFIRM_APPLY = '置き換えて登録'
 const CONFIRM_CANCEL = '中止'
 
+// line-webhook の DAILY_SALES_TEMPLATE_KEY / maybeServeTemplateDownload と一致させること。
+// 配布本体は public.line_file_templates にあり、line-webhook がGETで返す（M-talk専用の配布経路は無い）。
+const DAILY_SALES_TEMPLATE_KEY = 'daily_sales_management_xlsx'
+
 export function isDailySalesWorkbookName(fileName: string): boolean {
   return /\.(xlsx|xls|csv)$/i.test(String(fileName ?? '').trim())
+}
+
+/**
+ * 「日別売上管理表」「売上管理表テンプレート」等、テンプレートを求める発言か。
+ * line-webhook の isDailySalesTemplateRequestText と同じ判定にしておく
+ * （LINEでもM-talkでも同じ言葉で反応させるため）。
+ */
+export function isDailySalesTemplateRequestText(text: string): boolean {
+  const compact = String(text ?? '').replace(/\s+/g, '').toLowerCase()
+  if (!compact) return false
+  const exact = new Set([
+    '日別売上管理表',
+    '月次日別売上管理表',
+    '売上管理表',
+    '売上管理表テンプレート',
+    '日別売上テンプレート',
+    '過去売上テンプレート',
+    'excelテンプレート',
+    'エクセルテンプレート',
+  ])
+  if (exact.has(compact)) return true
+  const asksTemplate = compact.includes('テンプレ') || compact.includes('ひな形') || compact.includes('雛形') ||
+    compact.includes('フォーマット') || compact.includes('ダウンロード')
+  const asksSalesSheet = compact.includes('売上') || compact.includes('日別') || compact.includes('excel') ||
+    compact.includes('エクセル')
+  return asksTemplate && asksSalesSheet
+}
+
+/**
+ * テンプレート配布URL。実体はline-webhookのGET(?download=)が返す。
+ * M-talk用の配布経路を別に持たず、既存のLINE配布をそのまま指す
+ * （storeKeyはパスに載せるだけで配布内容そのものは店舗共通）。
+ */
+function dailySalesTemplateUrl(storeKey: string): string {
+  const supabaseUrl = String(Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '')
+  const base = supabaseUrl
+    ? `${supabaseUrl}/functions/v1/line-webhook`
+    : 'https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/line-webhook'
+  return `${base}/${encodeURIComponent(storeKey)}?download=${encodeURIComponent(DAILY_SALES_TEMPLATE_KEY)}`
+}
+
+/** テンプレート要求に対して、ダウンロードリンク付きのカードを返す。 */
+export async function replyDailySalesTemplateDownload(
+  supabase: DbClient,
+  params: { groupId: number; storeKey: string; asUser: BotUser },
+): Promise<void> {
+  const url = dailySalesTemplateUrl(params.storeKey)
+  await postChatCard(supabase, {
+    groupId: params.groupId,
+    kind: 'daily_sales_template',
+    text: [
+      '📄 日別売上管理表テンプレート',
+      '過去売上をまとめて登録するための基本Excelです。ダウンロードして金額を入力し、このルームへ送り返してください。',
+      '月合計だけ登録する場合は、B37「合計だけ入力」に総売上を入れてください。',
+      `ダウンロード: ${url}`,
+    ].join('\n'),
+    cards: [{
+      variant: 'line',
+      header: { title: '日別売上管理表テンプレート' },
+      sections: [
+        { type: 'note', text: '過去売上をまとめて登録するための基本Excelです。ダウンロードして金額を入力し、このルームへ送り返してください。' },
+        { type: 'note', text: '月合計だけ登録する場合は、B37「合計だけ入力」に総売上を入れてください。', size: 'xs' },
+      ],
+      action: { label: 'Excelをダウンロード', url, style: 'primary' },
+    }],
+    asUser: params.asUser,
+  })
 }
 
 /**
