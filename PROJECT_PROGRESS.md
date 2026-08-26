@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-08-26 - 1対1 AI向けLINE Report／Journal Report統合資料を作成
+
+- Request: LINE ReportとJournal Reportの内容を何でも正確に質問できるよう、詳細だが回答は簡潔で分かりやすく、区分・索引付きの資料へまとめる。
+- Knowledge: `line_report_help_manual.ts` を新設。全体像、売上・レシート・予算、予約、店舗運用・権限・小口、Journal基本・取込、資料・`#メモ`、Journal AI、フードコート、口コミ・競合、管理・利用状況、正確性・安全の11区分（SYS/SAL/RSV/OPS/JRN/KNW/JAI/FCT/REV/ADM/SEC）、32項目、項目コード、要点、詳細、検索語を収録。
+- Retrieval: `mtalk_help_manual.ts` がM-talk資料と統合し、毎回「区分索引＋質問に近いLINE/Journal最大4項目＋M-talk最大3項目」を渡す。回答指示は結論1〜2文→必要な手順／理由→注意点、索引全体は読み上げない、曖昧なら確認1問、LINE売上分析とJournal分析の正本・用途を分ける。
+- Docs: 同じ実行時データから `npm run help:update` で `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md`（465行）を自動生成。テストで生成結果との完全一致を確認し、手書き二重管理を防止。
+- Safety: 店舗の実数値は推測せず「＋」→「ジャーナルに聞く」へ案内。店舗スコープ、非公開保存、資料は金額の正本にしない等の境界を明記。
+- Test: 区分・ID・コード一意性、全項目分類、索引網羅、代表12質問の検索精度、生成Markdown完全一致、統合参照の非切断、簡潔回答指示、実数値安全境界を追加。Deno 27件＋チャットNode 103件成功。
+
 ### 2026-08-26 - 1対1 AIが仕組みも含めて幅広い質問に答えられるよう強化
 
 - Request: あらゆる質問に答えられるよう、AIがM-talkの仕組みを理解できるようにまとめる。
