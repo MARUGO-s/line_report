@@ -9228,12 +9228,15 @@ function buildSalesDataForAI() {
 
   sales.forEach(s => {
     const dStr = typeof s.date === 'string' ? s.date.slice(0, 10) : 'unknown';
-    if (!daily[dStr]) daily[dStr] = { total: 0, food: 0, drink: 0, groups: 0, customers: 0 };
+    if (!daily[dStr]) daily[dStr] = { total: 0, food: 0, drink: 0, groups: 0, customers: 0, weather: '', tempC: null };
     daily[dStr].total += s.total || 0;
     daily[dStr].food += s.foodTotal || 0;
     daily[dStr].drink += s.drinkTotal || 0;
     daily[dStr].groups += 1;
     daily[dStr].customers += s.customers || 0;
+    // 同じ日の伝票はどれも同じ天候のはずなので、最初に見つかった値だけ採用する。
+    if (!daily[dStr].weather && s.weather) daily[dStr].weather = String(s.weather);
+    if (daily[dStr].tempC == null && Number.isFinite(Number(s.tempC))) daily[dStr].tempC = Number(s.tempC);
 
     totalCustomers += s.customers || 0;
     totalGroups += 1;
@@ -10147,12 +10150,21 @@ function formatVerifiedDetailLines(p, indent = '') {
   }
   if (Array.isArray(p?.dailyBreakdown) && p.dailyBreakdown.length) {
     const rows = p.dailyBreakdown.slice(0, 40);
+    const hasWeather = p.dailyBreakdown.some(d => d.weather || Number.isFinite(d.tempC));
     lines.push(`${indent}- 日別売上:`);
-    rows.forEach(d => lines.push(
-      `${indent}  - ${d.date}${d.weekday ? `（${d.weekday}）` : ''}: ${yen(d.totalSales)} / ${d.customers}名 / ${d.count}件${d.avgSpend ? `（客単価 ${yen(d.avgSpend)}）` : ''}`
-    ));
+    rows.forEach(d => {
+      const weatherPart = d.weather || Number.isFinite(d.tempC)
+        ? ` / 天気 ${d.weather || '不明'}${Number.isFinite(d.tempC) ? `${d.tempC}℃` : ''}`
+        : '';
+      lines.push(
+        `${indent}  - ${d.date}${d.weekday ? `（${d.weekday}）` : ''}: ${yen(d.totalSales)} / ${d.customers}名 / ${d.count}件${d.avgSpend ? `（客単価 ${yen(d.avgSpend)}）` : ''}${weatherPart}`
+      );
+    });
     if (p.dailyBreakdown.length > rows.length) {
       lines.push(`${indent}  - …ほか${p.dailyBreakdown.length - rows.length}日分`);
+    }
+    if (hasWeather) {
+      lines.push(`${indent}  ※天気・気温は各店舗の推定座標をもとにした日別の観測・予報値です。降水量や時間帯別の変化までは含まれず、天気が無い日は取得できていないだけで「晴天だった」という意味ではありません。`);
     }
   }
   if (Array.isArray(p?.missingPeriods) && p.missingPeriods.length) {
@@ -13293,9 +13305,12 @@ function aggregateSalesRows(rows) {
     groups += Number(s?.groups) || 0;
     const date = String(s?.date || '').slice(0, 10);
     if (date) {
-      const row = byDay.get(date) || { date, weekday: String(s?.weekday || ''), totalSales: 0, customers: 0, count: 0 };
+      const row = byDay.get(date) || { date, weekday: String(s?.weekday || ''), totalSales: 0, customers: 0, count: 0, weather: '', tempC: null };
       row.totalSales += saleTotal; row.customers += saleCustomers; row.count += 1;
       if (!row.weekday && s?.weekday) row.weekday = String(s.weekday);
+      // 同じ日の伝票はどれも同じ天候のはずなので、最初に見つかった値だけ採用する。
+      if (!row.weather && s?.weather) row.weather = String(s.weather);
+      if (row.tempC == null && Number.isFinite(Number(s?.tempC))) row.tempC = Number(s.tempC);
       byDay.set(date, row);
     }
     const weekday = String(s?.weekday || '');

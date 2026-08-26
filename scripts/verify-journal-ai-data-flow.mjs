@@ -330,8 +330,8 @@ gap(
   "weather",
   "ジャーナル天候・気温",
   weatherStored && !weatherInNormalPrompt,
-  "ジャーナル → report.weatherByDate/sales.weather（保存・画面表示まで）",
-  "通常のJournal Report AI分析/チャット用テキストには、現状weather/tempCを明示的にシリアライズしていません。別画面のPOS Journal AIには天候分析があります。",
+  "ジャーナル → report.weatherByDate/sales.weather → buildSalesDataForAI/aggregateSalesRowsの日別へ付与 → 通常AI分析(salesData JSON)・チャット(formatVerifiedDetailLines)",
+  "通常のJournal Report AI分析/チャットの日別売上に天気・気温を付与済み。座標ベースの推定値であり、取得できていない日は空欄（晴天だったとは断定しない）。",
 );
 
 gap(
@@ -443,7 +443,7 @@ const coreFailures = checks.filter((item) => item.level === "core" && !item.ok);
 console.log("Journal Report AI データ統合検証");
 console.log("=".repeat(72));
 for (const item of checks) {
-  const mark = item.status === "接続済み"
+  const mark = item.status === "接続済み" || item.status === "統合済み"
     ? "OK"
     : item.status === "条件付き接続"
     ? "条件"
