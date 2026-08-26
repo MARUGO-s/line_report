@@ -84,6 +84,9 @@ const SHARED_MODULE_RULES: SharedModuleRule[] = [
   { pattern: /^(bistrocavacava_sheet_push|clear_store_sheet_budget_tabs|daily_sales_import|google_service_account_auth|google_sheets_client|receipt_sheets_.*)\.ts$/, codes: ['SAL-05', 'SAL-06', 'DEV-02'] },
   { pattern: /^budget_entry_flow\.ts$/, codes: ['SAL-01', 'SAL-04', 'DEV-02'] },
   { pattern: /^(calendar_tomorrow_reminder|reservation_.*|mtalk_schedule_register)\.ts$/, codes: ['RSV-01', 'JAI-04', 'DEV-02'] },
+  // M-talkの売上取込は、チャット全般ではなく過去売上の一括取込として索引する。
+  // 汎用の mtalk_.* より前に置くこと（helpCodesForSharedModule は先勝ち）。
+  { pattern: /^mtalk_daily_sales_import\.ts$/, codes: ['SAL-05', 'SAL-07', 'OPS-01', 'DEV-02'] },
   { pattern: /^(chat_.*|mtalk_.*|web_push)\.ts$/, codes: ['OPS-01', 'OPS-02', 'RSV-01', 'JAI-02', 'DEV-02'] },
   { pattern: /^competitor_review_context\.ts$/, codes: ['REV-01', 'REV-02', 'DEV-02'] },
   { pattern: /^(foodcourt_.*|tokyo_dome_schedule|weather_daily)\.ts$/, codes: ['FCT-01', 'FCT-02', 'FCT-03', 'FCT-04', 'FCT-05', 'FCT-06', 'DEV-02'] },

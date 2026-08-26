@@ -161,17 +161,19 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 
 - 過去の売上は、レシート画像ではなく「月次日別売上管理表」（Excel／CSV）の一括取込で登録します。レシート画像はその日1日分の登録専用です。
 - 経路1は売上分析画面です。「過去の日次売上を一括取込（月次日別売上管理表 Excel / CSV）」の枠へファイルをドラッグ＆ドロップするか「ファイルを選択」で読み込み、確認画面で店舗・期間・日数・合計・日別一覧を確かめてから反映します。
-- 経路2は店舗LINEルームです。所定のExcel／CSVをそのまま送ると自動判定し、新規かつ店舗が一致すればそのまま登録、既存データや店舗不一致がある場合は確認カード（置き換え／中止）が出ます。
+- 経路2はM-talkの店舗ルームです。所定のExcel／CSVをそのまま送ると、そのルームにいる店舗Botの店舗として取り込みます。新規期間ならそのまま登録し、既存データがある期間は確認カードの「置き換えて登録」「中止」で選びます。
+- M-talkでファイルの店舗がルームの店舗と違う場合は取り込みを中止し、ファイル側とルーム側の店舗を並べて「一致しない」ことを返信します。B3（店舗名）とC3（店舗キー）を直してから送り直してください。
+- 経路3は店舗LINEルームです。同じファイルを送ると自動判定し、新規かつ店舗が一致すればそのまま登録、既存データや店舗不一致がある場合は確認カード（置き換え／中止）が出ます。
 - テンプレートは2か所から入手できます。売上分析画面では一括取込の枠内にある「日別売上管理表テンプレート」のリンクから直接ダウンロードします。店舗LINEルームでは「日別売上管理表」「売上管理表テンプレート」等と送るとダウンロード用のカードが返ります。
 - テンプレートには見本として別店舗の店舗名・店舗キー・対象期間が入っています。金額を入れる前に、B2の対象期間・B3の店舗名・C3の店舗キーを自店舗のものへ必ず直してください。
 - ファイルはB2に対象期間YYYYMM、B3に店舗名、C3に店舗キー、A5にヘッダ（日付／総売上(税込)／消費税／客数／組数／客単価）、A6以降に日付を持ちます。照合は店舗キーを最優先で使います。
 - 採用するのは総売上（税込）です。純売上ではありません。月合計だけを登録する場合はB37「合計だけ入力」へ総売上を入れます。
 - 取込はファイルの対象日をまとめて置き換える方式です。金額が0や空欄の日は既存データが消えるため、期間と店舗キーを確認してから確定します。ファイルに無い日は変更されません。
-- M-talkのトークへExcelを送っても一括取込は行われません。添付ファイルとして残るだけなので、過去売上の登録は売上分析画面か店舗LINEルームを使います。
+- 一括取込が動くのは店舗Botのいる店舗ルームだけです。店舗Botがいない1対1トークや通常のグループへ送ったExcelは、添付ファイルとして残るだけで登録されません。
 
 **検索語:** 過去の売上 / 過去売上 / 過去の売上登録 / 過去分 / 過去 / 一括取込 / 一括 / まとめて登録 / まとめて / さかのぼ / 遡 / 前の月 / 先月 / 前月 / 去年 / 昨年 / 日別売上管理表 / 売上管理表 / 売上テンプレート / 未入力 / 後から登録 / 昔の売上
 
-**主な実装根拠:** `public/analytics.html` / `supabase/functions/_shared/daily_sales_import.ts` / `supabase/functions/line-webhook/index.ts`
+**主な実装根拠:** `public/analytics.html` / `supabase/functions/_shared/daily_sales_import.ts` / `supabase/functions/_shared/mtalk_daily_sales_import.ts` / `supabase/functions/chat-knowledge/index.ts` / `supabase/functions/line-webhook/index.ts`
 
 ## RSV 予約・カレンダー
 
@@ -736,11 +738,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 40件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 90件
+- 共有TypeScriptモジュール: 91件
 - 補助・運用・レガシーコード: 37件
 - admin-api静的ルート: 136件
 - SQL migrations: 270件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 63件
+- テストファイル: 64件
 
 ### 公開画面・ブラウザコード
 
@@ -864,6 +866,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/manual_month_sales.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/marugo_group_stores.ts` | SYS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_casual_chat.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/mtalk_daily_sales_import.ts` | SAL-05 / SAL-07 / OPS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_help_manual.ts` | OPS-01 / OPS-02 / JAI-02 / DEV-04 |
 | `supabase/functions/_shared/mtalk_room_id.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_room_settings.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |

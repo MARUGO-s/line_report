@@ -16,6 +16,11 @@ import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.
 import { handleMtalkSearchText } from "../_shared/mtalk_search.ts"
 import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
 import { generateCasualReply, isSoloHumanRoom } from "../_shared/mtalk_casual_chat.ts"
+import {
+  handleMtalkDailySalesCommand,
+  isDailySalesWorkbookName,
+  processMtalkDailySalesFile,
+} from "../_shared/mtalk_daily_sales_import.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
 const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/mtalk_room_settings.html"
@@ -436,8 +441,38 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     if (searched) return json({ ok: true, processed: true, kind: "search" }, 200)
   }
 
+  // 取込確認カードのボタン（「売上取込 置き換えて登録 <id>」）。
+  // 売上検索より先に見る必要はないが、雑談AIへ流す前に必ず処理する。
+  if (text) {
+    const command = await handleMtalkDailySalesCommand(supabase, {
+      groupId,
+      storeKey,
+      text,
+      asUser: storeBot,
+    })
+    if (command.handled) {
+      return json({ ok: true, processed: true, kind: "daily-sales-command", reason: command.reason }, 200)
+    }
+  }
+
   // .lzh は電子ジャーナルの原本。ルームの店舗として取り込む。
   const attachment = filePayload(message.payload)
+
+  // 月次日別売上管理表（Excel/CSV）は、このルームの店舗Botの店舗として取り込む。
+  // 店舗が一致しないファイルは取り込まず、一致しないことだけを返信する。
+  if (message.kind === "file" && attachment && isDailySalesWorkbookName(attachment.name)) {
+    const imported = await processMtalkDailySalesFile(supabase, {
+      groupId,
+      storeKey,
+      path: attachment.path,
+      fileName: attachment.name,
+      asUser: storeBot,
+    })
+    if (imported.handled) {
+      return json({ ok: true, processed: true, kind: "daily-sales-import", reason: imported.reason }, 200)
+    }
+  }
+
   if (message.kind === "file" && attachment && isJournalArchiveName(attachment.name)) {
     const done = await processStoreRoomJournalArchive(supabase, {
       groupId,
