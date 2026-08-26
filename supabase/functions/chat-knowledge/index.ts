@@ -18,7 +18,7 @@ import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
 import { generateCasualReply, isSoloHumanRoom } from "../_shared/mtalk_casual_chat.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
-const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
+const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/mtalk_room_settings.html"
 // 「M-talkに貼る」でジャーナルレポートAIの回答を貼り付けた投稿の目印。
 // jnl2txt.html の postAiAnswerToMtalk が本文の先頭へ付ける。
 const JOURNAL_PASTE_PREFIX_RE = /^\[電子ジャーナル\]/

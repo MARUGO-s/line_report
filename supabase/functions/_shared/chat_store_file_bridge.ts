@@ -1,7 +1,7 @@
 /**
- * M-talk 店舗ルームの画像／ファイルを LINE と同じ経路へ載せる。
- * - #メモ なし: メディア閲覧へ保存し、画像ならレシート解析して同じ内容を返す
- * - #メモ 引用: 資料登録後にメディア閲覧の複製を消す（LINE と同じ）
+ * M-talk 店舗ルームの画像／ファイル処理。
+ * - #メモ なし: メディア閲覧へ保存し、画像ならレシート解析して内容を返す
+ * - #メモ 引用: 知識ベース登録後にメディア閲覧の複製を消す
  */
 import { resolveGeminiApiKey, resolveReceiptGeminiFlashLiteModel } from './line_client.ts'
 import { removeRoomMediaByMessageId, saveMediaBytesToLibrary } from './line_media_store.ts'
