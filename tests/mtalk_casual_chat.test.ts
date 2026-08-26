@@ -165,7 +165,11 @@ Deno.test("AIへMarkdownを使わずM-talk向けプレーンテキストで答�
     storeName: "テスト店",
     question: "使用方法を教えてください",
   })
-  if (!system.includes("Markdown記法") || !system.includes("箇条書きは行頭を「・」")) {
+  if (
+    !system.includes("Markdown記法") ||
+    !system.includes("「- 項目名：説明」") ||
+    !system.includes("空行を1行入れて")
+  ) {
     throw new Error("M-talkの表示形式に合わせた出力指示がありません")
   }
 })
@@ -185,10 +189,14 @@ Deno.test("AIのMarkdown回答を読みやすいM-talk用テキストへ整形�
   assertEquals(formatted, [
     "M-talk の基本的な使い方は以下の通りです。",
     "",
-    "・ログイン／新規登録：メールアドレスとパスワードでサインイン。",
-    "・画像・ファイル・スタンプ：入力欄左の「＋」を押します。",
+    "▶ ログイン／新規登録",
+    "　メールアドレスとパスワードでサインイン。",
+    "",
+    "▶ 画像・ファイル・スタンプ",
+    "　入力欄左の「＋」を押します。",
     "　・「画像・ファイル」から写真や書類を選択",
     "　・顔マーク「☺」からスタンプを選択",
+    "",
     "■ 検索",
     "トーク検索（https://example.com）を利用できます。",
   ].join("\n"))
@@ -208,7 +216,9 @@ Deno.test("Markdown表・コードフェンス・水平区切りをプレーン�
   assertEquals(formatted, [
     "項目：操作",
     "送信：紙飛行機を押す",
+    "",
     "────────",
+    "",
     "　Shift+Enterで改行",
   ].join("\n"))
 })
@@ -251,8 +261,12 @@ Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整�
     })
     assertEquals(result, [
       "M-talkの使い方です。",
-      "・メッセージ送信：入力欄へ文字を入力します。",
-      "・画像送信：左の「＋」を押します。",
+      "",
+      "▶ メッセージ送信",
+      "　入力欄へ文字を入力します。",
+      "",
+      "▶ 画像送信",
+      "　左の「＋」を押します。",
     ].join("\n"))
   } finally {
     globalThis.fetch = originalFetch
