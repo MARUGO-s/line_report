@@ -29,8 +29,9 @@ export function buildCasualSystemPrompt(params: {
     `あなたは${params.storeName || 'この店舗'}のスタッフ専用チャットの、雑談・簡単な相談相手です。`,
     '自然な日本語で、短く親しみやすく答えてください（目安3文以内）。',
     'ただしM-talkの使い方を聞かれたときは、必要なら箇条書きや手順を使い、操作するボタン名・場所を具体的に説明してください。',
-    'M-talkはプレーンテキスト表示です。Markdown記法（**太字**、# 見出し、```コード```、Markdown表）は使わないでください。',
-    '箇条書きは行頭を「・」、小見出しは「■」にして、そのまま読める文章で答えてください。',
+    'M-talkはプレーンテキスト表示です。Markdown記法（**太字**、# 見出し、```コード```）は使わないでください。',
+    '手順や機能を並べるときは「- 項目名：説明」の形で1項目ずつ書き、項目と項目の間には空行を1行入れて、ぎゅっと詰めずに見やすく区切ってください。',
+    '1つの項目の中で補足を並べるときは、行頭に半角スペース2つを付けた「  - 補足」で字下げしてください。',
     'M-talkの使い方は、下に「M-talk使い方マニュアル」がある場合、それだけを正しい根拠として答えてください。',
     'マニュアルに書かれていない機能・場所・手順は推測で作らず、「このマニュアルでは確認できません」と伝えてください。',
     'LINEアプリとM-talkを混同しないでください。質問がM-talkについてなら、M-talk内の操作として答えてください。',
@@ -42,71 +43,115 @@ export function buildCasualSystemPrompt(params: {
   ].filter(Boolean).join('\n')
 }
 
+/** Markdownの装飾記号（太字・斜体・リンク・コード）を、意味を保ったまま外す。 */
+function stripInlineMarkdown(text: string): string {
+  return String(text ?? '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1（$2）')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1')
+    .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '$1')
+    .replace(/~~(.*?)~~/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\\([\\`*_[\]{}()#+.!-])/g, '$1')
+    .replace(/\s+([「『（【])/g, '$1')
+    .replace(/([」』）】])\s+/g, '$1')
+    .trimEnd()
+}
+
 /**
- * AIがMarkdownを返しても、M-talkのプレーンテキスト吹き出しで記号が露出しない
+ * AIがMarkdownを返しても、M-talkのプレーンテキスト吹き出しで読みやすくなる
  * ように整形する。プロンプトだけではモデルが **強調** や `-` 箇条書きを返す
  * ことがあるため、chat_messagesへ保存する前の最終防御として必ず通す。
+ *
+ * 詰まって読みにくくならないよう、トップレベルの項目は「▶ 見出し」と
+ * その説明行に分け、項目ごとに空行を1行入れて区切る。子項目は全角スペースで
+ * 字下げした「・」にする。表は「項目：値」/「値 / 値」へ、水平線は区切り線へ、
+ * 見出しは「■/▪」へ変換する。
  */
 export function formatCasualReplyForMtalk(markdown: string): string {
   const input = String(markdown ?? '').replace(/\r\n?/g, '\n').trim()
   if (!input) return ''
 
-  const lines = input.split('\n')
+  const rawLines = input.split('\n')
   const output: string[] = []
   let inCodeFence = false
 
-  for (const rawLine of lines) {
-    let line = rawLine.replace(/\s+$/g, '')
+  const pushBlank = () => {
+    if (output.length && output[output.length - 1] !== '') output.push('')
+  }
+
+  for (const rawLine of rawLines) {
+    const line = rawLine.replace(/\s+$/g, '')
     const trimmed = line.trim()
 
     if (/^```/.test(trimmed)) {
       inCodeFence = !inCodeFence
       continue
     }
-
-    if (/^\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(trimmed)) continue
-    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
-      output.push('────────')
+    if (inCodeFence) {
+      output.push(trimmed ? `　${trimmed}` : '')
       continue
     }
 
+    if (!trimmed) {
+      pushBlank()
+      continue
+    }
+
+    // 表の区切り行（|---|---|）は読み上げに不要なので落とす。
+    if (/^\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(trimmed)) continue
+
+    // 水平線は前後に余白を付けた区切り線にする。
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      pushBlank()
+      output.push('────────')
+      pushBlank()
+      continue
+    }
+
+    // 見出し（# 〜）は「■/▪」に。前に空行を入れて塊を分ける。
     const heading = trimmed.match(/^(#{1,6})\s+(.+)$/)
     if (heading) {
+      pushBlank()
       const marker = heading[1].length <= 2 ? '■' : '▪'
-      line = `${marker} ${heading[2]}`
-    } else {
-      const bullet = line.match(/^(\s*)[-*+]\s+(.+)$/)
-      if (bullet) {
-        const indent = bullet[1].length >= 2 ? '　' : ''
-        line = `${indent}・${bullet[2]}`
-      }
+      output.push(`${marker} ${stripInlineMarkdown(heading[2])}`)
+      continue
     }
 
+    // 表の行（| a | b |）は「項目：値」/「値 / 値」へ。
     if (/^\s*\|.*\|\s*$/.test(line)) {
-      const cells = line
-        .trim()
+      const cells = trimmed
         .replace(/^\||\|$/g, '')
         .split('|')
-        .map((cell) => cell.trim())
+        .map((cell) => stripInlineMarkdown(cell.trim()))
         .filter(Boolean)
-      line = cells.length === 2 ? `${cells[0]}：${cells[1]}` : cells.join(' / ')
+      output.push(cells.length === 2 ? `${cells[0]}：${cells[1]}` : cells.join(' / '))
+      continue
     }
 
-    line = line
-      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1（$2）')
-      .replace(/(\*\*|__)(.*?)\1/g, '$2')
-      .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1')
-      .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '$1')
-      .replace(/~~(.*?)~~/g, '$1')
-      .replace(/`([^`\n]+)`/g, '$1')
-      .replace(/\\([\\`*_[\]{}()#+.!-])/g, '$1')
-      .replace(/\s+([「『（【])/g, '$1')
-      .replace(/([」』）】])\s+/g, '$1')
-      .trimEnd()
+    const bullet = line.match(/^(\s*)[-*+]\s+(.+)$/)
+    if (bullet) {
+      const indent = bullet[1].replace(/\t/g, '  ').length
+      const content = stripInlineMarkdown(bullet[2])
+      if (indent >= 2) {
+        // 子項目はぶら下げて字下げする（親と同じ塊に見せる）。
+        output.push(`　・${content}`)
+      } else {
+        // トップレベル項目は空行で区切り、見出しと説明を分ける。
+        pushBlank()
+        const labelled = content.match(/^([^：:]{1,28})[：:]\s*(.+)$/)
+        if (labelled) {
+          output.push(`▶ ${labelled[1]}`)
+          output.push(`　${labelled[2]}`)
+        } else {
+          output.push(`▶ ${content}`)
+        }
+      }
+      continue
+    }
 
-    if (inCodeFence && line) line = `　${line.trimStart()}`
-    output.push(line)
+    output.push(stripInlineMarkdown(line))
   }
 
   return output
