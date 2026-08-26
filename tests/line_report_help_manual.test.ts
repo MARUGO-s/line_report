@@ -106,7 +106,13 @@ Deno.test("代表的な質問を正しいLINE Report／Journal Report項目へ�
     ["周辺競合の口コミと競合圧力について教えて", "competitor-reviews"],
     ["AI使用料とシステムマップは誰が見られる？", "ai-usage-system-map"],
     ["M-talk管理の監査ログから権限を復元できますか？", "mtalk-admin-audit"],
+    ["Botは普通のトーク画面から削除できますか？", "mtalk-admin-audit"],
     ["Journal AIにまだ入っていないデータは何ですか？", "known-coverage-limits"],
+    ["過去に生成したAI分析文を次の回答の事実にしますか？", "known-coverage-limits"],
+    ["Journalの天気と気温は通常AIチャットに入っていますか？", "known-coverage-limits"],
+    ["東京ドームと小ホールを同じイベント係数で扱いますか？", "foodcourt-forecast-evolution"],
+    ["LINEのグループに店舗Botを2体入れられますか？", "admin-console-approvals"],
+    ["GrokやPerplexityは数字を聞いただけでも毎回検索しますか？", "journal-ai-analysis"],
     ["Edge Functionsとadmin-apiの役割をコード構成から教えて", "edge-functions-api"],
     ["cloudflare-workerやsrc/server.jsは今の本番ですか？", "auxiliary-legacy-code"],
   ] as const
@@ -129,6 +135,7 @@ Deno.test("LINE Report／Journal Reportの質問は統合マニュアル対象�
       "売上レシートを修正したい",
       "AIチャットと標準AI分析の違いは？",
       "資料タブの数字は売上の正本ですか",
+      "Journalの資料に書いた金額を確定売上として使いますか",
       "フードコートの週次報告はどこですか",
       "自店舗口コミと競合口コミの違いは？",
       "システムマップでは何が見られますか",
@@ -140,6 +147,32 @@ Deno.test("LINE Report／Journal Reportの質問は統合マニュアル対象�
   ) {
     assertEquals(isLineReportHelpQuestion(question), true, question)
     assertEquals(isMtalkHelpQuestion(question), true, `integrated: ${question}`)
+  }
+})
+
+Deno.test("否定形・分離語・類似機能の質問でも正しい項目を選び、統合資料を注入する", () => {
+  const cases = [
+    ["Botは普通のトーク画面から削除できますか？", "ADM-03"],
+    ["過去に生成したAI分析文を次の回答の事実にしますか？", "SEC-03"],
+    ["Journalの天気と気温は通常AIチャットに入っていますか？", "SEC-03"],
+    ["東京ドームと小ホールを同じイベント係数で扱いますか？", "FCT-03"],
+    ["LINEのグループに店舗Botを2体入れられますか？", "ADM-01"],
+    ["GrokやPerplexityは数字を聞いただけでも毎回検索しますか？", "JAI-01"],
+    ["Journalの資料に書いた金額を確定売上として使いますか？", "KNW-01"],
+  ] as const
+
+  for (const [question, expectedCode] of cases) {
+    const selectedCodes = selectLineReportHelpSections(question, 6)
+      .map((entry) => entry.section.code)
+    if (!selectedCodes.includes(expectedCode)) {
+      throw new Error(
+        `${question}\nexpected: ${expectedCode}\nactual: ${selectedCodes.join(", ")}`,
+      )
+    }
+    const reference = buildMtalkHelpReference(question)
+    if (!reference || reference.endsWith("…")) {
+      throw new Error(`${question}: 統合資料が未注入または途中切れです`)
+    }
   }
 })
 

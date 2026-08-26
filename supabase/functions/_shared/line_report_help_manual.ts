@@ -498,7 +498,9 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     title: '標準AI分析の根拠と出力',
     keywords: [
       '標準ai分析', 'ai分析', 'コンサル分析', '経営分析', 'ワイン戦略',
-      'ダッシュボード', '履歴', '根拠', '外部知見', 'luna', 'claude',
+      'ダッシュボード', '履歴', '根拠', '外部知見', '外部検索',
+      'grok', 'perplexity', '数値照会', '毎回検索', '戦略質問',
+      'luna', 'claude',
     ],
     summary: '標準AI分析が何を根拠に、どの観点でレポートを作るかを説明する。',
     content: [
@@ -506,6 +508,7 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '数値は確定集計だけを正本にし、資料や外部情報は背景・仮説として扱います。',
       'ランチ／ディナー、客単価、F/D比率、曜日・時間帯、商品、ワイン点数・ml、定休、施策との対応を重視します。',
       '根拠がない季節コースや施策を事実として断定しません。定休日を機会損失と誤診しません。',
+      'Grok／Perplexity等の外部知見は戦略・改善意図の質問で必要な場合だけ追加し、単純な数値照会では検索しません。',
       '生成結果はAI分析履歴へ自動保存され、ダッシュボードでは売上・客単価・F/D・昼夜・曜日・時間帯・売れ筋等を確認できます。',
     ].join('\n'),
   },
@@ -623,12 +626,15 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     title: '来客予測・MAPE・AI学習進化',
     keywords: [
       '来客予測', '予測客数', '予測売上', '14日', 'mape', '予測誤差',
-      '学習', '進化', 'モデル選択', 'glm', 'ポアソン', '乗算モデル', '毎朝5時', '毎日5時',
+      '学習', '進化', 'モデル選択', 'glm', 'ポアソン', '乗算モデル',
+      '小ホール', 'イベント係数', '会場規模', '同じ係数',
+      '毎朝5時', '毎日5時',
     ],
     summary: '2種類の予測モデル、自動選択、14日予測と進化画面を説明する。',
     content: [
       '来客予測は蓄積実績、曜日、イベント、天気、動員数等を使い、客数と売上の今後14日を作ります。',
       'レガシー乗算モデルとポアソン回帰GLM等をバックテストし、拡張窓MAPEが良いモデルを自動採用します。',
+      '東京ドーム本体とカナデビア／後楽園等の小ホールは会場規模・イベント種別を分け、小ホールをドーム本体と同じ係数へ固定しません。',
       '毎日の学習処理で係数・予測・精度履歴を更新します。データが増えるほど検証材料は増えますが、必ず精度が上がると断定はしません。',
       'AI学習進化ページでは客数・売上MAPE、学習データ量、採用モデル、信頼度、学習曲線、品質基準、自己進化の準備状況を確認します。',
       'MAPEは低いほど誤差が小さい指標です。基準を下回っても予測を停止せず、継続学習します。',
@@ -680,6 +686,7 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '東京ドームイベント', 'カナデビア', '後楽園ホール', '天気cron',
       '週次イベント配信', '2週間', 'pv', 'パブリックビューイング',
       '日本戦', '深夜', '要確認', 'pv決定', 'アラート',
+      '小ホール', 'イベント係数', '会場規模', '同じ係数',
     ],
     summary: 'イベント・天気の自動取得と、週次／PV通知の確証ルールを説明する。',
     content: [
@@ -687,6 +694,7 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '天気は日次取得し、イベント・曜日とともにフードコート分析と予測へ結び付けます。古いキャッシュや予報・実績の違いに注意します。',
       '週次イベント配信はルーム設定の曜日・時刻に従い、原則今後2週間を会場別のLINE Flexで送ります。二重送信防止ログを持ちます。',
       '日本戦PVは、公式確認済みなら「PV決定」、営業時間外の未確定試合は必要時に「要確認」として区別し、未確認情報を決定事項として断定しません。',
+      '東京ドーム本体と小ホールは同列に扱わず、会場規模と主因イベントを分けて表示・予測します。',
       'PVやイベントの大集客が自店舗売上へ同じ割合で直結するとは限らず、競技・会場・時間帯・他イベントとの重なりを分けて分析します。',
     ].join('\n'),
   },
@@ -732,6 +740,7 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     keywords: [
       '管理画面', '接続設定', '利用状況', 'webhook設定', 'ログ', 'アクセス履歴',
       'ユーザー権限', '承認', '管理bot', '許可', '不許可', '新規ルーム', '自動連携',
+      'グループに店舗bot', 'botを2体', '公式アカウント1体', '1体しか', '2体入れ',
     ],
     summary: '本部管理画面の主要タブとユーザー／ルーム承認の役割を説明する。',
     content: [
@@ -768,7 +777,8 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     keywords: [
       'm-talk管理', 'chat-admin', '利用停止', '論理削除', 'ルーム権限',
       '権限テンプレート', '一括設定', 'ユーザー別アクセス', '監査ログ',
-      '復元', 'bot削除', 'bot復元', 'ルームゴミ箱',
+      '復元', 'bot削除', 'bot復元', 'botを削除', 'botは削除',
+      '通常画面', '普通のトーク画面', 'トーク画面から削除', 'ルームゴミ箱',
     ],
     summary: '本部向けM-talk管理の利用者・ルーム・Bot・監査機能を説明する。',
     content: [
@@ -915,6 +925,9 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '対応範囲', '未対応', '未統合', '入っていない', 'まだ入っていない',
       '使われていない', '制限', '既知の課題', 'データがない', '予約開始月',
       'cavacava', '2026年5月', '天候', 'mape履歴', '過去ai分析',
+      '過去のai分析文章', 'ai分析文', '次の回答', '再利用',
+      'journalの天気', '天気と気温', '気温', '通常aiチャット',
+      'grok', 'perplexity', '数値照会', '外部検索',
       'generate-insight', '自動生成', '何が使われない',
     ],
     summary: '「データが存在する」と「通常AIへ統合済み」を区別し、誤回答を防ぐ。',
@@ -923,6 +936,7 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '過去の売上予測・MAPE履歴は専用UIで閲覧できますが、通常の新しいAI回答へ過去予測の当たり外れを自動再投入してはいません。',
       '過去のAI分析文章は閲覧履歴であり、新しい回答の事実ソースとして再利用せず、保存レポートから数値を再計算します。',
       '資料の施策効果インサイト生成APIはありますが、Journal画面・LINE・定期処理から自動実行する現行導線は確認できません。',
+      'Grok／Perplexity等の外部検索は戦略・改善質問で必要な場合だけ行い、単純な数値照会では実行しません。',
       '予約を使う集客構造分析はBistro CAVACAVAの2026年5月以降が現行対象で、開始前や他店舗を予約0件・飛び込み100%として扱いません。',
       '外部サービスの接続状態、ルームの現在設定、最新店舗数値は資料だけで確定できないため、対象画面・管理者・実データで確認します。',
     ].join('\n'),
@@ -1265,11 +1279,12 @@ export function isLineReportHelpQuestion(question: string): boolean {
   const normalizedQuestion = normalize(question)
   if (!normalizedQuestion) return false
   const productWords = [
-    'line report', 'lineレポート', 'journal report', 'ジャーナルレポート',
+    'line report', 'lineレポート', 'journal', 'journal report', 'ジャーナルレポート',
     '電子ジャーナル', 'レシート', '予算', '予約', '小口', '経費', '売上分析',
     '店舗bot', '管理画面', 'gmail', '食べログ', '一休', 'lzh', 'jnl',
     '資料タブ', '商品コード', 'mape', 'ジャーナルに聞く', 'フードコート',
     '日報', '口コミ', '競合', 'ai使用量', 'ai使用料', 'システムマップ',
+    'grok', 'perplexity',
   ]
   return productWords.some((word) => normalizedQuestion.includes(normalize(word))) ||
     selectLineReportHelpSections(question, 1).some((entry) => entry.score >= 4)

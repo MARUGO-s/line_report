@@ -1,12 +1,19 @@
 # LINE Report Project Progress
 
+### 2026-08-26 - 統合AI資料の類似・否定形質問を敵対的に再検証
+
+- Re-test: 利用者が実際に使いそうな省略、否定形、単語が離れた表現、似た機能の比較を40問作り、`selectLineReportHelpSections` → `buildMtalkHelpReference` の実経路へ通した。
+- Findings: 初回は6問で関連項目が上位6件に入らなかった。対象は「通常トーク画面からBot削除」「過去AI分析文を次回答へ再利用」「Journal天気・気温の通常AI統合」「東京ドームと小ホールの係数差」「LINEグループのBot数」「Grok／Perplexityの外部検索条件」。また「Journalの資料…」で項目検索はできても統合資料が未注入になる表現を確認した。
+- Fix: ADM-01/03、JAI-01、FCT-03/06、SEC-03の検索語と説明を実装事実に合わせて追加し、`journal`、`grok`、`perplexity` を統合資料の質問判定へ追加。外部検索は戦略・改善質問のみ、数値照会では呼ばないことも明文化した。
+- Verification: 40問を再実行して **40/40成功・途中切れ0件**。失敗した表現を恒久テストへ追加し、否定形・分離語・類似機能でも正しい項目を選び、統合資料が必ず注入されることを検証する。
+
 ### 2026-08-26 - 統合AI資料を全コード入口と再照合し、継続監査を追加
 
 - Re-audit: 文書だけでなく実コードを再調査し、公開コード40件、Edge Functions 20件、共有TypeScriptモジュール90件、補助・運用・レガシーコード37件、admin-api静的ルート136件、SQL migration 270件、テスト63件をインベントリ化した。
 - Gaps fixed: 手入力日次／月次売上・売上シート・店舗別解析プロンプト、メディア／文書ライブラリ、LINE Report電子ジャーナルとJournal Reportの違い、フードコートRAG／蒸留／プロンプト評価、イベント／天気／PV通知、M-talk管理・監査復元、Journalの未統合データと予約対応範囲、コード構成・API・DB基盤、GAS／OCRブリッジ／旧Worker・Expressを追加。統合資料は12区分44項目へ拡張した。
 - Grounding: 全44項目に主要実装根拠ファイルを紐付けた。コード／API／テーブル等を尋ねられた時だけAIへ関連ソースを渡し、通常の使い方回答にはソース一覧を出さず簡潔さを維持する。
 - Continuous check: `line_report_help_coverage.ts` と `npm run help:check` を追加。新しい公開画面、Edge Function、共有モジュール、admin-api静的ルートが資料区分へ未分類のまま追加されると `npm run check` が失敗する。
-- Human audit: 自動生成資料 `LINE-REPORT-JOURNAL-AI-MANUAL.md` を1069行へ拡張し、後半に全コード精査インベントリ（入口→資料区分の対応表）を追加した。生成結果完全一致、実装根拠の存在、代表質問検索、非切断、安全境界をテストする。
+- Human audit: 自動生成資料 `LINE-REPORT-JOURNAL-AI-MANUAL.md` を1073行へ拡張し、後半に全コード精査インベントリ（入口→資料区分の対応表）を追加した。生成結果完全一致、実装根拠の存在、代表質問検索、非切断、安全境界をテストする。
 - Verification: 統合資料Deno 31件（会話19＋資料11＋コード網羅1）、チャットNode 103件、`npm run test` 全グループ、`npm run check`、Journal中核接続21 OK / 0 NG、`git diff --check` が成功。
 
 ### 2026-08-26 - 1対1 AI向けLINE Report／Journal Report統合資料を作成
@@ -14,7 +21,7 @@
 - Request: LINE ReportとJournal Reportの内容を何でも正確に質問できるよう、詳細だが回答は簡潔で分かりやすく、区分・索引付きの資料へまとめる。
 - Knowledge: `line_report_help_manual.ts` を新設。全体像、売上・レシート・予算、予約、店舗運用・権限・小口、Journal基本・取込、資料・`#メモ`、Journal AI、フードコート、口コミ・競合、管理・利用状況、コード構成、正確性・安全の12区分（SYS/SAL/RSV/OPS/JRN/KNW/JAI/FCT/REV/ADM/DEV/SEC）、44項目、項目コード、要点、詳細、検索語を収録。
 - Retrieval: `mtalk_help_manual.ts` がM-talk資料と統合し、毎回「区分索引＋質問に近いLINE/Journal最大4項目＋M-talk最大3項目」を渡す。回答指示は結論1〜2文→必要な手順／理由→注意点、索引全体は読み上げない、曖昧なら確認1問、LINE売上分析とJournal分析の正本・用途を分ける。
-- Docs: 同じ実行時データから `npm run help:update` で `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md`（1069行）を自動生成。テストで生成結果との完全一致を確認し、手書き二重管理を防止。
+- Docs: 同じ実行時データから `npm run help:update` で `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md`（1073行）を自動生成。テストで生成結果との完全一致を確認し、手書き二重管理を防止。
 - Safety: 店舗の実数値は推測せず「＋」→「ジャーナルに聞く」へ案内。店舗スコープ、非公開保存、資料は金額の正本にしない等の境界を明記。
 - Test: 区分・ID・コード一意性、全項目分類、索引網羅、代表12質問の検索精度、生成Markdown完全一致、統合参照の非切断、簡潔回答指示、実数値安全境界を追加。Deno 27件＋チャットNode 103件成功。
 
