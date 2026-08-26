@@ -406,8 +406,8 @@ AIにも「- 項目名：説明」で1項目ずつ書き、項目間へ空行を
 - LINE Report／Journal Report: `supabase/functions/_shared/line_report_help_manual.ts`
 - 人間向け自動生成版: `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md`
 
-LINE Report／Journal Report資料は11区分
-（SYS/SAL/RSV/OPS/JRN/KNW/JAI/FCT/REV/ADM/SEC）・32項目に分類し、
+LINE Report／Journal Report資料は12区分
+（SYS/SAL/RSV/OPS/JRN/KNW/JAI/FCT/REV/ADM/DEV/SEC）・44項目に分類し、
 `SYS-01` のような検索コードを持つ。AIへは毎回、
 「区分索引＋質問に近い最大4項目」を渡す。索引コードは内部検索用で、通常回答には
 表示しない。M-talkは質問に近い最大3項目と短い機能索引を渡す。
@@ -426,10 +426,18 @@ M-talk資料には「M-talkの仕組み・全体像」セクションがあり�
 履歴・4種の権限をまとめる。統合資料はレシート、予算、予約、権限、小口、Journal取込、
 資料／`#メモ`、標準AI分析、AIチャット、商品コード・コース、予測・MAPE、履歴、
 フードコート分析・日報・学習進化、口コミ・競合、管理画面・AI使用量・システムマップ、
+手入力売上・売上シート・文書ライブラリ・コード構成・API／DB基盤・既知の未統合範囲・
 安全境界まで横断する。
+
+全項目は主要実装根拠ファイルを持つ。質問に「コード」「実装」「API」「テーブル」
+等が含まれるときだけ関連ソースをAIへ渡し、通常の操作質問ではソース一覧を省いて
+回答を短く保つ。
 
 `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md` は実行時データから
 `npm run help:update` で生成し、テストが完全一致を確認する。手書きの二重管理へ戻さない。
+`npm run help:check` は公開コード、Edge Functions、共有モジュール、GAS／OCR／
+補助・レガシーコード、admin-apiの静的ルートを全件走査し、資料区分へ未分類の
+入口があれば失敗する。
 
 完全一致の「使い方」「ヘルプ」は従来どおり検索ヘルプの全機能カードを返す。
 「〜はどうやる？」「〜ができない」などの自然な質問は、このマニュアルを参照する

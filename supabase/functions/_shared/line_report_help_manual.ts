@@ -116,6 +116,13 @@ export const LINE_REPORT_HELP_CATEGORIES: LineReportHelpCategory[] = [
     keywords: ['管理画面', '承認', 'webhook', 'ログ', 'ai使用料', 'システムマップ'],
   },
   {
+    id: 'development',
+    code: 'DEV',
+    title: 'コード構成・API・データ基盤',
+    description: '公開画面、Edge Functions、DB・Storage・Realtime、テストとデプロイ',
+    keywords: ['コード', '実装', 'ソース', 'api', 'edge function', 'db', 'storage', 'realtime', 'デプロイ'],
+  },
+  {
     id: 'safety',
     code: 'SEC',
     title: '正確性・安全・制限',
@@ -249,6 +256,26 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     ].join('\n'),
   },
   {
+    id: 'manual-sales-sheets-prompts',
+    code: 'SAL-06',
+    categoryId: 'sales',
+    title: '手入力売上・売上シート・店舗別解析設定',
+    keywords: [
+      '手入力売上', '手入力', '日次手入力', '月次手入力', 'セル編集', '日次セル',
+      'セル', '直す', 'ドラッグ', 'csv取込',
+      '売上シート', 'googleスプレッドシート', 'sheets pilot', '解析プロンプト',
+      '店舗別プロンプト', 'webhook状態', '店舗電話',
+    ],
+    summary: 'レシート以外の補正入力、売上シート連携、店舗固有解析設定を説明する。',
+    content: [
+      '売上分析の日次表は、総売上・組数・客数をセル単位で手入力補正できます。送信された列だけを上書きし、空欄で手入力上書きを解除します。',
+      '所定のxlsx／csvはドラッグ＆ドロップで解析し、店舗・期間・日数・合計・日別一覧を確認してから既存日へ上書きできます。解析だけではDBへ書かず、確認後に確定します。',
+      '月次手入力と日次手入力はレシート集計と区別して保持し、画面では正本・上書きの優先順位に従って表示します。',
+      '売上シート導線が設定された店舗では、管理ページからGoogleスプレッドシートを開けます。同期対象・正本方向は店舗ごとの運用設定に従います。',
+      '店舗固有のレシート様式は、共通解析ルールを壊さず店舗別追記プロンプトで補強できます。Webhook状態、店舗候補、電話照合等も管理APIで確認します。',
+    ].join('\n'),
+  },
+  {
     id: 'reservation-flow',
     code: 'RSV-01',
     categoryId: 'reservations',
@@ -316,6 +343,25 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '小口ページへレシート画像をドロップすると解析結果を入力欄へ反映します。必ず金額・税率・科目を確認してから登録します。',
       'LINEでは「経費」「出金」「小口」等を先に送り、続けて出金レシート画像を送ります。別店舗レシートでは「経費として記録」ボタンが出る場合があります。',
       '通常の自店舗精算レシートは売上扱いであり、経費コマンドを使わない限り小口へ混ぜません。',
+    ].join('\n'),
+  },
+  {
+    id: 'media-document-library',
+    code: 'OPS-04',
+    categoryId: 'operations',
+    title: 'メディア・文書ライブラリと閲覧権限',
+    keywords: [
+      'メディア閲覧', 'メディアライブラリ', '文書', '資料アップロード', 'document',
+      '画像', '動画', '音声', 'ファイル', 'pdf', 'docx', 'xlsx', '閲覧許可',
+      '容量', '20mb', '古い順', '削除',
+    ],
+    summary: 'LINE受信メディアと管理文書の保存・絞り込み・権限・容量を説明する。',
+    content: [
+      'メディア閲覧は、保存許可されたLINE／M-talkルームの画像・動画・音声・ファイルを店舗・ルーム・種別で絞り込み、プレビュー・ダウンロード・削除する画面です。',
+      'LINE受信メディアはルーム単位で非公開保存し、1ルーム合計20MBを超えると古い順に削除します。OCR用原画像の処理とは別の閲覧用コピーです。',
+      '文書ライブラリにはTXT、PDF、DOCX、XLSXをルームへ紐付けてドラッグ＆ドロップでき、一覧、ページング、削除、閲覧許可ユーザーの選択を行えます。',
+      'M-talkから開くメディア画面は発行元ルームに対応する店舗・ルームへ限定され、管理者向け全件画面より狭い範囲です。',
+      '画像・文書本体は非公開Storageに置き、表示・ダウンロード時だけ署名URLを使います。アップロード上限は管理設定と各機能の上限に従います。',
     ].join('\n'),
   },
   {
@@ -388,6 +434,25 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '過去売上同期は店舗ごとの明示ONでのみ動き、他店舗へ自動的に広げません。',
       'ワイン量はグラス、固定750mlのボトル、ペアリング等の対象SKUだけを点数からml換算します。銘柄名だけのボトルは自動換算対象にしません。',
       '「どれくらいワインが出たか」が曖昧な場合は、点数・総ml・両方のどれを見たいか確認してから回答します。',
+    ].join('\n'),
+  },
+  {
+    id: 'pos-journal-vs-journal-report',
+    code: 'JRN-05',
+    categoryId: 'journal-core',
+    title: 'LINE Report電子ジャーナルとJournal Reportの違い',
+    keywords: [
+      'pos-journal', 'line report電子ジャーナル', 'journal reportとの違い',
+      '電子ジャーナル画面', '売上サマリー', '保管ファイル', '詳しく分析する',
+      '共有レポート', 'pdfにまとめる', 'どちらを使う',
+    ],
+    summary: 'pos-journal.htmlとJournal Report本体の役割・共有データ・操作差を説明する。',
+    content: [
+      'LINE Report電子ジャーナル（pos-journal.html）は、店舗・月ごとのLZH原本、売上サマリー、日別推移、決済、商品、会計明細、簡易AI分析・質問・PDF・履歴をLINE Reportの共通画面で扱います。',
+      'Journal Report（public/jnm/jnl2txt.html）は、詳細な取込・保存レポート、店舗情報、資料、標準AI分析、広いAIチャット、商品検索、コホート、予測・MAPE等を扱う専門画面です。',
+      '両者は同店舗・同月の原本と保存済みレポートを共有参照します。原本がある日は原本を優先し、ない日だけ保存レポートで補完して二重計上を防ぎます。',
+      'LINE Report電子ジャーナルの「詳しく分析する」はJournal Reportを別タブで開きます。正確な詳細商品分析や長期比較はJournal Reportが適しています。',
+      '電子ジャーナル画面の「PDFにまとめる」は表示中の売上サマリーと商品ランキングを対象とし、原本一覧や全会計明細を含む完全バックアップではありません。',
     ].join('\n'),
   },
   {
@@ -588,6 +653,44 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     ].join('\n'),
   },
   {
+    id: 'foodcourt-learning-assets',
+    code: 'FCT-05',
+    categoryId: 'foodcourt',
+    title: '品質評価・RAG・蒸留・プロンプト候補',
+    keywords: [
+      '品質評価', 'aiループ', '評価軸', 'rag', '蒸留', 'distillation',
+      '教材', 'プロンプト候補', 'プロンプト評価', 'evaluation set',
+      'monthly retrospective', '月次振り返り', 'evolution readiness',
+    ],
+    summary: 'AI回答の評価履歴、教材化、プロンプト改善と現在の実装範囲を説明する。',
+    content: [
+      'Q&A等の品質ループは、正確性・根拠・実用性等を評価し、不合格時に改善点だけを統合AIへ戻します。実行履歴とフィードバックは進化画面で確認できます。',
+      '合格・承認された回答はRAG教材候補や蒸留用JSONLとして出力でき、入力・下書き・評価・最終回答の組を将来の改善材料にします。',
+      'プロンプト評価セット、候補、比較結果、進化準備状況を管理するAPIと画面があります。月次振り返りでは蓄積状況と改善材料を確認します。',
+      'これらは品質改善の基盤であり、外部モデルが自動的に再学習・ファインチューニングされ続けているという意味ではありません。本格的な蒸留モデル運用は別段階です。',
+      '予測モデルの毎日再学習と、文章回答のRAG・評価・蒸留は別の改善ループとして扱います。',
+    ].join('\n'),
+  },
+  {
+    id: 'foodcourt-events-alerts',
+    code: 'FCT-06',
+    categoryId: 'foodcourt',
+    title: 'イベント・天気・週次配信・日本戦PVアラート',
+    keywords: [
+      '東京ドームイベント', 'カナデビア', '後楽園ホール', '天気cron',
+      '週次イベント配信', '2週間', 'pv', 'パブリックビューイング',
+      '日本戦', '深夜', '要確認', 'pv決定', 'アラート',
+    ],
+    summary: 'イベント・天気の自動取得と、週次／PV通知の確証ルールを説明する。',
+    content: [
+      '東京ドーム本体、カナデビアホール、後楽園ホールのイベントは定期取得し、画面、AI分析、予測特徴量へ使います。取得元ごとに独立して処理し、1会場の失敗で全体を止めません。',
+      '天気は日次取得し、イベント・曜日とともにフードコート分析と予測へ結び付けます。古いキャッシュや予報・実績の違いに注意します。',
+      '週次イベント配信はルーム設定の曜日・時刻に従い、原則今後2週間を会場別のLINE Flexで送ります。二重送信防止ログを持ちます。',
+      '日本戦PVは、公式確認済みなら「PV決定」、営業時間外の未確定試合は必要時に「要確認」として区別し、未確認情報を決定事項として断定しません。',
+      'PVやイベントの大集客が自店舗売上へ同じ割合で直結するとは限らず、競技・会場・時間帯・他イベントとの重なりを分けて分析します。',
+    ].join('\n'),
+  },
+  {
     id: 'store-reviews',
     code: 'REV-01',
     categoryId: 'reviews',
@@ -658,6 +761,116 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
     ].join('\n'),
   },
   {
+    id: 'mtalk-admin-audit',
+    code: 'ADM-03',
+    categoryId: 'administration',
+    title: 'M-talk管理・権限テンプレート・監査復元',
+    keywords: [
+      'm-talk管理', 'chat-admin', '利用停止', '論理削除', 'ルーム権限',
+      '権限テンプレート', '一括設定', 'ユーザー別アクセス', '監査ログ',
+      '復元', 'bot削除', 'bot復元', 'ルームゴミ箱',
+    ],
+    summary: '本部向けM-talk管理の利用者・ルーム・Bot・監査機能を説明する。',
+    content: [
+      'M-talk管理画面は本部フル管理者専用で、LINEユーザー承認とは別のM-talk利用状態とルーム権限を管理します。',
+      'ユーザー全体の利用停止・期限付き制限・論理削除と、ルームごとの閲覧・送信・招待・管理権限を設定できます。',
+      '権限テンプレートは変更対象をプレビューしてから一括適用し、閲覧権限なしで他権限だけを付ける矛盾を防ぎます。ユーザー別の有効アクセスと拒否理由も確認できます。',
+      '監査ログは変更前後を記録し、競合がない場合に限り一度だけ復元できます。復元操作そのものも監査されます。',
+      '管理画面では通常ルームのゴミ箱・復元・完全削除と、Botの論理削除・復元を行えます。通常M-talk画面からBotは削除できません。',
+    ].join('\n'),
+  },
+  {
+    id: 'frontend-entrypoints',
+    code: 'DEV-01',
+    categoryId: 'development',
+    title: '公開画面・フロントエンドの構成',
+    keywords: [
+      'フロントエンド', '公開画面', 'public', 'html', 'github pages', 'pages',
+      'chat.html', 'analytics.html', 'pos-journal.html', 'jnl2txt.html', '画面のコード',
+    ],
+    summary: 'GitHub Pages配信元、主要HTML、共通ブラウザコードの役割を説明する。',
+    content: [
+      '公開画面はリポジトリのpublic配下をGitHub Pagesへ配信します。既存URL互換のため、主要HTML名はpublic直下で維持します。',
+      '管理画面、売上分析、口コミ、予約、メディア、検索、M-talk、フードコート、POS電子ジャーナル等は個別HTMLです。',
+      'Journal Report本体はpublic/jnm/jnl2txt.htmlで、public/jnm/index.htmlはクエリ等を保って本体へ送る入口です。大きなインラインJavaScriptがあるため、GraphifyだけでなくHTMLを直接確認します。',
+      '認証、ページ設定、テーマ、ログアウト、キャッシュ等は共通JavaScriptへ分けています。M-talkはSupabase Auth・Realtimeをブラウザから利用し、業務管理画面はadmin-apiを通します。',
+      'public/system-map配下は知識更新で生成される構造図です。vendor配下は固定したブラウザライブラリです。',
+    ].join('\n'),
+  },
+  {
+    id: 'edge-functions-api',
+    code: 'DEV-02',
+    categoryId: 'development',
+    title: 'Edge Functions・API・Webhookの責務',
+    keywords: [
+      'edge function', 'supabase function', 'admin-api', 'line-webhook', 'chat-knowledge',
+      'chat-push', 'chat-search', 'ai-analyze', 'webhook', 'apiルート', 'どの関数',
+    ],
+    summary: '主要Edge Functionと中央APIの役割分担を説明する。',
+    content: [
+      'admin-apiは管理画面、売上、予約、小口、POSジャーナル、資料、フードコート、口コミ、M-talk管理等の中央APIです。管理・店舗・ルーム・cronの各スコープを入口で強制します。',
+      'line-webhookは店舗別LINEイベントを署名検証後に処理し、レシート、検索、予算、経費、予約スクショ、#メモ等へ振り分けます。line-admin-webhookは承認専用です。',
+      'chat-knowledgeはM-talk店舗ルームのBot処理と1対1の使い方AIを担当し、chat-searchは検索、chat-pushはWeb Pushを担当します。',
+      'ai-analyzeはJournal Reportの標準AI分析・チャット・確認経路を担当します。Gmail、予約配信、売上レポート、天気、イベント、予測、保持等は用途別cronへ分離しています。',
+      'verify_jwt=falseの関数もあるため、各関数側のLINE署名、内部シークレット、cronトークン等の認可を必須とします。',
+    ].join('\n'),
+  },
+  {
+    id: 'database-storage-realtime',
+    code: 'DEV-03',
+    categoryId: 'development',
+    title: 'DB・Storage・Realtime・cronの基盤',
+    keywords: [
+      'supabase', 'データベース', 'db', 'テーブル', 'migration', 'rls', 'storage',
+      'バケット', '署名url', 'realtime', 'cron', 'pg_cron', '店舗スコープ',
+    ],
+    summary: 'SupabaseのDB隔離、非公開Storage、Realtime、定期処理を説明する。',
+    content: [
+      '本番のLINE Report業務データは同一Supabaseプロジェクトで管理し、スキーマ変更はsupabase/migrationsのSQLを正本にします。',
+      '業務テーブルは公開クライアントから直接読ませず、RLS、権限剥奪、管理API、店舗スコープで多層防御します。M-talkのチャットテーブルはAuth・RLS・ルーム権限で直接利用します。',
+      '画像、POS原本、レポートHTML、資料添付等は用途別の非公開Storageへ保存し、閲覧時に期限付き署名URLを発行します。',
+      'M-talkはSupabase Realtimeでメッセージ、既読、リアクション、個人メモ等を同期し、未読や参加時点の境界もDB側で守ります。',
+      '予約、売上レポート、天気、イベント、予測、キャッシュ、保持等はcronとEdge Functionsで定期実行し、重複防止・認証・ログを持ちます。',
+    ].join('\n'),
+  },
+  {
+    id: 'tests-knowledge-deploy',
+    code: 'DEV-04',
+    categoryId: 'development',
+    title: 'テスト・知識同期・デプロイ',
+    keywords: [
+      'テスト', 'test', 'check', 'knowledge', 'graphify', 'obsidian', 'デプロイ',
+      'github actions', 'deploy pages', 'deploy edge functions', '本番反映', '検証',
+    ],
+    summary: '静的検査、テスト群、Graphify・Obsidian同期、本番反映手順を説明する。',
+    content: [
+      'npm run checkはブラウザ共通JS、リポジトリ構造、所有Function、Journal AIデータ接続、シェル構文等を検査します。npm run testは知識、構造、チャット、フードコート、予約、レシート、Journal AI、POS Journalを実行します。',
+      'コード・SQL構造はGraphify、運用・設計文書はObsidian／docsで補い、npm run knowledge:update後にknowledge:checkでハッシュ、SQL coverage、ミラー、秘密情報混入を確認します。',
+      '統合AI資料はline_report_help_manual.tsを実行時正本にし、npm run help:updateで人間向けMarkdownを生成し、help:checkとテストでコード入口の網羅と生成一致を検査します。',
+      'mainへのpush後、GitHub ActionsがpublicをPagesへ配信し、Edge Functions・migrationを本番Supabaseへ反映します。必要な変更だけをデプロイし、ワークフローと本番Functionバージョンを確認します。',
+      'UI変更はローカルPagesでPC・モバイルを確認し、APIは未認証401、店舗範囲、RLS、実データを変更しないテスト等を用途に応じて確認します。',
+    ].join('\n'),
+  },
+  {
+    id: 'auxiliary-legacy-code',
+    code: 'DEV-05',
+    categoryId: 'development',
+    title: '補助コード・GAS・OCR・レガシー経路',
+    keywords: [
+      '補助コード', 'レガシー', 'legacy', 'cloudflare worker', 'express', 'sqlite',
+      'ocr bridge', 'ocrブリッジ', 'google apps script', 'gas', 'clasp',
+      'src server', 'どれが本番', '古いコード',
+    ],
+    summary: '本番Supabase／Pages経路と、補助・移行・旧ローカルコードを区別する。',
+    content: [
+      '現在のLINE Report本番はGitHub PagesのpublicとSupabaseのadmin-api・各Edge Function・DBを正本にします。',
+      'google-apps-script/receipt-sheets-pilotは、売上スプレッドシートの編集・同期を補助するGASです。GASはGitHub ActionsのEdgeデプロイとは別にclasp／スクリプトプロパティ設定が必要です。',
+      'ocr-bridgeはOCR補助サービス用のPython・Docker構成です。主なLINEレシート解析はSupabase Edge側のreceipt_vision等で動くため、OCRブリッジを全レシートの唯一経路と説明しません。',
+      'cloudflare-workerは補助・レガシーWebhook経路、src/server.jsとsrc/db.jsは旧LINE-WINE向けローカルExpress／SQLiteです。現行LINE Report本番の管理API・チャット・Journal Reportとは分けます。',
+      'scripts配下にはデータ掃除、移行、ダミーデータ、POS解析、GAS設定、知識更新、整合検査、ローカルプレビュー等があり、通常利用者の画面機能ではなく開発・運用コマンドです。',
+    ].join('\n'),
+  },
+  {
     id: 'accuracy-security-boundaries',
     code: 'SEC-01',
     categoryId: 'safety',
@@ -693,7 +906,312 @@ export const LINE_REPORT_HELP_SECTIONS: LineReportHelpSection[] = [
       '正確な店舗数値は使い方AIではなくJournal AIへ、設定変更や権限変更はM-talk管理者・本部管理者へ案内します。',
     ].join('\n'),
   },
+  {
+    id: 'known-coverage-limits',
+    code: 'SEC-03',
+    categoryId: 'safety',
+    title: '現在の対応範囲・未統合データ・既知の制限',
+    keywords: [
+      '対応範囲', '未対応', '未統合', '入っていない', 'まだ入っていない',
+      '使われていない', '制限', '既知の課題', 'データがない', '予約開始月',
+      'cavacava', '2026年5月', '天候', 'mape履歴', '過去ai分析',
+      'generate-insight', '自動生成', '何が使われない',
+    ],
+    summary: '「データが存在する」と「通常AIへ統合済み」を区別し、誤回答を防ぐ。',
+    content: [
+      'Journalの通常AI分析・チャットには多くの確定データを統合しますが、ジャーナル由来の天候・気温は現状、通常AI用テキストへ明示的に全て渡していません。別のPOS Journal AIには天候分析があります。',
+      '過去の売上予測・MAPE履歴は専用UIで閲覧できますが、通常の新しいAI回答へ過去予測の当たり外れを自動再投入してはいません。',
+      '過去のAI分析文章は閲覧履歴であり、新しい回答の事実ソースとして再利用せず、保存レポートから数値を再計算します。',
+      '資料の施策効果インサイト生成APIはありますが、Journal画面・LINE・定期処理から自動実行する現行導線は確認できません。',
+      '予約を使う集客構造分析はBistro CAVACAVAの2026年5月以降が現行対象で、開始前や他店舗を予約0件・飛び込み100%として扱いません。',
+      '外部サービスの接続状態、ルームの現在設定、最新店舗数値は資料だけで確定できないため、対象画面・管理者・実データで確認します。',
+    ].join('\n'),
+  },
 ]
+
+/**
+ * 各説明を検証した主要ソース。利者向け要約をコードと結びつけ、
+ * 「実装はどこ？」という質問にも推測せず答えられるようにする。
+ */
+export const LINE_REPORT_HELP_SECTION_SOURCES: Record<string, string[]> = {
+  'SYS-01': [
+    'public/pages-config.js',
+    'public/index.html',
+    'public/chat.html',
+    'public/jnm/jnl2txt.html',
+  ],
+  'SYS-02': [
+    'public/auth-session.js',
+    'supabase/functions/_shared/admin_dashboard_link_auth.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'SAL-01': [
+    'supabase/functions/_shared/line_search_bot.ts',
+    'supabase/functions/_shared/budget_entry_flow.ts',
+    'supabase/functions/_shared/store_receipt.ts',
+  ],
+  'SAL-02': [
+    'supabase/functions/line-webhook/index.ts',
+    'supabase/functions/_shared/receipt_vision.ts',
+    'supabase/functions/_shared/receipt_save_flow.ts',
+  ],
+  'SAL-03': [
+    'supabase/functions/_shared/receipt_correction.ts',
+    'supabase/functions/_shared/receipt_duplicate.ts',
+    'supabase/functions/_shared/receipt_line_actions.ts',
+  ],
+  'SAL-04': [
+    'public/analytics.html',
+    'supabase/functions/_shared/budget_entry_flow.ts',
+    'supabase/functions/_shared/sales_budget_allocation.ts',
+    'supabase/functions/_shared/admin_receipt_sales.ts',
+  ],
+  'SAL-05': [
+    'public/analytics.html',
+    'supabase/functions/_shared/daily_sales_import.ts',
+    'supabase/functions/_shared/receipt_sheets_pilot_sync.ts',
+    'supabase/functions/receipt-sheets-sync-cron/index.ts',
+  ],
+  'SAL-06': [
+    'public/analytics.html',
+    'supabase/functions/_shared/manual_day_sales.ts',
+    'supabase/functions/_shared/manual_month_sales.ts',
+    'supabase/functions/_shared/daily_sales_import.ts',
+    'supabase/functions/_shared/receipt_sheets_pilot_sync.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'RSV-01': [
+    'public/reservation.html',
+    'public/mtalk_schedule.html',
+    'supabase/functions/gmail-alert-cron/index.ts',
+    'supabase/functions/_shared/reservation_mail_rules.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'OPS-01': [
+    'public/index.html',
+    'public/room_settings.html',
+    'public/chat-admin.html',
+    'supabase/functions/_shared/room_config_link.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'OPS-02': [
+    'public/message-search.html',
+    'public/media.html',
+    'supabase/functions/_shared/line_search_bot.ts',
+    'supabase/functions/_shared/line_room_message_search.ts',
+    'supabase/functions/_shared/line_media_store.ts',
+  ],
+  'OPS-03': [
+    'public/petty_cash.html',
+    'supabase/functions/_shared/petty_cash_flow.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'OPS-04': [
+    'public/media.html',
+    'supabase/functions/_shared/line_media_store.ts',
+    'supabase/functions/_shared/knowledge_file_extract.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JRN-01': [
+    'public/jnm/index.html',
+    'public/jnm/jnl2txt.html',
+    'docs/JOURNAL-REPORT-FEATURES.md',
+  ],
+  'JRN-02': [
+    'public/pos-journal.html',
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/_shared/pos_journal.ts',
+    'supabase/functions/_shared/pos_journal_lha.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JRN-03': [
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/_shared/pos_journal.ts',
+    'docs/JOURNAL-AI-CHAT-RULES.md',
+  ],
+  'JRN-04': [
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/_shared/journal_sales_sync.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JRN-05': [
+    'public/pos-journal.html',
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/_shared/pos_journal.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'KNW-01': [
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/_shared/knowledge_file_extract.ts',
+    'supabase/functions/admin-api/index.ts',
+    'docs/JOURNAL-STORE-KNOWLEDGE.md',
+  ],
+  'KNW-02': [
+    'supabase/functions/chat-knowledge/index.ts',
+    'supabase/functions/line-webhook/index.ts',
+    'supabase/functions/_shared/knowledge_memo_tag.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JAI-01': [
+    'supabase/functions/ai-analyze/index.ts',
+    'supabase/functions/_shared/journal_ai_orchestrate.ts',
+    'public/jnm/jnl2txt.html',
+  ],
+  'JAI-02': [
+    'public/jnm/jnl2txt.html',
+    'public/mtalk_journal_ai.html',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JAI-03': [
+    'supabase/functions/_shared/journal_product_index.ts',
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JAI-04': [
+    'supabase/functions/_shared/reservation_ai_cache.ts',
+    'supabase/functions/_shared/pos_journal_ai.ts',
+    'public/jnm/jnl2txt.html',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'JAI-05': [
+    'public/jnm/jnl2txt.html',
+    'public/jnm/ai-chat-pdf-history.html',
+    'public/jnm/ai-usage.html',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'FCT-01': [
+    'public/foodcourt.html',
+    'supabase/functions/_shared/foodcourt_compare.ts',
+    'supabase/functions/_shared/weather_daily.ts',
+    'supabase/functions/_shared/tokyo_dome_schedule.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'FCT-02': [
+    'supabase/functions/_shared/foodcourt_compare.ts',
+    'supabase/functions/_shared/foodcourt_loop_utils.ts',
+    'supabase/functions/_shared/foodcourt_distillation.ts',
+    'tests/foodcourt_prompt_evaluation.test.ts',
+  ],
+  'FCT-03': [
+    'public/foodcourt-evolution.html',
+    'supabase/functions/foodcourt-forecast-cron/index.ts',
+    'supabase/functions/_shared/foodcourt_forecast_utils.ts',
+    'tests/foodcourt_forecast_utils.test.ts',
+  ],
+  'FCT-04': [
+    'public/foodcourt-report.html',
+    'public/foodcourt-weekly-report.html',
+    'supabase/functions/_shared/foodcourt_compare.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'FCT-05': [
+    'public/foodcourt-evolution.html',
+    'supabase/functions/_shared/foodcourt_loop_utils.ts',
+    'supabase/functions/_shared/foodcourt_distillation.ts',
+    'supabase/functions/admin-api/index.ts',
+    'docs/AI_LOOP_ENGINEERING_DESIGN.md',
+  ],
+  'FCT-06': [
+    'public/foodcourt.html',
+    'supabase/functions/tokyo-dome-events-cron/index.ts',
+    'supabase/functions/tokyo-dome-weekly-cron/index.ts',
+    'supabase/functions/pv-japan-alert-cron/index.ts',
+    'supabase/functions/weather-daily-cron/index.ts',
+    'supabase/functions/_shared/tokyo_dome_schedule.ts',
+  ],
+  'REV-01': [
+    'public/reviews.html',
+    'supabase/functions/_shared/competitor_review_context.ts',
+    'supabase/functions/admin-api/index.ts',
+  ],
+  'REV-02': [
+    'public/reviews.html',
+    'supabase/functions/_shared/competitor_review_context.ts',
+    'supabase/functions/review-alert-cron/index.ts',
+  ],
+  'ADM-01': [
+    'public/index.html',
+    'public/chat-admin.html',
+    'supabase/functions/admin-api/index.ts',
+    'supabase/functions/_shared/line_admin_webhook.ts',
+    'supabase/functions/_shared/line_user_approval.ts',
+  ],
+  'ADM-02': [
+    'public/ai-usage.html',
+    'public/system-map.html',
+    'supabase/functions/admin-api/index.ts',
+    'docs/AI_KNOWLEDGE_SYSTEM.md',
+  ],
+  'ADM-03': [
+    'public/chat-admin.html',
+    'supabase/functions/admin-api/index.ts',
+    'docs/CHAT-ADMIN-PERMISSIONS.md',
+    'tests/chat_admin_permissions.test.mjs',
+    'tests/chat_admin_templates.test.mjs',
+  ],
+  'DEV-01': [
+    'public',
+    'docs/REPOSITORY_STRUCTURE.md',
+    '.github/workflows/deploy-pages.yml',
+  ],
+  'DEV-02': [
+    'supabase/functions',
+    'supabase/config.toml',
+    '.github/workflows/deploy-edge-functions.yml',
+  ],
+  'DEV-03': [
+    'supabase/migrations',
+    'docs/SECURITY.md',
+    'docs/SUPABASE-OWNERSHIP.md',
+  ],
+  'DEV-04': [
+    'package.json',
+    'AGENTS.md',
+    'scripts/update-knowledge-vault.sh',
+    'scripts/check-knowledge-system.mjs',
+    'tests',
+  ],
+  'DEV-05': [
+    'google-apps-script/receipt-sheets-pilot/Code.gs',
+    'cloudflare-worker/src/index.js',
+    'ocr-bridge/app.py',
+    'src/server.js',
+    'src/db.js',
+    'docs/REPOSITORY_STRUCTURE.md',
+  ],
+  'SEC-01': [
+    'docs/SECURITY.md',
+    'supabase/functions/admin-api/index.ts',
+    'supabase/functions/_shared/journal_ai_privacy.ts',
+    'supabase/functions/_shared/admin_dashboard_link_auth.ts',
+  ],
+  'SEC-02': [
+    'docs/操作マニュアル.md',
+    'docs/店舗運用修正記録.md',
+    'supabase/functions/_shared/line_report_help_manual.ts',
+    'supabase/functions/_shared/mtalk_help_manual.ts',
+  ],
+  'SEC-03': [
+    'docs/JOURNAL-REPORT-FEATURES.md',
+    'docs/RESERVATION-AI-COVERAGE.md',
+    'scripts/verify-journal-ai-data-flow.mjs',
+    'supabase/functions/_shared/line_report_help_manual.ts',
+  ],
+}
+
+export function lineReportHelpSourcesForCode(code: string): string[] {
+  return LINE_REPORT_HELP_SECTION_SOURCES[String(code ?? '').trim()] ?? []
+}
+
+export function wantsLineReportImplementationDetails(question: string): boolean {
+  const normalized = normalize(question)
+  if (!normalized) return false
+  return [
+    'コード', '実装', 'ソース', 'ファイル', '関数', 'モジュール', 'api',
+    'エンドポイント', 'テーブル', 'migration', 'マイグレーション', 'storage',
+    'バケット', 'rls', 'edge function', 'どこにある', 'どの処理',
+  ].some((word) => normalized.includes(normalize(word)))
+}
 
 function normalize(text: string): string {
   return String(text ?? '')
@@ -719,7 +1237,13 @@ function scoreSection(section: LineReportHelpSection, normalizedQuestion: string
   if (normalizedTitle && normalizedQuestion.includes(normalizedTitle)) score += 10
   const category = LINE_REPORT_HELP_CATEGORIES.find((entry) => entry.id === section.categoryId)
   if (category) {
-    for (const keyword of category.keywords) score += Math.min(3, keywordScore(keyword, normalizedQuestion))
+    // 区分語は検索の補助に留める。同じ区分の全項目へ加点しすぎると、
+    // 「予算の実装コード」のような質問でDEV全項目が予算項目を押し出すため。
+    const categoryMatch = Math.max(
+      0,
+      ...category.keywords.map((keyword) => keywordScore(keyword, normalizedQuestion)),
+    )
+    if (categoryMatch > 0) score += Math.min(2, categoryMatch)
   }
   return score
 }
@@ -814,6 +1338,8 @@ export function renderLineReportHelpManualMarkdown(): string {
         ...section.content.split('\n').map((paragraph) => `- ${paragraph}`),
         '',
         `**検索語:** ${section.keywords.join(' / ')}`,
+        '',
+        `**主な実装根拠:** ${lineReportHelpSourcesForCode(section.code).map((source) => `\`${source}\``).join(' / ')}`,
         '',
       )
     }
