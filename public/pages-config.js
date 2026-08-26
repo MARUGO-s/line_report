@@ -104,6 +104,19 @@
     return normalizeWebhookBaseUrl(base) + '/functions/v1/line-webhook';
   }
 
+  /**
+   * 月次日別売上管理表テンプレート（日別売上管理表.xlsx）の配布URL。
+   * 実体は line_file_templates テーブルにあり、line-webhook が GET で返す。
+   * template_key は supabase/functions/line-webhook/index.ts の
+   * DAILY_SALES_TEMPLATE_KEY と一致させること。
+   */
+  const DAILY_SALES_TEMPLATE_KEY = 'daily_sales_management_xlsx';
+
+  function dailySalesTemplateUrl(storeKey, base) {
+    return lineWebhookUrl(storeKey, base) +
+      '?download=' + encodeURIComponent(DAILY_SALES_TEMPLATE_KEY);
+  }
+
   /** 旧表記・別名 → canonical store_partition_key */
   const STORE_KEY_ALIASES = {
     bistrocavacava: ['BISTRO CAVA CAVA', 'BISTROCAVACAVA', 'CAVA CAVA'],
@@ -237,6 +250,8 @@
     lineWebhookPath: lineWebhookPath,
     lineWebhookUrl: lineWebhookUrl,
     lineWebhookLegacyUrl: lineWebhookLegacyUrl,
+    DAILY_SALES_TEMPLATE_KEY: DAILY_SALES_TEMPLATE_KEY,
+    dailySalesTemplateUrl: dailySalesTemplateUrl,
     webhookRawTableName: webhookRawTableName,
     receiptTableName: receiptTableName,
     listStores: listStores,
