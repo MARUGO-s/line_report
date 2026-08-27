@@ -168,6 +168,9 @@ export async function ensureMtalkRoomSettings(
     dome_weekly_enabled: false,
     review_alert_enabled: false,
     foodcourt_weekly_report_enabled: false,
+    // Web検索は1回ごとに実費が出るため、新規ルームは必ずOFFで作る。
+    mtalk_web_search_enabled: false,
+    mtalk_web_search_model: null,
     updated_at: now,
   })
   if (insertError) {
@@ -187,6 +190,10 @@ export type MtalkRoomFlags = {
   calendar_ai_auto_create_enabled: boolean
   calendar_silent_auto_register_enabled: boolean
   calendar_registration_reply_enabled: boolean
+  /** 雑談AIがWeb検索(Perplexity)で答えてよいか。従量課金のため既定OFF。 */
+  mtalk_web_search_enabled: boolean
+  /** Web検索に使うPerplexityモデル。NULL=既定 sonar。 */
+  mtalk_web_search_model: string | null
 }
 
 export async function loadMtalkRoomFlags(
@@ -204,15 +211,18 @@ export async function loadMtalkRoomFlags(
     calendar_ai_auto_create_enabled: false,
     calendar_silent_auto_register_enabled: false,
     calendar_registration_reply_enabled: false,
+    mtalk_web_search_enabled: false,
+    mtalk_web_search_model: null,
   }
   if (!roomId) return defaults
   const { data } = await supabase
     .from("room_summary_settings")
-    .select("bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, media_save_enabled, media_file_access_enabled, petty_receipt_analysis_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, calendar_registration_reply_enabled")
+    .select("bot_reply_hard_mute_enabled, image_analysis_reply_enabled, receipt_correction_reply_enabled, media_save_enabled, media_file_access_enabled, petty_receipt_analysis_enabled, calendar_ai_auto_create_enabled, calendar_silent_auto_register_enabled, calendar_registration_reply_enabled, mtalk_web_search_enabled, mtalk_web_search_model")
     .eq("room_id", roomId)
     .maybeSingle()
   if (!data) return defaults
   const row = data as Record<string, unknown>
+  const searchModel = String(row.mtalk_web_search_model ?? "").trim()
   return {
     bot_reply_hard_mute_enabled: row.bot_reply_hard_mute_enabled === true,
     image_analysis_reply_enabled: row.image_analysis_reply_enabled !== false,
@@ -223,5 +233,8 @@ export async function loadMtalkRoomFlags(
     calendar_ai_auto_create_enabled: row.calendar_ai_auto_create_enabled === true,
     calendar_silent_auto_register_enabled: row.calendar_silent_auto_register_enabled === true,
     calendar_registration_reply_enabled: row.calendar_registration_reply_enabled === true,
+    // Web検索は課金が発生するため、明示的に true のときだけ有効。
+    mtalk_web_search_enabled: row.mtalk_web_search_enabled === true,
+    mtalk_web_search_model: searchModel || null,
   }
 }

@@ -284,6 +284,7 @@
       {key:'bot_reply_hard_mute_enabled', t:'AI返信を完全に無しにする', d:'このルームではAIを一切返信させません（上の設定より優先）', kill:true},
       {key:'message_search_enabled', t:'会話検索', d:'過去のトーク履歴を検索できるようにします'},
       {key:'message_search_library_enabled', t:'資料検索', d:'保存した資料からAIが回答します'},
+      {key:'mtalk_web_search_enabled', t:'🌐 AIのWeb検索', d:'マニュアルに無い一般的な質問に、AIがWebを検索して出典付きで答えます。1回の検索ごとに料金が発生します（目安1〜2円）', extra:'webSearchModel'},
     ]},
     { id:'report', title:'要約・レポート', icon:'report', caption:'要約と売上レポートの配信', items:[
       {key:'send_room_summary', t:'ルーム要約の配信', d:'このルームの会話要約を定期配信します'},
@@ -324,6 +325,12 @@
   var gmailAlertInterval = { minutes:1, anchorHour:10, anchorMinute:0 };
   // 本日の予約状況配信の時刻（NULL=既定 18:00）。
   var todayReservationAlert = { hour:18, minute:0 };
+  // AIのWeb検索に使うモデル（NULL=既定 sonar）。admin-api・DB制約と同じ2値だけ許可。
+  var webSearchModel = { model:'sonar' };
+  var WEB_SEARCH_MODEL_OPTIONS = [
+    ['sonar', '標準（sonar）… 目安 約1.4円/回・通常の調べもの向け'],
+    ['sonar-pro', '高精度（sonar-pro）… 目安 約2.2円/回・詳しく調べたいとき'],
+  ];
   // 予定配信のリマインド設定スロット（最大5件）。
   var calendarReminder = {
     slots: [
@@ -427,6 +434,7 @@
         gmailAlertInterval.anchorMinute = (cfg.gmail_alert_anchor_minute != null) ? Number(cfg.gmail_alert_anchor_minute) : 0;
         todayReservationAlert.hour   = (cfg.today_reservation_alert_hour   != null) ? Number(cfg.today_reservation_alert_hour)   : 18;
         todayReservationAlert.minute = (cfg.today_reservation_alert_minute != null) ? Number(cfg.today_reservation_alert_minute) : 0;
+        webSearchModel.model = (cfg.mtalk_web_search_model === 'sonar-pro') ? 'sonar-pro' : 'sonar';
         if (Array.isArray(cfg.calendar_reminder_slots) && cfg.calendar_reminder_slots.length > 0) {
           calendarReminder.slots = cfg.calendar_reminder_slots.slice(0, 5).map(function(s, idx){
             return {
@@ -524,6 +532,26 @@
       + '</div>';
   }
 
+  // AIのWeb検索モデル。上のトグルがONのときだけ意味を持つので、OFFの間は隠す
+  // （効かない欄を触らせない。gmailAlertAnchor と同じ考え方）。
+  function webSearchModelApplies(){
+    var sec = SECTIONS.filter(function(s){ return s.id==='ai'; })[0];
+    if (!sec) return false;
+    return sec.items.some(function(i){ return i.key==='mtalk_web_search_enabled' && i.on; });
+  }
+
+  function webSearchModelControlHtml(){
+    var opt = WEB_SEARCH_MODEL_OPTIONS.map(function(o){
+      return '<option value="'+esc(o[0])+'"'+(o[0]===webSearchModel.model?' selected':'')+'>'+esc(o[1])+'</option>';
+    }).join('');
+    var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
+    return '<div class="web-search-model-row" style="'+(webSearchModelApplies()?'':'display:none;')+'display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px 14px;">'
+      + '<span style="font-size:12px;color:#8a94a6;font-weight:700;width:100%">🔎 検索に使うAIモデル</span>'
+      + '<select class="web-search-model-sel" style="'+ss+'width:100%;">'+opt+'</select>'
+      + '<span style="font-size:12px;color:#8a94a6;">料金は検索1回ごとに発生します。使わない間は上のスイッチをOFFにしてください。</span>'
+      + '</div>';
+  }
+
   // 本日の予約状況配信の時刻（サイトの type=time と同じ。同じ DB 列を読む／書く）。
   function todayReservationAlertControlHtml(){
     var ss = 'padding:6px 8px;border-radius:8px;border:1px solid var(--line,#d0d5dd);background:var(--surface2,#fff);color:var(--tx-1,#111);font-size:13px;';
@@ -581,6 +609,12 @@
     for (var i=0;i<rows.length;i++) rows[i].style.display = gmailAlertAnchorApplies() ? 'flex' : 'none';
   }
 
+  // Web検索トグルの状態に合わせてモデル選択欄を出し入れする（同じく render() は呼ばない）。
+  function syncWebSearchModelVisibility(){
+    var rows = document.querySelectorAll('.web-search-model-row');
+    for (var i=0;i<rows.length;i++) rows[i].style.display = webSearchModelApplies() ? 'flex' : 'none';
+  }
+
 
   function render(){
     el('list').innerHTML = SECTIONS.map(function(sec){
@@ -596,6 +630,7 @@
         if (it.extra === 'fcWeekly') r += fcWeeklyControlHtml();
         if (it.extra === 'reviewAlert') r += reviewAlertControlHtml();
         if (it.extra === 'gmailAlertInterval') r += gmailAlertIntervalControlHtml();
+        if (it.extra === 'webSearchModel') r += webSearchModelControlHtml();
         if (it.extra === 'todayReservationAlert') r += todayReservationAlertControlHtml();
         if (it.extra === 'tomorrowReminder') r += tomorrowReminderControlHtml();
         return r;
@@ -763,6 +798,13 @@
       if (!isNaN(val)){ reviewAlert[kind] = val; saveField('review_alert_'+kind, val); }
       return;
     }
+    var wsmSel = e.target.closest('select.web-search-model-sel');
+    if (wsmSel){
+      var wsmVal = (wsmSel.value === 'sonar-pro') ? 'sonar-pro' : 'sonar';
+      webSearchModel.model = wsmVal;
+      saveField('mtalk_web_search_model', wsmVal);
+      return;
+    }
     var gaiSel = e.target.closest('select.gmail-alert-interval-sel');
     if (gaiSel){
       var val = parseInt(gaiSel.value, 10);
@@ -810,6 +852,8 @@
     var item = sec.items[+inp.dataset.i];
     item.on = inp.checked;
     updateSummary();
+    // Web検索のON/OFFでモデル選択欄の要否が変わる（OFFの間は効かないので隠す）。
+    if (item.key === 'mtalk_web_search_enabled') syncWebSearchModelVisibility();
     saveField(item.key, inp.checked, inp, item);
   });
 
