@@ -89,8 +89,13 @@ export function buildCasualSystemPrompt(params: {
   ].filter(Boolean).join('\n')
 }
 
-/** 本文中のURL。装飾外しと行分割の両方で「壊してはいけない塊」として扱う。 */
-const URL_TOKEN_RE = /https?:\/\/[^\s<>「」『』（）()]+/gi
+/**
+ * 本文中のURL。装飾外しと行分割の両方で「壊してはいけない塊」として扱う。
+ * 全角記号・日本語句読点で必ず切る。ここを緩くすると「…opera.html、https://…」を
+ * ひと続きのURLと見なし、読点込みの開けないリンクになる（2026-08-27 実利用で404）。
+ */
+const URL_CHARS = '[^\\s<>"、。，．！？；：・〜（）()「」『』【】〔〕〈〉《》［］｛｝｜＼＜＞]+'
+const URL_TOKEN_RE = new RegExp(`https?:\\/\\/${URL_CHARS}`, 'gi')
 
 /** 行の先頭がURLか（「▶ https」と「//example.com」に割ってはいけない行の判定）。 */
 function startsWithUrl(text: string): boolean {
@@ -145,11 +150,24 @@ function stripInlineMarkdown(text: string): string {
  * 字下げした「・」にする。表は「項目：値」/「値 / 値」へ、水平線は区切り線へ、
  * 見出しは「■/▪」へ変換する。
  */
+/**
+ * 「出典: https://a、https://b、https://c」のように複数URLが1行へ詰め込まれた行を、
+ * 見出しとURLの各行へ分ける。1行のままでも各URLは個別にリンクになるが、
+ * 横に長く連なって読めないため、1行1URLへそろえる。
+ */
+function expandMultiUrlLine(line: string): string[] | null {
+  const urls = String(line ?? '').match(URL_TOKEN_RE)
+  if (!urls || urls.length < 2) return null
+  // URLを取り除いた残り（「出典:」など）を見出しとして先頭に残す。
+  const lead = String(line).split(urls[0])[0].replace(/[\s、,]+$/u, '').trim()
+  return [...(lead ? [lead] : []), ...urls]
+}
+
 export function formatCasualReplyForMtalk(markdown: string): string {
   const input = String(markdown ?? '').replace(/\r\n?/g, '\n').trim()
   if (!input) return ''
 
-  const rawLines = input.split('\n')
+  const rawLines = input.split('\n').flatMap((line) => expandMultiUrlLine(line) ?? [line])
   const output: string[] = []
   let inCodeFence = false
 
