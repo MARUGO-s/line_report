@@ -1,5 +1,16 @@
 # LINE Report Project Progress
 
+### 2026-08-28 - M-talk専用の委任管理者を最小権限で追加
+
+- Request: LINE Report全体の管理権限を渡さず、管理者が指定したM-talkの店舗・ルーム・操作範囲だけを扱える管理者を作る。一般ユーザーには重要な管理データやファイルを触らせない。
+- Scope: `chat_admin_delegations`にM-talk全体／選択店舗／選択ルーム、8能力、有効期限、停止状態、セッション世代を保存。初期能力は`view`だけで、期限は必須。
+- API boundary: 委任セッションは`scope=mtalk_admin`専用。`/chat-admin/*`以外の売上・予約・資料・ファイル・店舗設定APIは403。逆に店舗・ルーム・cronセッションもM-talk管理APIへ入れない。
+- Data minimization: 管理状態は対象ルーム・所属ユーザー・店舗Bot・対象監査ログだけへ絞ってから返し、メッセージ本文、添付パス、署名URLを含めない。
+- Atomic authorization: 全委任書込みをservice-role専用`chat_admin_delegated_execute`へ集約。委任行をロックし、停止・期限・能力・対象を再検査して既存管理RPCを同一トランザクションで実行する。停止と操作の競合でも停止完了後の書込みを許さない。
+- Session revocation: 管理範囲・能力・期限の変更、停止・再開をDBトリガが検知して`session_version`を進める。旧リンク／旧セッションは再開後も復活しない。復元不能なルーム完全削除は本部だけ。
+- UI/Docs: `chat-admin.html`へ委任作成・編集・停止・再開・リンク発行と権限範囲表示を追加。権限がないボタンは表示しない。仕様書、統合ガイド、操作マニュアル、AI資料を同期。
+- Verification: ローカルSupabaseへmigrationを実適用。SQL攻撃テストで許可店舗だけ変更成功、他店舗・期限切れ・停止済み・一般`authenticated`・完全削除を拒否し、監査範囲と世代更新も確認。`npm run test:chat` Deno 63/63・Node 137/137、`npm run check`、`git diff --check`成功。`admin-api`の既存型エラー内訳は基準ブランチと一致し、新規増加なし。
+
 ### 2026-08-27 - M-talk内部helperのData API公開を最小化
 
 - Audit: Supabase Advisorのauthenticated向けSECURITY DEFINER 42件を、画面が直接使う20 RPC、RLS・Storageが使う13自己スコープgate、内部helper 9件へ分類した。

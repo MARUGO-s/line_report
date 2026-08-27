@@ -6,7 +6,8 @@ Edge Functionを組み合わせて動くM-talkの1画面SPA。
 
 - 本番: `https://marugo-s.github.io/line_report/chat.html`
 - Supabase プロジェクト: `hocbnifuactbvmyjraxy`
-- 管理画面: `chat-admin.html`（本部フル管理セッション専用）。詳細は
+- 管理画面: `chat-admin.html`（本部管理者、または本部から範囲・操作を付与された
+  M-talk委任管理者専用）。詳細は
   [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md)。
 - ここに endpoint、暗号鍵、VAPID 秘密鍵、メッセージ本文、顧客名を書かない。
 
@@ -588,6 +589,7 @@ AIロジックには一切触れない）。回答に「💬 M-talkに貼る」�
 - Bot参加ルームには一覧で青い`BOT`バッジが付く（通常ユーザーだけのルームには出さない）。
 - 店舗Botは通常のM-talk画面から退出・削除できない。削除・復元は`chat-admin.html`だけで
   行い、物理削除せず`bot_deleted_at`を設定する（過去メッセージ・所属履歴は保持）。
+  委任管理者は対象店舗と`manage_bots`が明示的に付与された場合だけ操作できる。
   削除中のBotは新規投稿がDBで拒否され、店舗Bot一覧・予約通知・検索応答の候補からも除外。
 
 ---
@@ -692,6 +694,7 @@ Webを見て答えたときは出典URLを1行に保ち、本文中でも開け�
 | `chat_push_dispatches` | 同一メッセージの重複送信防止 |
 | `chat_push_internal_config` | cron／pg_netから`chat-push`/`chat-knowledge`を叩くための内部シークレット |
 | `chat_admin_audit_log` | M-talk管理画面から行った利用・権限変更の監査ログ |
+| `chat_admin_delegations` | M-talk委任管理者の対象店舗・ルーム、操作能力、有効期限、停止状態 |
 
 ### 発言の種別（`kind`と`payload`）
 

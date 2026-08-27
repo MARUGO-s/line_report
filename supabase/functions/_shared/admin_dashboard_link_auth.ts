@@ -242,9 +242,17 @@ export async function exchangeRoomConfigLoginLink(
 export async function authenticateAdminDashboardSessionToken(
   supabase: SupabaseClient,
   rawToken: string,
-): Promise<{ ok: boolean; storeScope: string | null; roomScope: string | null; scopeKind: string | null }> {
+): Promise<{
+  ok: boolean
+  storeScope: string | null
+  roomScope: string | null
+  scopeKind: string | null
+  metadata: Record<string, unknown>
+}> {
   const token = String(rawToken ?? "").trim()
-  if (!token.startsWith(SESSION_PREFIX)) return { ok: false, storeScope: null, roomScope: null, scopeKind: null }
+  if (!token.startsWith(SESSION_PREFIX)) {
+    return { ok: false, storeScope: null, roomScope: null, scopeKind: null, metadata: {} }
+  }
   const tokenHash = await hashToken(token)
   const nowIso = new Date().toISOString()
   const { data, error } = await supabase
@@ -256,9 +264,9 @@ export async function authenticateAdminDashboardSessionToken(
     .maybeSingle()
   if (error) {
     console.error("authenticateAdminDashboardSessionToken failed:", error.message)
-    return { ok: false, storeScope: null, roomScope: null, scopeKind: null }
+    return { ok: false, storeScope: null, roomScope: null, scopeKind: null, metadata: {} }
   }
-  if (!data) return { ok: false, storeScope: null, roomScope: null, scopeKind: null }
+  if (!data) return { ok: false, storeScope: null, roomScope: null, scopeKind: null, metadata: {} }
   // metadata.scope==='room_config' のときは「そのルームだけ」のスコープ（store スコープとは排他）。
   // それ以外で store_partition_key があれば「その店舗だけ」。/auth/session(生admin)由来は両方なし＝全店(null)。
   const meta = normalizeMetadata((data as { metadata?: unknown }).metadata)
@@ -266,16 +274,17 @@ export async function authenticateAdminDashboardSessionToken(
   const storeRaw = typeof meta.store_partition_key === "string" ? meta.store_partition_key.trim() : ""
   const roomRaw = typeof meta.room_id === "string" ? meta.room_id.trim() : ""
   if (scopeKind === ROOM_CONFIG_SCOPE) {
-    return { ok: true, storeScope: null, roomScope: roomRaw || null, scopeKind }
+    return { ok: true, storeScope: null, roomScope: roomRaw || null, scopeKind, metadata: meta }
   }
   if (scopeKind === CHAT_MEDIA_VIEW_SCOPE) {
-    return { ok: true, storeScope: storeRaw || null, roomScope: roomRaw || null, scopeKind }
+    return { ok: true, storeScope: storeRaw || null, roomScope: roomRaw || null, scopeKind, metadata: meta }
   }
   return {
     ok: true,
     storeScope: storeRaw || null,
     roomScope: null,
     scopeKind,
+    metadata: meta,
   }
 }
 

@@ -588,17 +588,18 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 ### ADM-03 M-talk管理・権限テンプレート・監査復元
 
-**要点:** 本部向けM-talk管理の利用者・ルーム・Bot・監査機能を説明する。
+**要点:** M-talk専用の委任範囲を含む、利用者・ルーム・Bot・監査機能を説明する。
 
-- M-talk管理画面は本部フル管理者専用で、LINEユーザー承認とは別のM-talk利用状態とルーム権限を管理します。
+- M-talk管理画面はLINEユーザー承認や売上・予約・資料管理とは分離されています。本部管理者は、M-talk全体、選択店舗、選択ルームのいずれかと、閲覧・監査・メンバー・ルーム・Bot・一括設定・全体ユーザー・監査復元の操作を組み合わせた専用管理リンクを発行できます。
+- 委任管理セッションはM-talk管理API以外を403で拒否します。委任設定は有効期限必須・初期は閲覧だけで、各書込みはDB行をロックし、委任ID・操作能力・対象の確認と変更を同じトランザクションで行います。停止または期限切れにすると保存済みセッションも次のAPI呼び出しから使えません。管理範囲・操作権限・期限の変更、停止・再開ではセッション世代を更新するため、停止前のセッションは再開しても復活せず、新しいリンクが必要です。店舗・ルーム限定者はM-talk全体のユーザー停止・削除、ルーム限定者はBot管理、すべての委任者はルーム完全削除を行えません。
 - ユーザー全体の利用停止・期限付き制限・論理削除と、ルームごとの閲覧・送信・招待・管理権限を設定できます。新規登録はルーム管理権限を持つ人の許可が必要で、許可後は閲覧のみで始まります。許可カードは管理者通知ルームにだけ届き、予約通知や店舗ルームの一般メンバーには見えません。
 - 権限テンプレートは変更対象をプレビューしてから一括適用し、閲覧権限なしで他権限だけを付ける矛盾を防ぎます。ユーザー別の有効アクセスと拒否理由も確認できます。
 - 監査ログは変更前後を記録し、競合がない場合に限り一度だけ復元できます。復元操作そのものも監査されます。
-- 管理画面では通常ルームのゴミ箱・復元・完全削除と、Botの論理削除・復元を行えます。通常M-talk画面からBotは削除できません。
+- 管理画面では通常ルームのゴミ箱・復元と、Botの論理削除・復元を行えます。復元不能な完全削除は本部管理者だけです。通常M-talk画面からBotは削除できません。
 
-**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / botを削除 / botは削除 / 通常画面 / 普通のトーク画面 / トーク画面から削除 / ルームゴミ箱
+**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / botを削除 / botは削除 / 通常画面 / 普通のトーク画面 / トーク画面から削除 / ルームゴミ箱 / 委任管理者 / m-talk専用管理者 / 店舗限定管理 / ルーム限定管理 / 監査専用
 
-**主な実装根拠:** `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `docs/CHAT-ADMIN-PERMISSIONS.md` / `tests/chat_admin_permissions.test.mjs` / `tests/chat_admin_templates.test.mjs`
+**主な実装根拠:** `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `supabase/functions/_shared/chat_admin_delegation.ts` / `supabase/migrations/20260910010000_chat_delegated_admin.sql` / `docs/CHAT-ADMIN-PERMISSIONS.md` / `tests/chat_admin_permissions.test.mjs` / `tests/chat_admin_templates.test.mjs` / `tests/chat_admin_delegation.test.mjs` / `tests/chat_admin_delegation_scope.test.ts`
 
 ## DEV コード構成・API・データ基盤
 
@@ -741,11 +742,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 41件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 92件
+- 共有TypeScriptモジュール: 93件
 - 補助・運用・レガシーコード: 37件
-- admin-api静的ルート: 136件
-- SQL migrations: 285件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 75件
+- admin-api静的ルート: 137件
+- SQL migrations: 286件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 77件
 
 ### 公開画面・ブラウザコード
 
@@ -830,6 +831,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/bistrocavacava_sheet_push.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/budget_entry_flow.ts` | SAL-01 / SAL-04 / DEV-02 |
 | `supabase/functions/_shared/calendar_tomorrow_reminder.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/chat_admin_delegation.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/chat_bridge.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/chat_flex_card.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/chat_push_payload.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
@@ -977,6 +979,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/calendar-events/search` | OPS-02 / RSV-01 / DEV-02 |
 | `/chat-admin` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
 | `/chat-admin/` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
+| `/chat-admin/delegations` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
 | `/chat-admin/state` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
 | `/chat-admin/templates` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
 | `/chat-admin/templates/apply` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |

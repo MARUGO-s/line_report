@@ -70,7 +70,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - `using (true)`のRLSポリシーを名前だけでservice-role専用と判断しない。週次経営レポート等の内部テーブルはGRANTとpolicyの両方をservice_roleに限定し、公開データを読む必要がある表もanon/authenticatedにはSELECTだけを与える。
 - 内部テーブルを束ねるviewも公開しない。`foodcourt_daily_features`は`security_invoker`を有効にし、Data APIの`anon / authenticated`からSELECT権限を剥がしてservice_roleだけに限定する。
 - 店舗Bot UUID生成などの補助関数も`search_path`を固定し、名前解決の差し替えを許さない。
-- `public/chat-admin.html`は`admin-api /chat-admin/*`を使用する。ブラウザへservice roleを渡さず、既存の本部フル管理セッションだけを許可する。店舗・ルーム・cronスコープは403。M-talk本体（`chat.html`）から管理画面へはリンクしない。管理画面は本部トップからの遷移以外では自動接続せず、明示的な本部セッション確認が必要。
+- `public/chat-admin.html`は`admin-api /chat-admin/*`を使用する。ブラウザへservice roleを渡さない。本部は`chat_admin_delegations`でM-talk全体／選択店舗／選択ルームと8つの操作能力を最小付与できる。委任は有効期限必須・初期`view`だけ。委任セッションは`scope=mtalk_admin`専用で、通常の売上・予約・資料・店舗設定APIは入口で403。各書込みは`chat_admin_delegated_execute`が委任行をロックし、`chat_admin_delegation_allows_*`による対象確認と実変更を同一トランザクションで行う。委任停止・期限切れは既存セッションにも即時反映する。管理範囲・操作権限・期限の変更、停止・再開ごとに`session_version`を増やし、旧リンクと旧セッションを恒久失効させる。復元不能なルーム完全削除は本部だけ。従来の店舗・ルーム・cronスコープは`/chat-admin/*`を403にする。
 - 新規の人間ユーザーは全店舗ルームへ自動参加しない。所属店舗の承認後、その店舗ルームだけ閲覧権限で入る。`chat_group_members`の送信・招待・管理の既定は false。プロフィール作成は `chat_complete_signup` のみ（authenticated の INSERT は不可）。新規登録・所属変更の許可カードは専用の管理者通知ルームへ送り、予約通知の1対1は復活させない。店舗ルームの一般メンバーはSELECTできない。
 - 管理画面の「ユーザー削除」はM-talk上の論理削除。`auth.users`と`chat_users`を物理削除せず、作成ルーム・過去発言・他アプリのログインを保持する。
 - 詳細: [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md)
@@ -82,6 +82,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 ### 3.1 admin-api（管理画面 API）
 - 認証は `x-admin-token`。生 admin トークン（`/auth/session`）と、LINE ログインリンク由来のセッショントークン（`/auth/link-login` → `lrst_` セッション・TTL 24h・単一使用）の2系統。比較は SHA-256＋`secureEqual`。
 - **店舗スコープ強制**: ログインリンク由来セッションは `store_partition_key` を持ち、認証ゲート直後で①許可パス(`STORE_SCOPED_ALLOWED_PATHS`)以外は403、②URL/body の `store`/`store_key`/`store_partition_key` を scope へ強制（他店明示で403）、③petty-cash の id 編集/削除は自店行のみ。**スコープ付きページに新パスを足したら `STORE_SCOPED_ALLOWED_PATHS` にも追加**（逆に全店専用パスは足さない）。
+- **M-talk委任スコープ強制**: `scope=mtalk_admin` は `/chat-admin/*` とログアウト以外を403にし、`STORE_SCOPED_ALLOWED_PATHS`へ追加しない。`manage_users`はM-talk全体だけ、店舗・ルーム委任は対象内メンバー操作だけ。`revert_audit`も元操作に必要な`manage_users`または`manage_members`を併せて要求する。
 - **レート制限**（2026-06-14 堅牢化）: キーに使うクライアントIPを**詐称不可の情報源優先**で解決（`Deno.serve` の `info.remoteAddr`(公開IP時)→`cf-connecting-ip`→`x-real-ip`→`x-forwarded-for` の**末尾**）。`/auth/session` は **20回/分**、アップロードは 12回/分、既定 180回/分。`consume_security_rate_limit`(SECURITY DEFINER, service_role)で集計。
 
 ### 3.2 verify_jwt=false の Edge Function

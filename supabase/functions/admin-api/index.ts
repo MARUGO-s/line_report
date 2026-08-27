@@ -135,6 +135,20 @@ import {
   revokeAllAdminDashboardAuthTokens,
   ROOM_CONFIG_SCOPE,
 } from "../_shared/admin_dashboard_link_auth.ts"
+import {
+  CHAT_ADMIN_CAPABILITIES,
+  MTALK_ADMIN_SCOPE,
+  chatAdminAllowsAudit,
+  chatAdminAllowsRoom,
+  chatAdminAllowsUser,
+  hasChatAdminCapability,
+  headquartersChatAdminAuthority,
+  loadMtalkAdminAuthority,
+  publicChatAdminAuthority,
+  type ChatAdminAuthority,
+  type ChatAdminCapability,
+  type ChatAdminScopeMode,
+} from "../_shared/chat_admin_delegation.ts"
 import { saveMediaBytesToLibrary } from "../_shared/line_media_store.ts"
 import {
   ADMIN_ACCESS_HISTORY_KEEP,
@@ -345,6 +359,21 @@ function buildWeeklyReportFlexMessage(weekStart: string, weekEnd: string, report
 }
 
 type AppError = {
+  status: number
+  message: string
+}
+
+type AuthenticatedAdmin = {
+  ok: true
+  storeScope: string | null
+  roomScope: string | null
+  scopeKind: string | null
+  chatAdminAuthority: ChatAdminAuthority | null
+  actorLabel: string | null
+}
+
+type AdminAuthenticationResult = AuthenticatedAdmin | {
+  ok: false
   status: number
   message: string
 }
@@ -1112,6 +1141,9 @@ Deno.serve(async (req, info) => {
         storeScope: authResult.storeScope,
         roomScope: authResult.roomScope,
         scopeKind: authResult.scopeKind,
+        chatAdminAuthority: authResult.chatAdminAuthority
+          ? publicChatAdminAuthority(authResult.chatAdminAuthority)
+          : null,
       }, 200)
     } catch (e) {
       const err = asAppError(e)
@@ -1407,6 +1439,17 @@ Deno.serve(async (req, info) => {
     return json({ error: authResult.message }, authResult.status)
   }
 
+  // 委任されたM-talk管理セッションは、売上・予約・資料・店舗設定など通常管理APIへ
+  // 絶対に横展開させない。個別ルートより前で専用名前空間へ閉じ込める。
+  if (
+    authResult.scopeKind === MTALK_ADMIN_SCOPE &&
+    path !== "/auth/logout" &&
+    path !== "/chat-admin" &&
+    !path.startsWith("/chat-admin/")
+  ) {
+    return json({ error: "この権限はM-talk管理だけに利用できます。" }, 403)
+  }
+
   // 店舗スコープ強制(IDOR対策): 店舗別ログインリンク由来のセッションは、その店舗のページ
   // (petty_cash.html / analytics.html)が使うパスだけに限定し、店舗キーをスコープへ固定する。
   // 生adminトークン由来(storeScope=null)は全店アクセスのまま(従来どおり)。
@@ -1624,39 +1667,77 @@ Deno.serve(async (req, info) => {
       return json({ success: true, revoked }, 200)
     }
 
-    // M-talk 専用管理。LINE/Bot 側の権限とは完全に分離し、本部のフル管理セッションだけを許可する。
-    // 店舗・ルーム・cron スコープからは到達できない（STORE_SCOPED_ALLOWED_PATHS にも含めない）。
+    // M-talk 専用管理。通常の店舗・ルーム・cronスコープは拒否し、本部フル管理者、または
+    // DBで有効性を再確認済みのM-talk委任管理者だけを通す。
     if (path === "/chat-admin" || path.startsWith("/chat-admin/")) {
-      if (storeScope || roomScope || authResult.scopeKind !== null) {
-        return json({ error: "M-talk管理は本部管理者だけが利用できます。" }, 403)
+      const chatAuthority = authResult.scopeKind === MTALK_ADMIN_SCOPE
+        ? authResult.chatAdminAuthority
+        : (!storeScope && !roomScope && authResult.scopeKind === null
+          ? headquartersChatAdminAuthority()
+          : null)
+      if (!chatAuthority) {
+        return json({ error: "このセッションではM-talk管理を利用できません。" }, 403)
       }
       const actor = actorFromAuth(authResult)
       const actorLabel = `admin-api:${actor.actorKind}:${actor.actorLabel}`.slice(0, 200)
 
       if (req.method === "GET" && path === "/chat-admin/state") {
-        return json(await fetchChatAdminState(supabase), 200)
+        return json(await fetchChatAdminState(supabase, chatAuthority), 200)
+      }
+
+      if (req.method === "GET" && path === "/chat-admin/delegations") {
+        chatAdminRequireHeadquarters(chatAuthority)
+        return json(await fetchChatAdminDelegations(supabase), 200)
+      }
+
+      if (req.method === "POST" && path === "/chat-admin/delegations") {
+        chatAdminRequireHeadquarters(chatAuthority)
+        const body = await parseJson(workReq)
+        if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        return json(await createChatAdminDelegation(supabase, body, actorLabel), 201)
+      }
+
+      const delegationMatch = /^\/chat-admin\/delegations\/([0-9a-f-]{36})(?:\/(link))?$/i.exec(path)
+      if (delegationMatch) {
+        chatAdminRequireHeadquarters(chatAuthority)
+        const delegationId = delegationMatch[1].toLowerCase()
+        if (!isUuid(delegationId)) throw { status: 400, message: "Invalid delegation id." } satisfies AppError
+        if (delegationMatch[2] === "link" && req.method === "POST") {
+          return json(await issueChatAdminDelegationLoginLink(supabase, delegationId, actorLabel), 200)
+        }
+        if (!delegationMatch[2] && req.method === "PATCH") {
+          const body = await parseJson(workReq)
+          if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+          return json(await updateChatAdminDelegation(supabase, delegationId, body, actorLabel), 200)
+        }
+        throw { status: 405, message: "Method not allowed." } satisfies AppError
       }
 
       if (req.method === "GET" && path === "/chat-admin/templates") {
+        chatAdminRequireCapability(chatAuthority, "manage_templates")
         return json(await fetchChatAdminTemplates(supabase), 200)
       }
 
       if (req.method === "POST" && path === "/chat-admin/templates/apply") {
+        chatAdminRequireCapability(chatAuthority, "manage_templates")
         const body = await parseJson(workReq)
         if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
-        return json(await applyChatAdminTemplate(supabase, body, actorLabel), 200)
+        await assertChatAdminTemplateScope(supabase, chatAuthority, body)
+        return json(await applyChatAdminTemplate(supabase, body, actorLabel, chatAuthority), 200)
       }
 
       const userAccessMatch = /^\/chat-admin\/users\/([0-9a-f-]{36})\/access$/i.exec(path)
       if (userAccessMatch && req.method === "GET") {
         const userId = userAccessMatch[1].toLowerCase()
         if (!isUuid(userId)) throw { status: 400, message: "Invalid user_id." } satisfies AppError
+        await assertChatAdminUserReadScope(supabase, chatAuthority, userId)
         return json(
           await fetchChatAdminUserAccess(
             supabase,
             userId,
             url.searchParams.get("limit"),
             url.searchParams.get("offset"),
+            chatAuthority,
           ),
           200,
         )
@@ -1664,17 +1745,20 @@ Deno.serve(async (req, info) => {
 
       const auditRevertMatch = /^\/chat-admin\/audit\/(\d{1,18})\/revert$/.exec(path)
       if (auditRevertMatch && req.method === "POST") {
+        chatAdminRequireCapability(chatAuthority, "revert_audit")
         const auditId = Number(auditRevertMatch[1])
         if (!Number.isSafeInteger(auditId) || auditId <= 0) {
           throw { status: 400, message: "Invalid audit id." } satisfies AppError
         }
         const body = await parseJson(workReq)
         if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
-        return json(await revertChatAdminAudit(supabase, auditId, body, actorLabel), 200)
+        await assertChatAdminAuditScope(supabase, chatAuthority, auditId, "revert_audit")
+        return json(await revertChatAdminAudit(supabase, auditId, body, actorLabel, chatAuthority), 200)
       }
 
       const roomActionMatch = /^\/chat-admin\/rooms\/(\d+)\/(trash|restore|purge)$/i.exec(path)
       if (roomActionMatch && req.method === "POST") {
+        chatAdminRequireCapability(chatAuthority, "manage_rooms")
         const groupId = Number(roomActionMatch[1])
         if (!Number.isSafeInteger(groupId) || groupId <= 0) {
           throw { status: 400, message: "Invalid room id." } satisfies AppError
@@ -1683,64 +1767,76 @@ Deno.serve(async (req, info) => {
         const body = await parseJson(workReq)
         if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
         if (action === "trash") {
-          return json(await trashChatAdminRoom(supabase, groupId, actorLabel), 200)
+          await assertChatAdminRoomScope(supabase, chatAuthority, groupId, "manage_rooms")
+          return json(await trashChatAdminRoom(supabase, groupId, actorLabel, chatAuthority), 200)
         }
         if (action === "restore") {
-          return json(await restoreChatAdminRoom(supabase, groupId, actorLabel), 200)
+          await assertChatAdminRoomScope(supabase, chatAuthority, groupId, "manage_rooms")
+          return json(await restoreChatAdminRoom(supabase, groupId, actorLabel, chatAuthority), 200)
         }
+        // 完全削除はStorageを含む復元不能な複数段処理なので、委任対象にはしない。
+        chatAdminRequireHeadquarters(chatAuthority)
         return json(await purgeChatAdminRoom(supabase, groupId, body, actorLabel), 200)
       }
 
       const botActionMatch = /^\/chat-admin\/bots\/([0-9a-f-]{36})\/(remove|restore)$/i.exec(path)
       if (botActionMatch && req.method === "POST") {
+        chatAdminRequireCapability(chatAuthority, "manage_bots")
         const botId = botActionMatch[1].toLowerCase()
         if (!isUuid(botId)) throw { status: 400, message: "Invalid bot id." } satisfies AppError
+        await assertChatAdminBotScope(supabase, chatAuthority, botId, "manage_bots")
         const action = botActionMatch[2].toLowerCase()
         if (action === "remove") {
           const body = await parseJson(workReq)
           if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
-          return json(await removeChatAdminBot(supabase, botId, body, actorLabel), 200)
+          return json(await removeChatAdminBot(supabase, botId, body, actorLabel, chatAuthority), 200)
         }
-        return json(await restoreChatAdminBot(supabase, botId, actorLabel), 200)
+        return json(await restoreChatAdminBot(supabase, botId, actorLabel, chatAuthority), 200)
       }
 
       const memberMatch = /^\/chat-admin\/rooms\/(\d+)\/members\/([0-9a-f-]{36})$/i.exec(path)
       if (memberMatch) {
+        chatAdminRequireCapability(chatAuthority, "manage_members")
         const groupId = Number(memberMatch[1])
         const userId = memberMatch[2].toLowerCase()
         if (!Number.isSafeInteger(groupId) || groupId <= 0 || !isUuid(userId)) {
           throw { status: 400, message: "Invalid room member." } satisfies AppError
         }
+        await assertChatAdminRoomScope(supabase, chatAuthority, groupId, "manage_members")
         if (req.method === "PATCH") {
           const body = await parseJson(workReq)
           if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
-          return json(await updateChatAdminMemberPermissions(supabase, groupId, userId, body, actorLabel), 200)
+          return json(await updateChatAdminMemberPermissions(supabase, groupId, userId, body, actorLabel, chatAuthority), 200)
         }
         if (req.method === "DELETE") {
-          return json(await removeChatAdminMember(supabase, groupId, userId, actorLabel), 200)
+          return json(await removeChatAdminMember(supabase, groupId, userId, actorLabel, chatAuthority), 200)
         }
         throw { status: 405, message: "Method not allowed." } satisfies AppError
       }
 
       const userActionMatch = /^\/chat-admin\/users\/([0-9a-f-]{36})\/(remove|restore)$/i.exec(path)
       if (userActionMatch && req.method === "POST") {
+        chatAdminRequireCapability(chatAuthority, "manage_users")
         const userId = userActionMatch[1].toLowerCase()
         if (!isUuid(userId)) throw { status: 400, message: "Invalid user_id." } satisfies AppError
+        await assertChatAdminUserGlobalScope(supabase, chatAuthority, userId, "manage_users")
         if (userActionMatch[2].toLowerCase() === "remove") {
           const body = await parseJson(workReq)
           if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
-          return json(await removeChatAdminUser(supabase, userId, body, actorLabel), 200)
+          return json(await removeChatAdminUser(supabase, userId, body, actorLabel, chatAuthority), 200)
         }
-        return json(await restoreChatAdminUser(supabase, userId, actorLabel), 200)
+        return json(await restoreChatAdminUser(supabase, userId, actorLabel, chatAuthority), 200)
       }
 
       const userMatch = /^\/chat-admin\/users\/([0-9a-f-]{36})$/i.exec(path)
       if (userMatch && req.method === "PATCH") {
+        chatAdminRequireCapability(chatAuthority, "manage_users")
         const userId = userMatch[1].toLowerCase()
         if (!isUuid(userId)) throw { status: 400, message: "Invalid user_id." } satisfies AppError
+        await assertChatAdminUserGlobalScope(supabase, chatAuthority, userId, "manage_users")
         const body = await parseJson(workReq)
         if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
-        return json(await updateChatAdminUserAccess(supabase, userId, body, actorLabel), 200)
+        return json(await updateChatAdminUserAccess(supabase, userId, body, actorLabel, chatAuthority), 200)
       }
 
       throw { status: 404, message: "M-talk管理APIが見つかりません。" } satisfies AppError
@@ -4171,6 +4267,166 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+function chatAdminRequireHeadquarters(authority: ChatAdminAuthority): void {
+  if (!authority.isFullAdmin) {
+    throw { status: 403, message: "委任管理者を設定できるのは本部管理者だけです。" } satisfies AppError
+  }
+}
+
+function chatAdminRequireCapability(
+  authority: ChatAdminAuthority,
+  capability: ChatAdminCapability,
+): void {
+  if (!hasChatAdminCapability(authority, capability)) {
+    throw { status: 403, message: "このM-talk管理操作は許可されていません。" } satisfies AppError
+  }
+}
+
+async function chatAdminDelegationRpcAllowed(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  rpc: string,
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  if (authority.isFullAdmin) return true
+  if (!authority.delegationId) return false
+  const { data, error } = await supabase.rpc(rpc, {
+    p_delegation_id: authority.delegationId,
+    ...args,
+  })
+  if (error) {
+    console.error(`${rpc} failed:`, error.message)
+    throw { status: 500, message: "M-talk管理範囲を確認できませんでした。" } satisfies AppError
+  }
+  return data === true
+}
+
+async function runChatAdminMutation(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  operation: string,
+  headquartersRpc: string,
+  args: Record<string, unknown>,
+): Promise<{ data: any; error: any }> {
+  if (authority.isFullAdmin) return await supabase.rpc(headquartersRpc, args)
+  if (!authority.delegationId) {
+    throw { status: 403, message: "M-talk委任管理権限が無効です。" } satisfies AppError
+  }
+  return await supabase.rpc("chat_admin_delegated_execute", {
+    p_delegation_id: authority.delegationId,
+    p_operation: operation,
+    p_args: args,
+    p_actor: String(args.p_actor ?? "").slice(0, 200),
+  })
+}
+
+async function assertChatAdminRoomScope(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  groupId: number,
+  capability: ChatAdminCapability,
+): Promise<void> {
+  chatAdminRequireCapability(authority, capability)
+  const allowed = await chatAdminDelegationRpcAllowed(
+    supabase,
+    authority,
+    "chat_admin_delegation_allows_room",
+    { p_group_id: groupId, p_capability: capability },
+  )
+  if (!allowed) {
+    throw { status: 403, message: "このルームは管理を許可された範囲外です。" } satisfies AppError
+  }
+}
+
+async function assertChatAdminUserReadScope(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  userId: string,
+): Promise<void> {
+  const allowed = await chatAdminDelegationRpcAllowed(
+    supabase,
+    authority,
+    "chat_admin_delegation_allows_user_read",
+    { p_user_id: userId },
+  )
+  if (!allowed) {
+    throw { status: 403, message: "このユーザーは管理を許可された範囲外です。" } satisfies AppError
+  }
+}
+
+async function assertChatAdminUserGlobalScope(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  userId: string,
+  capability: ChatAdminCapability,
+): Promise<void> {
+  chatAdminRequireCapability(authority, capability)
+  const allowed = await chatAdminDelegationRpcAllowed(
+    supabase,
+    authority,
+    "chat_admin_delegation_allows_user_global",
+    { p_user_id: userId, p_capability: capability },
+  )
+  if (!allowed) {
+    throw { status: 403, message: "全体ユーザー権限を変更できる範囲ではありません。" } satisfies AppError
+  }
+}
+
+async function assertChatAdminBotScope(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  botId: string,
+  capability: ChatAdminCapability,
+): Promise<void> {
+  chatAdminRequireCapability(authority, capability)
+  const allowed = await chatAdminDelegationRpcAllowed(
+    supabase,
+    authority,
+    "chat_admin_delegation_allows_bot",
+    { p_user_id: botId, p_capability: capability },
+  )
+  if (!allowed) {
+    throw { status: 403, message: "このBotは管理を許可された範囲外です。" } satisfies AppError
+  }
+}
+
+async function assertChatAdminAuditScope(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  auditId: number,
+  capability: ChatAdminCapability,
+): Promise<void> {
+  chatAdminRequireCapability(authority, capability)
+  const allowed = await chatAdminDelegationRpcAllowed(
+    supabase,
+    authority,
+    "chat_admin_delegation_allows_audit",
+    { p_audit_id: auditId, p_capability: capability },
+  )
+  if (!allowed) {
+    throw { status: 403, message: "この監査記録は管理を許可された範囲外です。" } satisfies AppError
+  }
+}
+
+async function assertChatAdminTemplateScope(
+  supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
+  body: Record<string, unknown>,
+): Promise<void> {
+  if (authority.isFullAdmin) return
+  const groupIds = chatAdminIdList(body.group_ids, "group_ids", (item) => {
+    const value = Number(item)
+    return Number.isSafeInteger(value) && value > 0 ? value : null
+  })
+  // user_idsだけの指定は、そのユーザーが参加する範囲外ルームまで広がるため委任者には許可しない。
+  if (!groupIds.length) {
+    throw { status: 403, message: "委任管理者は対象ルームを明示してください。" } satisfies AppError
+  }
+  for (const groupId of groupIds) {
+    await assertChatAdminRoomScope(supabase, authority, groupId, "manage_templates")
+  }
+}
+
 function chatAdminOptionalBoolean(value: unknown, field: string): boolean | null {
   if (value === undefined) return null
   if (typeof value !== "boolean") {
@@ -4204,13 +4460,24 @@ const CHAT_ADMIN_REVERTIBLE_ACTIONS = new Set<string>([
   "member_permissions_update",
   "member_remove",
 ])
+function chatAdminCanRevertAction(authority: ChatAdminAuthority, action: string): boolean {
+  if (!hasChatAdminCapability(authority, "revert_audit")) return false
+  if (action === "user_access_update" || action === "user_remove") {
+    return hasChatAdminCapability(authority, "manage_users")
+  }
+  if (action === "member_permissions_update" || action === "member_remove") {
+    return hasChatAdminCapability(authority, "manage_members")
+  }
+  return false
+}
 // chat_admin_apply_room_template の上限と同じ。変更するときは両方そろえる。
 const CHAT_ADMIN_TEMPLATE_MAX_TARGETS = 100
 
 async function fetchChatAdminState(
   supabase: ReturnType<typeof createClient<any>>,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
-  const [usersResult, accessResult, groupsResult, membersResult, auditResult] = await Promise.all([
+  const [usersResult, accessResult, groupsResult, membersResult, auditResult, userStoresResult, storeCatalogResult] = await Promise.all([
     supabase
       .from("chat_users")
       .select("id, username, icon_url, created_at, is_bot, store_key, bot_deleted_at, bot_deleted_by")
@@ -4235,9 +4502,26 @@ async function fetchChatAdminState(
       .select("id, actor, action, target_user_id, group_id, before_state, after_state, created_at, source_audit_id")
       .order("created_at", { ascending: false })
       .limit(200),
+    supabase
+      .from("chat_user_stores")
+      .select("user_id, store_key")
+      .limit(20000),
+    supabase
+      .from("chat_store_catalog")
+      .select("store_key, display_name, sort_order")
+      .order("sort_order", { ascending: true })
+      .limit(500),
   ])
 
-  const failures = [usersResult.error, accessResult.error, groupsResult.error, membersResult.error, auditResult.error]
+  const failures = [
+    usersResult.error,
+    accessResult.error,
+    groupsResult.error,
+    membersResult.error,
+    auditResult.error,
+    userStoresResult.error,
+    storeCatalogResult.error,
+  ]
     .filter(Boolean)
   if (failures.length) {
     throw {
@@ -4246,19 +4530,66 @@ async function fetchChatAdminState(
     } satisfies AppError
   }
 
-  const userRows = (usersResult.data || []) as Array<Record<string, unknown>>
-  const accessRows = (accessResult.data || []) as Array<Record<string, unknown>>
-  const groupRows = (groupsResult.data || []) as Array<Record<string, unknown>>
-  const memberRows = (membersResult.data || []) as Array<Record<string, unknown>>
+  const allUserRows = (usersResult.data || []) as Array<Record<string, unknown>>
+  const allAccessRows = (accessResult.data || []) as Array<Record<string, unknown>>
+  const allGroupRows = (groupsResult.data || []) as Array<Record<string, unknown>>
+  const allMemberRows = (membersResult.data || []) as Array<Record<string, unknown>>
+  const allAuditRows = (auditResult.data || []) as Array<Record<string, unknown>>
+  const allUserStoreRows = (userStoresResult.data || []) as Array<Record<string, unknown>>
+  const allStoreCatalogRows = (storeCatalogResult.data || []) as Array<Record<string, unknown>>
+  const storeKeysByUser = new Map<string, string[]>()
+  for (const row of allUserStoreRows) {
+    const userId = String(row.user_id ?? "")
+    const storeKey = String(row.store_key ?? "").trim()
+    if (!userId || !storeKey) continue
+    if (!storeKeysByUser.has(userId)) storeKeysByUser.set(userId, [])
+    storeKeysByUser.get(userId)?.push(storeKey)
+  }
+  const memberRoomIdsByUser = new Map<string, number[]>()
+  for (const row of allMemberRows) {
+    const userId = String(row.user_id ?? "")
+    const groupId = Number(row.group_id)
+    if (!userId || !Number.isSafeInteger(groupId) || groupId <= 0) continue
+    if (!memberRoomIdsByUser.has(userId)) memberRoomIdsByUser.set(userId, [])
+    memberRoomIdsByUser.get(userId)?.push(groupId)
+  }
+  const groupRows = allGroupRows.filter((row) => chatAdminAllowsRoom(authority, row))
+  const scopedGroupIds = new Set(groupRows.map((row) => Number(row.id)))
+  const scopedStoreKeys = authority.scopeMode === "all"
+    ? null
+    : new Set(
+      authority.scopeMode === "stores"
+        ? authority.storeKeys
+        : groupRows.map((room) => String(room.store_key ?? "").trim()).filter(Boolean),
+    )
+  const userRows = allUserRows.filter((row) => {
+    const userId = String(row.id ?? "")
+    return chatAdminAllowsUser(
+      authority,
+      row,
+      storeKeysByUser.get(userId) ?? [],
+      memberRoomIdsByUser.get(userId) ?? [],
+    )
+  })
+  const scopedUserIds = new Set(userRows.map((row) => String(row.id ?? "")))
+  const accessRows = allAccessRows.filter((row) => scopedUserIds.has(String(row.user_id ?? "")))
+  const memberRows = allMemberRows.filter((row) => (
+    scopedGroupIds.has(Number(row.group_id)) && scopedUserIds.has(String(row.user_id ?? ""))
+  ))
+  const roomById = new Map<number, Record<string, unknown>>(
+    allGroupRows.map((row) => [Number(row.id), row]),
+  )
+  const scopedAuditSourceRows = allAuditRows.filter((row) => chatAdminAllowsAudit(authority, row, roomById))
   const revertedAuditIds = new Set(
-    ((auditResult.data || []) as Array<Record<string, unknown>>)
+    scopedAuditSourceRows
       .map((row) => Number(row.source_audit_id ?? 0))
       .filter((value) => Number.isSafeInteger(value) && value > 0),
   )
-  const auditRows = ((auditResult.data || []) as Array<Record<string, unknown>>).map((row) => ({
+  const auditRows = scopedAuditSourceRows.map((row) => ({
     ...row,
     // 復元可能な操作で、まだ復元されていないものだけUIへ「元に戻す」を出す。
-    revertible: CHAT_ADMIN_REVERTIBLE_ACTIONS.has(String(row.action ?? ""))
+    revertible: chatAdminCanRevertAction(authority, String(row.action ?? ""))
+      && CHAT_ADMIN_REVERTIBLE_ACTIONS.has(String(row.action ?? ""))
       && row.before_state != null
       && row.after_state != null
       && !revertedAuditIds.has(Number(row.id ?? 0)),
@@ -4281,6 +4612,9 @@ async function fetchChatAdminState(
     const access = accessByUser.get(userId) ?? {}
     return {
       ...row,
+      store_keys: (storeKeysByUser.get(userId) ?? []).filter((storeKey) => (
+        scopedStoreKeys === null || scopedStoreKeys.has(storeKey)
+      )),
       room_count: roomCounts.get(userId) ?? 0,
       access: {
         access_enabled: access.access_enabled !== false,
@@ -4328,8 +4662,12 @@ async function fetchChatAdminState(
     return access.access_enabled === false || restricted
   })
   const activeUsers = humanUsers.length - deletedUsers.length - suspendedUsers.length
+  const storeCatalog = allStoreCatalogRows.filter((row) => (
+    scopedStoreKeys === null || scopedStoreKeys.has(String(row.store_key ?? ""))
+  ))
 
   return {
+    admin_authority: publicChatAdminAuthority(authority),
     summary: {
       active_users: activeUsers,
       suspended_users: suspendedUsers.length,
@@ -4342,8 +4680,11 @@ async function fetchChatAdminState(
     },
     users,
     rooms,
+    store_catalog: storeCatalog,
     audit_logs: auditRows,
-    revertible_actions: [...CHAT_ADMIN_REVERTIBLE_ACTIONS],
+    revertible_actions: hasChatAdminCapability(authority, "revert_audit")
+      ? [...CHAT_ADMIN_REVERTIBLE_ACTIONS]
+      : [],
     generated_at: new Date().toISOString(),
   }
 }
@@ -4353,6 +4694,7 @@ async function updateChatAdminUserAccess(
   userId: string,
   body: Record<string, unknown>,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const updateReason = Object.prototype.hasOwnProperty.call(body, "restriction_reason")
   const updateUntil = Object.prototype.hasOwnProperty.call(body, "restricted_until")
@@ -4374,10 +4716,15 @@ async function updateChatAdminUserAccess(
     p_expected_updated_at: chatAdminExpectedTimestamp(body.expected_updated_at),
     p_actor: actor,
   }
-  const { data, error } = await supabase.rpc("chat_admin_update_user_access", args)
+  const { data, error } = await runChatAdminMutation(
+    supabase,
+    authority,
+    "update_user_access",
+    "chat_admin_update_user_access",
+    args,
+  )
   if (error) {
-    const conflict = String(error.code ?? "") === "40001"
-    throw { status: conflict ? 409 : 400, message: conflict ? "別の管理者が先に更新しました。再読み込みしてやり直してください。" : error.message } satisfies AppError
+    throw chatAdminRpcError(error)
   }
   return { ok: true, access: data }
 }
@@ -4386,8 +4733,9 @@ async function trashChatAdminRoom(
   supabase: ReturnType<typeof createClient<any>>,
   groupId: number,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("chat_admin_trash_group", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "trash_group", "chat_admin_trash_group", {
     p_group_id: groupId,
     p_actor: actor,
   })
@@ -4399,8 +4747,9 @@ async function restoreChatAdminRoom(
   supabase: ReturnType<typeof createClient<any>>,
   groupId: number,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("chat_admin_restore_group", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "restore_group", "chat_admin_restore_group", {
     p_group_id: groupId,
     p_actor: actor,
   })
@@ -4456,12 +4805,13 @@ async function removeChatAdminBot(
   botId: string,
   body: Record<string, unknown>,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const confirmUsername = String(body.confirm_username ?? "").trim()
   if (!confirmUsername) {
     throw { status: 400, message: "確認のためBot名を入力してください。" } satisfies AppError
   }
-  const { data, error } = await supabase.rpc("chat_admin_remove_bot", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "remove_bot", "chat_admin_remove_bot", {
     p_user_id: botId,
     p_actor: actor,
     p_confirm_username: confirmUsername,
@@ -4474,8 +4824,9 @@ async function restoreChatAdminBot(
   supabase: ReturnType<typeof createClient<any>>,
   botId: string,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("chat_admin_restore_bot", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "restore_bot", "chat_admin_restore_bot", {
     p_user_id: botId,
     p_actor: actor,
   })
@@ -4488,17 +4839,18 @@ async function removeChatAdminUser(
   userId: string,
   body: Record<string, unknown>,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const confirmUsername = String(body.confirm_username ?? "").trim()
   if (!confirmUsername) {
     throw { status: 400, message: "確認のため表示名を入力してください。" } satisfies AppError
   }
-  const { data, error } = await supabase.rpc("chat_admin_remove_user", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "remove_user", "chat_admin_remove_user", {
     p_user_id: userId,
     p_actor: actor,
     p_confirm_username: confirmUsername,
   })
-  if (error) throw { status: 400, message: error.message } satisfies AppError
+  if (error) throw chatAdminRpcError(error)
   return { ok: true, access: data, history_preserved: true, auth_user_preserved: true }
 }
 
@@ -4506,12 +4858,13 @@ async function restoreChatAdminUser(
   supabase: ReturnType<typeof createClient<any>>,
   userId: string,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("chat_admin_restore_user", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "restore_user", "chat_admin_restore_user", {
     p_user_id: userId,
     p_actor: actor,
   })
-  if (error) throw { status: 400, message: error.message } satisfies AppError
+  if (error) throw chatAdminRpcError(error)
   return { ok: true, access: data }
 }
 
@@ -4521,12 +4874,13 @@ async function updateChatAdminMemberPermissions(
   userId: string,
   body: Record<string, unknown>,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const fields = ["can_view", "can_send", "can_invite", "can_manage"] as const
   if (!fields.some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
     throw { status: 400, message: "変更するルーム権限を指定してください。" } satisfies AppError
   }
-  const { data, error } = await supabase.rpc("chat_admin_update_member_permissions", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "update_member", "chat_admin_update_member_permissions", {
     p_group_id: groupId,
     p_user_id: userId,
     p_can_view: chatAdminOptionalBoolean(body.can_view, "can_view"),
@@ -4535,7 +4889,7 @@ async function updateChatAdminMemberPermissions(
     p_can_manage: chatAdminOptionalBoolean(body.can_manage, "can_manage"),
     p_actor: actor,
   })
-  if (error) throw { status: 400, message: error.message } satisfies AppError
+  if (error) throw chatAdminRpcError(error)
   return { ok: true, membership: data }
 }
 
@@ -4544,23 +4898,28 @@ async function removeChatAdminMember(
   groupId: number,
   userId: string,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
-  const { error } = await supabase.rpc("chat_admin_remove_member", {
+  const { error } = await runChatAdminMutation(supabase, authority, "remove_member", "chat_admin_remove_member", {
     p_group_id: groupId,
     p_user_id: userId,
     p_actor: actor,
   })
-  if (error) throw { status: 400, message: error.message } satisfies AppError
+  if (error) throw chatAdminRpcError(error)
   return { ok: true }
 }
 
 // M-talk管理RPCの失敗を、競合(40001)なら409、それ以外は400として返す。
 function chatAdminRpcError(error: { code?: string | null; message?: string | null } | null): AppError {
-  const conflict = String(error?.code ?? "") === "40001"
+  const code = String(error?.code ?? "")
+  const conflict = code === "40001"
+  const forbidden = code === "42501"
   return {
-    status: conflict ? 409 : 400,
+    status: conflict ? 409 : forbidden ? 403 : 400,
     message: conflict
       ? "別の管理者が先に更新しました。再読み込みしてやり直してください。"
+      : forbidden
+      ? "M-talk管理権限が停止、期限切れ、または対象範囲外です。"
       : String(error?.message ?? "M-talk管理操作に失敗しました。"),
   }
 }
@@ -4589,6 +4948,259 @@ function chatAdminIdList<T>(
   return [...new Set(list)]
 }
 
+function chatAdminDelegationStringList(value: unknown, field: string, max: number): string[] {
+  if (!Array.isArray(value)) {
+    throw { status: 400, message: `${field} は配列で指定してください。` } satisfies AppError
+  }
+  const values = [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))]
+  if (values.length > max) {
+    throw { status: 400, message: `${field} は${max}件までです。` } satisfies AppError
+  }
+  return values
+}
+
+async function normalizeChatAdminDelegationPayload(
+  supabase: ReturnType<typeof createClient<any>>,
+  body: Record<string, unknown>,
+  current?: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const label = Object.prototype.hasOwnProperty.call(body, "label")
+    ? String(body.label ?? "").trim()
+    : String(current?.label ?? "").trim()
+  if (!label || label.length > 80) {
+    throw { status: 400, message: "管理者名は1〜80文字で入力してください。" } satisfies AppError
+  }
+  const scopeMode = String(
+    Object.prototype.hasOwnProperty.call(body, "scope_mode") ? body.scope_mode : current?.scope_mode,
+  ).trim() as ChatAdminScopeMode
+  if (!(["all", "stores", "rooms"] as string[]).includes(scopeMode)) {
+    throw { status: 400, message: "管理範囲を選択してください。" } satisfies AppError
+  }
+  const rawStoreKeys = Object.prototype.hasOwnProperty.call(body, "store_keys")
+    ? body.store_keys
+    : (current?.store_keys ?? [])
+  const rawRoomIds = Object.prototype.hasOwnProperty.call(body, "room_ids")
+    ? body.room_ids
+    : (current?.room_ids ?? [])
+  const storeKeys = scopeMode === "stores"
+    ? chatAdminDelegationStringList(rawStoreKeys, "store_keys", 50)
+    : []
+  const roomIds = scopeMode === "rooms"
+    ? chatAdminIdList(rawRoomIds, "room_ids", (item) => {
+      const value = Number(item)
+      return Number.isSafeInteger(value) && value > 0 ? value : null
+    }, 500)
+    : []
+  if (scopeMode === "stores" && !storeKeys.length) {
+    throw { status: 400, message: "管理対象の店舗を1つ以上選択してください。" } satisfies AppError
+  }
+  if (scopeMode === "rooms" && !roomIds.length) {
+    throw { status: 400, message: "管理対象のルームを1つ以上選択してください。" } satisfies AppError
+  }
+
+  const rawCapabilities = Object.prototype.hasOwnProperty.call(body, "capabilities")
+    ? body.capabilities
+    : (current?.capabilities ?? ["view"])
+  const capabilities = chatAdminDelegationStringList(
+    rawCapabilities,
+    "capabilities",
+    CHAT_ADMIN_CAPABILITIES.length,
+  )
+  if (!capabilities.includes("view") || capabilities.some((item) => (
+    !CHAT_ADMIN_CAPABILITIES.includes(item as ChatAdminCapability)
+  ))) {
+    throw { status: 400, message: "許可する操作の指定が不正です。" } satisfies AppError
+  }
+  if (capabilities.includes("manage_users") && scopeMode !== "all") {
+    throw { status: 400, message: "全体ユーザー管理はM-talk全体スコープだけに付与できます。" } satisfies AppError
+  }
+  if (capabilities.includes("manage_bots") && scopeMode === "rooms") {
+    throw { status: 400, message: "Bot管理はM-talk全体または店舗スコープだけに付与できます。" } satisfies AppError
+  }
+  if (capabilities.includes("revert_audit") && !capabilities.includes("audit_read")) {
+    throw { status: 400, message: "監査復元には監査ログ閲覧も必要です。" } satisfies AppError
+  }
+  if (capabilities.includes("manage_templates") && !capabilities.includes("manage_members")) {
+    throw { status: 400, message: "一括設定にはメンバー権限管理も必要です。" } satisfies AppError
+  }
+
+  if (storeKeys.length) {
+    const { data, error } = await supabase
+      .from("chat_store_catalog")
+      .select("store_key")
+      .in("store_key", storeKeys)
+    if (error) throw { status: 500, message: `店舗一覧を確認できませんでした: ${error.message}` } satisfies AppError
+    const valid = new Set((data || []).map((row: Record<string, unknown>) => String(row.store_key ?? "")))
+    if (storeKeys.some((key) => !valid.has(key))) {
+      throw { status: 400, message: "存在しない店舗が含まれています。" } satisfies AppError
+    }
+  }
+  if (roomIds.length) {
+    const { data, error } = await supabase
+      .from("chat_groups")
+      .select("id")
+      .in("id", roomIds)
+    if (error) throw { status: 500, message: `ルーム一覧を確認できませんでした: ${error.message}` } satisfies AppError
+    const valid = new Set((data || []).map((row: Record<string, unknown>) => Number(row.id)))
+    if (roomIds.some((id) => !valid.has(id))) {
+      throw { status: 400, message: "存在しないルームが含まれています。" } satisfies AppError
+    }
+  }
+
+  const enabled = Object.prototype.hasOwnProperty.call(body, "enabled")
+    ? body.enabled
+    : (current?.enabled ?? true)
+  if (typeof enabled !== "boolean") {
+    throw { status: 400, message: "enabled はbooleanで指定してください。" } satisfies AppError
+  }
+  let expiresAt: string | null = current?.expires_at ? String(current.expires_at) : null
+  if (Object.prototype.hasOwnProperty.call(body, "expires_at")) {
+    const raw = String(body.expires_at ?? "").trim()
+    if (!raw) {
+      throw { status: 400, message: "委任管理権限には有効期限が必要です。" } satisfies AppError
+    } else {
+      const date = new Date(raw)
+      if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now() + 60_000) {
+        throw { status: 400, message: "有効期限は現在より後にしてください。" } satisfies AppError
+      }
+      expiresAt = date.toISOString()
+    }
+  }
+  if (!expiresAt) {
+    throw { status: 400, message: "委任管理権限には有効期限が必要です。" } satisfies AppError
+  }
+  if (enabled && new Date(expiresAt).getTime() <= Date.now()) {
+    throw { status: 400, message: "期限切れの権限は有効化できません。" } satisfies AppError
+  }
+  return {
+    label,
+    enabled,
+    scope_mode: scopeMode,
+    store_keys: storeKeys,
+    room_ids: roomIds,
+    capabilities,
+    expires_at: expiresAt,
+  }
+}
+
+async function fetchChatAdminDelegations(
+  supabase: ReturnType<typeof createClient<any>>,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .from("chat_admin_delegations")
+    .select("id, label, enabled, scope_mode, store_keys, room_ids, capabilities, expires_at, session_version, last_link_issued_at, created_by, updated_by, created_at, updated_at")
+    .order("created_at", { ascending: false })
+    .limit(500)
+  if (error) {
+    throw { status: 500, message: `委任管理者の取得に失敗しました: ${error.message}` } satisfies AppError
+  }
+  return { delegations: data || [], capabilities: CHAT_ADMIN_CAPABILITIES }
+}
+
+async function createChatAdminDelegation(
+  supabase: ReturnType<typeof createClient<any>>,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const payload = await normalizeChatAdminDelegationPayload(supabase, body)
+  const { data, error } = await supabase
+    .from("chat_admin_delegations")
+    .insert({ ...payload, created_by: actor, updated_by: actor })
+    .select("id, label, enabled, scope_mode, store_keys, room_ids, capabilities, expires_at, session_version, created_at, updated_at")
+    .single()
+  if (error || !data) {
+    throw { status: 400, message: `委任管理者を作成できませんでした: ${error?.message ?? "unknown"}` } satisfies AppError
+  }
+  await supabase.from("chat_admin_audit_log").insert({
+    action: "delegation_create",
+    actor,
+    after_state: data,
+  })
+  const login = await issueChatAdminDelegationLoginLink(supabase, String(data.id), actor)
+  return { ok: true, delegation: data, ...login }
+}
+
+async function updateChatAdminDelegation(
+  supabase: ReturnType<typeof createClient<any>>,
+  delegationId: string,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data: current, error: currentError } = await supabase
+    .from("chat_admin_delegations")
+    .select("id, label, enabled, scope_mode, store_keys, room_ids, capabilities, expires_at, session_version, created_at, updated_at")
+    .eq("id", delegationId)
+    .maybeSingle()
+  if (currentError) throw { status: 500, message: `委任管理者を確認できませんでした: ${currentError.message}` } satisfies AppError
+  if (!current) throw { status: 404, message: "委任管理者が見つかりません。" } satisfies AppError
+  const payload = await normalizeChatAdminDelegationPayload(supabase, body, current as Record<string, unknown>)
+  const { data, error } = await supabase
+    .from("chat_admin_delegations")
+    .update({
+      ...payload,
+      updated_by: actor,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", delegationId)
+    .eq("updated_at", String(current.updated_at))
+    .select("id, label, enabled, scope_mode, store_keys, room_ids, capabilities, expires_at, session_version, created_at, updated_at")
+    .maybeSingle()
+  if (error) throw { status: 400, message: `委任管理者を更新できませんでした: ${error.message}` } satisfies AppError
+  if (!data) {
+    throw { status: 409, message: "別の管理者が先に変更しました。再読み込みしてください。" } satisfies AppError
+  }
+  await supabase.from("chat_admin_audit_log").insert({
+    action: "delegation_update",
+    actor,
+    before_state: current,
+    after_state: data,
+  })
+  return { ok: true, delegation: data }
+}
+
+async function issueChatAdminDelegationLoginLink(
+  supabase: ReturnType<typeof createClient<any>>,
+  delegationId: string,
+  actor: string,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .from("chat_admin_delegations")
+    .select("id, label, enabled, expires_at, session_version")
+    .eq("id", delegationId)
+    .maybeSingle()
+  if (error) throw { status: 500, message: `委任管理者を確認できませんでした: ${error.message}` } satisfies AppError
+  if (!data) throw { status: 404, message: "委任管理者が見つかりません。" } satisfies AppError
+  if (data.enabled !== true) throw { status: 403, message: "停止中の委任管理者にはリンクを発行できません。" } satisfies AppError
+  if (data.expires_at && new Date(String(data.expires_at)).getTime() <= Date.now()) {
+    throw { status: 403, message: "期限切れの委任管理者にはリンクを発行できません。" } satisfies AppError
+  }
+  const sessionVersion = Number(data.session_version)
+  if (!Number.isSafeInteger(sessionVersion) || sessionVersion <= 0) {
+    throw { status: 500, message: "委任管理者のセッション世代が不正です。" } satisfies AppError
+  }
+  const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+    scope: MTALK_ADMIN_SCOPE,
+    chat_admin_delegation_id: delegationId,
+    chat_admin_delegation_version: sessionVersion,
+    source: "chat_admin_delegation",
+  })
+  await supabase
+    .from("chat_admin_delegations")
+    .update({ last_link_issued_at: new Date().toISOString(), updated_by: actor })
+    .eq("id", delegationId)
+  await supabase.from("chat_admin_audit_log").insert({
+    action: "delegation_link_issue",
+    actor,
+    after_state: { delegation_id: delegationId, expires_at: issued.expires_at },
+  })
+  return {
+    ok: true,
+    delegation_id: delegationId,
+    login_token: issued.token,
+    login_expires_at: issued.expires_at,
+  }
+}
+
 async function fetchChatAdminTemplates(
   supabase: ReturnType<typeof createClient<any>>,
 ): Promise<Record<string, unknown>> {
@@ -4608,6 +5220,7 @@ async function applyChatAdminTemplate(
   supabase: ReturnType<typeof createClient<any>>,
   body: Record<string, unknown>,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const templateKey = String(body.template_key ?? "").trim()
   if (!/^[a-z][a-z0-9_]{1,40}$/.test(templateKey)) {
@@ -4625,7 +5238,7 @@ async function applyChatAdminTemplate(
     throw { status: 400, message: "適用対象のルームまたはユーザーを指定してください。" } satisfies AppError
   }
   const dryRun = body.dry_run !== false
-  const { data, error } = await supabase.rpc("chat_admin_apply_room_template", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "apply_template", "chat_admin_apply_room_template", {
     p_group_ids: groupIds,
     p_user_ids: userIds,
     p_template_key: templateKey,
@@ -4641,16 +5254,30 @@ async function fetchChatAdminUserAccess(
   userId: string,
   limitParam: string | null,
   offsetParam: string | null,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const limit = Math.min(Math.max(Number(limitParam ?? 100) || 100, 1), 500)
   const offset = Math.max(Number(offsetParam ?? 0) || 0, 0)
   const { data, error } = await supabase.rpc("chat_admin_user_effective_access", {
     p_user_id: userId,
-    p_limit: limit,
-    p_offset: offset,
+    p_limit: authority.isFullAdmin ? limit : 500,
+    p_offset: authority.isFullAdmin ? offset : 0,
   })
   if (error) throw chatAdminRpcError(error)
-  return (data ?? {}) as Record<string, unknown>
+  const result = (data ?? {}) as Record<string, unknown>
+  if (authority.isFullAdmin) return result
+  const scopedRooms = (Array.isArray(result.rooms) ? result.rooms : [])
+    .filter((room) => isRecord(room) && chatAdminAllowsRoom(authority, {
+      id: room.group_id,
+      store_key: room.store_key,
+    }))
+  return {
+    ...result,
+    rooms: scopedRooms.slice(offset, offset + limit),
+    total_rooms: scopedRooms.length,
+    limit,
+    offset,
+  }
 }
 
 async function revertChatAdminAudit(
@@ -4658,9 +5285,10 @@ async function revertChatAdminAudit(
   auditId: number,
   body: Record<string, unknown>,
   actor: string,
+  authority: ChatAdminAuthority,
 ): Promise<Record<string, unknown>> {
   const dryRun = body.dry_run !== false
-  const { data, error } = await supabase.rpc("chat_admin_revert_audit", {
+  const { data, error } = await runChatAdminMutation(supabase, authority, "revert_audit", "chat_admin_revert_audit", {
     p_audit_id: auditId,
     p_dry_run: dryRun,
     p_actor: actor,
@@ -5365,10 +5993,7 @@ async function authenticate(
   req: Request,
   supabase: ReturnType<typeof createClient>,
   fallbackToken: string,
-): Promise<
-  | { ok: true; storeScope: string | null; roomScope: string | null; scopeKind: string | null }
-  | { ok: false; status: number; message: string }
-> {
+): Promise<AdminAuthenticationResult> {
   const provided = req.headers.get("x-admin-token") ?? ""
   // cron から admin-api を叩く経路（週次レポート等）: Authorization: Bearer <CRON_AUTH_TOKEN|ADMIN_DASHBOARD_TOKEN>
   if (!provided) {
@@ -5377,7 +6002,10 @@ async function authenticate(
     if (bearer) {
       const cronTok = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
       if (cronTok && secureEqual(bearer, cronTok)) {
-        return { ok: true, storeScope: null, roomScope: null, scopeKind: "cron" }
+        return {
+          ok: true, storeScope: null, roomScope: null, scopeKind: "cron",
+          chatAdminAuthority: null, actorLabel: null,
+        }
       }
       // DB cron は Vault のトークンを使う。Edge Function の環境変数が未同期でも、
       // service-role 経由で同じ Vault 値と照合できれば許可する（値はレスポンスに出さない）。
@@ -5385,14 +6013,20 @@ async function authenticate(
         const { data: vaultCronToken } = await supabase.rpc("resolve_edge_cron_auth_token")
         const dbCronToken = String(vaultCronToken ?? "").trim()
         if (dbCronToken && secureEqual(bearer, dbCronToken)) {
-          return { ok: true, storeScope: null, roomScope: null, scopeKind: "cron" }
+          return {
+            ok: true, storeScope: null, roomScope: null, scopeKind: "cron",
+            chatAdminAuthority: null, actorLabel: null,
+          }
         }
       } catch (_err) {
         // Vault 未設定時は既存の環境変数・管理トークン照合を継続する。
       }
       // vault が ADMIN_DASHBOARD_TOKEN と同値で運用されている場合も許可
       if (fallbackToken && secureEqual(bearer, fallbackToken)) {
-        return { ok: true, storeScope: null, roomScope: null, scopeKind: null }
+        return {
+          ok: true, storeScope: null, roomScope: null, scopeKind: null,
+          chatAdminAuthority: null, actorLabel: "本部",
+        }
       }
     }
     return { ok: false, status: 401, message: "Unauthorized." }
@@ -5404,18 +6038,40 @@ async function authenticate(
     if (session.scopeKind === CHAT_MEDIA_VIEW_SCOPE) {
       return { ok: false, status: 403, message: "この閲覧リンクではこの操作はできません。" }
     }
+    if (session.scopeKind === MTALK_ADMIN_SCOPE) {
+      const delegated = await loadMtalkAdminAuthority(supabase, session.metadata)
+      if (!delegated.ok) {
+        return { ok: false, status: 403, message: delegated.message }
+      }
+      return {
+        ok: true,
+        storeScope: null,
+        roomScope: null,
+        scopeKind: MTALK_ADMIN_SCOPE,
+        chatAdminAuthority: delegated.authority,
+        actorLabel: delegated.authority.label,
+      }
+    }
+    if (session.scopeKind !== null && session.scopeKind !== ROOM_CONFIG_SCOPE) {
+      return { ok: false, status: 403, message: "この管理スコープは利用できません。" }
+    }
     // ログインリンク由来のセッションは storeScope か roomScope を持つ＝その店舗/ルームだけに制限。
     return {
       ok: true,
       storeScope: session.storeScope,
       roomScope: session.roomScope,
       scopeKind: session.scopeKind,
+      chatAdminAuthority: null,
+      actorLabel: null,
     }
   }
 
   const raw = await authenticateRawAdminToken(provided, supabase, fallbackToken)
   if (raw.ok) {
-    return { ok: true, storeScope: null, roomScope: null, scopeKind: null } // 生adminトークン＝全店アクセス
+    return {
+      ok: true, storeScope: null, roomScope: null, scopeKind: null,
+      chatAdminAuthority: null, actorLabel: "本部",
+    } // 生adminトークン＝全店アクセス
   }
   return raw
 }
@@ -16720,7 +17376,11 @@ async function recordCurrentAdminAccess(params: {
   path: string
   method: string
   ip: string
-  auth?: { storeScope?: string | null; scopeKind?: string | null }
+  auth?: {
+    storeScope?: string | null
+    scopeKind?: string | null
+    actorLabel?: string | null
+  }
   storeKey?: string | null
   eventKind?: string
   action?: string

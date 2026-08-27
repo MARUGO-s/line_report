@@ -80,7 +80,7 @@ type SharedModuleRule = {
 const SHARED_MODULE_RULES: SharedModuleRule[] = [
   { pattern: /^line_report_help_/, codes: ['DEV-04'] },
   { pattern: /^mtalk_help_/, codes: ['OPS-01', 'OPS-02', 'JAI-02', 'DEV-04'] },
-  { pattern: /^(admin_access_log|admin_dashboard_link_auth|admin_utils|job_titles)\.ts$/, codes: ['ADM-01', 'ADM-03', 'SEC-01', 'DEV-02'] },
+  { pattern: /^(admin_access_log|admin_dashboard_link_auth|chat_admin_delegation|admin_utils|job_titles)\.ts$/, codes: ['ADM-01', 'ADM-03', 'SEC-01', 'DEV-02'] },
   { pattern: /^(admin_receipt_sales|manual_day_sales|manual_month_sales|sales_budget_allocation)\.ts$/, codes: ['SAL-04', 'SAL-05', 'SAL-06', 'DEV-02'] },
   { pattern: /^(bistrocavacava_sheet_push|clear_store_sheet_budget_tabs|daily_sales_import|google_service_account_auth|google_sheets_client|receipt_sheets_.*)\.ts$/, codes: ['SAL-05', 'SAL-06', 'DEV-02'] },
   { pattern: /^budget_entry_flow\.ts$/, codes: ['SAL-01', 'SAL-04', 'DEV-02'] },

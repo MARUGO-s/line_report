@@ -213,10 +213,10 @@ test("every new admin RPC stays service-role only", async () => {
   assert.doesNotMatch(migration, /grant execute on function public\.chat_admin_[a-z_]+\([^)]*\)\s*\n?\s*to authenticated/i)
 })
 
-test("new admin API routes stay inside the headquarters-only chat-admin block", async () => {
+test("new admin API routes stay inside the isolated capability-checked chat-admin block", async () => {
   const api = await read("supabase/functions/admin-api/index.ts")
 
-  const guard = api.indexOf('return json({ error: "M-talk管理は本部管理者だけが利用できます。" }, 403)')
+  const guard = api.indexOf('if (path === "/chat-admin" || path.startsWith("/chat-admin/"))')
   const notFound = api.indexOf('throw { status: 404, message: "M-talk管理APIが見つかりません。" } satisfies AppError')
   assert.ok(guard > 0 && notFound > guard, "the chat-admin block must be bounded by its scope guard and 404")
 
@@ -228,21 +228,24 @@ test("new admin API routes stay inside the headquarters-only chat-admin block", 
   ]
   for (const route of routes) {
     const at = api.indexOf(route)
-    assert.ok(at > guard && at < notFound, `${route} must live inside the headquarters-only block`)
+    assert.ok(at > guard && at < notFound, `${route} must live inside the isolated chat-admin block`)
   }
 
-  // 店舗・ルームスコープからは到達させない。
+  // 通常の店舗・ルームスコープからは到達させず、M-talk委任スコープも他APIへ出さない。
   const storeScoped = api.slice(api.indexOf("const STORE_SCOPED_ALLOWED_PATHS"), api.indexOf("if (!STORE_SCOPED_ALLOWED_PATHS.has(path))"))
   assert.doesNotMatch(storeScoped, /chat-admin/i)
+  assert.match(api, /authResult\.scopeKind === MTALK_ADMIN_SCOPE[\s\S]*!path\.startsWith\("\/chat-admin\/"\)[\s\S]*この権限はM-talk管理だけに利用できます/)
+  assert.match(api, /chatAdminRequireCapability\(chatAuthority, "manage_templates"\)/)
+  assert.match(api, /assertChatAdminTemplateScope\(supabase, chatAuthority, body\)/)
 
   // 書き込みは dry_run:false を明示したときだけ。
   assert.match(api, /const dryRun = body\.dry_run !== false[\s\S]*chat_admin_apply_room_template/)
   assert.match(api, /const dryRun = body\.dry_run !== false[\s\S]*chat_admin_revert_audit/)
-  // 競合は409で返す。
-  assert.match(api, /const conflict = String\(error\?\.code \?\? ""\) === "40001"[\s\S]*status: conflict \? 409 : 400/)
+  // 競合は409、委任の停止・期限切れ・範囲外は403で返す。
+  assert.match(api, /const conflict = code === "40001"[\s\S]*const forbidden = code === "42501"[\s\S]*status: conflict \? 409 : forbidden \? 403 : 400/)
   // UIへ渡す復元可否はサーバ側で判定する。
   assert.match(api, /CHAT_ADMIN_REVERTIBLE_ACTIONS = new Set<string>\(\[\s*"user_access_update",\s*"user_remove",\s*"member_permissions_update",\s*"member_remove",\s*\]\)/)
-  assert.match(api, /revertible: CHAT_ADMIN_REVERTIBLE_ACTIONS\.has\(String\(row\.action \?\? ""\)\)/)
+  assert.match(api, /revertible: chatAdminCanRevertAction\(authority, String\(row\.action \?\? ""\)\)[\s\S]*CHAT_ADMIN_REVERTIBLE_ACTIONS\.has\(String\(row\.action \?\? ""\)\)/)
 })
 
 test("admin UI previews before applying and escapes every rendered value", async () => {
