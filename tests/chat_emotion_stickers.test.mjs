@@ -59,7 +59,7 @@ test('sticker picker lets users choose large or compact bubble display', () => {
   assert.match(chat, /data-sticker-mode="large">大きく送る/);
   assert.match(chat, /data-sticker-mode="compact">文章内に入れる/);
   assert.match(chat, /sticker\.display === 'compact'/);
-  assert.match(chat, /class="message-bubble"><div class="inline-sticker-message">\$\{stickerImage\}/);
+  assert.match(chat, /class="message-bubble">\$\{struck\}<div class="inline-sticker-message">\$\{stickerImage\}/);
   assert.match(chat, /sticker: \{ id: stickerId, display \}/);
   assert.match(displayModeMigration, /v_sticker_display := case[\s\S]*?'compact'[\s\S]*?'large'/);
   assert.match(displayModeMigration, /'display', v_sticker_display/);

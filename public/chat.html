@@ -1885,6 +1885,16 @@
     }
     .composer-mode-chip.visible { display: inline-flex; }
     .composer-mode-chip.memo { background: #fdf3d8; border-color: #e8d69c; color: #8a6d22; }
+    .composer-mode-chip.edit { background: #e8f1ff; border-color: #b7d0f5; color: #1d4f91; }
+    .edited-mark { font-size: 11px; opacity: .72; }
+    .edit-original {
+      display: block;
+      margin: 0 0 4px;
+      text-decoration: line-through;
+      opacity: 0.62;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .composer-mode-chip button {
       border: 0;
       padding: 0 2px;
@@ -2994,6 +3004,7 @@
       <div class="account-menu-user" id="accountMenuUser"></div>
       <div class="account-menu-list">
         <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
+        <a href="./mtalk-help.html" role="menuitem">使い方</a>
         <a href="./chat-admin.html" role="menuitem">M-talk管理</a>
         <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
       </div>
@@ -3077,6 +3088,7 @@
         <p class="login-note">
           アカウントをお持ちでない方は
           <a href="#" onclick="showSignup(event)">新規登録</a>
+          ／ <a href="./mtalk-help.html">使い方</a>
         </p>
       </div>
 
@@ -3212,9 +3224,10 @@
     let selectGroupSeq = 0;
     const MESSAGE_PAGE_SIZE = 50;
     const MESSAGE_COLUMNS =
-      'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, is_silent, created_at';
+      'id, group_id, user_id, username, content, kind, payload, reply_to_id, mentions, is_silent, created_at, edited_at, edit_history';
     let isSilentSendActive = false;
     let isPrivateNoteMode = false;
+    let editingMessage = null;
     let composerSheetOpen = false;
     // Inline personal-note mode hands its text to the existing note persistence path.
     let pendingPrivateNoteContent = null;
@@ -3787,6 +3800,9 @@
           { event: 'INSERT', schema: 'public', table: 'chat_messages' },
           (payload) => handleIncomingMessage(payload.new))
         .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
+          (payload) => handleUpdatedMessage(payload.new))
+        .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'chat_private_notes', filter: `user_id=eq.${currentUser.id}` },
           (payload) => handleIncomingNote(payload.new))
         .on('postgres_changes',
@@ -3932,9 +3948,39 @@
       if (currentPrivateNotes.length !== before) renderMessageList();
     }
 
+    function handleUpdatedMessage(msg) {
+      if (!msg || !msg.id) return;
+      const id = Number(msg.id);
+      if (!Number.isSafeInteger(id)) return;
+      const idx = currentMessages.findIndex((item) => Number(item.id) === id);
+      if (idx >= 0) {
+        currentMessages[idx] = Object.assign({}, currentMessages[idx], msg);
+        quotedMessages.set(id, currentMessages[idx]);
+        refreshMessageNode(id);
+        currentMessages.forEach((item) => {
+          if (Number(item.reply_to_id) === id) refreshMessageNode(item.id);
+        });
+      } else if (quotedMessages.has(id)) {
+        quotedMessages.set(id, Object.assign({}, quotedMessages.get(id), msg));
+      }
+      if (replyTarget && Number(replyTarget.id) === id) {
+        replyTarget = Object.assign({}, replyTarget, msg);
+        if ($('replyBarText')) $('replyBarText').textContent = quotePreviewText(replyTarget);
+      }
+      if (editingMessage && Number(editingMessage.id) === id) {
+        editingMessage = Object.assign({}, editingMessage, msg);
+      }
+      const last = lastMessages[msg.group_id];
+      if (last && Number(last.id) === id) {
+        lastMessages[msg.group_id] = Object.assign({}, last, msg);
+        renderGroups();
+      }
+    }
+
     function handleDeletedMessage(row) {
       const id = Number(row && row.id);
       if (!Number.isSafeInteger(id)) return;
+      if (editingMessage && Number(editingMessage.id) === id) cancelMessageEdit();
       currentMessages = currentMessages.filter((m) => Number(m.id) !== id);
       quotedMessages.delete(id);
       const node = $('messages') && $('messages').querySelector(`.message[data-message-id="${id}"]`);
@@ -5220,6 +5266,7 @@
     }
 
     function closeChat() {
+      if (editingMessage) cancelMessageEdit();
       if (currentGroupId) snapshotRoomView(currentGroupId);
       currentGroupId = null;
       currentRoomMembership = null;
@@ -6419,6 +6466,7 @@
         await loadGroups();
         return;
       }
+      if (editingMessage && Number(currentGroupId) !== Number(group.id)) cancelMessageEdit();
       if (currentGroupId && Number(currentGroupId) !== Number(group.id)) {
         snapshotRoomView(currentGroupId);
       }
@@ -6868,6 +6916,28 @@
       $('reactionDetailOverlay').classList.remove('hidden');
     }
 
+    function messageEditHistory(msg) {
+      const raw = msg && msg.edit_history;
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+          return [];
+        }
+      }
+      return [];
+    }
+
+    function renderStruckEditHistory(msg) {
+      const items = messageEditHistory(msg)
+        .map((row) => String((row && row.content) || '').trim())
+        .filter(Boolean);
+      if (!items.length) return '';
+      return items.map((text) => `<span class="edit-original">${escapeHtml(text)}</span>`).join('');
+    }
+
     function buildMessageNode(msg) {
       const div = document.createElement('div');
       const isOwn = currentUser && String(msg.user_id) === String(currentUser.id);
@@ -6891,11 +6961,12 @@
         const stickerImage = `<img class="msg-sticker" src="${escapeHtml(sticker.path)}" alt="${escapeHtml(sticker.label || '感情イラスト')}" loading="lazy" decoding="async">`;
         const inlineText = compactSticker && !String(msg.content || '').startsWith('[感情イラスト]')
           ? `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>` : '';
+        const struck = compactSticker ? renderStruckEditHistory(msg) : '';
         bodyHtml = compactSticker
-          ? `<div class="message-bubble"><div class="inline-sticker-message">${stickerImage}${inlineText}</div></div>`
+          ? `<div class="message-bubble">${struck}<div class="inline-sticker-message">${stickerImage}${inlineText}</div></div>`
           : stickerImage;
       } else {
-        bodyHtml = `<div class="message-bubble"><span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>${renderLinkPreview(msg.content)}</div>`;
+        bodyHtml = `<div class="message-bubble">${renderStruckEditHistory(msg)}<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>${renderLinkPreview(msg.content)}</div>`;
       }
 
       let quoteHtml = '';
@@ -6909,6 +6980,7 @@
         // 引用は吹き出しの中に入れる。画像・カードのときは上に置く。
         if (!cards && !image && !file && !sticker) {
           bodyHtml = `<div class="message-bubble">${quoteHtml}`
+            + renderStruckEditHistory(msg)
             + `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>${renderLinkPreview(msg.content)}</div>`;
           quoteHtml = '';
         }
@@ -6922,6 +6994,7 @@
           <div class="message-meta">
             ${isOwn ? '' : `<span class="username">${escapeHtml(speakerName(msg.user_id, msg.username))}</span>`}
             <span>${formatTime(msg.created_at)}</span>
+            ${msg.edited_at ? '<span class="edited-mark">編集済み</span>' : ''}
             ${msg.is_silent ? '<span class="silent-mark" title="通知なしで送信されました">🔕</span>' : ''}
             ${isOwn ? readMarkHtml(msg) : ''}
           </div>
@@ -7052,6 +7125,7 @@
       const menu = document.createElement('div');
       menu.className = 'msg-menu';
       const canDelete = currentUser && String(msg.user_id) === String(currentUser.id);
+      const canEdit = canDelete && canCurrentUserSend() && messageIsEditable(msg);
       const canInteract = canCurrentUserSend();
       menu.innerHTML = `
         ${canInteract ? `<div class="msg-menu-emojis">
@@ -7062,6 +7136,7 @@
           <button class="msg-menu-reply" type="button" data-action="copy"><span class="msg-menu-action-icon">⧉</span><span>コピー</span></button>
           <button class="msg-menu-reply" type="button" data-action="keep"><span class="msg-menu-action-icon">📌</span><span>Keepに保存</span></button>
           <button class="msg-menu-reply" type="button" data-action="forward"><span class="msg-menu-action-icon">➜</span><span>転送</span></button>
+          ${canEdit ? '<button class="msg-menu-reply" type="button" data-action="edit"><span class="msg-menu-action-icon">✎</span><span>編集</span></button>' : ''}
           ${canDelete ? '<button class="msg-menu-reply msg-menu-delete" type="button" data-action="delete"><span class="msg-menu-action-icon">⌫</span><span>削除</span></button>' : ''}
         </div>
       `;
@@ -7105,6 +7180,11 @@
         if (e.target.closest('[data-action="forward"]')) {
           closeMessageMenu();
           openForward(msg);
+          return;
+        }
+        if (e.target.closest('[data-action="edit"]')) {
+          closeMessageMenu();
+          startMessageEdit(msg);
           return;
         }
         if (e.target.closest('[data-action="delete"]')) {
@@ -7226,10 +7306,91 @@
           .eq('id', msg.id)
           .eq('user_id', currentUser.id);
         if (error) throw error;
+        if (editingMessage && Number(editingMessage.id) === Number(msg.id)) cancelMessageEdit();
         handleDeletedMessage({ id: msg.id, group_id: msg.group_id });
       } catch (error) {
         console.error('Delete message error:', error);
         alert(error.message || '削除に失敗しました');
+      }
+    }
+
+    function messageIsEditable(msg) {
+      if (!msg || !currentUser || String(msg.user_id) !== String(currentUser.id)) return false;
+      if (isGroupTrashed(findMineGroup(msg.group_id || currentGroupId))) return false;
+      if (String(msg.kind || 'text') === 'text') return true;
+      const sticker = stickerFromMessage(msg);
+      return !!(sticker && sticker.display === 'compact');
+    }
+
+    function editableMessageText(msg) {
+      if (!msg) return '';
+      const sticker = stickerFromMessage(msg);
+      if (sticker && sticker.display === 'compact') {
+        const text = String(msg.content || '');
+        if (text.startsWith('[感情イラスト]')) return '';
+        return text;
+      }
+      return String(msg.content || '');
+    }
+
+    function startMessageEdit(msg) {
+      if (!messageIsEditable(msg) || !requireCurrentRoomSend()) return;
+      editingMessage = msg;
+      isSilentSendActive = false;
+      isPrivateNoteMode = false;
+      pendingInlineSticker = null;
+      renderInlineStickerPreview();
+      composerSheetOpen = false;
+      clearReplyTarget();
+      const input = $('messageInput');
+      if (input) {
+        input.value = editableMessageText(msg);
+        input.focus();
+      }
+      syncComposerModeUi();
+      resizeComposer();
+      showChatToast('編集中');
+    }
+
+    function cancelMessageEdit() {
+      if (!editingMessage) return;
+      editingMessage = null;
+      const input = $('messageInput');
+      if (input) input.value = '';
+      syncComposerModeUi();
+      resizeComposer();
+    }
+
+    async function saveEditedMessage(content) {
+      const msg = editingMessage;
+      if (!msg || !currentUser) return false;
+      if (!requireCurrentRoomSend()) return false;
+      if (isGroupTrashed(findMineGroup(currentGroupId))) {
+        alert('ゴミ箱のルームでは編集できません。復元してから使ってください。');
+        return false;
+      }
+      const sticker = stickerFromMessage(msg);
+      const compact = !!(sticker && sticker.display === 'compact');
+      const text = String(content || '').trim();
+      if (!compact && !text) return false;
+      try {
+        const { data, error } = await sb.from('chat_messages')
+          .update({
+            content: text,
+            mentions: collectMentions(text)
+          })
+          .eq('id', msg.id)
+          .eq('user_id', currentUser.id)
+          .select(MESSAGE_COLUMNS)
+          .single();
+        if (error) throw error;
+        editingMessage = null;
+        handleUpdatedMessage(data);
+        return true;
+      } catch (error) {
+        console.error('Edit message error:', error);
+        alert(error.message || '編集に失敗しました');
+        return false;
       }
     }
 
@@ -7619,6 +7780,7 @@
 
     async function toggleStickerPicker() {
       if (!currentGroupId || !currentUser) return;
+      if (editingMessage) cancelMessageEdit();
       if (!requireCurrentRoomSend()) return;
       if (isGroupTrashed(findMineGroup(currentGroupId))) {
         alert('ゴミ箱のルームには送信できません。復元してから使ってください。');
@@ -8532,6 +8694,17 @@
       if (!requireCurrentRoomSend()) return;
       const input = $('messageInput');
       const content = input.value.trim();
+      if (editingMessage) {
+        const compact = !!stickerFromMessage(editingMessage) && stickerFromMessage(editingMessage).display === 'compact';
+        if (!content && !compact) return;
+        const ok = await saveEditedMessage(content);
+        if (ok) {
+          input.value = '';
+          syncComposerModeUi();
+          resizeComposer();
+        }
+        return;
+      }
       if (!content && !pendingInlineSticker) return;
 
       if (isPrivateNoteMode) {
@@ -8566,6 +8739,7 @@
     }
 
     function toggleSilentSend() {
+      if (editingMessage) cancelMessageEdit();
       isSilentSendActive = !isSilentSendActive;
       if (isSilentSendActive) isPrivateNoteMode = false;
       syncComposerModeUi();
@@ -8575,6 +8749,7 @@
 
     function togglePrivateNoteMode() {
       if (!currentGroupId || !currentUser) return;
+      if (editingMessage) cancelMessageEdit();
       isPrivateNoteMode = !isPrivateNoteMode;
       if (isPrivateNoteMode) {
         isSilentSendActive = false;
@@ -8591,10 +8766,15 @@
     function clearComposerMode() {
       isSilentSendActive = false;
       isPrivateNoteMode = false;
-      syncComposerModeUi();
+      if (editingMessage) cancelMessageEdit();
+      else syncComposerModeUi();
     }
 
     function toggleComposerSheet() {
+      if (editingMessage) {
+        cancelMessageEdit();
+        return;
+      }
       composerSheetOpen = !composerSheetOpen;
       syncComposerModeUi();
     }
@@ -8619,30 +8799,36 @@
       const plus = $('composerPlusBtn');
       const sheet = $('composerSheet');
       const text = String(input?.value || '').trim();
-      const mode = isPrivateNoteMode ? 'memo' : (isSilentSendActive ? 'silent' : 'normal');
+      const compactEdit = !!(editingMessage && stickerFromMessage(editingMessage) && stickerFromMessage(editingMessage).display === 'compact');
+      const mode = editingMessage ? 'edit' : (isPrivateNoteMode ? 'memo' : (isSilentSendActive ? 'silent' : 'normal'));
 
       if (chip) {
         chip.classList.toggle('visible', mode !== 'normal');
         chip.classList.toggle('memo', mode === 'memo');
+        chip.classList.toggle('edit', mode === 'edit');
       }
-      if (chipIcon) chipIcon.textContent = mode === 'memo' ? '📝' : '🔕';
-      if (chipText) chipText.textContent = mode === 'memo'
+      if (chipIcon) chipIcon.textContent = mode === 'edit' ? '✎' : (mode === 'memo' ? '📝' : '🔕');
+      if (chipText) chipText.textContent = mode === 'edit'
+        ? '編集中 ・ この発言の本文を直します'
+        : mode === 'memo'
         ? '個人メモ ・ 自分だけに表示、送信されません'
         : 'サイレント送信 ・ 全員に届くが通知は鳴りません';
-      if (hint) hint.textContent = mode === 'memo'
+      if (hint) hint.textContent = mode === 'edit'
+        ? '保存で反映。通知は送り直しません'
+        : mode === 'memo'
         ? '相手には届きません'
         : mode === 'silent' ? '届きますが通知は鳴りません' : 'Enterで送信';
       if (input) {
-        input.placeholder = mode === 'memo' ? '自分用のメモを入力' : 'メッセージを入力';
+        input.placeholder = mode === 'edit' ? '直す本文を入力' : (mode === 'memo' ? '自分用のメモを入力' : 'メッセージを入力');
         input.classList.toggle('composer-input-active', mode !== 'normal');
         input.classList.toggle('composer-input-empty', !text);
       }
       if (send) {
-        send.disabled = !text;
+        send.disabled = mode === 'edit' ? (!text && !compactEdit) : !text;
         send.classList.toggle('memo-mode', mode === 'memo');
-        send.setAttribute('aria-label', mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信');
+        send.setAttribute('aria-label', mode === 'edit' ? '編集を保存' : mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信');
       }
-      if (sendLabel) sendLabel.textContent = mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信';
+      if (sendLabel) sendLabel.textContent = mode === 'edit' ? '保存' : mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信';
       if (plus) {
         plus.classList.toggle('active', composerSheetOpen);
         plus.setAttribute('aria-expanded', composerSheetOpen ? 'true' : 'false');
@@ -9376,6 +9562,11 @@
         clearReplyTarget();
         return;
       }
+      if (e.key === 'Escape' && editingMessage) {
+        e.preventDefault();
+        cancelMessageEdit();
+        return;
+      }
       // PC: Enter で送信、Shift+Enter で改行。スマホは送信ボタンがあるので Enter は改行。
       if (e.key === 'Enter' && !e.shiftKey && !composingKey(e) && !isMobileLayout()) {
         e.preventDefault();
@@ -9842,6 +10033,7 @@
       closeOpenSwipe();
       closeScheduleSend();
       closeSendMode();
+      if (editingMessage) cancelMessageEdit();
     });
     document.querySelector('.groups-scroll').addEventListener('scroll', () => {
       closeTalkContextMenu();

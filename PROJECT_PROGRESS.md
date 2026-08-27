@@ -1,5 +1,36 @@
 # LINE Report Project Progress
 
+### 2026-08-27 - M-talkで自分の発言を編集できるようにする
+
+- Request: 誤送信の訂正が削除しかなかったので、自分の本文を後から直せるようにする。
+- DB: `edited_at` を追加。UPDATE は本人かつ送信権限があるときだけ。トリガが
+  kind / payload / 送信者 / 返信先 / サイレントを固定し、メンションを参加者に絞る。
+  ゴミ箱ルームは既存の拒否トリガを UPDATE にも適用。Push と資料登録は INSERT 専用のまま。
+- UI: 「…」→「編集」で入力欄が編集モードになる。直す前の本文は取り消し線で残し、
+  `edit_history` はトリガが積み上げてクライアントから消せない。保存後に「編集済み」と表示。
+  画像・ファイル・カード・大きく送ったスタンプは対象外。
+- Test: `tests/chat_message_edit.test.mjs`。
+
+### 2026-08-27 - 推奨順1〜5: スモーク・文書追いつき・スタッフ使い方・複数ルーム一括UI
+
+- Smoke: 本番 Pages の `chat.html` / `chat-admin.html` は HTTP 200。未認証の
+  `/chat-admin/state`・templates・apply・audit revert は 401。管理ログイン画面を
+  ブラウザで確認。本部トークンがこの環境に無いため、「変更内容を確認」の
+  認証済み dry_run は未実施（手順は従来どおり、書き込みなし）。
+- 1対1: 本番 `chat.html` にリンクプレビュー実装あり。AI使用料ページは
+  Perplexity / Web検索の表示あり。天気・Web検索の実送信は従量課金と本文保護のため未実施。
+- Docs: 08-27 の天気（地域名）・Web検索（ON/OFF・出典URL・使用料）を
+  `CHAT-TALK-GUIDE.md` と統合ガイドへ反映。
+- Staff page: `public/mtalk-help.html`。使い方のみ。`chat.html` からリンク。
+- Admin UI: ルーム一覧チェック → `group_ids` 複数指定のプレビュー。DB変更なし。
+
+### 2026-08-27 - 雑談AIのWeb検索実費をAI使用料へ表示
+
+- Request / ship: Perplexity Web検索の従量課金を `ai_usage_events` に記録し、
+  `ai-usage.html` へ表示する（#207）。出典URLの改行・読点連結を修正（#205 / #206）。
+- Reply: 使用AIの注記、調理手順も検索対象（#204）。Web検索のON/OFFとモデル選択（#203）。
+- Weather: 店舗座標の予報に、おおまかな地域名を添える（#202）。日次売上取込と用語整理（#201）。
+
 ### 2026-08-26 - 統合AI資料の類似・否定形質問を敵対的に再検証
 
 - Re-test: 利用者が実際に使いそうな省略、否定形、単語が離れた表現、似た機能の比較を40問作り、`selectLineReportHelpSections` → `buildMtalkHelpReference` の実経路へ通した。

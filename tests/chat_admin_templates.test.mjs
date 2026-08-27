@@ -259,6 +259,13 @@ test("admin UI previews before applying and escapes every rendered value", async
   // 適用・復元は必ずプレビュー(dry_run:true)を経由し、確認後に dry_run:false を送る。
   assert.match(html, /async function previewTemplate\(\)[\s\S]*dry_run:true[\s\S]*templateDialog'\)\.showModal\(\)/)
   assert.match(html, /async function applyTemplate\(\)[\s\S]*confirm\([\s\S]*dry_run:false/)
+
+  // 複数ルームへの一括適用。APIはもともと group_ids 配列対応。UIがチェックしたルームを渡す。
+  assert.match(html, /data-room-select=/)
+  assert.match(html, /id="templateRoomScope"/)
+  assert.match(html, /function selectedApplyGroupIds\(\)[\s\S]*templateRoomScope === 'checked'[\s\S]*selectedRoomIds/)
+  assert.match(html, /const payload = \{template_key:key, group_ids:groupIds, user_ids:userIds\}/)
+  assert.doesNotMatch(html, /group_ids:\[Number\(room\.id\)\]/)
   assert.match(html, /async function openRevertDialog\([\s\S]*dry_run:true[\s\S]*revertDialog'\)\.showModal\(\)/)
   assert.match(html, /async function applyRevert\(\)[\s\S]*confirm\([\s\S]*dry_run:false/)
 

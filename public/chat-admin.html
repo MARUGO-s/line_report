@@ -86,7 +86,11 @@
     .tab.active { background:var(--blue); border-color:var(--blue); color:#fff; }
     .room-layout { display:grid; grid-template-columns:minmax(280px,36%) minmax(0,1fr); min-height:480px; }
     .room-list { border-right:1px solid var(--line); max-height:650px; overflow:auto; }
-    .room-item { width:100%; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--text); padding:13px 15px; text-align:left; }
+    .room-row { display:flex; align-items:stretch; border-bottom:1px solid var(--line); }
+    .room-check { display:flex; align-items:center; padding:0 10px; background:transparent; flex:0 0 auto; }
+    .room-check input { width:18px; height:18px; accent-color:var(--accent); }
+    .room-item { width:100%; border:0; background:transparent; color:var(--text); padding:13px 15px; text-align:left; }
+    .room-row .room-item { flex:1; min-width:0; }
     .room-item:hover,.room-item.active { background:var(--surface2); }
     .room-item-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
     .room-item small { display:block; color:var(--muted); margin-top:5px; }
@@ -269,7 +273,7 @@
     const ADMIN_SURFACE = PAGES.ADMIN_SURFACE || 'line_report';
     const $ = (id) => document.getElementById(id);
     const state = { users: [], rooms: [], audit: [], summary: {}, selectedUser: null, selectedRoomId: null, roomTab: 'all', loading: false, busyDepth: 0,
-      templates: [], templateKey: '', templateScope: 'room', selectedMembers: new Set(), maxTargets: 100,
+      templates: [], templateKey: '', templateScope: 'room', templateRoomScope: 'current', selectedMembers: new Set(), selectedRoomIds: new Set(), maxTargets: 100,
       revertibleActions: [], templatePreview: null, revertPreview: null,
       accessData: null, accessQuery: '', accessKind: 'all', accessStatus: 'all' };
 
@@ -310,7 +314,7 @@
     function clearSensitiveState() {
       state.users = []; state.rooms = []; state.audit = []; state.summary = {};
       state.selectedUser = null; state.selectedRoomId = null;
-      state.templates = []; state.templateKey = ''; state.templateScope = 'room'; state.selectedMembers = new Set();
+      state.templates = []; state.templateKey = ''; state.templateScope = 'room'; state.templateRoomScope = 'current'; state.selectedMembers = new Set(); state.selectedRoomIds = new Set();
       state.templatePreview = null; state.revertPreview = null; state.revertibleActions = [];
       state.accessData = null; state.accessQuery = ''; state.accessKind = 'all'; state.accessStatus = 'all';
       document.querySelectorAll('dialog').forEach((dialog) => { if (dialog.open) dialog.close(); });
@@ -392,7 +396,11 @@
         state.selectedRoomId = rooms.length ? Number(rooms[0].id) : null;
         state.selectedMembers = new Set();
       }
-      $('roomRows').innerHTML = rooms.length ? rooms.map((room) => '<button class="room-item ' + (Number(room.id) === Number(state.selectedRoomId) ? 'active' : '') + '" type="button" data-room-id="' + room.id + '"><span class="room-item-head"><strong>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</strong><span class="badge ' + (room.trashed_at ? 'danger' : '') + '">' + (room.is_direct ? '1対1' : 'ルーム') + '</span></span><small>ID ' + room.id + ' ・ ' + Number(room.member_count || 0) + '人' + (room.trashed_at ? ' ・ ゴミ箱' : '') + '</small></button>').join('') : '<div class="empty">該当するルームはありません</div>';
+      $('roomRows').innerHTML = rooms.length ? rooms.map((room) => {
+        const id = Number(room.id);
+        const checked = state.selectedRoomIds.has(id);
+        return '<div class="room-row"><label class="room-check"><input type="checkbox" data-room-select="' + id + '"' + (checked ? ' checked' : '') + '></label><button class="room-item ' + (id === Number(state.selectedRoomId) ? 'active' : '') + '" type="button" data-room-id="' + id + '"><span class="room-item-head"><strong>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</strong><span class="badge ' + (room.trashed_at ? 'danger' : '') + '">' + (room.is_direct ? '1対1' : 'ルーム') + '</span></span><small>ID ' + id + ' ・ ' + Number(room.member_count || 0) + '人' + (room.trashed_at ? ' ・ ゴミ箱' : '') + '</small></button></div>';
+      }).join('') : '<div class="empty">該当するルームはありません</div>';
       renderRoomDetail();
     }
     function renderRoomDetail() {
@@ -529,21 +537,38 @@
         : '選んだテンプレートの4権限へ参加者を揃えます。Botと削除済みユーザーは対象外です。1対1では招待・管理を付与しません。';
       return '<div class="template-bar">' +
         '<label class="tb-field">権限テンプレート<select id="templateSelect"><option value="">選択してください</option>' + options + '</select></label>' +
-        '<label class="tb-field">対象<select id="templateScope"><option value="room"' + (state.templateScope === 'room' ? ' selected' : '') + '>このルームの全員</option><option value="selected"' + (state.templateScope === 'selected' ? ' selected' : '') + '>チェックしたメンバー</option></select></label>' +
+        '<label class="tb-field">対象ルーム<select id="templateRoomScope"><option value="current"' + (state.templateRoomScope === 'current' ? ' selected' : '') + '>このルームだけ</option><option value="checked"' + (state.templateRoomScope === 'checked' ? ' selected' : '') + '>チェックしたルーム（' + state.selectedRoomIds.size + '）</option></select></label>' +
+        '<label class="tb-field">対象メンバー<select id="templateScope"><option value="room"' + (state.templateScope === 'room' ? ' selected' : '') + '>対象ルームの全員</option><option value="selected"' + (state.templateScope === 'selected' ? ' selected' : '') + '>チェックしたメンバー</option></select></label>' +
         '<button class="btn" id="templatePreviewBtn" type="button">変更内容を確認</button>' +
         '<small>' + escapeHtml(hint) + '</small></div>';
     }
 
+    function selectedApplyGroupIds() {
+      if (state.templateRoomScope === 'checked') {
+        return Array.from(state.selectedRoomIds).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
+      }
+      const room = currentRoom();
+      const id = room ? Number(room.id) : 0;
+      return Number.isSafeInteger(id) && id > 0 ? [id] : [];
+    }
+
     async function previewTemplate() {
-      const room = currentRoom(); if (!room) return;
-      const select = $('templateSelect'); const scope = $('templateScope');
+      const room = currentRoom();
+      const select = $('templateSelect'); const scope = $('templateScope'); const roomScope = $('templateRoomScope');
       const key = String(select ? select.value : '').trim();
       if (!key) { toast('権限テンプレートを選択してください。', true); return; }
       state.templateKey = key;
       state.templateScope = scope ? scope.value : 'room';
+      state.templateRoomScope = roomScope ? roomScope.value : 'current';
+      const groupIds = selectedApplyGroupIds();
+      if (!groupIds.length) {
+        toast(state.templateRoomScope === 'checked' ? '対象のルームをチェックしてください。' : 'ルームを選択してください。', true);
+        return;
+      }
       const userIds = state.templateScope === 'selected' ? Array.from(state.selectedMembers) : [];
       if (state.templateScope === 'selected' && !userIds.length) { toast('対象のメンバーをチェックしてください。', true); return; }
-      const payload = {template_key:key, group_ids:[Number(room.id)], user_ids:userIds};
+      if (state.templateRoomScope === 'current' && !room) return;
+      const payload = {template_key:key, group_ids:groupIds, user_ids:userIds};
       setBusy(true);
       try {
         const body = await api('/chat-admin/templates/apply', {method:'POST', body:JSON.stringify(Object.assign({dry_run:true}, payload))});
@@ -689,12 +714,24 @@
     $('userSearch').addEventListener('input', renderUsers); $('userStatus').addEventListener('change', renderUsers); $('roomSearch').addEventListener('input', renderRooms);
     $('userRows').addEventListener('click', (event) => { const edit = event.target.closest('[data-edit-user]'); const toggle = event.target.closest('[data-toggle-access]'); const access = event.target.closest('[data-user-access]'); const removeBotBtn = event.target.closest('[data-remove-bot]'); const restoreBotBtn = event.target.closest('[data-restore-bot]'); if (edit) openUserDialog(edit.dataset.editUser); if (toggle) toggleUserAccess(toggle.dataset.toggleAccess).catch(() => {}); if (access) openAccessDialog(access.dataset.userAccess).catch((error) => toast(error.message || String(error), true)); if (removeBotBtn) removeBot(removeBotBtn.dataset.removeBot).catch(() => {}); if (restoreBotBtn) restoreBot(restoreBotBtn.dataset.restoreBot).catch(() => {}); });
     $('roomTabs').addEventListener('click', (event) => { const tab = event.target.closest('[data-room-tab]'); if (!tab) return; state.roomTab=tab.dataset.roomTab; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item===tab)); renderRooms(); });
-    $('roomRows').addEventListener('click', (event) => { const row=event.target.closest('[data-room-id]'); if (!row) return; state.selectedRoomId=Number(row.dataset.roomId); state.selectedMembers=new Set(); renderRooms(); });
+    $('roomRows').addEventListener('click', (event) => {
+      if (event.target.closest('[data-room-select]')) return;
+      const row=event.target.closest('[data-room-id]'); if (!row) return; state.selectedRoomId=Number(row.dataset.roomId); state.selectedMembers=new Set(); renderRooms();
+    });
+    $('roomRows').addEventListener('change', (event) => {
+      const input = event.target.closest('[data-room-select]');
+      if (!input) return;
+      const id = Number(input.dataset.roomSelect);
+      if (!Number.isSafeInteger(id) || id <= 0) return;
+      if (input.checked) state.selectedRoomIds.add(id); else state.selectedRoomIds.delete(id);
+      if ($('templateRoomScope')) renderRoomDetail();
+    });
     $('roomDetail').addEventListener('change', (event) => {
       if (event.target.matches('[data-member-permission]')) { updateMember(event.target).catch(() => {}); return; }
       if (event.target.matches('[data-member-select]')) { const id = event.target.dataset.memberSelect; if (event.target.checked) state.selectedMembers.add(id); else state.selectedMembers.delete(id); return; }
       if (event.target.id === 'templateSelect') { state.templateKey = event.target.value; renderRoomDetail(); return; }
       if (event.target.id === 'templateScope') { state.templateScope = event.target.value; }
+      if (event.target.id === 'templateRoomScope') { state.templateRoomScope = event.target.value; renderRoomDetail(); }
     });
     $('roomDetail').addEventListener('click', (event) => {
       const button=event.target.closest('[data-remove-member]'); if (button) { removeMember(button.dataset.removeMember).catch(() => {}); return; }

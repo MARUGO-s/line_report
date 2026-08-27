@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#4B0B1A">
+  <meta name="referrer" content="no-referrer">
+  <title>M-talk 使い方</title>
+  <link rel="icon" type="image/svg+xml" href="icons/chat-logo-v3.svg">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111111;
+      --card: #1c1c1e;
+      --line: #2c2c2e;
+      --text: #f2f2f2;
+      --muted: #8e8e93;
+      --accent: #06c755;
+      --link: #7dd3fc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Segoe UI", sans-serif; }
+    body { padding: 24px 16px 72px; line-height: 1.7; }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+    header img { width: 52px; height: 52px; border-radius: 14px; }
+    h1 { margin: 0; font-size: 26px; }
+    .lead { color: var(--muted); margin: 4px 0 0; font-size: 14px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0 28px; }
+    a.btn { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; border-radius: 10px; text-decoration: none; font-weight: 700; }
+    a.btn.primary { background: var(--accent); color: #042d15; }
+    a.btn.ghost { border: 1px solid var(--line); color: var(--text); }
+    nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 28px; }
+    nav a { color: var(--link); text-decoration: none; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 18px 8px; margin-bottom: 16px; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    h3 { margin: 16px 0 6px; font-size: 15px; }
+    p, li { font-size: 15px; }
+    ul { padding-left: 1.2em; }
+    .note { color: var(--muted); font-size: 13px; }
+    .warn { border-left: 3px solid #f59e0b; padding-left: 10px; }
+    code { font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="icons/chat-logo-v3.svg" width="52" height="52" alt="">
+      <div>
+        <h1>M-talk 使い方</h1>
+        <p class="lead">店舗スタッフ向け。操作の手順だけをまとめています。</p>
+      </div>
+    </header>
+    <div class="actions">
+      <a class="btn primary" href="./chat.html">M-talkを開く</a>
+      <a class="btn ghost" href="#toc">目次へ</a>
+    </div>
+    <nav id="toc">
+      <a href="#start">始める</a>
+      <a href="#send">送る</a>
+      <a href="#files">画像・ファイル</a>
+      <a href="#stickers">感情イラスト</a>
+      <a href="#actions">返信・既読</a>
+      <a href="#search">検索</a>
+      <a href="#notes">個人メモとKeep</a>
+      <a href="#schedule">予約配信・予定</a>
+      <a href="#notify">通知</a>
+      <a href="#rooms">ルーム操作</a>
+      <a href="#store">店舗ルーム</a>
+      <a href="#ai">AIの使い分け</a>
+      <a href="#help">困ったとき</a>
+    </nav>
+
+    <section id="start">
+      <h2>始める</h2>
+      <ul>
+        <li>メールアドレスとパスワードで登録・ログインします。初回だけ表示名とアイコンを決めます。</li>
+        <li>自分のアイコンは、左上の自分の画像 →「アイコンを変更」から変えられます。</li>
+        <li>iPhone／iPadで通知を使うときは、Safariの共有メニューから<strong>ホーム画面に追加</strong>し、ホーム画面のM-talkから開きます。</li>
+      </ul>
+      <p class="note">M-talkは社内チャットです。店舗のLINE公式アカウントとは別です。</p>
+    </section>
+
+    <section id="send">
+      <h2>メッセージを送る</h2>
+      <ul>
+        <li>PCは Enter で送信、Shift+Enter で改行します。</li>
+        <li>スマホは送信ボタンで送り、Enter は改行です。</li>
+        <li>自分のテキスト（と文章付きスタンプ）は「…」→「編集」で直せます。直す前の文章は取り消し線で残り、何を直したか分かります。履歴は消せません。通知は送り直しません。画像・ファイルは編集できません。</li>
+        <li>自分の発言は削除できます。他人の発言は削除できません。</li>
+        <li>「＋」→「通知せず送る」を選ぶと、そのメッセージだけ通知しません。受信側には 🔕 が付きます。</li>
+      </ul>
+    </section>
+
+    <section id="files">
+      <h2>画像・ファイル</h2>
+      <ul>
+        <li>入力欄左の「＋」→「画像・ファイル」から選びます。PCではドラッグ＆ドロップや画像の貼り付けもできます。</li>
+        <li>画像、PDF、Word、Excel、PowerPoint、テキスト、CSV、ZIP などを送れます。1ファイル 25MB までです。</li>
+        <li>画像はタップで拡大できます。PDF や Excel、Word はアプリ内で中身を見られます。</li>
+        <li>iPhone の HEIC 写真は、送るときに JPEG へ変換を試みます。</li>
+        <li>電子ジャーナル（.lzh）はトークに添付しません。店舗ルームに落とすと電子ジャーナルへ取り込まれます。</li>
+      </ul>
+    </section>
+
+    <section id="stickers">
+      <h2>感情イラスト</h2>
+      <ul>
+        <li>入力欄の ☺ から選びます。「感情」と「漫符・記号」を切り替えられます。</li>
+        <li>大きく単体で送るか、入力中の文章の中に入れるかを選べます。</li>
+      </ul>
+    </section>
+
+    <section id="actions">
+      <h2>返信・リアクション・メンション・既読</h2>
+      <ul>
+        <li>メッセージの「…」から、リアクション、返信、コピー、転送、自分の発言の削除ができます。</li>
+        <li>リアクションは1人1種類です。別の絵文字を選ぶと置き換わり、同じものを押すと取り消せます。</li>
+        <li>入力中に @ を入れると、そのルームの参加者を指名できます。</li>
+        <li>自分の発言には既読が出ます。1対1は「既読」、複数人は「既読 N」です。</li>
+      </ul>
+    </section>
+
+    <section id="search">
+      <h2>検索</h2>
+      <ul>
+        <li>トーク一覧上部の検索欄に 2文字以上入れると、参加中のトークとメッセージを探せます。</li>
+        <li>画面右上の検索アイコンは、投稿せずに「メッセージ検索」「予定・予約カレンダー」「写真・メディア」を開きます。</li>
+        <li>写真・メディアは、店舗Botがいるルームだけで使えます。</li>
+      </ul>
+    </section>
+
+    <section id="notes">
+      <h2>個人メモ・Keep・アルバム</h2>
+      <p class="warn">名前が似ていますが、保存先も見える人も違います。</p>
+      <h3>個人メモ</h3>
+      <p>「＋」→「個人メモ」。そのルームの自分のタイムラインにだけ残ります。他の人・Bot・通知には出ません。</p>
+      <h3>Keepメモ</h3>
+      <p>「＋」→「Keepメモ」。ルームをまたいで使える、自分だけの保存棚です。メッセージの「…」から Keep へ保存もできます。</p>
+      <h3>アルバム</h3>
+      <p>「＋」→「アルバム」。そのルームに投稿済みの画像を、参加者で共有して整理します。</p>
+      <h3>#メモ（別物）</h3>
+      <p>店舗ルームへ <code>#メモ</code> を付けて送ると、資料として登録されます。個人メモではありません。</p>
+    </section>
+
+    <section id="schedule">
+      <h2>予約配信と予定</h2>
+      <ul>
+        <li>「＋」→「予約配信」で、日時を指定して後から送れます。テキスト・感情イラスト・画像が対象です。</li>
+        <li>予約した本人だけが確認・取り消しできます。</li>
+        <li>「＋」→「予定を見る」で、予約表と予定カレンダーを開けます。追加や変更にはルームの管理権限が必要です。</li>
+      </ul>
+    </section>
+
+    <section id="notify">
+      <h2>通知</h2>
+      <ul>
+        <li>ベルのアイコンで通知をオンにします。</li>
+        <li>iPhone／iPad は、ホーム画面に追加したアプリ版だけで通知を受け取れます。</li>
+        <li>画面上部に「通知が切れたので、ここをタップして再開」と出たら、そのバーを1回押します。</li>
+        <li>届くか確認するときは「通知テスト」を使います。自分が送った通常メッセージは自分へ通知されません。</li>
+      </ul>
+    </section>
+
+    <section id="rooms">
+      <h2>ルームの操作</h2>
+      <ul>
+        <li>トーク一覧は「すべて／友だち／グループ／登録ユーザー／Bot／ゴミ箱」で切り替えます。</li>
+        <li>PCは右クリック、スマホは左右スワイプで、ピン留め・非通知・非表示・退出ができます。ピン留めは5件までです。</li>
+        <li>1対1は当事者2人だけです。第三者は追加できません。</li>
+        <li>複数人ルームは、招待権限がある人がメンバー追加や招待リンク発行ができます。</li>
+        <li>管理権限があれば、店舗固定以外のルームをゴミ箱へ移せます。完全削除は作成者だけが、ルーム名を再入力して実行できます。</li>
+        <li>参加した時点より前のメッセージは見えません。最初は最新50件で、上へスクロールすると過去を読み足します。</li>
+      </ul>
+    </section>
+
+    <section id="store">
+      <h2>店舗ルーム</h2>
+      <ul>
+        <li>店舗固定ルームは退出・削除できません。店舗Botのアイコン右下に bot マークが付きます。</li>
+        <li><code>#メモ</code>／<code>#日報</code>／<code>#note</code> を付けて送ると、資料として登録されます。</li>
+        <li>レシート画像を送ると売上が登録され、結果カードから修正や削除ができます。</li>
+        <li>閲覧専用のルームでは、入力欄に「このルームは閲覧専用です」と出ます。</li>
+      </ul>
+    </section>
+
+    <section id="ai">
+      <h2>店舗Botとの1対1で使えるAI</h2>
+      <p>自分以外の人がいない店舗Botトークでのみ使えます。</p>
+      <h3>雑談・使い方</h3>
+      <p>ふだんの入力欄から「画像はどう送る？」などと聞けます。店舗の正確な売上・客数には答えません。</p>
+      <h3>天気</h3>
+      <p>「今日の天気は？」と聞くと、その店舗のおおまかな地域の予報で答えます。</p>
+      <h3>Web検索</h3>
+      <p>ルーム設定で「AIのWeb検索」がオンのときだけ、調べ物にWebを使います。既定はオフです。使った回答の末尾に出典URLが付きます。料金がかかるため、使わないときはオフに戻してください。</p>
+      <h3>ジャーナルに聞く</h3>
+      <p>売上や客数など正確な数字は、入力欄の「＋」→「ジャーナルに聞く」から確認します。長い回答を「M-talkに貼る」と、複数メッセージに分けて全文が貼られます。</p>
+    </section>
+
+    <section id="help">
+      <h2>困ったとき</h2>
+      <ul>
+        <li>ログインできない → メールとパスワード、利用停止になっていないかを管理者へ確認します。</li>
+        <li>送れない／ルームが見えない → そのルームの閲覧・送信権限を確認します。</li>
+        <li>通知が来ない → ホーム画面版か、再開バー、通知テストを確認します。</li>
+        <li>画像が出ない → 画面を再読み込みします。</li>
+      </ul>
+      <p class="note">このページは使い方だけを書いています。内部の仕組みや管理画面の操作は載せていません。</p>
+    </section>
+  </div>
+</body>
+</html>

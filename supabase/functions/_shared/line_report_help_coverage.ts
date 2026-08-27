@@ -34,6 +34,7 @@ export const PUBLIC_CODE_HELP_CODES: Record<string, string[]> = {
   'public/media.html': ['OPS-02', 'OPS-04', 'DEV-01'],
   'public/menu-logout.js': ['SYS-02', 'DEV-01'],
   'public/message-search.html': ['OPS-02', 'DEV-01'],
+  'public/mtalk-help.html': ['OPS-01', 'OPS-02', 'JAI-02', 'DEV-01'],
   'public/mtalk_journal_ai.html': ['JAI-02', 'DEV-01'],
   'public/mtalk_schedule.html': ['RSV-01', 'DEV-01'],
   'public/pages-config.js': ['SYS-01', 'SYS-02', 'DEV-01'],

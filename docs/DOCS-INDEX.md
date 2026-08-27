@@ -37,6 +37,7 @@
 | [AI_CONTEXT.md](./AI_CONTEXT.md) | AI | `knowledge:update`で生成する短縮コンテキスト。作業開始時の情報源順位・必須フロー |
 | [LINE-REPORT-JOURNAL-AI-MANUAL.md](./LINE-REPORT-JOURNAL-AI-MANUAL.md) | 運用・AI・開発 | **1対1 AIの統合資料＋コード監査表** — 12区分・44項目・検索コード・実装根拠付き。公開／Edge／共有／補助・レガシー／APIルートの全対応表も自動生成 |
 | [M-TALK-COMPLETE-GUIDE.md](./M-TALK-COMPLETE-GUIDE.md) | 運用・開発・説明 | **M-talk統合版** — 概要／使い方／通知／権限／管理／セキュリティ／技術構成／トラブルシュートを1ファイルに。各領域の正本は CHAT-TALK-GUIDE・CHAT-ADMIN-PERMISSIONS・SECURITY |
+| `public/mtalk-help.html` | 店舗スタッフ | **使い方だけ**の共有ページ。テーブル名・管理API・内部構造は載せない。本番 `/mtalk-help.html` |
 | [CHAT-TALK-GUIDE.md](./CHAT-TALK-GUIDE.md) | 運用・開発 | **トーク（chat.html）** — 利用条件、発言種別（text/card/image）、予約通知の複製、画像の非公開バケット、検索、既読・リアクション・返信・メンション |
 | [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md) | 運用・開発 | **M-talk専用管理** — ユーザー利用停止・論理削除、1対1／ルーム別の閲覧・送信・招待・管理権限、管理API、監査 |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
