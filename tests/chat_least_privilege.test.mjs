@@ -10,6 +10,10 @@ const policyHelperFix = await readFile(
   new URL('../supabase/migrations/20260909020000_chat_keep_private_active_policy_helper.sql', import.meta.url),
   'utf8',
 );
+const internalHelperPrivileges = await readFile(
+  new URL('../supabase/migrations/20260909060000_revoke_authenticated_chat_internal_helpers.sql', import.meta.url),
+  'utf8',
+);
 
 test('anonymous visitors lose all direct chat table and sequence privileges', () => {
   assert.match(migration, /relname like 'chat\\_%' escape '\\'/i);
@@ -64,4 +68,41 @@ test('Keep and private-note policies use the authenticated-safe access wrapper',
     policyHelperFix,
     /chat_is_registered\(\).*auth\.uid\(\)/is,
   );
+});
+
+test('internal chat helpers cannot be called directly with a browser JWT', () => {
+  for (const signature of [
+    'chat_can_browse_users\\(\\)',
+    'chat_is_member\\(bigint\\)',
+    'chat_is_member_path\\(text\\)',
+    'chat_is_signup_manager\\(uuid\\)',
+    'chat_normalize_store_keys\\(text\\[\\]\\)',
+    'chat_shares_affiliation\\(uuid, uuid\\)',
+    'chat_store_display_names\\(text\\[\\]\\)',
+    'chat_user_can_join_group_by_store\\(bigint, uuid\\)',
+    'chat_user_store_keys\\(uuid\\)',
+  ]) {
+    assert.match(
+      internalHelperPrivileges,
+      new RegExp(`revoke execute on function public\\.${signature}\\s+from public, anon, authenticated`, 'i'),
+    );
+    assert.match(
+      internalHelperPrivileges,
+      new RegExp(`grant execute on function public\\.${signature}\\s+to postgres, service_role`, 'i'),
+    );
+  }
+});
+
+test('reviewed browser RPCs and RLS gates remain available to authenticated users', () => {
+  for (const signature of [
+    'chat_create_group',
+    'chat_open_direct',
+    'chat_can_view_group',
+    'chat_can_send_group',
+  ]) {
+    assert.doesNotMatch(
+      internalHelperPrivileges,
+      new RegExp(`revoke execute on function public\\.${signature}\\(`, 'i'),
+    );
+  }
 });

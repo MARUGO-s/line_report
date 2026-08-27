@@ -41,7 +41,10 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - 全27個のM-talk関連テーブルでRLS有効を確認。架空のauthenticated非メンバーJWTから、ルーム・メッセージ・メンバー・添付メタデータはいずれも0件だった。
 - `chat-images`は非公開。`chat-icons`だけはプロフィール・ルームアイコン表示用の公開バケットで、重要ファイルを置かない。
 - M-talk追加後に、匿名ロールへ残っていた`chat_*`の直接GRANT、トリガ専用関数3件のEXECUTE、停止ユーザーのKeep・個人メモ操作、`chat_store_bot_id`の可変`search_path`を検出した。`20260909010000_chat_least_privilege_cleanup.sql`で是正した。Keep・個人メモのRLSは、任意ユーザーを検査できるservice_role専用helperを直接呼ばず、`20260909020000_chat_keep_private_active_policy_helper.sql`で`auth.uid()`本人に固定されたauthenticated用wrapperへ接続する。
-- AdvisorにはM-talk外の既存警告も残るため、過去の全体監査値を現在値として扱わない。今回のmigration適用後は、上記4分類が消えたことを個別に再確認する。
+- Advisorのauthenticated向けSECURITY DEFINER 42件を用途で全件分類した。画面が直接使う20 RPCと、RLS・Storageが使う13自己スコープgateだけをauthenticatedに残し、内部helper 9件は`20260909060000_revoke_authenticated_chat_internal_helpers.sql`で`postgres / service_role`専用にした。残る33件はanon/public実行可0件、固定`search_path`漏れ0件。
+- `chat_can_see_admin_notice(group_id, user_id)`はRLSからauthenticated実行が必要だが、任意の`user_id`で管理者状態を推測できないよう、`20260909070000_self_scope_admin_notice_gate.sql`で本人またはservice-roleに固定した。管理者本人=true、他ユーザーからの照会=false、Push用service-role=trueを本番DBで確認した。
+- 本番DBで架空非メンバー、正規利用者、非参加ルーム、transaction内で一時停止した利用者を再検証した。非メンバーと非参加ルームは本文・所属・添付0件、停止時は本文・Keep・個人メモ・添付0件。停止操作は同一transactionでROLLBACKし、本番データを変更していない。
+- Advisorの`pg_trgm` public配置警告は既存の日本語検索indexと`public.gin_trgm_ops`互換を維持するため受容する。拡張移動はindex再構築を伴う別作業とし、警告だけを消す目的では実施しない。
 
 ### Supabase Advisor（DB リンタ）
 - 2026-06-14監査では `function_search_path_mutable` 26件と `auth_rls_initplan` 51件を0件まで是正した。

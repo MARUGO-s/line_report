@@ -8,7 +8,9 @@
 - `20260909030000_revoke_authenticated_internal_rpcs.sql`で、M-talk JWTからチャット外のAI使用量・予約再集計・cron／trigger内部関数へ到達する経路を閉じ、service_role/postgresだけを残す。
 - `20260909040000_lock_public_write_policies.sql`で、無条件ALLだった週次経営レポートと試合結果のRLSを修正する。週次経営レポートは内部専用、試合結果は公開SELECTのみで、書込みはservice_role専用。
 - `20260909050000_harden_security_advisor_boundaries.sql`で、公開SELECT可能だった`foodcourt_daily_features`をsecurity_invoker＋service_role専用へ変更し、予約番号抽出・PV cron関数の`search_path`とEXECUTEも内部ロールへ限定する。
-- 静的テストが実装全体を読めるよう`tests/helpers/chat-page-source.mjs`を追加。`npm run test:chat`はDeno 57/57・Node 129/129。
+- `20260909060000_revoke_authenticated_chat_internal_helpers.sql`で、画面・RLSから直接使わない内部helper 9件をauthenticatedから剥がした。`20260909070000_self_scope_admin_notice_gate.sql`で、管理者通知の可視性判定を本人またはservice-roleへ固定した。
+- 本番Advisorのauthenticated向けSECURITY DEFINERは42件から33件。残りは画面用20 RPC＋RLS/Storage用13 gateに全件分類済みで、anon/public実行可0件・固定`search_path`漏れ0件。架空非メンバー、別ルーム、transaction内停止ユーザー、管理者なりすましをDBで再検証済み。
+- 静的テストが実装全体を読めるよう`tests/helpers/chat-page-source.mjs`を追加。`npm run test:chat`はDeno 57/57・Node 132/132（最終権限監査テストを含む）。
 
 ## Project
 

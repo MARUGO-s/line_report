@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-08-27 - M-talk内部helperのData API公開を最小化
+
+- Audit: Supabase Advisorのauthenticated向けSECURITY DEFINER 42件を、画面が直接使う20 RPC、RLS・Storageが使う13自己スコープgate、内部helper 9件へ分類した。
+- Least privilege: `20260909060000_revoke_authenticated_chat_internal_helpers.sql`で、所属店舗・管理者状態等を補助的に判定する9件を`public / anon / authenticated`から剥がし、`postgres / service_role`だけにした。Advisor該当件数は42件から33件へ減少。
+- Impersonation guard: `20260909070000_self_scope_admin_notice_gate.sql`で、authenticated利用者が`chat_can_see_admin_notice`へ別ユーザーIDを渡して管理者状態を推測できないよう、本人またはservice-roleだけに固定した。
+- Production proof: 架空authenticatedはルーム・本文・所属・`chat-images`が全て0件。実在利用者は正規ルームと未読RPCを利用可能。非参加ルームの本文・添付は0件。利用停止をtransaction内で再現するとルーム・本文・Keep・個人メモ・添付が全て0件になり、ROLLBACK後に停止ユーザー0件へ復帰した。
+- Advisor allowlist: 残る33件は20 browser RPC＋13 policy gateだけ。anon/public実行可0件、固定`search_path`漏れ0件。`pg_trgm`のpublic配置警告は既存の日本語検索index/operator class互換を維持するため移動しない。
+- Test: `npm run test:chat` Deno 57/57・Node 132/132。内部helperのREVOKEと管理者通知gateの本人/service-role境界を回帰テストへ追加した。
+
 ### 2026-08-27 - chat.htmlの責務別分割とM-talk最小権限化
 
 - Request: 約10,600行の`chat.html`を段階的なツリーへ分け、一般ユーザーと管理者の境界を再監査する。
