@@ -138,6 +138,18 @@
     .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; margin:0 0 14px; font-size:13px; }
     .kv dt { color:var(--muted); }
     .kv dd { margin:0; }
+    .scope-banner { margin-bottom:14px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .scope-banner strong { display:block; margin-bottom:4px; }
+    .scope-banner small { color:var(--muted); line-height:1.5; }
+    .delegate-form { display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:12px; padding:18px; border-bottom:1px solid var(--line); }
+    .delegate-form .field { margin:0; }
+    .delegate-wide { grid-column:1/-1; }
+    .delegate-targets,.delegate-capabilities { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; max-height:220px; overflow:auto; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--surface2); }
+    .delegate-targets label,.delegate-capabilities label { display:flex; align-items:flex-start; gap:8px; color:var(--text); font-size:12px; line-height:1.4; }
+    .delegate-targets input,.delegate-capabilities input { width:17px; height:17px; flex:0 0 auto; accent-color:var(--accent); }
+    .delegate-list { display:grid; gap:0; }
+    .delegate-row { display:grid; grid-template-columns:minmax(170px,1.2fr) minmax(150px,1fr) minmax(220px,1.5fr) auto; gap:12px; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); font-size:12px; }
+    .delegate-row small { color:var(--muted); display:block; margin-top:4px; }
     .toast { position:fixed; right:18px; bottom:18px; z-index:100; max-width:min(420px,calc(100% - 36px)); padding:12px 15px; border-radius:11px; color:#fff; background:#263547; box-shadow:var(--shadow); }
     .toast.error { background:#9d2d2d; }
     @media (max-width:1120px) { .summary { grid-template-columns:repeat(3,1fr); } .app { grid-template-columns:205px minmax(0,1fr); } }
@@ -164,6 +176,10 @@
       .tb-field { min-width:0; }
       .template-bar small { flex:0 0 auto; }
       .switches { grid-template-columns:1fr; }
+      .scope-banner { display:block; }
+      .delegate-form { grid-template-columns:1fr; }
+      .delegate-wide { grid-column:auto; }
+      .delegate-row { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -176,8 +192,9 @@
         <button type="button" data-jump="users">ユーザー</button>
         <button type="button" data-jump="rooms">ルーム</button>
         <button type="button" data-jump="audit">監査ログ</button>
+        <button class="hidden" id="delegationNav" type="button" data-jump="delegations">委任管理者</button>
         <a href="./chat.html">M-talkを開く</a>
-        <a href="./index.html">管理画面へ戻る</a>
+        <a id="hqDashboardLink" href="./index.html">管理画面へ戻る</a>
       </nav>
       <div class="side-foot">
         <button class="btn" id="themeToggleBtn" type="button">ライトモード</button>
@@ -192,17 +209,18 @@
 
       <section class="login-wrap" id="loginView">
         <form class="login-card" id="loginForm">
-          <h2>本部管理者として接続</h2>
-          <p>ここは M-talk の利用者画面ではありません。本部フル管理セッションだけが使えます。店舗・ルーム限定セッションでは開けません。</p>
+          <h2>M-talk管理者として接続</h2>
+          <p>ここは M-talk の利用者画面ではありません。本部管理トークン、保存済みのM-talk管理セッション、または本部から発行された専用ログインリンクを使用します。</p>
           <div class="notice hidden" id="loginError"></div>
-          <button class="btn primary hidden" id="resumeAdminBtn" type="button" style="width:100%;margin-bottom:14px">保存済みの本部セッションで接続</button>
-          <label class="field">管理トークン<input id="tokenInput" type="password" autocomplete="current-password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション"></label>
+          <button class="btn primary hidden" id="resumeAdminBtn" type="button" style="width:100%;margin-bottom:14px">保存済みのM-talk管理セッションで接続</button>
+          <label class="field">管理トークン<input id="tokenInput" type="password" autocomplete="current-password" placeholder="本部管理トークン または lrst_ セッション"></label>
           <button class="btn primary" id="loginBtn" type="submit" style="width:100%">接続する</button>
         </form>
       </section>
 
       <div class="hidden" id="dashboardView">
         <section id="overview">
+          <div class="notice scope-banner" id="authorityNotice"></div>
           <div class="summary" id="summaryGrid"></div>
           <div class="notice">M-talkの利用停止・削除はチャット履歴や認証アカウントを消しません。削除は論理削除として扱い、必要なら復元できます。</div>
         </section>
@@ -220,6 +238,19 @@
         <section class="panel" id="audit">
           <div class="panel-head"><div><h2>監査ログ</h2><p>M-talk専用権限の変更履歴（最新200件）</p></div></div>
           <div class="audit-list" id="auditRows"></div>
+        </section>
+
+        <section class="panel hidden" id="delegations">
+          <div class="panel-head"><div><h2>M-talk委任管理者</h2><p>通常の売上・予約・資料管理権限を渡さず、M-talk内の対象と操作だけを許可します。</p></div></div>
+          <form class="delegate-form" id="delegationForm">
+            <label class="field">管理者名<input id="delegationLabel" maxlength="80" required placeholder="例：CAVACAVA 店長"></label>
+            <label class="field">管理範囲<select id="delegationScope"><option value="stores">選択店舗</option><option value="rooms">選択ルーム</option><option value="all">M-talk全体</option></select></label>
+            <label class="field">有効期限<input id="delegationExpires" type="datetime-local" required></label>
+            <div class="delegate-wide"><strong>対象</strong><div class="delegate-targets" id="delegationTargets"></div></div>
+            <div class="delegate-wide"><strong>許可する操作</strong><div class="delegate-capabilities" id="delegationCapabilities"></div></div>
+            <div class="delegate-wide row-actions"><button class="btn hidden" id="delegationCancelBtn" type="button">編集をやめる</button><button class="btn primary" id="delegationSaveBtn" type="submit">作成してログインリンクを発行</button></div>
+          </form>
+          <div class="delegate-list" id="delegationRows"></div>
         </section>
       </div>
     </main>
@@ -276,7 +307,16 @@
     const state = { users: [], rooms: [], audit: [], summary: {}, selectedUser: null, selectedRoomId: null, roomTab: 'all', loading: false, busyDepth: 0,
       templates: [], templateKey: '', templateScope: 'room', templateRoomScope: 'current', selectedMembers: new Set(), selectedRoomIds: new Set(), maxTargets: 100,
       revertibleActions: [], templatePreview: null, revertPreview: null,
-      accessData: null, accessQuery: '', accessKind: 'all', accessStatus: 'all' };
+      accessData: null, accessQuery: '', accessKind: 'all', accessStatus: 'all',
+      authority: {is_full_admin:false,label:'',scope_mode:'rooms',store_keys:[],room_ids:[],capabilities:[]}, storeCatalog: [], delegations: [], editingDelegationId: null };
+
+    const CAPABILITY_LABELS = {
+      view:'対象のユーザー・ルームを閲覧', audit_read:'監査ログを閲覧', manage_members:'ルーム内メンバー権限を変更',
+      manage_rooms:'ルームのゴミ箱・復元（完全削除は本部のみ）', manage_bots:'対象店舗のBotを停止・復元',
+      manage_templates:'権限テンプレートを一括適用', manage_users:'M-talk全体のユーザー停止・削除', revert_audit:'監査ログから変更を復元'
+    };
+    function can(capability) { return !!(state.authority && Array.isArray(state.authority.capabilities) && state.authority.capabilities.includes(capability)); }
+    function isHeadquarters() { return state.authority && state.authority.is_full_admin === true; }
 
     function token() { return AUTH ? AUTH.getToken() : ''; }
     function apiUrl(path) { return PAGES.adminApiUrl(path, PROJECT_URL); }
@@ -306,7 +346,7 @@
       let body = {};
       try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) showLogin();
+        if (response.status === 401) showLogin();
         const error = new Error(body.error || ('API error: ' + response.status)); error.status = response.status; throw error;
       }
       return body;
@@ -318,11 +358,13 @@
       state.templates = []; state.templateKey = ''; state.templateScope = 'room'; state.templateRoomScope = 'current'; state.selectedMembers = new Set(); state.selectedRoomIds = new Set();
       state.templatePreview = null; state.revertPreview = null; state.revertibleActions = [];
       state.accessData = null; state.accessQuery = ''; state.accessKind = 'all'; state.accessStatus = 'all';
+      state.authority = {is_full_admin:false,label:'',scope_mode:'rooms',store_keys:[],room_ids:[],capabilities:[]}; state.storeCatalog = []; state.delegations = []; state.editingDelegationId = null;
       document.querySelectorAll('dialog').forEach((dialog) => { if (dialog.open) dialog.close(); });
       $('summaryGrid').replaceChildren(); $('userRows').replaceChildren(); $('roomRows').replaceChildren(); $('auditRows').replaceChildren();
       $('roomDetail').innerHTML = '<div class="empty">左からルームを選択してください</div>';
       $('dialogPerson').replaceChildren(); $('tokenInput').value = '';
       $('templatePreview').replaceChildren(); $('accessBody').replaceChildren(); $('revertBody').replaceChildren(); $('templateNote').textContent = '';
+      $('authorityNotice').replaceChildren(); $('delegationRows').replaceChildren(); $('delegationTargets').replaceChildren(); $('delegationCapabilities').replaceChildren();
       $('userSearch').value = ''; $('roomSearch').value = ''; $('userStatus').value = 'all';
     }
 
@@ -331,7 +373,10 @@
       $('loginView').classList.remove('hidden'); $('dashboardView').classList.add('hidden'); $('refreshBtn').classList.add('hidden'); $('logoutBtn').classList.add('hidden');
       $('loginError').textContent = message || ''; $('loginError').classList.toggle('hidden', !message);
     }
-    function showDashboard() { $('loginView').classList.add('hidden'); $('dashboardView').classList.remove('hidden'); $('refreshBtn').classList.remove('hidden'); $('logoutBtn').classList.remove('hidden'); }
+    function showDashboard() {
+      $('loginView').classList.add('hidden'); $('dashboardView').classList.remove('hidden'); $('refreshBtn').classList.remove('hidden'); $('logoutBtn').classList.remove('hidden');
+      $('delegations').classList.toggle('hidden', !isHeadquarters()); $('delegationNav').classList.toggle('hidden', !isHeadquarters()); $('hqDashboardLink').classList.toggle('hidden', !isHeadquarters());
+    }
 
     async function loadState() {
       setBusy(true);
@@ -341,17 +386,30 @@
         state.rooms = Array.isArray(body.rooms) ? body.rooms : [];
         state.audit = Array.isArray(body.audit_logs) ? body.audit_logs : [];
         state.summary = body.summary || {};
+        state.authority = body.admin_authority || state.authority;
+        state.storeCatalog = Array.isArray(body.store_catalog) ? body.store_catalog : [];
         state.revertibleActions = Array.isArray(body.revertible_actions) ? body.revertible_actions : [];
         if (state.selectedRoomId && !state.rooms.some((room) => Number(room.id) === Number(state.selectedRoomId))) state.selectedRoomId = null;
-        if (!state.templates.length) {
+        if (can('manage_templates') && !state.templates.length) {
           try {
             const catalog = await api('/chat-admin/templates');
             state.templates = Array.isArray(catalog.templates) ? catalog.templates : [];
             state.maxTargets = Number(catalog.max_targets) || state.maxTargets;
           } catch (_) { state.templates = []; }
-        }
+        } else if (!can('manage_templates')) state.templates = [];
+        if (isHeadquarters()) await loadDelegations(); else state.delegations = [];
         renderAll(); showDashboard();
       } finally { setBusy(false); }
+    }
+
+    function renderAuthority() {
+      const auth = state.authority || {};
+      const scope = auth.scope_mode === 'all' ? 'M-talk全体' : auth.scope_mode === 'stores' ? '選択店舗' : '選択ルーム';
+      const targets = auth.scope_mode === 'stores'
+        ? (Array.isArray(auth.store_keys) ? auth.store_keys.join('、') : '')
+        : auth.scope_mode === 'rooms' ? ((Array.isArray(auth.room_ids) ? auth.room_ids : []).map((id) => { const room=state.rooms.find((item)=>Number(item.id)===Number(id)); return room ? (room.group_name || ('ID '+id)) : ('ID '+id); }).join('、')) : 'すべて';
+      const capabilities = (Array.isArray(auth.capabilities) ? auth.capabilities : []).map((item) => CAPABILITY_LABELS[item] || item).join(' ／ ');
+      $('authorityNotice').innerHTML = '<div><strong>' + escapeHtml(auth.label || (auth.is_full_admin ? '本部管理者' : 'M-talk委任管理者')) + '</strong><small>範囲: ' + escapeHtml(scope + (targets ? '（' + targets + '）' : '')) + '<br>操作: ' + escapeHtml(capabilities || '閲覧のみ') + '</small></div>' + (auth.is_full_admin ? '<span class="badge ok">本部フル管理</span>' : '<span class="badge warn">M-talk専用</span>');
     }
 
     function renderSummary() {
@@ -368,8 +426,8 @@
       $('userRows').innerHTML = users.length ? users.map((user) => {
         const access = user.access || {}; const locked = user.is_bot === true; const deleted = !!access.deleted_at; const botDeleted = locked && !!user.bot_deleted_at;
         const actions = locked
-          ? '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button>' + (botDeleted ? '<button class="btn" type="button" data-restore-bot="' + escapeHtml(user.id) + '">Bot復元</button>' : '<button class="btn ghost-danger" type="button" data-remove-bot="' + escapeHtml(user.id) + '">Bot削除</button>')
-          : '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button><button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '">' + (deleted ? '復元' : '権限設定') + '</button>' + (!deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '');
+          ? '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button>' + (can('manage_bots') ? (botDeleted ? '<button class="btn" type="button" data-restore-bot="' + escapeHtml(user.id) + '">Bot復元</button>' : '<button class="btn ghost-danger" type="button" data-remove-bot="' + escapeHtml(user.id) + '">Bot削除</button>') : '')
+          : '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button>' + (can('manage_users') ? '<button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '">' + (deleted ? '復元' : '権限設定') + '</button>' + (!deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '') : '');
         return '<tr><td><div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (locked ? ' <span class="badge">Bot</span>' : '') + '</strong><small>' + escapeHtml(user.id) + '</small></div></div></td>' +
           '<td>' + statusBadge(user) + (access.restriction_reason ? '<small style="display:block;margin-top:4px;color:var(--muted)">' + escapeHtml(access.restriction_reason) + '</small>' : '') + '</td>' +
           '<td>' + Number(user.room_count || 0) + '</td><td>' + boolBadge(access.can_start_direct) + '</td><td>' + boolBadge(access.can_create_group) + '</td><td>' + boolBadge(access.can_browse_users) + '</td>' +
@@ -400,7 +458,8 @@
       $('roomRows').innerHTML = rooms.length ? rooms.map((room) => {
         const id = Number(room.id);
         const checked = state.selectedRoomIds.has(id);
-        return '<div class="room-row"><label class="room-check"><input type="checkbox" data-room-select="' + id + '"' + (checked ? ' checked' : '') + '></label><button class="room-item ' + (id === Number(state.selectedRoomId) ? 'active' : '') + '" type="button" data-room-id="' + id + '"><span class="room-item-head"><strong>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</strong><span class="badge ' + (room.trashed_at ? 'danger' : '') + '">' + (room.is_direct ? '1対1' : 'ルーム') + '</span></span><small>ID ' + id + ' ・ ' + Number(room.member_count || 0) + '人' + (room.trashed_at ? ' ・ ゴミ箱' : '') + '</small></button></div>';
+        const selector = can('manage_templates') ? '<label class="room-check"><input type="checkbox" data-room-select="' + id + '"' + (checked ? ' checked' : '') + '></label>' : '';
+        return '<div class="room-row">' + selector + '<button class="room-item ' + (id === Number(state.selectedRoomId) ? 'active' : '') + '" type="button" data-room-id="' + id + '"><span class="room-item-head"><strong>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : '名称なし')) + '</strong><span class="badge ' + (room.trashed_at ? 'danger' : '') + '">' + (room.is_direct ? '1対1' : 'ルーム') + '</span></span><small>ID ' + id + ' ・ ' + Number(room.member_count || 0) + '人' + (room.trashed_at ? ' ・ ゴミ箱' : '') + '</small></button></div>';
       }).join('') : '<div class="empty">該当するルームはありません</div>';
       renderRoomDetail();
     }
@@ -409,18 +468,20 @@
       if (!room) { $('roomDetail').innerHTML = '<div class="empty">左からルームを選択してください</div>'; return; }
       const members = Array.isArray(room.members) ? room.members : [];
       const rows = members.length ? members.map((member) => {
-        const locked = member.is_bot === true || !!room.trashed_at; const user = {username:member.username,icon_url:member.icon_url};
+        const locked = member.is_bot === true || !!room.trashed_at || !can('manage_members'); const user = {username:member.username,icon_url:member.icon_url};
         return '<div class="member-row" data-member-id="' + escapeHtml(member.user_id) + '"><label class="member-cell center"><input type="checkbox" data-member-select="' + escapeHtml(member.user_id) + '"' + (state.selectedMembers.has(member.user_id) ? ' checked' : '') + (locked ? ' disabled' : '') + '></label><div class="member-cell"><div class="member-name">' + avatarHtml(user) + '<div><strong>' + escapeHtml(member.username || '不明なユーザー') + '</strong>' + (locked ? '<span class="badge">Bot</span>' : '') + (member.user_deleted_at ? '<span class="badge danger">削除済み</span>' : '') + '</div></div></div>' +
           memberPermission('can_view',member,locked,room.is_direct) + memberPermission('can_send',member,locked,room.is_direct) + memberPermission('can_invite',member,locked,room.is_direct) + memberPermission('can_manage',member,locked,room.is_direct) +
           '<div class="member-cell center"><button class="btn ghost-danger" type="button" data-remove-member="' + escapeHtml(member.user_id) + '" ' + (locked || room.is_direct ? 'disabled title="1対1とBotはアクセス解除できません"' : '') + '>解除</button></div></div>';
       }).join('') : '<div class="empty" style="grid-column:1/-1">メンバーはいません</div>';
       const roomName = room.group_name || (room.is_direct ? '1対1トーク' : '名称なし');
-      const roomActions = room.is_store_room
+      const roomActions = !can('manage_rooms')
+        ? '<span class="badge">ルーム操作は閲覧のみ</span>'
+        : room.is_store_room
         ? '<span class="badge">店舗固定ルームは削除不可</span>'
         : (room.trashed_at
-          ? '<button class="btn" type="button" data-restore-room="' + Number(room.id) + '">復元</button><button class="btn ghost-danger" type="button" data-purge-room="' + Number(room.id) + '">完全削除</button>'
+          ? '<button class="btn" type="button" data-restore-room="' + Number(room.id) + '">復元</button>' + (isHeadquarters() ? '<button class="btn ghost-danger" type="button" data-purge-room="' + Number(room.id) + '">完全削除</button>' : '<span class="badge">完全削除は本部のみ</span>')
           : '<button class="btn ghost-danger" type="button" data-trash-room="' + Number(room.id) + '">ゴミ箱へ</button>');
-      $('roomDetail').innerHTML = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><h3>' + escapeHtml(roomName) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + Number(room.id) + ' / ' + members.length + '人' + (room.trashed_at ? ' / ゴミ箱' : '') + '</p></div><div class="row-actions">' + roomActions + '</div></div>' + (room.trashed_at ? '<div class="notice" style="margin:12px 0">ゴミ箱のルームには送信・参加できません。復元するか、ルーム名を確認入力して完全削除できます。</div>' : '') + templateBarHtml(room) + '<div class="table-wrap"><div class="perm-grid"><div class="perm-head"></div><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
+      $('roomDetail').innerHTML = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><h3>' + escapeHtml(roomName) + '</h3><p>' + (room.is_direct ? '1対1' : 'ルーム') + ' / ID ' + Number(room.id) + ' / ' + members.length + '人' + (room.trashed_at ? ' / ゴミ箱' : '') + '</p></div><div class="row-actions">' + roomActions + '</div></div>' + (room.trashed_at ? '<div class="notice" style="margin:12px 0">ゴミ箱のルームには送信・参加できません。復元できます。完全削除は本部管理者だけが実行できます。</div>' : '') + templateBarHtml(room) + '<div class="table-wrap"><div class="perm-grid"><div class="perm-head"></div><div class="perm-head" style="text-align:left">メンバー</div><div class="perm-head">閲覧</div><div class="perm-head">送信</div><div class="perm-head">招待</div><div class="perm-head">管理</div><div class="perm-head">解除</div>' + rows + '</div></div>';
     }
     function memberPermission(name,member,locked,isDirect) { const unavailable = locked || (isDirect && (name === 'can_invite' || name === 'can_manage')) || (name !== 'can_view' && member.can_view !== true); return '<label class="member-cell center" title="' + name + '"><input type="checkbox" data-member-permission="' + name + '" ' + (member[name] === true ? 'checked' : '') + (unavailable ? ' disabled' : '') + '></label>'; }
 
@@ -435,9 +496,164 @@
         return '<div class="audit"><span>' + formatDate(item.created_at) + '</span><span>' + escapeHtml(item.actor || 'system') + '</span><strong>' + escapeHtml(actionLabel(item.action)) + '</strong><span class="audit-diff" title="' + escapeHtml(diff) + '">' + escapeHtml(diff) + '</span><span class="audit-action">' + revertCell + '</span></div>';
       }).join('') : '<div class="empty">監査ログはありません</div>';
     }
-    function renderAll() { renderSummary(); renderUsers(); renderRooms(); renderAudit(); }
+    function renderAll() { renderAuthority(); renderSummary(); renderUsers(); renderRooms(); renderAudit(); renderDelegations(); }
+
+    async function loadDelegations() {
+      if (!isHeadquarters()) { state.delegations = []; return; }
+      const body = await api('/chat-admin/delegations?_ts=' + Date.now());
+      state.delegations = Array.isArray(body.delegations) ? body.delegations : [];
+    }
+
+    function defaultDelegationExpiry() {
+      const date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0,16);
+    }
+
+    function selectedDelegationCapabilities() {
+      return Array.from(document.querySelectorAll('[data-delegation-capability]:checked')).map((input) => input.value);
+    }
+
+    function renderDelegationCapabilities(selected) {
+      const chosen = new Set(Array.isArray(selected) ? selected : ['view']);
+      chosen.add('view');
+      const allScope = $('delegationScope').value === 'all';
+      const roomScope = $('delegationScope').value === 'rooms';
+      $('delegationCapabilities').innerHTML = Object.keys(CAPABILITY_LABELS).map((key) => {
+        const outsideScope = (key === 'manage_users' && !allScope) || (key === 'manage_bots' && roomScope);
+        const disabled = key === 'view' || outsideScope;
+        const checked = chosen.has(key) && !outsideScope;
+        return '<label><input type="checkbox" value="' + escapeHtml(key) + '" data-delegation-capability' + (checked ? ' checked' : '') + (disabled ? ' disabled' : '') + '><span><strong>' + escapeHtml(CAPABILITY_LABELS[key]) + '</strong></span></label>';
+      }).join('');
+    }
+
+    function renderDelegationTargets(selectedStores, selectedRooms) {
+      const scope = $('delegationScope').value;
+      const stores = new Set(Array.isArray(selectedStores) ? selectedStores : Array.from(document.querySelectorAll('[data-delegation-store]:checked')).map((input) => input.value));
+      const rooms = new Set(Array.isArray(selectedRooms) ? selectedRooms.map(Number) : Array.from(document.querySelectorAll('[data-delegation-room]:checked')).map((input) => Number(input.value)));
+      if (scope === 'all') {
+        $('delegationTargets').innerHTML = '<span class="badge warn">M-talk内の全ユーザー・全ルームが対象です</span>';
+      } else if (scope === 'stores') {
+        $('delegationTargets').innerHTML = state.storeCatalog.length ? state.storeCatalog.map((store) => '<label><input type="checkbox" value="' + escapeHtml(store.store_key) + '" data-delegation-store' + (stores.has(String(store.store_key)) ? ' checked' : '') + '><span>' + escapeHtml(store.display_name || store.store_key) + '<small>' + escapeHtml(store.store_key) + '</small></span></label>').join('') : '<span class="empty">店舗がありません</span>';
+      } else {
+        $('delegationTargets').innerHTML = state.rooms.length ? state.rooms.map((room) => '<label><input type="checkbox" value="' + Number(room.id) + '" data-delegation-room' + (rooms.has(Number(room.id)) ? ' checked' : '') + '><span>' + escapeHtml(room.group_name || (room.is_direct ? '1対1トーク' : ('ID '+room.id))) + '<small>ID ' + Number(room.id) + (room.store_key ? ' / ' + escapeHtml(room.store_key) : '') + '</small></span></label>').join('') : '<span class="empty">ルームがありません</span>';
+      }
+      renderDelegationCapabilities(selectedDelegationCapabilities());
+    }
+
+    function resetDelegationForm() {
+      state.editingDelegationId = null;
+      $('delegationForm').reset();
+      $('delegationScope').value = 'stores';
+      $('delegationExpires').value = defaultDelegationExpiry();
+      $('delegationSaveBtn').textContent = '作成してログインリンクを発行';
+      $('delegationCancelBtn').classList.add('hidden');
+      renderDelegationTargets([], []);
+      renderDelegationCapabilities(['view']);
+    }
+
+    function delegationScopeText(item) {
+      if (item.scope_mode === 'all') return 'M-talk全体';
+      if (item.scope_mode === 'stores') return '店舗: ' + (Array.isArray(item.store_keys) ? item.store_keys.join('、') : '');
+      const names = (Array.isArray(item.room_ids) ? item.room_ids : []).map((id) => { const room=state.rooms.find((entry)=>Number(entry.id)===Number(id)); return room ? (room.group_name || ('ID '+id)) : ('ID '+id); });
+      return 'ルーム: ' + names.join('、');
+    }
+
+    function renderDelegations() {
+      if (!isHeadquarters()) return;
+      if (!$('delegationCapabilities').children.length) resetDelegationForm();
+      $('delegationRows').innerHTML = state.delegations.length ? state.delegations.map((item) => {
+        const expired = !!(item.expires_at && new Date(item.expires_at).getTime() <= Date.now());
+        const active = item.enabled === true && !expired;
+        const caps = (Array.isArray(item.capabilities) ? item.capabilities : []).map((key) => CAPABILITY_LABELS[key] || key).join('、');
+        const statusBadgeHtml = active ? '<span class="badge ok">有効</span>' : expired ? '<span class="badge danger">期限切れ</span>' : '<span class="badge danger">停止</span>';
+        return '<div class="delegate-row" data-delegation-id="' + escapeHtml(item.id) + '"><div><strong>' + escapeHtml(item.label) + '</strong><small>' + statusBadgeHtml + ' / 期限 ' + escapeHtml(formatDate(item.expires_at)) + '</small></div><div>' + escapeHtml(delegationScopeText(item)) + '</div><div>' + escapeHtml(caps) + '</div><div class="row-actions"><button class="btn" type="button" data-edit-delegation>編集</button><button class="btn" type="button" data-link-delegation' + (!active ? ' disabled' : '') + '>リンク発行</button><button class="btn ' + (active ? 'ghost-danger' : '') + '" type="button" data-toggle-delegation' + (expired ? ' disabled title="期限を延長してから再開してください"' : '') + '>' + (active ? '即時停止' : '再開') + '</button></div></div>';
+      }).join('') : '<div class="empty">委任管理者はまだいません</div>';
+    }
+
+    function delegationPayload() {
+      const scope = $('delegationScope').value;
+      const capabilities = selectedDelegationCapabilities();
+      if (capabilities.includes('manage_templates') && !capabilities.includes('manage_members')) capabilities.push('manage_members');
+      if (capabilities.includes('revert_audit') && !capabilities.includes('audit_read')) capabilities.push('audit_read');
+      return {
+        label: $('delegationLabel').value.trim(),
+        scope_mode: scope,
+        store_keys: scope === 'stores' ? Array.from(document.querySelectorAll('[data-delegation-store]:checked')).map((input) => input.value) : [],
+        room_ids: scope === 'rooms' ? Array.from(document.querySelectorAll('[data-delegation-room]:checked')).map((input) => Number(input.value)) : [],
+        capabilities: capabilities,
+        expires_at: $('delegationExpires').value ? new Date($('delegationExpires').value).toISOString() : ''
+      };
+    }
+
+    function buildDelegationLoginUrl(body) {
+      const url = new URL('./chat-admin.html', location.href);
+      url.search = '';
+      url.searchParams.set('lt', body.login_token);
+      url.searchParams.set('scope_kind', 'mtalk_admin');
+      url.searchParams.set('delegation_id', body.delegation_id);
+      return url.toString();
+    }
+
+    async function presentDelegationLink(body) {
+      const link = buildDelegationLoginUrl(body);
+      try {
+        await navigator.clipboard.writeText(link);
+        alert('M-talk専用ログインリンクをコピーしました。\nリンク自体は24時間・1回限り有効です。ログイン後のセッションも期限付きです。');
+      } catch (_) {
+        prompt('このM-talk専用ログインリンクを安全な方法で本人へ渡してください。', link);
+      }
+    }
+
+    async function saveDelegation(event) {
+      event.preventDefault();
+      if (!isHeadquarters()) return;
+      const payload = delegationPayload();
+      setBusy(true);
+      try {
+        if (state.editingDelegationId) {
+          await api('/chat-admin/delegations/' + encodeURIComponent(state.editingDelegationId), {method:'PATCH',body:JSON.stringify(payload)});
+          await loadState(); resetDelegationForm(); toast('権限を更新しました。旧セッションは失効したため、新しいリンクを発行してください', false);
+        } else {
+          const body = await api('/chat-admin/delegations', {method:'POST',body:JSON.stringify(payload)});
+          await presentDelegationLink(body);
+          await loadState(); resetDelegationForm(); toast('委任管理者を作成しました', false);
+        }
+      } catch (error) { toast(error.message || String(error), true); }
+      finally { setBusy(false); }
+    }
+
+    function editDelegation(id) {
+      const item = state.delegations.find((entry) => entry.id === id); if (!item) return;
+      state.editingDelegationId = id;
+      $('delegationLabel').value = item.label || '';
+      $('delegationScope').value = item.scope_mode || 'stores';
+      $('delegationExpires').value = toLocalInput(item.expires_at);
+      renderDelegationTargets(item.store_keys || [], item.room_ids || []);
+      renderDelegationCapabilities(item.capabilities || ['view']);
+      $('delegationSaveBtn').textContent = '変更を保存'; $('delegationCancelBtn').classList.remove('hidden');
+      $('delegationForm').scrollIntoView({behavior:'smooth',block:'start'});
+    }
+
+    async function toggleDelegation(id) {
+      const item = state.delegations.find((entry) => entry.id === id); if (!item) return;
+      const active = item.enabled === true && !(item.expires_at && new Date(item.expires_at).getTime() <= Date.now());
+      if (active && !confirm(item.label + ' のM-talk管理権限を即時停止しますか？\n保存済みセッションも次のAPI呼び出しから使えなくなります。\n再開後は新しいリンクを発行してください。')) return;
+      setBusy(true);
+      try { await api('/chat-admin/delegations/' + encodeURIComponent(id), {method:'PATCH',body:JSON.stringify({enabled:!active})}); await loadState(); toast(active ? '委任管理権限を停止しました' : '再開しました。新しいリンクを発行してください', false); }
+      catch (error) { toast(error.message || String(error), true); }
+      finally { setBusy(false); }
+    }
+
+    async function issueDelegationLink(id) {
+      setBusy(true);
+      try { const body = await api('/chat-admin/delegations/' + encodeURIComponent(id) + '/link', {method:'POST',body:'{}'}); await presentDelegationLink(body); await loadState(); }
+      catch (error) { toast(error.message || String(error), true); }
+      finally { setBusy(false); }
+    }
 
     function openUserDialog(userId) {
+      if (!can('manage_users')) return;
       const user = state.users.find((item) => item.id === userId); if (!user || user.is_bot) return;
       state.selectedUser = user; const access = user.access || {};
       $('dialogPerson').innerHTML = avatarHtml(user) + '<div><h3>' + escapeHtml(user.username || '名称なし') + '</h3><small>' + escapeHtml(user.id) + '</small></div>';
@@ -447,17 +663,19 @@
       $('userDialog').showModal();
     }
     async function saveUser(event) {
-      event.preventDefault(); const user = state.selectedUser; if (!user || user.is_bot) return;
+      event.preventDefault(); const user = state.selectedUser; if (!can('manage_users') || !user || user.is_bot) return;
       const restricted = $('editRestrictedUntil').value;
       await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify({access_enabled:$('editAccessEnabled').checked,can_start_direct:$('editCanStartDirect').checked,can_create_group:$('editCanCreateGroup').checked,can_browse_users:$('editCanBrowseUsers').checked,restriction_reason:$('editRestrictionReason').value.trim() || null,restricted_until:restricted ? new Date(restricted).toISOString() : null,expected_updated_at:user.access?.updated_at})}, 'ユーザー権限を保存しました');
       $('userDialog').close();
     }
     async function toggleUserAccess(userId) {
+      if (!can('manage_users')) return;
       const user = state.users.find((item) => item.id === userId); if (!user || user.is_bot || user.access?.deleted_at) return;
       const enabling = user.access?.access_enabled === false; if (!enabling && !confirm(user.username + ' のM-talk利用を停止しますか？')) return;
       await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify({access_enabled:enabling,restriction_reason:enabling ? null : '管理者による利用停止',restricted_until:null,expected_updated_at:user.access?.updated_at})}, enabling ? 'M-talkの利用を再開しました' : 'M-talkの利用を停止しました');
     }
     async function removeUser() {
+      if (!can('manage_users')) return;
       const user = state.selectedUser; if (!user || user.is_bot) return;
       if (!confirm(user.username + ' をM-talkから削除します。\n履歴と認証アカウントは保持されます。続けますか？')) return;
       const typed = prompt('確認のため表示名「' + user.username + '」を入力してください'); if (typed === null) return;
@@ -466,10 +684,12 @@
       await mutate('/chat-admin/users/' + encodeURIComponent(user.id) + '/remove', {method:'POST',body:JSON.stringify({confirm_username:typed.trim()})}, 'ユーザーを削除状態にしました'); $('userDialog').close();
     }
     async function restoreUser() {
+      if (!can('manage_users')) return;
       const user = state.selectedUser; if (!user || user.is_bot || !confirm(user.username + ' をM-talkへ復元しますか？')) return;
       await mutate('/chat-admin/users/' + encodeURIComponent(user.id) + '/restore', {method:'POST',body:'{}'}, 'ユーザーを復元しました'); $('userDialog').close();
     }
     async function removeBot(botId) {
+      if (!can('manage_bots')) return;
       const bot = state.users.find((item) => item.id === botId); if (!bot || !bot.is_bot || bot.bot_deleted_at) return;
       if (!confirm(bot.username + ' を削除状態にしますか？\n\n過去メッセージと所属履歴は保持されますが、このBotは新しい投稿・予約通知・検索応答に使用されなくなります。通常のM-talk画面からは削除できません。')) return;
       const typed = prompt('確認のためBot名「' + bot.username + '」を入力してください'); if (typed === null) return;
@@ -478,23 +698,27 @@
       await mutate('/chat-admin/bots/' + encodeURIComponent(bot.id) + '/remove', {method:'POST',body:JSON.stringify({confirm_username:typed.trim()})}, 'Botを削除状態にしました');
     }
     async function restoreBot(botId) {
+      if (!can('manage_bots')) return;
       const bot = state.users.find((item) => item.id === botId); if (!bot || !bot.is_bot || !bot.bot_deleted_at) return;
       if (!confirm(bot.username + ' を復元し、Bot機能を再び有効にしますか？')) return;
       await mutate('/chat-admin/bots/' + encodeURIComponent(bot.id) + '/restore', {method:'POST',body:'{}'}, 'Botを復元しました');
     }
     async function trashRoom(groupId) {
+      if (!can('manage_rooms')) return;
       const room = state.rooms.find((item) => Number(item.id) === Number(groupId)); if (!room || room.is_store_room || room.trashed_at) return;
       if (!confirm('「' + (room.group_name || room.id) + '」をゴミ箱へ移動しますか？\n履歴は保持され、ゴミ箱から復元できます。')) return;
       await mutate('/chat-admin/rooms/' + room.id + '/trash', {method:'POST',body:'{}'}, 'ルームをゴミ箱へ移動しました');
       state.roomTab = 'trash'; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item.dataset.roomTab === 'trash')); renderRooms();
     }
     async function restoreRoom(groupId) {
+      if (!can('manage_rooms')) return;
       const room = state.rooms.find((item) => Number(item.id) === Number(groupId)); if (!room || room.is_store_room || !room.trashed_at) return;
       if (!confirm('「' + (room.group_name || room.id) + '」をゴミ箱から復元しますか？')) return;
       await mutate('/chat-admin/rooms/' + room.id + '/restore', {method:'POST',body:'{}'}, 'ルームを復元しました');
       state.roomTab = 'all'; document.querySelectorAll('[data-room-tab]').forEach((item) => item.classList.toggle('active',item.dataset.roomTab === 'all')); renderRooms();
     }
     async function purgeRoom(groupId) {
+      if (!can('manage_rooms')) return;
       const room = state.rooms.find((item) => Number(item.id) === Number(groupId)); if (!room || room.is_store_room || !room.trashed_at) return;
       const roomName = String(room.group_name || room.id);
       const typed = prompt('完全削除すると、このルームのメッセージ・画像・予定は復元できません。\n確認のためルーム名「' + roomName + '」を入力してください'); if (typed === null) return;
@@ -504,6 +728,7 @@
       state.selectedRoomId = null; renderRooms();
     }
     async function updateMember(target) {
+      if (!can('manage_members')) return;
       const room = state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId)); const row = target.closest('[data-member-id]'); if (!room || !row) return;
       const member = room.members.find((item) => item.user_id === row.dataset.memberId); if (!member || member.is_bot) return;
       const permission = target.dataset.memberPermission; if (!['can_view','can_send','can_invite','can_manage'].includes(permission)) return;
@@ -515,13 +740,14 @@
       await mutate('/chat-admin/rooms/' + room.id + '/members/' + encodeURIComponent(member.user_id), {method:'PATCH',body:JSON.stringify(payload)}, 'ルーム権限を保存しました');
     }
     async function removeMember(userId) {
+      if (!can('manage_members')) return;
       const room = state.rooms.find((item) => Number(item.id) === Number(state.selectedRoomId)); const member = room?.members?.find((item) => item.user_id === userId); if (!room || room.is_direct || !member || member.is_bot) return;
       if (!confirm(member.username + ' の「' + (room.group_name || 'このルーム') + '」へのアクセスを解除しますか？\n履歴は保持され、権限を再設定すれば復元できます。')) return;
       await mutate('/chat-admin/rooms/' + room.id + '/members/' + encodeURIComponent(userId), {method:'DELETE'}, 'ルームへのアクセスを解除しました');
     }
     const PERMISSION_KEYS = ['can_view','can_send','can_invite','can_manage'];
     const PERMISSION_LABELS = {can_view:'閲覧',can_send:'送信',can_invite:'招待',can_manage:'管理'};
-    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',bot_remove:'Botの削除',bot_restore:'Botの復元',room_trash:'ルームをゴミ箱へ移動',room_restore:'ルームの復元',room_purge:'ルームの完全削除',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元'};
+    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',bot_remove:'Botの削除',bot_restore:'Botの復元',room_trash:'ルームをゴミ箱へ移動',room_restore:'ルームの復元',room_purge:'ルームの完全削除',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元',delegation_create:'委任管理者の作成',delegation_update:'委任管理者の変更',delegation_link_issue:'委任ログインリンクの発行'};
     const REASON_LABELS = {user_deleted:'M-talkから削除済み',user_disabled:'全体で利用停止中',user_restricted:'期限付きで停止中',room_view_denied:'このルームは閲覧不可',room_send_denied:'送信不可',room_invite_denied:'招待不可',room_manage_denied:'管理不可',room_direct_locked:'1対1のため招待・管理は不可',room_trashed:'ルームがゴミ箱にある'};
     function actionLabel(value) { return ACTION_LABELS[String(value || '')] || String(value || ''); }
     function permText(perms) { return PERMISSION_KEYS.map((key) => PERMISSION_LABELS[key] + (perms && perms[key] === true ? '○' : '×')).join(' '); }
@@ -530,7 +756,7 @@
     function selectedTemplate() { return state.templates.find((item) => item.key === state.templateKey) || null; }
 
     function templateBarHtml() {
-      if (!state.templates.length) return '';
+      if (!can('manage_templates') || !state.templates.length) return '';
       const options = state.templates.map((item) => '<option value="' + escapeHtml(item.key) + '"' + (item.key === state.templateKey ? ' selected' : '') + '>' + escapeHtml(item.label) + '</option>').join('');
       const template = selectedTemplate();
       const hint = template
@@ -554,6 +780,7 @@
     }
 
     async function previewTemplate() {
+      if (!can('manage_templates')) return;
       const room = currentRoom();
       const select = $('templateSelect'); const scope = $('templateScope'); const roomScope = $('templateRoomScope');
       const key = String(select ? select.value : '').trim();
@@ -599,6 +826,7 @@
     }
 
     async function applyTemplate() {
+      if (!can('manage_templates')) return;
       const preview = state.templatePreview; if (!preview) return;
       if (!confirm('プレビューの内容でルーム権限を一括適用します。よろしいですか？')) return;
       await mutate('/chat-admin/templates/apply', {method:'POST', body:JSON.stringify(Object.assign({dry_run:false}, preview.payload))}, '権限テンプレートを適用しました');
@@ -676,6 +904,7 @@
     }
 
     async function openRevertDialog(auditId) {
+      if (!can('revert_audit')) return;
       setBusy(true);
       try {
         const body = await api('/chat-admin/audit/' + encodeURIComponent(Number(auditId)) + '/revert', {method:'POST', body:JSON.stringify({dry_run:true})});
@@ -700,6 +929,7 @@
     }
 
     async function applyRevert() {
+      if (!can('revert_audit')) return;
       const preview = state.revertPreview; if (!preview) return;
       if (!confirm('この監査ログの変更を元に戻します。よろしいですか？')) return;
       await mutate('/chat-admin/audit/' + encodeURIComponent(preview.auditId) + '/revert', {method:'POST', body:JSON.stringify({dry_run:false})}, '監査ログの変更を元に戻しました');
@@ -710,7 +940,7 @@
     async function mutate(path,options,message) { setBusy(true); try { await api(path,options); await loadState(); toast(message,false); } catch (error) { if (error.status === 409) { await loadState().catch(() => {}); document.querySelectorAll('dialog').forEach((dialog) => { if (dialog.open) dialog.close(); }); } toast(error.message || String(error),true); throw error; } finally { setBusy(false); } }
 
     async function connectWithStoredAdminSession() {
-      if (!AUTH || !token()) throw new Error('保存済みの本部セッションがありません');
+      if (!AUTH || !token()) throw new Error('保存済みのM-talk管理セッションがありません');
       await loadState();
     }
     $('resumeAdminBtn').addEventListener('click', async () => {
@@ -760,6 +990,20 @@
     });
     $('templateApplyBtn').addEventListener('click', () => applyTemplate().catch(() => {}));
     $('revertApplyBtn').addEventListener('click', () => applyRevert().catch(() => {}));
+    $('delegationForm').addEventListener('submit', saveDelegation);
+    $('delegationCancelBtn').addEventListener('click', resetDelegationForm);
+    $('delegationScope').addEventListener('change', () => {
+      const capabilities = selectedDelegationCapabilities();
+      renderDelegationTargets([], []);
+      renderDelegationCapabilities(capabilities);
+    });
+    $('delegationRows').addEventListener('click', (event) => {
+      const row = event.target.closest('[data-delegation-id]'); if (!row) return;
+      const id = row.dataset.delegationId;
+      if (event.target.closest('[data-edit-delegation]')) { editDelegation(id); return; }
+      if (event.target.closest('[data-link-delegation]')) { issueDelegationLink(id); return; }
+      if (event.target.closest('[data-toggle-delegation]')) toggleDelegation(id);
+    });
     $('userForm').addEventListener('submit', (event) => saveUser(event).catch((error) => toast(error.message,true))); $('removeUserBtn').addEventListener('click', () => removeUser().catch((error) => toast(error.message,true))); $('restoreUserBtn').addEventListener('click', () => restoreUser().catch((error) => toast(error.message,true)));
     document.querySelectorAll('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => $('userDialog').close()));
     document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => { const dialog = $(button.dataset.close); if (dialog && dialog.open) dialog.close(); }));
@@ -778,9 +1022,10 @@
       }
     }
     (async function init() {
-      try { if (AUTH && AUTH.consumeUrlAuthParams) await AUTH.consumeUrlAuthParams({exchangeUrl:apiUrl('/auth/link-login'),adminSurface:ADMIN_SURFACE}); } catch (_) {}
+      let consumedLoginLink = false;
+      try { if (AUTH && AUTH.consumeUrlAuthParams) consumedLoginLink = await AUTH.consumeUrlAuthParams({exchangeUrl:apiUrl('/auth/link-login'),adminSurface:ADMIN_SURFACE}); } catch (_) {}
       if (!AUTH || !token()) { showLogin(); return; }
-      if (referrerIsHqDashboard()) {
+      if (consumedLoginLink || referrerIsHqDashboard()) {
         try { await loadState(); } catch (error) { showLogin(error.message || '管理セッションを確認できませんでした。'); }
         return;
       }

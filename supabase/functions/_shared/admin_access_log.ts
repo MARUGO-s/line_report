@@ -98,6 +98,13 @@ export function actorFromAuth(auth: {
       lineUserId,
     }
   }
+  if (auth.scopeKind === "mtalk_admin") {
+    return {
+      actorKind: "mtalk_delegate",
+      actorLabel: String(auth.actorLabel || "").trim() || "M-talk委任管理者",
+      lineUserId: null,
+    }
+  }
   const store = String(auth.storeScope || "").trim()
   if (store) {
     return {
