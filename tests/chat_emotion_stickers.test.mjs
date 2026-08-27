@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { readChatPageSource } from './helpers/chat-page-source.mjs';
 
-const chat = await readFile(new URL('../public/chat.html', import.meta.url), 'utf8');
+const chat = await readChatPageSource();
 const migration = await readFile(new URL('../supabase/migrations/20260821123000_chat_emotion_stickers.sql', import.meta.url), 'utf8');
 const addedStickerMigration = await readFile(new URL('../supabase/migrations/20260823030000_chat_emotion_stickers_more.sql', import.meta.url), 'utf8');
 const categoryMigration = await readFile(new URL('../supabase/migrations/20260823033000_chat_sticker_categories_and_symbols.sql', import.meta.url), 'utf8');

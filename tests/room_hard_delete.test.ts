@@ -1,9 +1,12 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { readChatPageSource } from "./helpers/chat-page-source.mjs"
 
 const root = new URL("..", import.meta.url)
-const read = (relative: string) => readFile(new URL(relative, root), "utf8")
+const read = (relative: string) => relative === "public/chat.html"
+  ? readChatPageSource()
+  : readFile(new URL(relative, root), "utf8")
 
 test("room hard delete only touches exact room_id or one chat group", async () => {
   const shared = await read("supabase/functions/_shared/room_hard_delete.ts")

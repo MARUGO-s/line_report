@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFile, stat } from "node:fs/promises"
 import test from "node:test"
 import vm from "node:vm"
+import { readChatPageSource } from "./helpers/chat-page-source.mjs"
 import {
   base64UrlEncode,
   buildWebPushRequest,
@@ -16,7 +17,9 @@ import {
 } from "../supabase/functions/_shared/mtalk_room_id.ts"
 
 const root = new URL("..", import.meta.url)
-const read = (relative: string) => readFile(new URL(relative, root), "utf8")
+const read = (relative: string) => relative === "public/chat.html"
+  ? readChatPageSource()
+  : readFile(new URL(relative, root), "utf8")
 
 test("chat PWA registers a service worker and lets the signed-in user enable notifications", async () => {
   const [html, indexHtml, manifest, serviceWorker] = await Promise.all([
@@ -58,6 +61,25 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   }
   assert.match(html, /vendor\/supabase\/supabase-2\.110\.9\.min\.js/)
   assert.doesNotMatch(html, /cdn\.jsdelivr\.net\/npm\/@supabase/)
+  const chatAssets = [
+    "chat/chat.css",
+    "chat/core.js",
+    "chat/auth.js",
+    "chat/permissions.js",
+    "chat/profile.js",
+    "chat/realtime.js",
+    "chat/notifications.js",
+    "chat/rooms.js",
+    "chat/messages.js",
+    "chat/attachments.js",
+    "chat/composer.js",
+    "chat/bootstrap.js",
+  ]
+  for (const asset of chatAssets) {
+    assert.match(html, new RegExp(asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    assert.match(serviceWorker, new RegExp(asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    assert.ok((await stat(new URL(`public/${asset}`, root))).size > 0, `${asset} must exist`)
+  }
   assert.match(html, /navigator\.serviceWorker\.register\('chat-sw\.js', \{ scope: '\.\/' \}/)
   assert.doesNotMatch(html, /chat-sw\.js\?v=/)
   assert.match(html, /Notification\.requestPermission\(\)/)
@@ -109,7 +131,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v53/)
+  assert.match(serviceWorker, /line-report-chat-v54/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -218,7 +240,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v53/)
+  assert.match(serviceWorker, /line-report-chat-v54/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {

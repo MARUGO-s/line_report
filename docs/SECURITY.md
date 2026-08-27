@@ -4,7 +4,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 利用許可・ルーム承認の運用詳細は [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md)、用語は [DOCS-INDEX.md](./DOCS-INDEX.md) を参照。
 
 **本番:** Supabase `hocbnifuactbvmyjraxy`（hocbn）／GitHub Pages `https://marugo-s.github.io/line_report/`
-**最終監査:** 2026-06-14（多観点コード監査＋DB権限/ストレージ直接検証＋是正）
+**最終監査:** 2026-08-27（M-talkのRLS・匿名/非メンバー・Storage・SECURITY DEFINER権限を本番DBで再検証）
 
 ---
 
@@ -12,8 +12,8 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 この7つは「新しい関数・エンドポイント・テーブルを足すたびに必ず守る」恒久ルール。
 
-1. **公開フロントは直接DB/RPCを叩かない。** GitHub Pages の静的HTML/JS は全世界に公開される前提。業務データへのアクセスは**すべて Edge Function 経由**（`admin-api` / `line-webhook` 等）。Edge Function は `SUPABASE_SERVICE_ROLE_KEY` で接続する。`public/pages-config.js` の anon JWT は Edge Function 呼び出しの Bearer 用で**公開して問題ない**（脆弱性にしない）。
-2. **anon / authenticated に SECURITY DEFINER 関数の EXECUTE を渡さない。** SECURITY DEFINER は RLS をバイパスするため、公開 anon キーで叩けると致命的。
+1. **公開フロントは全世界から読める前提で、秘密を置かない。** 売上・予約・レシート等の業務データは**すべてEdge Function経由**（`admin-api` / `line-webhook`等）。例外はM-talk専用の`chat_*`と非公開`chat-images`で、Supabase Authの本人JWT＋RLS＋権限検査付きRPCだけを使う。ブラウザへ`service_role`を渡さず、M-talkから業務テーブルへ直接到達させない。`public/pages-config.js`のanon JWTは公開キーであり、単体ではデータアクセス権にならない。
+2. **anon に SECURITY DEFINER 関数の EXECUTE を渡さない。** `authenticated` への例外は、`auth.uid()` とM-talk権限を関数内で再検査するレビュー済みRPCだけに限定する。トリガ専用・管理用・service_role専用関数は `authenticated` からも実行不可にする。
 3. **admin-api の店舗スコープは「許可リスト＋store強制」で守る。** ある店舗の資格で他店舗のデータを読めてはいけない（IDOR 防止）。
 4. **LINE Webhook の署名検証はフェイルクローズ。** secret 未設定でも必ず拒否する（`return false`）。
 5. **新しい関数には `SET search_path = public` を固定**し、**新しい RLS ポリシーは `auth.x()` を `(select auth.x())` で包む**（[supabase-advisor 規約]）。
@@ -22,7 +22,9 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 ---
 
-## 2. DB 層の防御（2026-06-14 に実データで検証）
+## 2. DB 層の防御
+
+次の表は全業務DBを対象にした **2026-06-14 時点の監査スナップショット**。M-talk追加後の差分は表の直後に記載する。
 
 | 検査項目 | 結果 |
 |----------|------|
@@ -34,9 +36,16 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 **結論:** フロントの公開 anon キーでは業務データに一切到達できない。実質的な防衛線は **admin-api の独自認証＋店舗スコープ** と **LINE Webhook 署名** に集約される。
 
+### 2026-08-27 M-talk差分監査
+
+- 全27個のM-talk関連テーブルでRLS有効を確認。架空のauthenticated非メンバーJWTから、ルーム・メッセージ・メンバー・添付メタデータはいずれも0件だった。
+- `chat-images`は非公開。`chat-icons`だけはプロフィール・ルームアイコン表示用の公開バケットで、重要ファイルを置かない。
+- M-talk追加後に、匿名ロールへ残っていた`chat_*`の直接GRANT、トリガ専用関数3件のEXECUTE、停止ユーザーのKeep・個人メモ操作、`chat_store_bot_id`の可変`search_path`を検出した。`20260909010000_chat_least_privilege_cleanup.sql`で是正する。
+- AdvisorにはM-talk外の既存警告も残るため、過去の全体監査値を現在値として扱わない。今回のmigration適用後は、上記4分類が消えたことを個別に再確認する。
+
 ### Supabase Advisor（DB リンタ）
-- セキュリティ WARN は **0**（`function_search_path_mutable` 26→0 で是正済み）。残 WARN は `extension_in_public`(pg_trgm) 1件＝意図的据え置き。
-- パフォーマンス WARN は **0**（`auth_rls_initplan` 51→0 で是正済み）。残は INFO の `unused_index` / `unindexed_foreign_keys`（低優先）。
+- 2026-06-14監査では `function_search_path_mutable` 26件と `auth_rls_initplan` 51件を0件まで是正した。
+- 以後に追加された機能は警告が再発し得る。**DDL 変更後は `get_advisors` を再実行**し、機能名・関数名単位で新規警告を確認する。
 - **DDL 変更後は `get_advisors` を再実行**して RLS 付け忘れ等を早期検知すること。
 
 ### 2.1 トークWeb Push
@@ -51,6 +60,10 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - `chat_user_access`はM-talkだけの利用停止・一時制限・論理削除を保持する。Supabase AuthやLINE Botの`line_user_permissions`は変更しない。
 - `chat_group_members`の`can_view / can_send / can_invite / can_manage`を、画面表示だけでなくメッセージ、Realtime、検索、既読・未読、リアクション、Storage、Push、予約送信、ルームRPCで強制する。
 - 生のメンバーINSERT/DELETEとルームINSERTは許可せず、権限検査付きRPCだけでルーム作成・招待参加・メンバー追加を行う。
+- `anon`から全`chat_*`テーブル・sequence権限を剥がす。RLSだけでなくSQL GRANTでも匿名アクセスを拒否する。
+- 停止・一時制限・論理削除中は、本文・添付に加えてKeepと個人メモもData APIから取得・変更できない。
+- トリガ専用のSECURITY DEFINER関数は`public / anon / authenticated`のEXECUTEを剥がし、RPCとして露出させない。
+- 店舗Bot UUID生成などの補助関数も`search_path`を固定し、名前解決の差し替えを許さない。
 - `public/chat-admin.html`は`admin-api /chat-admin/*`を使用する。ブラウザへservice roleを渡さず、既存の本部フル管理セッションだけを許可する。店舗・ルーム・cronスコープは403。M-talk本体（`chat.html`）から管理画面へはリンクしない。管理画面は本部トップからの遷移以外では自動接続せず、明示的な本部セッション確認が必要。
 - 新規の人間ユーザーは全店舗ルームへ自動参加しない。所属店舗の承認後、その店舗ルームだけ閲覧権限で入る。`chat_group_members`の送信・招待・管理の既定は false。プロフィール作成は `chat_complete_signup` のみ（authenticated の INSERT は不可）。新規登録・所属変更の許可カードは専用の管理者通知ルームへ送り、予約通知の1対1は復活させない。店舗ルームの一般メンバーはSELECTできない。
 - 管理画面の「ユーザー削除」はM-talk上の論理削除。`auth.users`と`chat_users`を物理削除せず、作成ルーム・過去発言・他アプリのログインを保持する。
@@ -154,7 +167,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 ## 9. 新規追加時のチェックリスト
 
-- [ ] 新しい SECURITY DEFINER 関数 → anon/authenticated に EXECUTE を**渡さない**＋`SET search_path = public`
+- [ ] 新しい SECURITY DEFINER 関数 → anonにはEXECUTEを**渡さない**。authenticatedへ公開するのは`auth.uid()`と権限を内部検査するレビュー済みRPCだけ。トリガ・管理・service_role専用関数はauthenticatedにも渡さない＋`SET search_path`固定
 - [ ] 新しい RLS ポリシー → `auth.x()` を `(select auth.x())` で包む。anon に開けるなら店舗スコープを必ず確認
 - [ ] 新しいテーブル → 内部用なら「RLS 有効・ポリシー無し（全拒否）」、クライアント可読なら店舗スコープのポリシー
 - [ ] 新しい admin-api パス → スコープ付きページが使うなら `STORE_SCOPED_ALLOWED_PATHS` に追加、全店専用なら追加しない
@@ -169,11 +182,16 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 ## 10. 検証クエリ（不変条件のセルフチェック）
 
 ```sql
--- ① anon/authenticated が EXECUTE 可能な SECURITY DEFINER 関数（0 であること）
-select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+-- ① anon/authenticated が EXECUTE 可能な SECURITY DEFINER 関数を列挙する。
+-- anonは0件であること。authenticatedはレビュー済みM-talk RPCの許可リストと突合する。
+select p.oid::regprocedure as function_name,
+       has_function_privilege('anon',p.oid,'EXECUTE') as anon_can_execute,
+       has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated_can_execute
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
 where n.nspname='public' and p.prosecdef
   and (has_function_privilege('anon',p.oid,'EXECUTE')
-       or has_function_privilege('authenticated',p.oid,'EXECUTE'));
+       or has_function_privilege('authenticated',p.oid,'EXECUTE'))
+order by 1;
 
 -- ② RLS 無効かつ anon に権限があるテーブル（0 であること）
 select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace

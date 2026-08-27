@@ -1,7 +1,8 @@
 # トーク（chat.html）ガイド
 
-社内連絡用のグループチャット。`public/chat.html`（1ファイル・約9,900行、UI/CSS/ロジックを全て内包）が
-Supabase Auth / Realtime / Storage / Edge Function と組んで動く、M-talkの1画面SPA。
+社内連絡用のグループチャット。`public/chat.html`は画面構造だけを持ち、
+`public/chat/`のCSS・責務別JavaScriptとSupabase Auth / Realtime / Storage /
+Edge Functionを組み合わせて動くM-talkの1画面SPA。
 
 - 本番: `https://marugo-s.github.io/line_report/chat.html`
 - Supabase プロジェクト: `hocbnifuactbvmyjraxy`
@@ -9,19 +10,34 @@ Supabase Auth / Realtime / Storage / Edge Function と組んで動く、M-talk�
   [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md)。
 - ここに endpoint、暗号鍵、VAPID 秘密鍵、メッセージ本文、顧客名を書かない。
 
-この文書は `chat.html` が実際に持つ機能を、画面構成から1件ずつのメッセージ操作まで
-網羅した参照資料。行番号や関数名は 2026-08-26 時点のコードに基づく。
+この文書はM-talkが実際に持つ機能を、画面構成から1件ずつのメッセージ操作まで
+網羅した参照資料。関数名は2026-08-27時点のコードに基づく。
 
 ---
 
 ## 0. 全体構成
 
 ```
-public/chat.html
-├─ <style>            … 全CSS（テーマは1色固定、ダーク基調のUI）
-├─ <body>             … サイドバー / メイン画面 / 各種オーバーレイの静的マークアップ
-└─ <script>           … 状態管理・Supabaseクエリ・DOM描画（約6,800行、関数400個超）
+public/
+├─ chat.html                 … 画面構造と公開資産の読込順
+├─ chat-sw.js                … PWAキャッシュ・Web Push
+└─ chat/
+   ├─ chat.css               … 全CSSとレスポンシブ指定
+   ├─ core.js                … Supabase接続、共有状態、共通UI基盤
+   ├─ auth.js                … ログイン・登録
+   ├─ permissions.js         … 全体権限・ルーム権限の画面側ゲート
+   ├─ profile.js             … 初期プロフィール・所属店舗
+   ├─ realtime.js            … Realtime購読と受信反映
+   ├─ notifications.js       … PWA・Web Push・未読バッジ
+   ├─ rooms.js               … 一覧・招待・ルーム操作
+   ├─ messages.js            … 履歴・描画・返信・リアクション
+   ├─ attachments.js         … スタンプ・画像・一般ファイル・カード
+   ├─ composer.js            … 送信・Keep・アルバム・予約配信
+   └─ bootstrap.js           … DOMイベント登録と初期起動
 ```
+
+スクリプトは上記順のclassic scriptとして読み込む。共有状態を維持したまま責務を分けているため、
+読込順を変更するときは依存関係とPWAの`CHAT_SHELL`を同時に更新する。
 
 画面は3カラム構成。
 

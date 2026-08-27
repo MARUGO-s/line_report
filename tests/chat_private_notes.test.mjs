@@ -1,9 +1,12 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { chatScriptPaths, readChatPageSource } from "./helpers/chat-page-source.mjs"
 
 const root = new URL("..", import.meta.url)
-const read = (relative) => readFile(new URL(relative, root), "utf8")
+const read = (relative) => relative === "public/chat.html"
+  ? readChatPageSource()
+  : readFile(new URL(relative, root), "utf8")
 const MIGRATION = "supabase/migrations/20260826050000_chat_private_notes.sql"
 
 test("chat_private_notes is author-only: RLS enabled, no update policy, ownership enforced", async () => {
@@ -109,12 +112,12 @@ test("state view cache (fast room switching) carries private notes alongside mes
   assert.match(chat, /currentPrivateNotes = cached\.notes \? cached\.notes\.slice\(\) : \[\];/)
 })
 
-test("chat.html inline script still compiles", async () => {
-  const html = await read("public/chat.html")
-  const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1])
-  assert.ok(blocks.length > 0)
+test("chat.html external scripts still compile", async () => {
+  const paths = chatScriptPaths()
+  assert.ok(paths.length > 0)
   const vm = await import("node:vm")
-  for (const block of blocks) {
-    assert.doesNotThrow(() => new vm.default.Script(block), "inline script must parse")
+  for (const path of paths) {
+    const block = await read(`public/${path}`)
+    assert.doesNotThrow(() => new vm.default.Script(block), `${path} must parse`)
   }
 })

@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-08-27 chat.html分割・M-talk最小権限化
+
+- `public/chat.html`は約10,600行の単一ファイルから、画面構造497行＋`public/chat/`のCSS・11責務別JSへ分割した。読込順と`chat-sw.js`の`CHAT_SHELL`はセットで保つ。
+- フロントの権限判定は`public/chat/permissions.js`へ集約したが、正本の強制はDBのRLS・RPC・Storage policy。UIの非表示だけを認可に使わない。
+- `20260909010000_chat_least_privilege_cleanup.sql`でanonの`chat_*` GRANT、トリガ専用関数の公開EXECUTE、停止ユーザーのKeep・個人メモ経路を追加で閉じる。
+- 静的テストが実装全体を読めるよう`tests/helpers/chat-page-source.mjs`を追加。`npm run test:chat`は123/123。
+
 ## Project
 
 - Production: `https://marugo-s.github.io/line_report/`
@@ -301,7 +308,7 @@ npm run knowledge:check
 ### 現行実装の検証記録
 
 - `npm run test:chat`: 57/57成功。
-- 管理画面と`chat.html`のinline JavaScript構文解析成功。
+- 管理画面のinline JavaScriptと、`public/chat/`へ外部化した全JavaScriptの構文解析成功。
 - 実DB試験: 停止ユーザーの閲覧・送信拒否、閲覧専用の送信拒否、非メンバー自己参加拒否、管理RPCの一般実行拒否、競合更新409、部分PATCH保持を確認。
 - 予約画像payloadを使った保存型XSS試験を、登録時・配信時・表示時の三層防御で通過。
 - Pages workflow: `32649962831`成功。

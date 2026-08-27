@@ -1,16 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
 const migration = fs.readFileSync(
   new URL('../supabase/migrations/20260902010000_chat_message_edits.sql', import.meta.url),
   'utf8',
 );
 
-const chatHtml = fs.readFileSync(
-  new URL('../public/chat.html', import.meta.url),
-  'utf8',
-);
+const chatHtml = readChatPageSourceSync();
 
 const helpManual = fs.readFileSync(
   new URL('../supabase/functions/_shared/mtalk_help_manual.ts', import.meta.url),

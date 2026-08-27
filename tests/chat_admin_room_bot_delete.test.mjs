@@ -1,9 +1,12 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { readChatPageSource } from "./helpers/chat-page-source.mjs"
 
 const root = new URL("..", import.meta.url)
-const read = (relative) => readFile(new URL(relative, root), "utf8")
+const read = (relative) => relative === "public/chat.html"
+  ? readChatPageSource()
+  : readFile(new URL(relative, root), "utf8")
 
 test("M-talk管理画面だけがルームのゴミ箱・復元・完全削除を操作できる", async () => {
   const [migration, api, admin, chat, shared] = await Promise.all([

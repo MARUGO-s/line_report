@@ -7,7 +7,7 @@
 - 使い方（店舗スタッフ）: `https://marugo-s.github.io/line_report/mtalk-help.html`
 - 管理画面: `https://marugo-s.github.io/line_report/chat-admin.html`
 - Supabase プロジェクト: `hocbnifuactbvmyjraxy`（hocbn）
-- 最終更新: 2026-08-26
+- 最終更新: 2026-08-27
 
 > **この文書へ書いてはいけないもの**: endpoint、暗号鍵、VAPID 秘密鍵、
 > メッセージ本文、顧客名、実データ。構造と手順だけを書く。
@@ -45,8 +45,8 @@
 
 ## 1. M-talk とは
 
-社内連絡用のグループチャット。`public/chat.html` の1ファイルに UI とロジックが入り、
-Supabase の Auth / Realtime / Storage / Edge Function で動く静的Webアプリ。
+社内連絡用のグループチャット。`public/chat.html`に画面構造、`public/chat/`にCSSと
+責務別JavaScriptを置き、SupabaseのAuth / Realtime / Storage / Edge Functionで動く静的Webアプリ。
 
 ### LINE との違い
 
@@ -504,7 +504,7 @@ M-talk に限らず、この システム全体で守るルール。詳細は [S
 
 ### 構成
 
-- **フロント**: GitHub Pages の静的HTML。`public/chat.html` に UI とロジックが同居する。
+- **フロント**: GitHub Pagesの静的HTML。`public/chat.html`は画面構造、`public/chat/`はCSS・認証・権限・Realtime・通知・ルーム・メッセージ・添付・入力・起動処理を分担する。
 - **認証**: Supabase Auth（メール＋パスワード）。
 - **データ**: Supabase Postgres。権限は RLS と RPC で強制する。
 - **リアルタイム**: Supabase Realtime。

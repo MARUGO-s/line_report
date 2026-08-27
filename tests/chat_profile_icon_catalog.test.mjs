@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
-const chat = readFileSync(new URL('../public/chat.html', import.meta.url), 'utf8');
+const chat = readChatPageSourceSync();
 const catalog = JSON.parse(readFileSync(new URL('../public/profile-icons/catalog.json', import.meta.url), 'utf8'));
 const files = readdirSync(new URL('../public/profile-icons/', import.meta.url)).filter((name) => name.endsWith('.png'));
 

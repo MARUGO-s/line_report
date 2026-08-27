@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
 const migration = readFileSync(new URL('../supabase/migrations/20260821160000_chat_history_since_join.sql', import.meta.url), 'utf8');
-const chat = readFileSync(new URL('../public/chat.html', import.meta.url), 'utf8');
+const chat = readChatPageSourceSync();
 const singleReactionMigration = readFileSync(
   new URL('../supabase/migrations/20260821235500_chat_single_reaction_per_user.sql', import.meta.url),
   'utf8'

@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { readChatPageSource } from './helpers/chat-page-source.mjs';
 
 const root = new URL('..', import.meta.url);
-const read = (path) => readFile(new URL(path, root), 'utf8');
+const read = (path) => path === 'public/chat.html'
+  ? readChatPageSource()
+  : readFile(new URL(path, root), 'utf8');
 
 test('M-talk image posts are archived in the existing LINE media library', async () => {
   const [chat, mediaPage, api, mediaStore, bridge, auth, ai] = await Promise.all([
