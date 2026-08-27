@@ -390,7 +390,10 @@ Deno.test("天気の質問には店舗座標の予報を直接返し、Groqを�
       botUserId: "bot1",
       question: "今日の天気は",
     })
-    assertEquals(result, `本日(${todayStr.slice(5).replace("-", "/")})は晴れ、最高27.5℃です。`)
+    assertEquals(
+      result,
+      `荒木町（四谷エリア）の天気予報です。\n本日(${todayStr.slice(5).replace("-", "/")})は晴れ、最高27.5℃です。`,
+    )
     assertEquals(groqCalled, false, "天気の質問はGroqを呼ばず直接答える")
   } finally {
     globalThis.fetch = originalFetch
