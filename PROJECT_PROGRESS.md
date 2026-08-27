@@ -7,7 +7,8 @@
 - Implementation: `POS_JOURNAL_STORE_CODE_MAP`と`pos_journal_store_codes`へ1015と同じ店舗対応を追加。DBに別店舗の1020が先に存在する場合は上書きせずmigrationを失敗させる。電子ジャーナル画面とM-talk運用資料も1015・1020へ更新する。
 - Read-only production proof: CAVACAVA店舗専用・10分限定セッションでStorage原本35件を読み、現行パーサーで35/35成功。2025-02は13件・総売上940,010円・42会計、2025-11は22件・総売上1,383,300円・72会計で既存運用記録と一致した。セッションは直後に削除し残存0件。
 - Verification: migrationは本番`BEGIN`内で適用・権限検査後に`ROLLBACK`し、1015と旧原本35件が無変更であることを確認。`npm run test:ci`、`npm run check`、POS関連76件、実ブラウザPC／390px表示、Graphify／knowledge（SQL coverage 287/287）が成功した。
-- Remaining: migration適用後に35件を既存プレースホルダへ再取込し、保存レポート／売上同期、PR／本番反映を確認する。
+- Production: PR #215を本番反映後、同じ35原本をファイル名・容量・SHA-256まで全件再照合して既存行へ修復。新規0・重複0・失敗0、保存レポート4件更新、日次／月次売上同期も同額で完了した。一般`anon`／`authenticated`は店舗コード表・原本表ともSELECT/INSERT不可、一時セッションは削除後0件。
+- Zero-sales day: 2025-11-12の原本は正常解析された売上0円・会計0件の日だった。会計0件だけで未解析扱いへ戻らないよう`parsed_complete`をパーサーと判定へ追加し、保存済みの当該1行はファイル名・SHA-256・全ゼロ集計を固定条件にしたmigrationでだけ補正する。
 
 ### 2026-08-28 - M-talk専用の委任管理者を最小権限で追加
 

@@ -183,10 +183,46 @@ Deno.test("journal parser reads completed sale with a fullwidth payment digit", 
   ].join("\r\n");
   const day = parsePosJournalText(text, "101520260602221907580001.lzh");
   assertEquals(day.business_date, "2026-06-02");
+  assertEquals(day.parsed_complete, true);
   assertEquals(day.gross_sales, 8000);
   assertEquals(day.receipts.length, 1);
   assertEquals(day.receipts[0].pay, "クレジット");
   assertEquals(day.receipts[0].items[0].name, "コース６品");
+});
+
+Deno.test("zero-sales settlement is complete even without receipts", () => {
+  const text = [
+    "0001-01   No.1001  2025年11月12日(水) 22時00分",
+    "★★   日計精算レポート   ★★",
+    "  営業日付：                    2025年11月12日",
+    "純 売 上                               \\0",
+    "消 費 税                               \\0",
+    "総 売 上                               \\0",
+    " 会計組数・客数",
+    "                  0組                    0名",
+  ].join("\r\n");
+  const day = parsePosJournalText(text, "102020251112220006060001.lzh");
+  assertEquals(day.business_date, "2025-11-12");
+  assertEquals(day.receipts, []);
+  assertEquals(day.gross_sales, 0);
+  assertEquals(day.parsed_complete, true);
+});
+
+Deno.test("zero-sales completion migration targets only the verified source hash", async () => {
+  const sql = await Deno.readTextFile(
+    new URL(
+      "../supabase/migrations/20260910030000_pos_journal_zero_sales_complete_marker.sql",
+      import.meta.url,
+    ),
+  );
+  assertEquals(sql.includes("2025-11-12"), true);
+  assertEquals(sql.includes("102020251112220006060001.lzh"), true);
+  assertEquals(
+    sql.includes("596da7196b5b52a2ebd989e72c9b1eb2fe60c2939f6c916b55e2b4ab9d6c6386"),
+    true,
+  );
+  assertEquals(sql.includes("jsonb_set"), true);
+  assertEquals(sql.includes("parsed_complete"), true);
 });
 
 Deno.test("journal parser preserves negative cancellation item rows", () => {
