@@ -67,7 +67,7 @@ function wrapLevel2Lh0(fileName: string, payload: Uint8Array): Uint8Array {
   return archive;
 }
 
-Deno.test("POS store code 1015 resolves to existing Bistro CAVACAVA store", () => {
+Deno.test("POS store codes 1015 and 1020 resolve to Bistro CAVACAVA", () => {
   assertEquals(
     detectPosJournalStoreCode("101520260602221907580001.lzh"),
     "1015",
@@ -76,7 +76,30 @@ Deno.test("POS store code 1015 resolves to existing Bistro CAVACAVA store", () =
     storeKey: "bistrocavacava",
     storeName: "Bistro CAVACAVA",
   });
+  assertEquals(
+    detectPosJournalStoreCode("102020251129221906200001.lzh"),
+    "1020",
+  );
+  assertEquals(resolvePosJournalStore("1020"), {
+    storeKey: "bistrocavacava",
+    storeName: "Bistro CAVACAVA",
+  });
   assertEquals(resolvePosJournalStore("9999"), null);
+});
+
+Deno.test("POS store code migration seeds the historical CAVACAVA code", async () => {
+  const sql = await Deno.readTextFile(
+    new URL(
+      "../supabase/migrations/20260910020000_pos_journal_store_code_1020.sql",
+      import.meta.url,
+    ),
+  );
+  assertEquals(
+    /'1020'\s*,\s*'bistrocavacava'\s*,\s*'Bistro CAVACAVA'/.test(sql),
+    true,
+  );
+  assertEquals(sql.includes("on conflict (store_code) do update"), true);
+  assertEquals(sql.includes("raise exception"), true);
 });
 
 Deno.test("monthly summary de-duplicates business dates and sorts them", () => {

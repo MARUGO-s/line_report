@@ -49,6 +49,12 @@ test("POS journal summary shows food/drink mix and daily majority icons", () => 
   assert.match(page, /colspan="12"/);
 });
 
+test("POS journal page shows both verified CAVACAVA store codes", () => {
+  assert.match(page, /店舗コード1015・1020/);
+  assert.match(page, /コード1015・1020をBistro CAVACAVAへ保存/);
+  assert.match(page, /var STORE_CODE = '1015・1020'/);
+});
+
 test("POS journal state applies Journal Report category overrides", () => {
   assert.match(adminApi, /const categoryOverrides = await fetchPosJournalCategoryOverrides/);
   assert.match(adminApi, /categoryOverrides,/);

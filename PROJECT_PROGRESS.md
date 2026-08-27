@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-08-28 - CAVACAVA実LZH検証と旧店舗コード1020対応
+
+- Evidence: 手元の実LZH `101520260605221707610001.lzh`（LH5、2,538 bytes）を共通パーサーで解析し、本番`pos_journal_files`の同一SHA-256原本ID 162と照合。営業日2026-06-05、総売上70,400円、2組・6名・2会計が一致した。
+- Store code: 本番には`store_code=1020`の原本が35件あり、全件が`bistrocavacava`、ファイル名も`1020YYYYMMDD...lzh`、Storage原本・SHA-256保管済みだった。2025年2月／11月のKIOXIA再アップロード待ち35行という既存記録とも一致するため、`1020`をBistro CAVACAVAの旧POSコードとして追加する。
+- Implementation: `POS_JOURNAL_STORE_CODE_MAP`と`pos_journal_store_codes`へ1015と同じ店舗対応を追加。DBに別店舗の1020が先に存在する場合は上書きせずmigrationを失敗させる。電子ジャーナル画面とM-talk運用資料も1015・1020へ更新する。
+- Read-only production proof: CAVACAVA店舗専用・10分限定セッションでStorage原本35件を読み、現行パーサーで35/35成功。2025-02は13件・総売上940,010円・42会計、2025-11は22件・総売上1,383,300円・72会計で既存運用記録と一致した。セッションは直後に削除し残存0件。
+- Verification: migrationは本番`BEGIN`内で適用・権限検査後に`ROLLBACK`し、1015と旧原本35件が無変更であることを確認。`npm run test:ci`、`npm run check`、POS関連76件、実ブラウザPC／390px表示、Graphify／knowledge（SQL coverage 287/287）が成功した。
+- Remaining: migration適用後に35件を既存プレースホルダへ再取込し、保存レポート／売上同期、PR／本番反映を確認する。
+
 ### 2026-08-28 - M-talk専用の委任管理者を最小権限で追加
 
 - Request: LINE Report全体の管理権限を渡さず、管理者が指定したM-talkの店舗・ルーム・操作範囲だけを扱える管理者を作る。一般ユーザーには重要な管理データやファイルを触らせない。
@@ -286,8 +295,8 @@
 - Implementation: 店舗ルーム（または店舗Botのいるルーム）へ `.lzh` を落とすと、`chat-knowledge` がルームから店舗を解決して `/pos-journals/upload` へ転送し、営業日と総売上を並べたカードを返す。管理画面から入れたときと同じ処理（店舗コード検証・重複スキップ・対象月判定・不完全日の修復・Journal Report の日別/月間レポート再作成）が走る。取込先の店舗が決まらないルームでは従来どおり電子ジャーナル画面へ誘導する。
 - Implementation: 店舗コードの対応表を `pos_journal_store_codes` としてDB化した。これまで `POS_JOURNAL_STORE_CODE_MAP` に 1015 しか無く、店舗を増やすたびにデプロイが要ったが、insert だけで足せるようにした。解決順は「コード内の定数 → この表」で、表が空でも 1015 は従来どおり動く。
 - Security: `admin-api` の内部キー経路に `/pos-journals/upload` を追加した。これまで `/pos-journals/knowledge/*` だけに絞っていた境界を広げることになるが、`storeScope` は null で通し、`uploadPosJournalFiles` 側の「ファイル名の店舗コード == 指定店舗」検証は従来どおり効く。他店舗のコードのファイルを別店舗のルームへ落としても弾かれる。
-- **Pending（特記事項）**: **店舗コードの登録待ち。現在この取込が使えるのは Bistro CAVACAVA（1015）だけ**で、他店舗の `.lzh` は「未登録の店舗コードです」で弾かれる。店舗コードは各店舗のレジが出力する値でLZHファイル名の先頭4桁に入る（`1015_20260824.lzh` → `1015`）ため、実際のファイル名を確認して `pos_journal_store_codes` へ insert する必要がある。デプロイは不要で、入れた時点で即使える。
-- **Pending（特記事項）**: **実ファイルでの取込は未検証。** CAVACAVA の `.lzh` を該当ルームへ落として結果カードが返るかの確認が残っている。
+- **2026-08-28更新**: Bistro CAVACAVAは現行`1015`と旧`1020`へ対応。別店舗は、店舗コードが各店のLZHファイル名先頭4桁に入るため、実ファイルを確認して`pos_journal_store_codes`へinsertする（推測登録は禁止）。
+- **2026-08-28更新**: CAVACAVA実ファイルの解凍・解析結果と本番保存行の一致は確認済み。M-talkへの再送では同一原本の重複スキップと結果カードを最終確認する。
 
 ### 2026-08-25 - トークの添付を拡張し、アプリ内で開けるようにした
 

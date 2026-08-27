@@ -8,6 +8,8 @@ export const POS_JOURNAL_STORE_CODE_MAP: Readonly<
   }>
 > = {
   "1015": { storeKey: "bistrocavacava", storeName: "Bistro CAVACAVA" },
+  // 2025年分の既存POS原本で使われていた旧コード。1015と同じ店舗。
+  "1020": { storeKey: "bistrocavacava", storeName: "Bistro CAVACAVA" },
 };
 
 export type PosJournalReceiptItem = {
