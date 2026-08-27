@@ -113,7 +113,7 @@ Botの削除・復元は、通常のM-talk画面では行えず、**本部フル
 - `chat-icons`の書込みは本人のパス、または管理可能ルームのパスだけに限定する。
 - `chat-images`は`can_view`で閲覧、`can_send`で保存する。
 - `anon`には`chat_*`テーブル・sequence権限を与えない。停止・一時制限・論理削除中は
-  Keepと個人メモも`chat_has_active_access()`で遮断する。
+  Keepと個人メモも、本人固定の`chat_is_registered()`ゲートで遮断する。
 - PostgreSQLトリガ専用関数はData APIから呼ばせず、`public / anon / authenticated`の
   EXECUTEを剥がす。
 

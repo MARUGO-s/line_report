@@ -40,7 +40,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 - 全27個のM-talk関連テーブルでRLS有効を確認。架空のauthenticated非メンバーJWTから、ルーム・メッセージ・メンバー・添付メタデータはいずれも0件だった。
 - `chat-images`は非公開。`chat-icons`だけはプロフィール・ルームアイコン表示用の公開バケットで、重要ファイルを置かない。
-- M-talk追加後に、匿名ロールへ残っていた`chat_*`の直接GRANT、トリガ専用関数3件のEXECUTE、停止ユーザーのKeep・個人メモ操作、`chat_store_bot_id`の可変`search_path`を検出した。`20260909010000_chat_least_privilege_cleanup.sql`で是正する。
+- M-talk追加後に、匿名ロールへ残っていた`chat_*`の直接GRANT、トリガ専用関数3件のEXECUTE、停止ユーザーのKeep・個人メモ操作、`chat_store_bot_id`の可変`search_path`を検出した。`20260909010000_chat_least_privilege_cleanup.sql`で是正した。Keep・個人メモのRLSは、任意ユーザーを検査できるservice_role専用helperを直接呼ばず、`20260909020000_chat_keep_private_active_policy_helper.sql`で`auth.uid()`本人に固定されたauthenticated用wrapperへ接続する。
 - AdvisorにはM-talk外の既存警告も残るため、過去の全体監査値を現在値として扱わない。今回のmigration適用後は、上記4分類が消えたことを個別に再確認する。
 
 ### Supabase Advisor（DB リンタ）
