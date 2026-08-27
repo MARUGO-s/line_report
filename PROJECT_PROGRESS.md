@@ -8,6 +8,7 @@
 - Access hardening: 停止・一時制限・論理削除ユーザーはKeepと個人メモも、本人固定の`chat_is_registered()`で遮断する。低レベルの`chat_has_active_access(uuid)`はservice_role専用のまま維持する。
 - Cross-app boundary: M-talkのauthenticated JWTから、AI使用量・予約再集計・cron起動／履歴削除などチャット外の内部SECURITY DEFINER関数を実行できないようservice_role/postgres専用へ統一する。
 - Public policy audit: `foodcourt_weekly_reports`の無条件ALLをservice_role専用へ修正し、`giants_game_results`は公開SELECTのみ維持してINSERT/UPDATE/DELETEをservice_roleへ限定する。
+- Advisor hardening: `foodcourt_daily_features`のdefiner権限による保護表バイパスを閉じ、内部補助関数2件の`search_path`固定とブラウザロールEXECUTE剥奪を追加する。
 - Test: `npm run test:chat` Deno 57/57・Node 129/129。外部化した全JSの構文検査と最小権限migration専用テストを追加。
 
 ### 2026-08-27 - 承認カードを予約通知の1対1へ送らない
