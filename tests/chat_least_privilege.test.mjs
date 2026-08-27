@@ -6,6 +6,10 @@ const migration = await readFile(
   new URL('../supabase/migrations/20260909010000_chat_least_privilege_cleanup.sql', import.meta.url),
   'utf8',
 );
+const policyHelperFix = await readFile(
+  new URL('../supabase/migrations/20260909020000_chat_keep_private_active_policy_helper.sql', import.meta.url),
+  'utf8',
+);
 
 test('anonymous visitors lose all direct chat table and sequence privileges', () => {
   assert.match(migration, /relname like 'chat\\_%' escape '\\'/i);
@@ -42,9 +46,22 @@ test('stopped accounts cannot access Keep or private notes directly', () => {
     'chat_keep_items_update_own',
     'chat_keep_items_delete_own',
   ]) {
-    const start = migration.indexOf(`create policy ${policy}`);
+    const start = policyHelperFix.indexOf(`create policy ${policy}`);
     assert.ok(start >= 0, `${policy} must be recreated`);
-    const end = migration.indexOf(';', start);
-    assert.match(migration.slice(start, end + 1), /chat_has_active_access\(\)/i);
+    const end = policyHelperFix.indexOf(';', start);
+    const statement = policyHelperFix.slice(start, end + 1);
+    assert.match(statement, /chat_is_registered\(\)/i);
+    assert.doesNotMatch(statement, /chat_has_active_access\(\)/i);
   }
+});
+
+test('Keep and private-note policies use the authenticated-safe access wrapper', () => {
+  assert.match(
+    policyHelperFix,
+    /chat_has_active_access\(uuid\).*service_role-only/is,
+  );
+  assert.match(
+    policyHelperFix,
+    /chat_is_registered\(\).*auth\.uid\(\)/is,
+  );
 });

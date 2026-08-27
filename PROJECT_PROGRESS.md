@@ -5,7 +5,7 @@
 - Request: 約10,600行の`chat.html`を段階的なツリーへ分け、一般ユーザーと管理者の境界を再監査する。
 - Frontend: `chat.html`を画面構造だけの497行へ縮小。`public/chat/`へCSSと、core/auth/permissions/profile/realtime/notifications/rooms/messages/attachments/composer/bootstrapの11ファイルを分離。classic scriptの読込順を固定し、`chat-sw.js` v54ですべてPWAキャッシュ対象にした。
 - Security audit: 本番DBで27対象テーブルのRLS有効、偽の非メンバーJWTでルーム・本文・所属・`chat-images`が全て0件、`chat-images`非公開を確認。匿名ロールに残っていた不要な`chat_*` GRANTと、トリガ専用SECURITY DEFINER関数のEXECUTEを追加migrationで剥がす。
-- Access hardening: 停止・一時制限・論理削除ユーザーはKeepと個人メモも`chat_has_active_access()`で遮断する。
+- Access hardening: 停止・一時制限・論理削除ユーザーはKeepと個人メモも、本人固定の`chat_is_registered()`で遮断する。低レベルの`chat_has_active_access(uuid)`はservice_role専用のまま維持する。
 - Test: `npm run test:chat` 123/123。外部化した全JSの構文検査と最小権限migration専用テストを追加。
 
 ### 2026-08-27 - 承認カードを予約通知の1対1へ送らない
