@@ -19077,6 +19077,20 @@ async function fetchAiUsageCostState(
   }
   journalModels = mergeModelTotals(journalSurfaceRows)
 
+  // M-talk雑談AI（Web検索=Perplexity ＋ 文章化=Groq）。全店舗合算で返す。
+  // ここは journal/foodcourt と違い groq を落とさない。旧Groqイベントの混入が無い
+  // 新しい用途タグで、Groqの文章化コストも実費の一部だから。
+  let mtalkModels: Array<ReturnType<typeof mapSurfaceRow>> = []
+  const { data: mtalkData, error: mtalkError } = await supabase.rpc(
+    "ai_usage_surface_model_totals",
+    { p_from, p_to, p_store: null, p_surface: "mtalk" },
+  )
+  if (mtalkError) {
+    console.error("ai_usage_surface_model_totals(mtalk) failed:", mtalkError.message)
+  } else {
+    mtalkModels = (Array.isArray(mtalkData) ? mtalkData : []).map(mapSurfaceRow)
+  }
+
   // 時系列データ（日次）
   let dailyTotals: Array<Record<string, unknown>> = []
   const { data: dailyData, error: dailyError } = await supabase.rpc("ai_usage_time_series", {
@@ -19137,6 +19151,7 @@ async function fetchAiUsageCostState(
       surfaces: ["journal", "pos_journal"],
       models: journalModels,
     },
+    mtalk: { surfaces: ["mtalk"], models: mtalkModels },
     daily_totals: dailyTotals,
     monthly_totals: monthlyTotals,
     generated_at: new Date().toISOString(),
