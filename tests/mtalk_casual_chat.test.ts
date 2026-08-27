@@ -1,4 +1,5 @@
 import {
+  buildAiCreditLine,
   buildCasualSystemPrompt,
   clampReplyForMtalk,
   formatCasualReplyForMtalk,
@@ -15,6 +16,13 @@ import {
   normalizeMtalkWebSearchModel,
   shouldMtalkWebSearch,
 } from "../supabase/functions/_shared/mtalk_web_search.ts"
+
+// 返信末尾に必ず付く「使用AI」注記。既定モデルは openai/gpt-oss-120b。
+const CREDIT_GROQ_ONLY = "― 使用AI: Groq gpt-oss-120b（Web検索なし・モデルの知識のみ）";
+const CREDIT_WEATHER = "― 情報元: Open-Meteo（気象データ・AI未使用）";
+function creditWithSearch(model: string): string {
+  return `― 使用AI: Perplexity ${model}（Web検索）＋ Groq gpt-oss-120b（文章化）`;
+}
 
 function assertEquals(actual: unknown, expected: unknown, label = ""): void {
   const a = JSON.stringify(actual)
@@ -332,6 +340,8 @@ Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整�
       "",
       "▶ 画像送信",
       "　左の「＋」を押します。",
+      "",
+      CREDIT_GROQ_ONLY,
     ].join("\n"))
     assertEquals(requestBody?.max_tokens, 2000, "gpt-ossの推論込み出力枠")
     assertEquals(requestBody?.max_completion_tokens, 2000, "gpt-ossの完了トークン枠")
@@ -397,7 +407,12 @@ Deno.test("天気の質問には店舗座標の予報を直接返し、Groqを�
     })
     assertEquals(
       result,
-      `荒木町（四谷エリア）の天気予報です。\n本日(${todayStr.slice(5).replace("-", "/")})は晴れ、最高27.5℃です。`,
+      [
+        "荒木町（四谷エリア）の天気予報です。",
+        `本日(${todayStr.slice(5).replace("-", "/")})は晴れ、最高27.5℃です。`,
+        "",
+        CREDIT_WEATHER,
+      ].join("\n"),
     )
     assertEquals(groqCalled, false, "天気の質問はGroqを呼ばず直接答える")
   } finally {
@@ -419,6 +434,85 @@ Deno.test("Web検索の門番は雑談を通さず、明示依頼と外部トピ
   assertEquals(shouldMtalkWebSearch("インボイス制度とは"), true);
   // 外部トピック語があっても、質問の形でなければ検索しない。
   assertEquals(shouldMtalkWebSearch("ワインを開けました"), false);
+});
+
+Deno.test("調理の手順を聞く質問も検索対象にする（レシピという語を使わなくても）", () => {
+  // 2026-08-27 の実利用で「スポンジケーキの作り方を教えて」が検索されず、
+  // モデルの知識だけで答えていた。飲食店で最も多い聞き方なので門番を広げた。
+  for (
+    const q of [
+      "スポンジケーキの作り方を教えて",
+      "鴨の焼き方はどうすればいい？",
+      "このソースの保存方法は？",
+      "牡蠣に合わせるワインは何がいい？",
+    ]
+  ) {
+    assertEquals(shouldMtalkWebSearch(q), true, q);
+  }
+});
+
+Deno.test("使用AIの注記は検索の有無を正直に書き分ける", () => {
+  assertEquals(
+    buildAiCreditLine({ groqModel: "openai/gpt-oss-120b", webSearch: null }),
+    CREDIT_GROQ_ONLY,
+  );
+  assertEquals(
+    buildAiCreditLine({
+      groqModel: "openai/gpt-oss-120b",
+      webSearch: { ok: true, text: "x", citations: [], model: "sonar" },
+    }),
+    creditWithSearch("sonar"),
+  );
+  // 天気は生成AIを通していないので、AI名ではなくデータ元を書く。
+  assertEquals(buildAiCreditLine({ weatherSource: true }), CREDIT_WEATHER);
+  // モデル名の修飾（openai/）は落として読みやすくする。
+  if (buildAiCreditLine({ groqModel: "openai/gpt-oss-120b" }).includes("openai/")) {
+    throw new Error("モデル名の接頭辞が落ちていません");
+  }
+});
+
+Deno.test("長い回答でも注記が切り落とされない", async () => {
+  const originalFetch = globalThis.fetch;
+  Deno.env.set("GROQ_API_KEY", "test-key");
+  // 上限(1800字)を超える本文を返させ、注記が末尾に残ることを確認する。
+  const long = "あ".repeat(2500);
+  globalThis.fetch = (() =>
+    Promise.resolve(
+      new Response(JSON.stringify({ choices: [{ message: { content: long } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )) as typeof fetch;
+
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    lt: () => chain,
+    order: () => chain,
+    limit: () => Promise.resolve({ data: [], error: null }),
+  };
+  const sb = { from: () => chain };
+
+  try {
+    const result = await generateCasualReply(sb, {
+      groupId: 1,
+      messageId: 100,
+      storeName: "テスト店",
+      storeKey: "unknown-store",
+      botUserId: "bot1",
+      question: "長い説明をください",
+    });
+    if (!String(result).endsWith(CREDIT_GROQ_ONLY)) {
+      throw new Error("長文回答で注記が末尾に残っていません");
+    }
+    // M-talkのDB上限2000字を超えない。
+    if (String(result).length > 2000) {
+      throw new Error(`本文＋注記が2000字を超えました: ${String(result).length}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    Deno.env.delete("GROQ_API_KEY");
+  }
 });
 
 Deno.test("Web検索モデルは許可リストへ丸め、未知の値は既定のsonarにする", () => {
@@ -544,7 +638,11 @@ Deno.test("Web検索がONなら検索結果をシステム指示へ渡し、選�
     if (!groqSystem.includes("https://example.com/wine")) {
       throw new Error("出典URLがシステム指示へ渡っていません");
     }
-    assertEquals(result, "シャルドネが人気です。");
+    // 検索したときは Perplexity と Groq の両方を注記する。
+    assertEquals(
+      result,
+      `シャルドネが人気です。\n\n${creditWithSearch("sonar-pro")}`,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     Deno.env.delete("GROQ_API_KEY");
@@ -585,7 +683,12 @@ Deno.test("Web検索が失敗しても雑談AIの回答は返す", async () => {
       question: "最近人気のワイン品種は何ですか？",
       webSearchEnabled: true,
     });
-    assertEquals(result, "確認できませんでした。", "検索失敗でも通常回答へ落とす");
+    // 検索が失敗した回は「Web検索なし」と正直に注記する（検索したように見せない）。
+    assertEquals(
+      result,
+      `確認できませんでした。\n\n${CREDIT_GROQ_ONLY}`,
+      "検索失敗でも通常回答へ落とす",
+    );
   } finally {
     globalThis.fetch = originalFetch;
     Deno.env.delete("GROQ_API_KEY");

@@ -230,6 +230,32 @@ const WEATHER_TOMORROW_RE = /明日|あした|あす/
 const WEATHER_DAY_AFTER_RE = /明後日|あさって/
 const WEATHER_TODAY_RE = /今日|本日/
 
+/** `openai/gpt-oss-120b` のような修飾付きモデル名を、注記用に短くする。 */
+function shortModelName(model: string): string {
+  const name = String(model ?? '').trim()
+  const slash = name.lastIndexOf('/')
+  return slash >= 0 ? name.slice(slash + 1) : name
+}
+
+/**
+ * 返信の最後に、その回答を作ったAI（またはデータ元）を明記する行。
+ * 利用者が「今の回答はWeb検索したのか、モデルの知識なのか」を毎回判別できるようにする。
+ */
+export function buildAiCreditLine(params: {
+  groqModel?: string | null
+  webSearch?: MtalkWebSearchResult | null
+  weatherSource?: boolean
+}): string {
+  // 天気は決定的な気象データで、生成AIを通していない。
+  if (params.weatherSource) return '― 情報元: Open-Meteo（気象データ・AI未使用）'
+  const groq = shortModelName(params.groqModel || GROQ_TEXT_PRIMARY_MODEL)
+  if (params.webSearch) {
+    // 検索はPerplexity、文章化はGroq。両方書かないと「何が答えたのか」が正確に伝わらない。
+    return `― 使用AI: Perplexity ${params.webSearch.model}（Web検索）＋ Groq ${groq}（文章化）`
+  }
+  return `― 使用AI: Groq ${groq}（Web検索なし・モデルの知識のみ）`
+}
+
 function jstDateStr(offsetDays = 0): string {
   const now = new Date()
   now.setUTCDate(now.getUTCDate() + offsetDays)
@@ -290,7 +316,9 @@ async function buildWeatherForecastReply(
   const area = STORE_LOCATION_PROFILES[String(storeKey ?? '').trim()]?.area
   const header = area ? `${area}の天気予報です。` : null
 
-  return [header, ...lines].filter(Boolean).join('\n')
+  return [header, ...lines, '', buildAiCreditLine({ weatherSource: true })]
+    .filter((line) => line !== null)
+    .join('\n')
 }
 
 /**
@@ -390,7 +418,11 @@ export async function generateCasualReply(
     const text = formatCasualReplyForMtalk(String(
       (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content ?? '',
     ))
-    return text ? clampReplyForMtalk(text, REPLY_MAX_CHARS) : null
+    if (!text) return null
+    // 注記は本文を上限まで詰めた後に足す。先に足すと長文回答で注記ごと切り落とされる。
+    // REPLY_MAX_CHARS(1800) + 注記(約60字) でもDB上限2000には収まる。
+    const body = clampReplyForMtalk(text, REPLY_MAX_CHARS)
+    return `${body}\n\n${buildAiCreditLine({ groqModel: model, webSearch })}`
   } catch (err) {
     console.error('generateCasualReply threw:', err instanceof Error ? err.message : String(err))
     return null
