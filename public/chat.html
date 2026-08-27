@@ -1672,6 +1672,11 @@
        引用ブロックを組み立てる際の改行やインデントまで表示される。 */
     .bubble-text { display: block; white-space: pre-wrap; }
 
+    /* 本文中のURL。長いリンクでも吹き出しからはみ出さないよう任意位置で折り返す。 */
+    .msg-link { color: inherit; text-decoration: underline; overflow-wrap: anywhere; word-break: break-all; }
+    .message:not(.own) .msg-link { color: #0b66c3; }
+    .msg-link:hover { opacity: .8; }
+
     .message.own .message-bubble {
       background: #8ced4a;
       color: #111;
@@ -6735,19 +6740,44 @@
 
     // 本文中の @表示名 を、そのトークの参加者名と照合して強調する。
     // 長い名前から先に照合しないと「@田中」が「@田中太郎」を食ってしまう。
+    // 本文中のURL。末尾の句読点・閉じ括弧は本文の一部として外す（firstMessageUrl と同じ扱い）。
+    const MESSAGE_URL_RE = /https?:\/\/[^\s<>「」『』]+/i;
+
+    // 本文の途中にあるURLを、その場でクリックできるリンクにする。
+    // href は safeHttpUrl で http/https に限定し、javascript: 等を弾く。
+    function linkifyAt(text, index) {
+      if (text[index] !== 'h' && text[index] !== 'H') return null;
+      const match = MESSAGE_URL_RE.exec(text.slice(index));
+      if (!match || match.index !== 0) return null;
+      const raw = match[0].replace(/[.,!?。、，！？）)\]}]+$/g, '');
+      if (!raw) return null;
+      const href = safeHttpUrl(raw);
+      if (!href) return null;
+      return {
+        length: raw.length,
+        html: `<a class="msg-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(raw)}</a>`,
+      };
+    }
+
     function renderContentWithMentions(content, mentions) {
       const text = String(content ?? '');
       const names = groupMembers
         .flatMap((u) => isStoreBot(u) ? [personName(u), u.username] : [u.username])
         .filter(Boolean)
         .sort((a, b) => b.length - a.length);
-      if (!names.length) return escapeHtml(text);
 
       const mentionSet = new Set(Array.isArray(mentions) ? mentions : []);
       let out = '';
       let i = 0;
       while (i < text.length) {
-        if (text[i] === '@' || text[i] === '＠') {
+        // メンション候補が無いルームでもURLだけはリンク化する（早期returnしない）。
+        const link = linkifyAt(text, i);
+        if (link) {
+          out += link.html;
+          i += link.length;
+          continue;
+        }
+        if (names.length && (text[i] === '@' || text[i] === '＠')) {
           const rest = text.slice(i + 1);
           const hit = names.find((name) => rest.startsWith(name));
           if (hit) {

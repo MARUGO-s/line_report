@@ -89,11 +89,16 @@ export function buildCasualSystemPrompt(params: {
   ].filter(Boolean).join('\n')
 }
 
-/** Markdownの装飾記号（太字・斜体・リンク・コード）を、意味を保ったまま外す。 */
-function stripInlineMarkdown(text: string): string {
+/** 本文中のURL。装飾外しと行分割の両方で「壊してはいけない塊」として扱う。 */
+const URL_TOKEN_RE = /https?:\/\/[^\s<>「」『』（）()]+/gi
+
+/** 行の先頭がURLか（「▶ https」と「//example.com」に割ってはいけない行の判定）。 */
+function startsWithUrl(text: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(String(text ?? '').trim())
+}
+
+function stripMarkdownSymbols(text: string): string {
   return String(text ?? '')
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1（$2）')
     .replace(/(\*\*|__)(.*?)\1/g, '$2')
     .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1')
     .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '$1')
@@ -102,7 +107,32 @@ function stripInlineMarkdown(text: string): string {
     .replace(/\\([\\`*_[\]{}()#+.!-])/g, '$1')
     .replace(/\s+([「『（【])/g, '$1')
     .replace(/([」』）】])\s+/g, '$1')
-    .trimEnd()
+}
+
+/**
+ * Markdownの装飾記号（太字・斜体・リンク・コード）を、意味を保ったまま外す。
+ *
+ * URL部分だけは対象外にする。`https://example.com/a_b_c` の `_b_` を斜体と誤認して
+ * 落とすと、リンクが開けない別のURLに化けるため（アンダースコアやアスタリスクを
+ * 含むURLは珍しくない）。
+ */
+function stripInlineMarkdown(text: string): string {
+  // Markdownリンク・画像は先に畳む。URL保護を先にすると [文言](url) の url だけが
+  // 保護され、角括弧と丸括弧が対応の崩れたまま本文に残る。
+  const source = String(text ?? '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1（$2）')
+  let out = ''
+  let last = 0
+  URL_TOKEN_RE.lastIndex = 0
+  for (const match of source.matchAll(URL_TOKEN_RE)) {
+    const start = match.index ?? 0
+    out += stripMarkdownSymbols(source.slice(last, start))
+    out += match[0]
+    last = start + match[0].length
+  }
+  out += stripMarkdownSymbols(source.slice(last))
+  return out.trimEnd()
 }
 
 /**
@@ -186,7 +216,12 @@ export function formatCasualReplyForMtalk(markdown: string): string {
       } else {
         // トップレベル項目は空行で区切り、見出しと説明を分ける。
         pushBlank()
-        const labelled = content.match(/^([^：:]{1,28})[：:]\s*(.+)$/)
+        // URLで始まる項目（出典リストなど）は絶対に分割しない。`https://…` の
+        // スキーム側のコロンを「項目：値」と誤認すると「▶ https」「　//example.com」の
+        // 2行に割れ、リンクとして開けなくなる。
+        const labelled = startsWithUrl(content)
+          ? null
+          : content.match(/^([^：:]{1,28})[：:]\s*(.+)$/)
         if (labelled) {
           output.push(`▶ ${labelled[1]}`)
           output.push(`　${labelled[2]}`)
