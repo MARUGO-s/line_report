@@ -388,8 +388,9 @@ iPhoneの「高効率」設定で出る`.heic`は、送信時にJPEGへ変換し
 `pos-journal.html` へ誘導する（`promptJournalArchive()`。原本の二重管理を避けるため、
 汎用の添付として置きっぱなしにはしない）。
 
-> ⚠️ 2026-08-25時点、この取込が使えるのは Bistro CAVACAVA（店舗コード1015）のみ。
-> 他店舗の登録は `pos_journal_store_codes` へのinsertだけで完了し、デプロイ不要。
+> 2026-08-28時点、Bistro CAVACAVAの店舗コード1015・1020に対応済み。
+> 1020は2025年分の既存POS原本で使われていた旧コード。別店舗の登録は、実際のLZHファイル名を確認して
+> `pos_journal_store_codes`へinsertする（推測で登録しない）。
 
 ---
 

@@ -578,7 +578,7 @@
       <div class="pj-content">
         <div class="pj-inner">
           <h1 class="pj-h1">電子ジャーナル（POS取込）</h1>
-          <p class="pj-sub"><strong>Bistro CAVACAVA</strong>（店舗コード1015）のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。</p>
+          <p class="pj-sub"><strong>Bistro CAVACAVA</strong>（店舗コード1015・1020）のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。</p>
           <div class="pj-src" id="srcInfo"></div>
 
           <section class="card pj-auth" id="authCard" hidden>
@@ -618,7 +618,7 @@
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015のみBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
+                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015・1020をBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
@@ -789,7 +789,7 @@
     var PAGES = window.LINE_REPORT_PAGES || {};
     var AUTH = window.LINE_REPORT_AUTH || null;
     var STORE_KEY = 'bistrocavacava';
-    var STORE_CODE = '1015';
+    var STORE_CODE = '1015・1020';
     var STORE_NAME = (PAGES.getPreferredStoreDisplayLabel && PAGES.getPreferredStoreDisplayLabel(STORE_KEY)) || 'Bistro CAVACAVA';
     var LEGACY_DATA_URL = './pos-journal-202606.json';
     var WD = ['日','月','火','水','木','金','土'];

@@ -1,5 +1,14 @@
 # LINE Report AI Handoff
 
+## 2026-08-28 CAVACAVA実LZHと店舗コード1020
+
+- 実LZH`101520260605221707610001.lzh`を共通パーサーで解析し、本番の同一SHA-256原本ID 162と照合した。営業日2026-06-05、総売上70,400円、2組・6名・2会計が一致する。
+- 本番には旧コード`1020`のCAVACAVA原本が35件あり、全件`bistrocavacava`、ファイル名・Storage原本・SHA-256も整合する。2025年2月／11月のKIOXIA再アップロード待ち35行という既存記録に該当する。
+- `20260910020000_pos_journal_store_code_1020.sql`と`POS_JOURNAL_STORE_CODE_MAP`で、1020をBistro CAVACAVAへ追加する。別店舗へ誤登録済みならmigrationは上書きせず失敗する。
+- 10分限定のCAVACAVA店舗セッションでStorage原本を読み、35/35件の再解析に成功。2025-02は13件・940,010円・42会計、2025-11は22件・1,383,300円・72会計。セッションは削除済み（残存0）。
+- `npm run test:ci`、`npm run check`、POS関連76件、PC／390px実画面、Graphify／knowledge（SQL coverage 287/287）は成功済み。
+- 残作業は、本番migration後の35件再取込、保存レポート／売上同期、回帰テスト、PR／デプロイ確認。
+
 ## 2026-08-28 M-talk専用の委任管理者
 
 - 優先度4「M-talk専用管理者」を実装した。本部は`public/chat-admin.html`から、M-talk全体／選択店舗／選択ルームと、8つの操作能力を組み合わせて最小権限の管理リンクを発行できる。初期値は閲覧だけ、有効期限は必須（画面初期値30日）。
