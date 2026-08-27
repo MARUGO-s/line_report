@@ -1,15 +1,14 @@
 /**
- * M-talk / LINE Report / Journal Report の使い方を、
+ * M-talk / Journal Report の使い方を、
  * 1対1トークのAIが横断参照するためのマニュアル入口。
  *
  * 正本:
  * - docs/CHAT-TALK-GUIDE.md
  * - docs/M-TALK-COMPLETE-GUIDE.md
- * - docs/操作マニュアル.md
  * - docs/JOURNAL-REPORT-FEATURES.md
  * - docs/JOURNAL-AI-CHAT-RULES.md
  *
- * LINE Report / Journal Report の統合知識本体:
+ * Journal Report の統合知識本体:
  * - supabase/functions/_shared/line_report_help_manual.ts
  *
  * 利用者向け機能を変更した場合は、正本と対応するマニュアルデータを同時に更新する。
@@ -222,7 +221,10 @@ export const MTALK_HELP_SECTIONS: MtalkHelpSection[] = [
     keywords: ['店舗ルーム', '店舗bot', 'ボット', 'bot', '#メモ', '#日報', '#note', '資料登録', 'レシート', '売上登録'],
     content: [
       '店舗の固定ルームへ「#メモ」「#日報」「#note」を付けて送ると、Journal Reportの資料へ登録され、店舗Botが結果を返します。',
-      'レシート画像を送ると自動で売上登録され、結果カードから修正や削除ができます。',
+      'レシート画像を送ると自動で売上登録され、結果カードから修正や削除ができます。これはその日1日分の登録です。',
+      '過去の売上をまとめて登録するときはレシート画像ではなく、月次日別売上管理表（Excel／CSV）をこの店舗ルームへ送ります。ルームの店舗Botの店舗として取り込み、既存データがある期間は確認カードで置き換えを選びます。売上分析画面の「過去の日次売上を一括取込」へドラッグ＆ドロップしても同じことができます。',
+      'ファイルに書かれた店舗がこのルームの店舗と違う場合は取り込まず、一致しないことを返信します。テンプレートには見本の店舗が入っているため、B3（店舗名）とC3（店舗キー）を自店舗へ直してから送ってください。',
+      'テンプレートが必要なときは、この店舗ルームへ「日別売上管理表」「売上管理表テンプレート」等と送るとダウンロードリンク付きのカードが返ります。',
       '#メモのない通常画像は、その投稿元ルームの写真・メディアライブラリへ保存されます。',
     ].join('\n'),
   },
@@ -388,9 +390,9 @@ export function buildMtalkHelpReference(
     parts.push(`【${section.title}】\n${section.content}`)
   }
 
-  // LINE Report / Journal Report はカテゴリ索引＋質問に近い詳細だけを渡す。
+  // M-talk / Journal Report はカテゴリ索引＋質問に近い詳細だけを渡す。
   // 全資料を毎回渡さないことで、回答を短く保ちながら必要な根拠を深くする。
-  parts.push(`【LINE Report / Journal Report 区分索引】\n${buildLineReportHelpIndex()}`)
+  parts.push(`【M-talk / Journal Report 区分索引】\n${buildLineReportHelpIndex()}`)
   for (const { section } of lineReportSelections) {
     const sources = includeImplementationSources
       ? lineReportHelpSourcesForCode(section.code)

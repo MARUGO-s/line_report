@@ -16,9 +16,16 @@ import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.
 import { handleMtalkSearchText } from "../_shared/mtalk_search.ts"
 import { loadStoreRegistryRow } from "../_shared/chat_store_file_bridge.ts"
 import { generateCasualReply, isSoloHumanRoom } from "../_shared/mtalk_casual_chat.ts"
+import {
+  handleMtalkDailySalesCommand,
+  isDailySalesTemplateRequestText,
+  isDailySalesWorkbookName,
+  processMtalkDailySalesFile,
+  replyDailySalesTemplateDownload,
+} from "../_shared/mtalk_daily_sales_import.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
-const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
+const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/mtalk_room_settings.html"
 // 「M-talkに貼る」でジャーナルレポートAIの回答を貼り付けた投稿の目印。
 // jnl2txt.html の postAiAnswerToMtalk が本文の先頭へ付ける。
 const JOURNAL_PASTE_PREFIX_RE = /^\[電子ジャーナル\]/
@@ -424,6 +431,13 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   const senderName = String(message.username || "M-talk")
   const lineTimestamp = Date.parse(String(message.created_at || "")) || Date.now()
 
+  // 「日別売上管理表」等のテンプレート要求。検索・雑談AIより先に見る
+  // （LINE版の isDailySalesTemplateRequestText と同じ言葉に反応させる）。
+  if (text && isDailySalesTemplateRequestText(text)) {
+    await replyDailySalesTemplateDownload(supabase, { groupId, storeKey, asUser: storeBot })
+    return json({ ok: true, processed: true, kind: "daily-sales-template" }, 200)
+  }
+
   const registry = await loadStoreRegistryRow(supabase, storeKey)
   if (registry && message.kind !== "image" && !imagePathFromPayload(message.payload)) {
     const searched = await handleMtalkSearchText(supabase, {
@@ -436,8 +450,38 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     if (searched) return json({ ok: true, processed: true, kind: "search" }, 200)
   }
 
+  // 取込確認カードのボタン（「売上取込 置き換えて登録 <id>」）。
+  // 売上検索より先に見る必要はないが、雑談AIへ流す前に必ず処理する。
+  if (text) {
+    const command = await handleMtalkDailySalesCommand(supabase, {
+      groupId,
+      storeKey,
+      text,
+      asUser: storeBot,
+    })
+    if (command.handled) {
+      return json({ ok: true, processed: true, kind: "daily-sales-command", reason: command.reason }, 200)
+    }
+  }
+
   // .lzh は電子ジャーナルの原本。ルームの店舗として取り込む。
   const attachment = filePayload(message.payload)
+
+  // 月次日別売上管理表（Excel/CSV）は、このルームの店舗Botの店舗として取り込む。
+  // 店舗が一致しないファイルは取り込まず、一致しないことだけを返信する。
+  if (message.kind === "file" && attachment && isDailySalesWorkbookName(attachment.name)) {
+    const imported = await processMtalkDailySalesFile(supabase, {
+      groupId,
+      storeKey,
+      path: attachment.path,
+      fileName: attachment.name,
+      asUser: storeBot,
+    })
+    if (imported.handled) {
+      return json({ ok: true, processed: true, kind: "daily-sales-import", reason: imported.reason }, 200)
+    }
+  }
+
   if (message.kind === "file" && attachment && isJournalArchiveName(attachment.name)) {
     const done = await processStoreRoomJournalArchive(supabase, {
       groupId,
@@ -449,7 +493,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     return json({ ok: done, processed: true, kind: "journal-archive" }, 200)
   }
 
-  // LINE と同じ: #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。
+  // #メモ が無い画像はメディア閲覧へ保存し、レシートなら解析して返す。
   if (message.kind === "image" || imagePathFromPayload(message.payload)) {
     const image = imagePathFromPayload(message.payload)
     if (!image) {
@@ -495,6 +539,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
         groupId,
         messageId,
         storeName: registry?.display_name || storeBot?.username || "",
+        storeKey,
         botUserId: storeBot?.id || "",
         question: text,
       })

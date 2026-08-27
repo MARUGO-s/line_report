@@ -52,7 +52,7 @@
   <script>
     // この画面はAIを持たない。ジャーナルレポートのAIチャットをそのまま埋め込み、
     // 答えるのは向こうのシステムに任せる（同じ答えを得るため作り直さない）。
-    const CONFIG = window.LINE_REPORT_PAGES || {};
+    const CONFIG = window.MTALK_PAGES || window.LINE_REPORT_PAGES || {};
     const SUPABASE_URL = CONFIG.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
     const SUPABASE_ANON_KEY = CONFIG.RECEIPT_ADMIN_ANON_KEY || '';
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

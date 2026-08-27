@@ -1,5 +1,5 @@
 /**
- * LINE へ送っている通知を chat.html（Supabase Realtime のグループチャット）へ複製する。
+ * M-talk へ送る通知カード。store_room（店舗ルーム）と1対1トークの両方で対応。
  *
  * 使い方:
  *   const groupId = await resolveChatGroupId(supabase, roomId)
@@ -25,9 +25,9 @@ export type ChatCardFieldRow = {
   value: string
   /** 履歴・予約回数欄のように1要素=1段落で縦に積むもの。 */
   paragraphs?: string[]
-  /** LINE Flex と同じ赤字など。 */
+  /** カードUIと同じ赤字など。 */
   color?: string | null
-  /** LINE Flex の weight: 'bold'（同日確認の数値など）。 */
+  /** カードUIの weight: 'bold'（同日確認の数値など）。 */
   weight?: 'bold' | null
 }
 

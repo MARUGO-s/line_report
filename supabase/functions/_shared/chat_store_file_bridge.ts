@@ -1,7 +1,7 @@
 /**
- * M-talk 店舗ルームの画像／ファイルを LINE と同じ経路へ載せる。
- * - #メモ なし: メディア閲覧へ保存し、画像ならレシート解析して同じ内容を返す
- * - #メモ 引用: 資料登録後にメディア閲覧の複製を消す（LINE と同じ）
+ * M-talk 店舗ルームの画像／ファイル処理。
+ * - #メモ なし: メディア閲覧へ保存し、画像ならレシート解析して内容を返す
+ * - #メモ 引用: 知識ベース登録後にメディア閲覧の複製を消す
  */
 import { resolveGeminiApiKey, resolveReceiptGeminiFlashLiteModel } from './line_client.ts'
 import { removeRoomMediaByMessageId, saveMediaBytesToLibrary } from './line_media_store.ts'
@@ -160,7 +160,7 @@ export async function saveStoreRoomFileToMediaLibrary(
     bytes: Uint8Array
   },
 ): Promise<{ saved: boolean; lineMessageId: string; roomId: string; reason?: string }> {
-  // M-talkからの投稿を、同じ店舗の任意のLINEルーム（例: エリア会議）へ
+  // M-talkからの投稿を、同じ店舗の別のルーム（例: エリア会議）へ
   // 保存してはいけない。投稿元のM-talkルームを常に保存先にする。
   const roomId = `mtalk-group-${params.groupId}`
   const lineMessageId = mtalkMediaMessageId(params.groupId, params.chatMessageId)
@@ -362,7 +362,7 @@ export async function handleStoreRoomReceiptCommand(
   if (!registry) return false
   // 保留状態（重複確認・修正・店舗不一致）の会話キーは (room_id, user_id)。
   // 画像側は投稿元の M-talk ルームで保留を書くので、ここも同じ ID で引く。
-  // 店舗の LINE ルームを優先すると保留が見つからず、「置き換え」等に無反応になる。
+  // 別のルームを優先すると保留が見つからず、「置き換え」等に無反応になる。
   const roomId = `mtalk-group-${params.groupId}`
   const reply = await handleStoreReceiptTextMessage(
     supabase,
@@ -406,5 +406,5 @@ export async function postStoreRoomLineStyleReply(
     content: result.text,
     kind: 'text',
   })
-  if (error) console.error('store room LINE-style reply failed:', error.message)
+  if (error) console.error('store room M-talk reply failed:', error.message)
 }

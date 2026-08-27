@@ -776,6 +776,11 @@
         <div class="mi-sub">ここにファイルをドラッグ＆ドロップ、または <label class="button mi-pick" for="manualImportFile">ファイルを選択</label></div>
         <input type="file" id="manualImportFile" accept=".xlsx,.xls,.csv" hidden>
         <div class="mi-note">採用は<b>総売上</b>。アップロード後、確認画面で内容をチェックしてから反映します。</div>
+        <div class="mi-note mi-template">
+          書式が分からないときは
+          <a id="dailySalesTemplateLink" class="mi-template-link" href="#" rel="noopener">日別売上管理表テンプレート</a>
+          をダウンロードし、金額を入力して取り込んでください。
+        </div>
       </div>
       <div id="manualImportStatus" class="meta"></div>
     </div>
@@ -1017,6 +1022,8 @@
   .manual-import-drop .mi-main { font-size: 0.95rem; }
   .manual-import-drop .mi-sub { font-size: 0.85rem; margin-top: 6px; }
   .manual-import-drop .mi-note { font-size: 0.75rem; color: var(--sub, #8a96a3); margin-top: 6px; }
+  .manual-import-drop .mi-template-link { color: inherit; text-decoration: underline; }
+  .manual-import-drop .mi-template-link:hover { color: var(--fg, #e8eef5); }
   .manual-import .mi-pick { display: inline-block; padding: 4px 12px; cursor: pointer; }
   .import-preview-wrap { max-height: 46vh; overflow: auto; border: 1px solid var(--border, #2a3a4d); border-radius: 8px; }
   .import-preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -1740,6 +1747,7 @@ function receiptDailyOnViewportChange() {
 function renderReceiptDailyTable(data) {
   if (!dom.receiptDailyTableBody || !dom.receiptDailyMeta) return;
   if (receiptDailyEditActive) return;
+  refreshDailySalesTemplateLink();
   const numBlocks = receiptDailyBlockCount();
   receiptDailySyncLayoutChrome(numBlocks);
   const colspan = numBlocks * RECEIPT_DAILY_COLS;
@@ -2141,9 +2149,21 @@ async function confirmManualImport() {
   }
 }
 
+/**
+ * テンプレートの配布は line-webhook の GET（?download=）が担当する。
+ * 店舗キーはパスに載せるだけで配布内容は共通だが、経路を店舗別Webhookに
+ * 揃えておくためリンクは選択中の店舗に追従させる。
+ */
+function refreshDailySalesTemplateLink() {
+  const link = document.getElementById('dailySalesTemplateLink');
+  if (!link || typeof LINE_REPORT_PAGES.dailySalesTemplateUrl !== 'function') return;
+  link.href = LINE_REPORT_PAGES.dailySalesTemplateUrl(rdResolveStoreKey());
+}
+
 (function initManualImport() {
   const drop = document.getElementById('manualImportDrop');
   const fileInput = document.getElementById('manualImportFile');
+  refreshDailySalesTemplateLink();
   if (fileInput) {
     fileInput.addEventListener('change', () => {
       const f = fileInput.files && fileInput.files[0];
