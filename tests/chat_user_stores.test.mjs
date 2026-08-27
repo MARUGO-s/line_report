@@ -84,3 +84,22 @@ test("chat.html requires store pick, later change, and filters 1:1 candidates", 
   assert.match(knowledge, /mtalk-stores:approve:/)
   assert.match(knowledge, /所属店舗の変更/)
 })
+
+test("privilege boundaries: no self insert, viewer defaults, store-room join, no silent admin", async () => {
+  const boundary = await read("supabase/migrations/20260906010000_chat_privilege_boundaries.sql")
+  const chat = await read("public/chat.html")
+  const admin = await read("public/chat-admin.html")
+
+  assert.match(boundary, /alter column can_send set default false/i)
+  assert.match(boundary, /alter column can_invite set default false/i)
+  assert.match(boundary, /drop policy if exists chat_users_insert_self/i)
+  assert.match(boundary, /revoke insert on table public\.chat_users/i)
+  assert.match(functionDefinition(boundary, "chat_join_by_invite"), /chat_user_can_join_group_by_store/i)
+  assert.match(functionDefinition(boundary, "chat_create_group"), /chat_shares_affiliation/i)
+  assert.match(boundary, /signup_status = 'pending'/i)
+
+  assert.doesNotMatch(chat, /href="\.\/chat-admin\.html"/)
+  assert.match(admin, /referrerIsHqDashboard/)
+  assert.match(admin, /resumeAdminBtn/)
+  assert.match(admin, /ここは M-talk の利用者画面ではありません/)
+})

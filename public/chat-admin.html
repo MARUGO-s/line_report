@@ -193,9 +193,10 @@
       <section class="login-wrap" id="loginView">
         <form class="login-card" id="loginForm">
           <h2>本部管理者として接続</h2>
-          <p>既存のフル管理トークンを使用します。店舗・ルーム限定セッションではこの画面を開けません。</p>
+          <p>ここは M-talk の利用者画面ではありません。本部フル管理セッションだけが使えます。店舗・ルーム限定セッションでは開けません。</p>
           <div class="notice hidden" id="loginError"></div>
-          <label class="field">管理トークン<input id="tokenInput" type="password" autocomplete="current-password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション" required></label>
+          <button class="btn primary hidden" id="resumeAdminBtn" type="button" style="width:100%;margin-bottom:14px">保存済みの本部セッションで接続</button>
+          <label class="field">管理トークン<input id="tokenInput" type="password" autocomplete="current-password" placeholder="ADMIN_DASHBOARD_TOKEN または lrst_ セッション"></label>
           <button class="btn primary" id="loginBtn" type="submit" style="width:100%">接続する</button>
         </form>
       </section>
@@ -708,7 +709,18 @@
 
     async function mutate(path,options,message) { setBusy(true); try { await api(path,options); await loadState(); toast(message,false); } catch (error) { if (error.status === 409) { await loadState().catch(() => {}); document.querySelectorAll('dialog').forEach((dialog) => { if (dialog.open) dialog.close(); }); } toast(error.message || String(error),true); throw error; } finally { setBusy(false); } }
 
-    $('loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const value = $('tokenInput').value.trim(); $('loginError').classList.add('hidden'); setBusy(true); try { await AUTH.loginWithToken(value,{sessionUrl:apiUrl('/auth/session'),adminSurface:ADMIN_SURFACE}); $('tokenInput').value=''; await loadState(); } catch (error) { showLogin(error.message || String(error)); } finally { setBusy(false); } });
+    async function connectWithStoredAdminSession() {
+      if (!AUTH || !token()) throw new Error('保存済みの本部セッションがありません');
+      await loadState();
+    }
+    $('resumeAdminBtn').addEventListener('click', async () => {
+      $('loginError').classList.add('hidden');
+      setBusy(true);
+      try { await connectWithStoredAdminSession(); }
+      catch (error) { showLogin(error.message || String(error)); }
+      finally { setBusy(false); }
+    });
+    $('loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const value = $('tokenInput').value.trim(); if (!value) { showLogin('管理トークンを入力してください'); return; } $('loginError').classList.add('hidden'); setBusy(true); try { await AUTH.loginWithToken(value,{sessionUrl:apiUrl('/auth/session'),adminSurface:ADMIN_SURFACE}); $('tokenInput').value=''; await loadState(); } catch (error) { showLogin(error.message || String(error)); } finally { setBusy(false); } });
     $('logoutBtn').addEventListener('click', async () => { try { await AUTH.logout({logoutUrl:apiUrl('/auth/logout'),adminSurface:ADMIN_SURFACE}); } finally { showLogin(); } });
     $('refreshBtn').addEventListener('click', () => loadState().catch((error) => toast(error.message,true)));
     $('userSearch').addEventListener('input', renderUsers); $('userStatus').addEventListener('change', renderUsers); $('roomSearch').addEventListener('input', renderRooms);
@@ -753,10 +765,27 @@
     document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => { const dialog = $(button.dataset.close); if (dialog && dialog.open) dialog.close(); }));
     document.querySelectorAll('[data-jump]').forEach((button) => button.addEventListener('click', () => { document.querySelectorAll('[data-jump]').forEach((item) => item.classList.toggle('active',item===button)); $(button.dataset.jump)?.scrollIntoView({behavior:'smooth',block:'start'}); }));
 
+    function referrerIsHqDashboard() {
+      try {
+        const ref = String(document.referrer || '');
+        if (!ref) return false;
+        const url = new URL(ref);
+        if (url.origin !== location.origin) return false;
+        const path = String(url.pathname || '');
+        return /\/index\.html$/i.test(path) || /\/line_report\/?$/i.test(path);
+      } catch (_) {
+        return false;
+      }
+    }
     (async function init() {
       try { if (AUTH && AUTH.consumeUrlAuthParams) await AUTH.consumeUrlAuthParams({exchangeUrl:apiUrl('/auth/link-login'),adminSurface:ADMIN_SURFACE}); } catch (_) {}
       if (!AUTH || !token()) { showLogin(); return; }
-      try { await loadState(); } catch (error) { showLogin(error.message || '管理セッションを確認できませんでした。'); }
+      if (referrerIsHqDashboard()) {
+        try { await loadState(); } catch (error) { showLogin(error.message || '管理セッションを確認できませんでした。'); }
+        return;
+      }
+      showLogin();
+      $('resumeAdminBtn').classList.remove('hidden');
     })();
   </script>
 </body>
