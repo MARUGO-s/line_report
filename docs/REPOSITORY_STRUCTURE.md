@@ -18,6 +18,7 @@ GitHub Actionsが`public/`をGitHub Pagesへデプロイします。
 line_report-main/
 ├── public/
 │   ├── *.html / *.js             GitHub Pagesの公開入口（既存URL維持）
+│   ├── chat/                      M-talkのCSS・責務別JavaScript
 │   ├── icons/ / vendor/          公開画像・ブラウザ用ライブラリ
 │   └── system-map/               公開する自動生成システム図
 ├── supabase/                     Edge Functions・migration・設定
@@ -68,7 +69,7 @@ line_report-main/
 | 内容 | 配置先 |
 |---|---|
 | 新しい公開ページ | `public/`。既存URL要件を先に確認 |
-| 共通フロント資産 | `public/icons/`、`public/vendor/`、または用途別の公開サブディレクトリ |
+| 共通フロント資産 | `public/icons/`、`public/vendor/`、または用途別の公開サブディレクトリ。M-talk専用は`public/chat/` |
 | Edge Function | `supabase/functions/<function>/` |
 | DB変更 | `supabase/migrations/` |
 | 自動テスト | `tests/` |

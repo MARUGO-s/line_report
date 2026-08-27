@@ -9,9 +9,12 @@ import {
   eventTimeLabel,
   reminderClockMatches,
 } from "../supabase/functions/_shared/calendar_tomorrow_reminder.ts"
+import { readChatPageSource } from "./helpers/chat-page-source.mjs"
 
 const root = new URL("..", import.meta.url)
-const read = (relative: string) => readFile(new URL(relative, root), "utf8")
+const read = (relative: string) => relative === "public/chat.html"
+  ? readChatPageSource()
+  : readFile(new URL(relative, root), "utf8")
 
 test("tomorrow reminder clock defaults to 19:00 and matches that minute only", () => {
   assert.equal(CALENDAR_TOMORROW_REMINDER_DEFAULTS.hour, 19)

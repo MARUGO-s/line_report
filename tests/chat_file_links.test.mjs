@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
 const root = new URL('..', import.meta.url);
-const chat = fs.readFileSync(new URL('public/chat.html', root), 'utf8');
+const chat = readChatPageSourceSync();
 const migration = fs.readFileSync(new URL('supabase/migrations/20260828010000_chat_file_attachments.sql', root), 'utf8');
 
 test('M-talk accepts private office/document attachments and renders signed downloads', () => {

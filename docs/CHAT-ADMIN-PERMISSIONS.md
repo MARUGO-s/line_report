@@ -112,6 +112,10 @@ Botの削除・復元は、通常のM-talk画面では行えず、**本部フル
 - ユーザー全体権限は`updated_at`で競合を検出して409にし、ルーム権限はDBで行ロック後に指定項目だけを更新する。別管理者の変更を古い画面値で巻き戻さない。
 - `chat-icons`の書込みは本人のパス、または管理可能ルームのパスだけに限定する。
 - `chat-images`は`can_view`で閲覧、`can_send`で保存する。
+- `anon`には`chat_*`テーブル・sequence権限を与えない。停止・一時制限・論理削除中は
+  Keepと個人メモも`chat_has_active_access()`で遮断する。
+- PostgreSQLトリガ専用関数はData APIから呼ばせず、`public / anon / authenticated`の
+  EXECUTEを剥がす。
 
 通常のM-talk画面では、ルームの完全削除は復元不能なため、`can_manage`だけでは許可せず
 作成者本人に限定する。M-talk管理画面では本部フル管理セッションに限り、

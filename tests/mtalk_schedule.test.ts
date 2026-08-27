@@ -2,9 +2,12 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 import { parseScheduleFromText } from "../supabase/functions/_shared/mtalk_schedule_register.ts"
+import { readChatPageSource } from "./helpers/chat-page-source.mjs"
 
 const root = new URL("..", import.meta.url)
-const read = (relative: string) => readFile(new URL(relative, root), "utf8")
+const read = (relative: string) => relative === "public/chat.html"
+  ? readChatPageSource()
+  : readFile(new URL(relative, root), "utf8")
 
 test("M-talk schedule page switches reservation and event tabs", async () => {
   const [html, chat, api, gmail] = await Promise.all([

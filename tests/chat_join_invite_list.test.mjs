@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
-const chat = readFileSync(new URL('../public/chat.html', import.meta.url), 'utf8');
+const chat = readChatPageSourceSync();
 
 test('unjoined group list asks for an invite link instead of joining by id', () => {
   assert.match(chat, /未参加のグループ/);

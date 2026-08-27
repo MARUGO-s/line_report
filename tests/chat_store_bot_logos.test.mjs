@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { readChatPageSource } from './helpers/chat-page-source.mjs';
 
-const chat = await readFile(new URL('../public/chat.html', import.meta.url), 'utf8');
+const chat = await readChatPageSource();
 
 const expectedStoreLogos = {
   marugo: 'marugo.svg', marugosecond: 'marugosecond.svg', marugogrande: 'marugogrande.svg',

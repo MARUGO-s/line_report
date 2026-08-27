@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
 const migration = fs.readFileSync(
   new URL('../supabase/migrations/20260826040000_chat_silent_messages.sql', import.meta.url),
@@ -12,10 +13,7 @@ const chatPush = fs.readFileSync(
   'utf8',
 );
 
-const chatHtml = fs.readFileSync(
-  new URL('../public/chat.html', import.meta.url),
-  'utf8',
-);
+const chatHtml = readChatPageSourceSync();
 
 test('migration adds is_silent boolean to chat_messages', () => {
   assert.match(migration, /alter table if exists public\.chat_messages/i);

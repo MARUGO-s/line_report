@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 
 const root = new URL('..', import.meta.url);
-const chat = fs.readFileSync(new URL('public/chat.html', root), 'utf8');
+const chat = readChatPageSourceSync();
 const migration = fs.readFileSync(new URL('supabase/migrations/20260827010000_chat_keep_and_albums.sql', root), 'utf8');
 const editMigration = fs.readFileSync(new URL('supabase/migrations/20260827020000_chat_album_edit_permissions.sql', root), 'utf8');
 

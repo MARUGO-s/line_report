@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { readChatPageSource } from './helpers/chat-page-source.mjs';
 
 const root = new URL('../', import.meta.url);
-const read = (rel) => readFile(new URL(rel, root), 'utf8');
+const read = (rel) => rel === 'public/chat.html'
+  ? readChatPageSource()
+  : readFile(new URL(rel, root), 'utf8');
 
 test('sales sheet links stay hidden unless they have an http(s) URL', async () => {
   const config = await read('public/pages-config.js');
