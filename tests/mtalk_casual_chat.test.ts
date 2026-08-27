@@ -436,6 +436,43 @@ Deno.test("Web検索の門番は雑談を通さず、明示依頼と外部トピ
   assertEquals(shouldMtalkWebSearch("ワインを開けました"), false);
 });
 
+Deno.test("出典URLを1行に保ち、https のコロンで折らない", () => {
+  // 2026-08-27 の実利用で、出典が「▶ https」「　//example.com/…」の2行に割れて
+  // リンクとして開けなかった。原因は「項目：値」分割が https: のコロンに反応したこと。
+  const formatted = formatCasualReplyForMtalk([
+    "出典:",
+    "- https://mi-journey.jp/foodie/45532/",
+    "- https://www.nichireifoods.co.jp/media/12232/",
+  ].join("\n"));
+
+  if (formatted.includes("▶ https\n")) {
+    throw new Error(`URLがスキームで分割されています:\n${formatted}`);
+  }
+  if (!formatted.includes("▶ https://mi-journey.jp/foodie/45532/")) {
+    throw new Error(`URLが1行に収まっていません:\n${formatted}`);
+  }
+  if (!formatted.includes("▶ https://www.nichireifoods.co.jp/media/12232/")) {
+    throw new Error(`2件目のURLが1行に収まっていません:\n${formatted}`);
+  }
+});
+
+Deno.test("URL内のアンダースコア・アスタリスクをMarkdown装飾と誤認しない", () => {
+  // `_b_` を斜体と誤認して落とすと、開けない別のURLに化ける。
+  const formatted = formatCasualReplyForMtalk(
+    "- https://example.com/path_to_a_page/item_1",
+  );
+  if (!formatted.includes("https://example.com/path_to_a_page/item_1")) {
+    throw new Error(`URLが装飾除去で壊れました:\n${formatted}`);
+  }
+});
+
+Deno.test("URLでない「項目：値」は従来どおり2行へ分ける", () => {
+  const formatted = formatCasualReplyForMtalk("- 材料：卵4個、砂糖120g");
+  if (!formatted.includes("▶ 材料") || !formatted.includes("　卵4個、砂糖120g")) {
+    throw new Error(`通常の項目分割が壊れています:\n${formatted}`);
+  }
+});
+
 Deno.test("調理の手順を聞く質問も検索対象にする（レシピという語を使わなくても）", () => {
   // 2026-08-27 の実利用で「スポンジケーキの作り方を教えて」が検索されず、
   // モデルの知識だけで答えていた。飲食店で最も多い聞き方なので門番を広げた。
