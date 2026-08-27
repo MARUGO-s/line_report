@@ -456,6 +456,34 @@ Deno.test("出典URLを1行に保ち、https のコロンで折らない", () =>
   }
 });
 
+Deno.test("読点で連結された複数URLを1行1URLへ分ける", () => {
+  // 2026-08-27 実利用: 「出典: https://a.html、https://b/、https://c」が1行に詰まり、
+  // 読点まで1つのURLと解釈されて %E3%80%81 付きの存在しないURLになり404した。
+  const formatted = formatCasualReplyForMtalk(
+    "出典: https://www.ffcc.jp/recipe/2023/06/opera.html、https://www.kyoritsu-foods.co.jp/recipe/880/、https://delishkitchen.tv/recipes/236018418380178532",
+  );
+  const lines = formatted.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  if (!lines.includes("出典:")) {
+    throw new Error(`見出しが残っていません:\n${formatted}`);
+  }
+  for (
+    const url of [
+      "https://www.ffcc.jp/recipe/2023/06/opera.html",
+      "https://www.kyoritsu-foods.co.jp/recipe/880/",
+      "https://delishkitchen.tv/recipes/236018418380178532",
+    ]
+  ) {
+    if (!lines.includes(url)) {
+      throw new Error(`URLが単独行になっていません: ${url}\n${formatted}`);
+    }
+  }
+  // 読点を巻き込んだURLが1つも残っていないこと。
+  if (/https?:\/\/[^\s]*、/.test(formatted)) {
+    throw new Error(`URLが読点を巻き込んでいます:\n${formatted}`);
+  }
+});
+
 Deno.test("URL内のアンダースコア・アスタリスクをMarkdown装飾と誤認しない", () => {
   // `_b_` を斜体と誤認して落とすと、開けない別のURLに化ける。
   const formatted = formatCasualReplyForMtalk(

@@ -6741,7 +6741,11 @@
     // 本文中の @表示名 を、そのトークの参加者名と照合して強調する。
     // 長い名前から先に照合しないと「@田中」が「@田中太郎」を食ってしまう。
     // 本文中のURL。末尾の句読点・閉じ括弧は本文の一部として外す（firstMessageUrl と同じ扱い）。
-    const MESSAGE_URL_RE = /https?:\/\/[^\s<>「」『』]+/i;
+    // 全角記号・日本語句読点でも必ず切る。ここを緩くすると
+    // 「…opera.html、https://…」がひと続きのURLとして扱われ、読点が %E3%80%81 へ
+    // エンコードされた存在しないURLになる（2026-08-27 実利用で404を確認）。
+    const MESSAGE_URL_PATTERN = 'https?:\\/\\/[^\\s<>"、。，．！？；：・〜（）「」『』【】〔〕〈〉《》［］｛｝｜＼＜＞]+';
+    const MESSAGE_URL_RE = new RegExp(MESSAGE_URL_PATTERN, 'i');
 
     // 本文の途中にあるURLを、その場でクリックできるリンクにする。
     // href は safeHttpUrl で http/https に限定し、javascript: 等を弾く。
@@ -6810,7 +6814,7 @@
     }
 
     function firstMessageUrl(content) {
-      const match = String(content || '').match(/https?:\/\/[^\s<>「」『』]+/i);
+      const match = String(content || '').match(MESSAGE_URL_RE);
       if (!match) return '';
       return safeHttpUrl(match[0].replace(/[.,!?。、，！？）)\]}]+$/g, ''));
     }
