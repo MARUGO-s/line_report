@@ -25,7 +25,9 @@ import {
 } from "../_shared/mtalk_daily_sales_import.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
-const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/mtalk_room_settings.html"
+// 実ファイルは public/room_settings.html。M-talk用の別ページは存在しないので、
+// 用語移行でここを mtalk_room_settings.html に変えると 404 になる（2026-08-27 に復旧）。
+const ROOM_SETTINGS_PAGE = "https://marugo-s.github.io/line_report/room_settings.html"
 // 「M-talkに貼る」でジャーナルレポートAIの回答を貼り付けた投稿の目印。
 // jnl2txt.html の postAiAnswerToMtalk が本文の先頭へ付ける。
 const JOURNAL_PASTE_PREFIX_RE = /^\[電子ジャーナル\]/
@@ -535,6 +537,9 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     // 雑談・簡単な相談として oss-120b で返す。グループでは黙って無視する
     // （他のスタッフの雑談を勝手にAIへ送らないため）。
     if (text && await isSoloHumanRoom(supabase, groupId, String(message.user_id || ""))) {
+      // Web検索の可否・モデルはルーム設定（権限設定ページ）から読む。
+      // 既定はOFFなので、明示的に有効化したルームだけ Perplexity の課金が発生する。
+      const roomFlags = await loadMtalkRoomFlags(supabase, groupId)
       const casualReply = await generateCasualReply(supabase, {
         groupId,
         messageId,
@@ -542,6 +547,8 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
         storeKey,
         botUserId: storeBot?.id || "",
         question: text,
+        webSearchEnabled: roomFlags.mtalk_web_search_enabled,
+        webSearchModel: roomFlags.mtalk_web_search_model,
       })
       if (casualReply) {
         await replyInRoom(supabase, groupId, casualReply, storeBot)

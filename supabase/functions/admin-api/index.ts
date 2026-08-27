@@ -588,7 +588,12 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
   "calendar_silent_auto_register_enabled", "calendar_low_confidence_confirm_reply_enabled",
   "calendar_registration_reply_enabled", "dome_weekly_enabled",
   "review_alert_enabled", "foodcourt_weekly_report_enabled",
+  "mtalk_web_search_enabled",
 ]
+
+// M-talk雑談AIのWeb検索で使える Perplexity モデル。DBのCHECK制約と同じ集合を持つ。
+// 許可外の値は null（＝既定 sonar）へ落とし、課金単価の高いモデルを勝手に指定させない。
+const MTALK_WEB_SEARCH_MODELS_ALLOWED = new Set(["sonar", "sonar-pro"])
 const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," +
   ROOM_CONFIG_SAFE_BOOL_FIELDS.join(",") +
   ",today_reservation_alert_hour,today_reservation_alert_minute" +
@@ -596,7 +601,8 @@ const ROOM_CONFIG_SAFE_SELECT = "room_id,room_name,room_config_access_enabled," 
   ",dome_weekly_dow,dome_weekly_hour,dome_weekly_minute" +
   ",foodcourt_weekly_dow,foodcourt_weekly_hour,foodcourt_weekly_minute" +
   ",review_alert_hour,review_alert_minute" +
-  ",gmail_alert_interval_minutes,gmail_alert_anchor_hour,gmail_alert_anchor_minute"
+  ",gmail_alert_interval_minutes,gmail_alert_anchor_hour,gmail_alert_anchor_minute" +
+  ",mtalk_web_search_model"
 
 // 予約メール通知(gmail-alert-cron)の配信間隔（分）として許可する値。
 // 1(既定・null扱い)=毎分チェック(リアルタイム)。それ以外は「N分おきにまとめて配信」。
@@ -678,6 +684,11 @@ function buildRoomConfigSafePayload(body: Record<string, unknown>): Record<strin
   if ("gmail_alert_anchor_minute" in body) {
     const v = Number(body.gmail_alert_anchor_minute)
     out.gmail_alert_anchor_minute = (Number.isInteger(v) && v >= 0 && v <= 59) ? v : null
+  }
+  // M-talk雑談AIのWeb検索モデル。許可外は null（＝既定 sonar）へ落とす。
+  if ("mtalk_web_search_model" in body) {
+    const v = String(body.mtalk_web_search_model ?? "").trim().toLowerCase()
+    out.mtalk_web_search_model = MTALK_WEB_SEARCH_MODELS_ALLOWED.has(v) ? v : null
   }
   return out
 }

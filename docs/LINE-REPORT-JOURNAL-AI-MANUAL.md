@@ -199,14 +199,17 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 ### OPS-01 ルーム設定・権限・セルフ設定
 
-**要点:** 管理者設定、スタッフのセルフ設定、ルーム削除範囲を説明する。
+**要点:** 管理者設定、スタッフのセルフ設定、AIのWeb検索、ルーム削除範囲を説明する。
 
 - 管理画面の権限・機能設定で、添付保存、解析結果返信、修正返信、売上レポート、予算登録、予約配信等をルームごとに管理します。
 - 設定保存前は画面を強制再読込し、最新状態で保存します。「AI返信完全無し」でも登録確定に必要なレシート・予算等の返信は残る場合があります。
 - セルフ設定を管理者が有効化すると、スタッフはLINEルームで「設定」と送り、24時間・1回限りのリンクとルームパスワードで、そのルームの安全なトグルだけ変更できます。
+- 「AI返信・検索」区分の「AIのWeb検索」をONにすると、雑談AIがマニュアルにも店舗データにも無い一般的な質問へ、Webを検索して出典付きで答えます。既定はOFFで、検索1回ごとに料金が発生します（標準モデルで目安1〜2円）。
+- Web検索は「調べて」等の明示的な依頼か、疑問形かつ外部情報が要る話題のときだけ動きます。ふだんの雑談・使い方の質問では検索しません。売上・客数はWeb検索の対象外で、従来どおり「ジャーナルに聞く」が担当します。
+- Web検索のモデルは同じ設定画面で「標準（sonar）」と「高精度（sonar-pro）」から選べます。高精度は料金が上がるため、通常は標準のままで足ります。
 - M-talkルームはゴミ箱へ移動して復元でき、完全削除は権限と再入力確認が必要です。店舗固定ルームは通常の完全削除対象外です。
 
-**検索語:** ルーム設定 / 権限 / 機能設定 / ai返信完全無し / 予算登録を許可 / レシート解析結果 / セルフ設定 / パスワード / ワンパス / ゴミ箱 / 復元
+**検索語:** ルーム設定 / 権限 / 機能設定 / ai返信完全無し / 予算登録を許可 / レシート解析結果 / セルフ設定 / パスワード / ワンパス / ゴミ箱 / 復元 / web検索 / ウェブ検索 / ネット検索 / 検索して答える / 出典 / モデル / 料金
 
 **主な実装根拠:** `public/index.html` / `public/room_settings.html` / `public/chat-admin.html` / `supabase/functions/_shared/room_config_link.ts` / `supabase/functions/admin-api/index.ts`
 
@@ -738,10 +741,10 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 40件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 91件
+- 共有TypeScriptモジュール: 92件
 - 補助・運用・レガシーコード: 37件
 - admin-api静的ルート: 136件
-- SQL migrations: 270件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- SQL migrations: 271件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 65件
 
 ### 公開画面・ブラウザコード
@@ -872,6 +875,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/mtalk_room_settings.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_schedule_register.ts` | RSV-01 / JAI-04 / DEV-02 |
 | `supabase/functions/_shared/mtalk_search.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/mtalk_web_search.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/paged_row_scan.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/petty_cash_flow.ts` | OPS-03 / DEV-02 |
 | `supabase/functions/_shared/pos_journal.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
