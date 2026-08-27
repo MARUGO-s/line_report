@@ -3973,8 +3973,15 @@
       $('loginNotice').classList.add('hidden');
     }
 
+    async function dropRealtimeChannel(existing) {
+      if (!existing) return;
+      try { await sb.removeChannel(existing); } catch (_) { /* 破棄できなくても新規チャンネルで続行 */ }
+    }
+
     async function subscribeRealtime() {
-      if (channel) sb.removeChannel(channel);
+      const previous = channel;
+      channel = null;
+      await dropRealtimeChannel(previous);
 
       try {
         const { data } = await sb.auth.getSession();
@@ -3984,7 +3991,7 @@
       }
 
       channel = sb
-        .channel('chat-global')
+        .channel(`chat-global-${currentUser.id}-${Date.now()}`)
         .on('postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'chat_user_access', filter: `user_id=eq.${currentUser.id}` },
           () => handleCurrentChatAccessChange())
@@ -4348,7 +4355,9 @@
         await savePushSubscription(pushSubscription, true).catch((error) => {
           console.error('Push subscription refresh error:', error);
         });
-        subscribePushPreferenceChanges();
+        await subscribePushPreferenceChanges().catch((error) => {
+          console.error('Push preference realtime error:', error);
+        });
         await syncPushPreference();
         hidePushRestoreBar();
       } catch (error) {
@@ -4429,7 +4438,9 @@
         });
         await savePushSubscription(pushSubscription, true);
         pushNotificationsEnabled = true;
-        subscribePushPreferenceChanges();
+        await subscribePushPreferenceChanges().catch((error) => {
+          console.error('Push preference realtime error:', error);
+        });
         renderNotificationStatus('enabled');
         hidePushRestoreBar();
         await syncAppBadge();
@@ -4663,28 +4674,32 @@
       void pollPushDiagnosticStatus(testId);
     }
 
-    function subscribePushPreferenceChanges() {
+    async function subscribePushPreferenceChanges() {
       if (!currentUser || !pushSubscription) return;
-      if (pushPreferenceChannel) sb.removeChannel(pushPreferenceChannel);
-      pushPreferenceChannel = sb
-        .channel(`chat-push-preference-${currentUser.id}`)
-        .on('postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'chat_push_user_preferences',
-            filter: `user_id=eq.${currentUser.id}`
-          },
-          (payload) => {
-            pushNotificationsEnabled = payload.new?.notifications_enabled === true;
-            renderNotificationStatus(pushNotificationsEnabled ? 'enabled' : 'disabled');
-            if (pushNotificationsEnabled) {
-              loadUnread();
-            } else {
-              syncAppBadge(0);
-            }
-          })
-        .subscribe();
+      const state = pushPreferenceChannel && pushPreferenceChannel.state;
+      if (state === 'joined' || state === 'joining') return;
+      const previous = pushPreferenceChannel;
+      pushPreferenceChannel = null;
+      await dropRealtimeChannel(previous);
+      const next = sb.channel(`chat-push-preference-${currentUser.id}-${Date.now()}`);
+      next.on('postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'chat_push_user_preferences',
+          filter: `user_id=eq.${currentUser.id}`
+        },
+        (payload) => {
+          pushNotificationsEnabled = payload.new?.notifications_enabled === true;
+          renderNotificationStatus(pushNotificationsEnabled ? 'enabled' : 'disabled');
+          if (pushNotificationsEnabled) {
+            loadUnread();
+          } else {
+            syncAppBadge(0);
+          }
+        });
+      pushPreferenceChannel = next;
+      next.subscribe();
     }
 
     async function syncPushPreference() {
@@ -10031,8 +10046,8 @@
       closeTalkContextMenu();
       closeForward();
       closeOpenSwipe();
-      if (channel) { sb.removeChannel(channel); channel = null; }
-      if (pushPreferenceChannel) { sb.removeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
+      if (channel) { await dropRealtimeChannel(channel); channel = null; }
+      if (pushPreferenceChannel) { await dropRealtimeChannel(pushPreferenceChannel); pushPreferenceChannel = null; }
       if (pushSubscription) {
         const endpoint = pushSubscription.endpoint;
         try {
