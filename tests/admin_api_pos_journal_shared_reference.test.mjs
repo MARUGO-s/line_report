@@ -55,6 +55,12 @@ test("POS journal page shows both verified CAVACAVA store codes", () => {
   assert.match(page, /var STORE_CODE = '1015・1020'/);
 });
 
+test("successfully parsed zero-sales journals are not shown as incomplete", () => {
+  assert.match(adminApi, /parsed_complete:\s*parsedData\.parsed_complete === true/);
+  assert.match(page, /if \(file\.parsed_complete === true\) return false/);
+  assert.match(page, /正常解析済みの0円日は対象外/);
+});
+
 test("POS journal state applies Journal Report category overrides", () => {
   assert.match(adminApi, /const categoryOverrides = await fetchPosJournalCategoryOverrides/);
   assert.match(adminApi, /categoryOverrides,/);

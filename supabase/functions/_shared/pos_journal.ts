@@ -36,6 +36,8 @@ export type PosJournalDay = Record<string, unknown> & {
   business_date: string;
   receipts: PosJournalReceipt[];
   source: string;
+  /** LZHの精算レポートを最後まで解析済み。売上0円・会計0件の日も未解析と区別する。 */
+  parsed_complete?: boolean;
 };
 
 export type PosJournalSummary = {
@@ -702,6 +704,7 @@ function parsePosJournalTexts(
     business_date: String(settlement.business_date),
     receipts,
     source: sourceFileName,
+    parsed_complete: true,
   };
 }
 

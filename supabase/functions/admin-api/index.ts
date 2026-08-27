@@ -10989,6 +10989,7 @@ function posJournalFileRow(value: unknown): Record<string, unknown> | null {
     groups: toNonNegativeInteger(value.groups_count),
     guests: toNonNegativeInteger(value.guests_count),
     receipts_count: toNonNegativeInteger(value.receipts_count),
+    parsed_complete: parsedData.parsed_complete === true,
     uploaded_at: String(value.uploaded_at ?? ""),
     parsed_data: parsedData,
   }
@@ -12947,7 +12948,8 @@ function isPosJournalPlaceholderRow(row: Record<string, unknown>): boolean {
   const receiptsCount = toNonNegativeInteger(row.receipts_count)
   const parsed = isRecord(row.parsed_data) ? row.parsed_data : {}
   const receipts = Array.isArray(parsed.receipts) ? parsed.receipts : []
-  return receiptsCount <= 0 || receipts.length === 0
+  const parsedComplete = parsed.parsed_complete === true
+  return !parsedComplete && (receiptsCount <= 0 || receipts.length === 0)
 }
 
 function buildPosJournalRepairPayload(

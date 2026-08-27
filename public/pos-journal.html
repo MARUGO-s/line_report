@@ -618,7 +618,7 @@
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015・1020をBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。会計0件の不完全行がある営業日は再アップロードで修復できます。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
+                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015・1020をBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。未解析の不完全行は再アップロードで修復できます（正常解析済みの0円日は対象外）。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
@@ -920,6 +920,7 @@
     }
     function isIncompleteJournalFile(file) {
       if (!file) return false;
+      if (file.parsed_complete === true) return false;
       if ((Number(file.receipts_count) || 0) <= 0) return true;
       var parsed = file.parsed_data;
       if (parsed && typeof parsed === 'object' && Array.isArray(parsed.receipts)) {

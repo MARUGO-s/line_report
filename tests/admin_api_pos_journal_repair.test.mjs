@@ -27,8 +27,12 @@ const upload = sectionBetween(
   "async function uploadPosJournalFiles(",
   "async function fetchPosJournalDownloadUrl(",
 );
-test("placeholder rows are incomplete journals without receipts", () => {
-  assert.match(placeholder, /receiptsCount <= 0 \|\| receipts\.length === 0/);
+test("placeholder rows exclude a successfully parsed zero-sales journal", () => {
+  assert.match(placeholder, /parsed\.parsed_complete === true/);
+  assert.match(
+    placeholder,
+    /!parsedComplete && \(receiptsCount <= 0 \|\| receipts\.length === 0\)/,
+  );
   assert.doesNotMatch(placeholder, /grossSales <= 0 && receipts\.length === 0/);
 });
 
