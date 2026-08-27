@@ -16,7 +16,8 @@ test('new and existing users can select bundled icons while uploads remain avail
   assert.match(chat, /function pickUploadedIcon\(\)/);
   assert.match(chat, /function choosePresetIcon\(url\)/);
   assert.match(chat, /update\(\{ icon_url: url \}\)\.eq\('id', currentUser\.id\)/);
-  assert.match(chat, /insert\(\{ id: uid, username, icon_url: pendingPresetUserIconUrl \|\| null \}\)/);
+  assert.match(chat, /rpc\('chat_complete_signup'/);
+  assert.match(chat, /p_icon_url: iconUrl/);
   assert.match(chat, /canvas\.toBlob\(resolve, 'image\/webp', 0\.82\)/);
   assert.match(chat, /cacheControl: '31536000'/);
   assert.match(chat, /profile-icons\/catalog\.json', \{ cache: 'force-cache' \}/);

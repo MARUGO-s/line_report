@@ -4218,7 +4218,7 @@ async function fetchChatAdminState(
       .limit(5000),
     supabase
       .from("chat_user_access")
-      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
+      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
       .limit(5000),
     supabase
       .from("chat_groups")
@@ -4287,6 +4287,8 @@ async function fetchChatAdminState(
         can_start_direct: access.can_start_direct !== false,
         can_create_group: access.can_create_group !== false,
         can_browse_users: access.can_browse_users !== false,
+        default_can_send: access.default_can_send !== false,
+        signup_status: String(access.signup_status || "approved"),
         restriction_reason: access.restriction_reason ?? null,
         restricted_until: access.restricted_until ?? null,
         deleted_at: access.deleted_at ?? null,

@@ -9,7 +9,7 @@ import {
   loadChatStoreBot,
   resolveRoomStoreKey,
 } from "../_shared/chat_store_file_bridge.ts"
-import { postChatCard, type ChatCardSection } from "../_shared/chat_bridge.ts"
+import { postChatCard, postChatCardIndependent, type ChatCardSection } from "../_shared/chat_bridge.ts"
 import { ensureMtalkRoomSettings, loadMtalkRoomFlags } from "../_shared/mtalk_room_settings.ts"
 import { mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.ts"
@@ -622,6 +622,326 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
   return json({ ok: processed, processed, kind: "text" }, processed ? 200 : 500)
 }
 
+const SIGNUP_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
+  try {
+    const body = await req.json()
+    return body && typeof body === "object" && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+async function listSignupManagerGroupIds(supabase: DbClient): Promise<number[]> {
+  const { data: groups, error: groupError } = await supabase
+    .from("chat_groups")
+    .select("id")
+    .eq("is_direct", false)
+    .is("trashed_at", null)
+    .limit(5000)
+  if (groupError) {
+    console.error("signup manager groups failed:", groupError.message)
+    return []
+  }
+  const groupIds = (groups || [])
+    .map((row: { id?: number }) => Number(row.id))
+    .filter((id: number) => Number.isSafeInteger(id) && id > 0)
+  if (groupIds.length === 0) return []
+
+  const { data: members, error: memberError } = await supabase
+    .from("chat_group_members")
+    .select("group_id, user_id")
+    .in("group_id", groupIds)
+    .eq("can_view", true)
+    .eq("can_manage", true)
+    .limit(20000)
+  if (memberError) {
+    console.error("signup manager members failed:", memberError.message)
+    return []
+  }
+  const memberRows = (members || []) as Array<{ group_id?: number; user_id?: string }>
+  const managerIds = [...new Set(memberRows.map((row) => String(row.user_id || "")).filter(Boolean))]
+  if (managerIds.length === 0) return []
+  const { data: humans, error: humanError } = await supabase
+    .from("chat_users")
+    .select("id")
+    .in("id", managerIds)
+    .eq("is_bot", false)
+  if (humanError) {
+    console.error("signup manager humans failed:", humanError.message)
+    return []
+  }
+  const humanSet = new Set((humans || []).map((row: { id?: string }) => String(row.id || "")))
+  return [...new Set(
+    memberRows
+      .filter((row) => humanSet.has(String(row.user_id || "")))
+      .map((row) => Number(row.group_id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0),
+  )]
+}
+
+function signupApprovalCard(userId: string, username: string, storeNames: string) {
+  const name = username || "新しいユーザー"
+  const stores = String(storeNames || "").trim() || "未設定"
+  return {
+    header: {
+      eyebrow: "新規登録",
+      title: "利用の許可",
+      subtitle: name,
+    },
+    sections: [
+      {
+        type: "fields",
+        rows: [
+          { label: "表示名", value: name },
+          { label: "所属店舗", value: stores },
+        ],
+      },
+      {
+        type: "note",
+        text: "許可すると閲覧だけできる状態で始まります。所属店舗もこの内容で登録されます。送信やグループ作成は、あとから権限設定で付けられます。",
+      },
+    ],
+    actions: [
+      {
+        label: "許可（閲覧のみ）",
+        command: `mtalk-signup:approve:${userId}`,
+        style: "primary",
+      },
+      {
+        label: "不許可",
+        command: `mtalk-signup:deny:${userId}`,
+        style: "secondary",
+      },
+    ],
+  }
+}
+
+async function handleSignupNotify(req: Request, supabase: DbClient): Promise<Response> {
+  const body = await readJsonObject(req)
+  const userId = String(body.user_id ?? "").trim()
+  const username = String(body.username ?? "").trim()
+  if (!SIGNUP_UUID_RE.test(userId)) {
+    return json({ ok: false, error: "invalid user_id" }, 400)
+  }
+  const { data: access, error: accessError } = await supabase
+    .from("chat_user_access")
+    .select("signup_status, deleted_at")
+    .eq("user_id", userId)
+    .maybeSingle()
+  if (accessError) return json({ ok: false, error: accessError.message }, 500)
+  if (!access || access.deleted_at || access.signup_status !== "pending") {
+    return json({ ok: true, skipped: true, reason: "not pending" }, 200)
+  }
+  const { data: userRow } = await supabase
+    .from("chat_users")
+    .select("username, is_bot")
+    .eq("id", userId)
+    .maybeSingle()
+  if (!userRow || userRow.is_bot === true) {
+    return json({ ok: true, skipped: true, reason: "missing user" }, 200)
+  }
+  const displayName = String(userRow.username || username || "新しいユーザー").trim() || "新しいユーザー"
+  const { data: storeReq } = await supabase
+    .from("chat_store_change_requests")
+    .select("requested_store_keys")
+    .eq("user_id", userId)
+    .eq("kind", "signup")
+    .eq("status", "pending")
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const storeKeys = Array.isArray(storeReq?.requested_store_keys)
+    ? storeReq.requested_store_keys.map((key: unknown) => String(key || "").trim()).filter(Boolean)
+    : []
+  let storeNames = String(body.store_names ?? "").trim()
+  if (!storeNames && storeKeys.length) {
+    const { data: catalog } = await supabase
+      .from("chat_store_catalog")
+      .select("store_key, display_name")
+      .in("store_key", storeKeys)
+    storeNames = (catalog || [])
+      .map((row: { display_name?: string }) => String(row.display_name || "").trim())
+      .filter(Boolean)
+      .join("、")
+  }
+  const groupIds = await listSignupManagerGroupIds(supabase)
+  let posted = 0
+  let skipped = 0
+  for (const groupId of groupIds) {
+    const result = await postChatCardIndependent(supabase, {
+      groupId,
+      kind: "signup_approval",
+      dedupeKey: userId,
+      text: `新規登録: ${displayName} さん（${storeNames || "所属未設定"}）の利用を許可しますか？`,
+      cards: [signupApprovalCard(userId, displayName, storeNames)],
+    })
+    if (result.skipped) skipped += 1
+    else if (result.ok) posted += 1
+    else console.error("signup notify post failed:", groupId, result.error)
+  }
+  return json({ ok: true, posted, skipped, groups: groupIds.length }, 200)
+}
+
+async function handleSignupReviewed(req: Request, supabase: DbClient): Promise<Response> {
+  const body = await readJsonObject(req)
+  const userId = String(body.user_id ?? "").trim()
+  const username = String(body.username ?? "").trim() || "ユーザー"
+  const reviewerName = String(body.reviewer_name ?? "").trim()
+  const approved = body.approved === true
+  if (!SIGNUP_UUID_RE.test(userId)) {
+    return json({ ok: false, error: "invalid user_id" }, 400)
+  }
+  const groupIds = await listSignupManagerGroupIds(supabase)
+  const storeNames = String(body.store_names ?? "").trim()
+  const note = approved
+    ? `${username} さんの利用を許可しました。閲覧のみで始まります。${storeNames ? `所属店舗: ${storeNames}` : ""}`
+    : `${username} さんの利用を不許可にしました。`
+  const byline = reviewerName ? `対応: ${reviewerName}` : ""
+  let posted = 0
+  for (const groupId of groupIds) {
+    const result = await postChatCard(supabase, {
+      groupId,
+      kind: "signup_reviewed",
+      text: note,
+      cards: [{
+        header: {
+          eyebrow: "新規登録",
+          title: approved ? "許可しました" : "不許可にしました",
+          subtitle: username,
+        },
+        sections: [
+          { type: "note", text: note },
+          ...(storeNames ? [{ type: "note", text: `所属店舗: ${storeNames}` } as ChatCardSection] : []),
+          ...(byline ? [{ type: "note", text: byline, size: "xs" } as ChatCardSection] : []),
+        ],
+      }],
+    })
+    if (result.ok) posted += 1
+    else console.error("signup reviewed post failed:", groupId, result.error)
+  }
+  return json({ ok: true, posted, groups: groupIds.length, approved }, 200)
+}
+
+function storeChangeCard(
+  requestId: number,
+  username: string,
+  currentNames: string,
+  requestedNames: string,
+) {
+  const name = username || "ユーザー"
+  return {
+    header: {
+      eyebrow: "所属店舗",
+      title: "所属店舗の変更",
+      subtitle: name,
+    },
+    sections: [
+      {
+        type: "fields",
+        rows: [
+          { label: "表示名", value: name },
+          { label: "現在", value: currentNames || "未設定" },
+          { label: "変更後", value: requestedNames || "未設定" },
+        ],
+      },
+      {
+        type: "note",
+        text: "許可すると、この内容に所属店舗が変わります。変わるまで今の所属のままです。",
+      },
+    ],
+    actions: [
+      {
+        label: "許可して変更する",
+        command: `mtalk-stores:approve:${requestId}`,
+        style: "primary",
+      },
+      {
+        label: "不許可",
+        command: `mtalk-stores:deny:${requestId}`,
+        style: "secondary",
+      },
+    ],
+  }
+}
+
+async function handleStoreChangeNotify(req: Request, supabase: DbClient): Promise<Response> {
+  const body = await readJsonObject(req)
+  const requestId = Number(body.request_id)
+  const userId = String(body.user_id ?? "").trim()
+  const username = String(body.username ?? "").trim() || "ユーザー"
+  if (!Number.isSafeInteger(requestId) || requestId <= 0 || !SIGNUP_UUID_RE.test(userId)) {
+    return json({ ok: false, error: "invalid request" }, 400)
+  }
+  const { data: requestRow, error: requestError } = await supabase
+    .from("chat_store_change_requests")
+    .select("id, status, kind, requested_store_keys, current_store_keys")
+    .eq("id", requestId)
+    .maybeSingle()
+  if (requestError) return json({ ok: false, error: requestError.message }, 500)
+  if (!requestRow || requestRow.status !== "pending" || requestRow.kind !== "change") {
+    return json({ ok: true, skipped: true, reason: "not pending" }, 200)
+  }
+  const requestedNames = String(body.store_names ?? "").trim()
+    || "未設定"
+  const currentNames = String(body.current_store_names ?? "").trim() || "未設定"
+  const groupIds = await listSignupManagerGroupIds(supabase)
+  let posted = 0
+  let skipped = 0
+  for (const groupId of groupIds) {
+    const result = await postChatCardIndependent(supabase, {
+      groupId,
+      kind: "store_change",
+      dedupeKey: String(requestId),
+      text: `所属店舗の変更: ${username} さん（${currentNames} → ${requestedNames}）を許可しますか？`,
+      cards: [storeChangeCard(requestId, username, currentNames, requestedNames)],
+    })
+    if (result.skipped) skipped += 1
+    else if (result.ok) posted += 1
+    else console.error("store change notify post failed:", groupId, result.error)
+  }
+  return json({ ok: true, posted, skipped, groups: groupIds.length }, 200)
+}
+
+async function handleStoreChangeReviewed(req: Request, supabase: DbClient): Promise<Response> {
+  const body = await readJsonObject(req)
+  const username = String(body.username ?? "").trim() || "ユーザー"
+  const reviewerName = String(body.reviewer_name ?? "").trim()
+  const approved = body.approved === true
+  const storeNames = String(body.store_names ?? "").trim()
+  const note = approved
+    ? `${username} さんの所属店舗を変更しました。${storeNames ? `新しい所属: ${storeNames}` : ""}`
+    : `${username} さんの所属店舗の変更を不許可にしました。`
+  const byline = reviewerName ? `対応: ${reviewerName}` : ""
+  const groupIds = await listSignupManagerGroupIds(supabase)
+  let posted = 0
+  for (const groupId of groupIds) {
+    const result = await postChatCard(supabase, {
+      groupId,
+      kind: "store_change_reviewed",
+      text: note,
+      cards: [{
+        header: {
+          eyebrow: "所属店舗",
+          title: approved ? "変更を許可しました" : "変更を不許可にしました",
+          subtitle: username,
+        },
+        sections: [
+          { type: "note", text: note },
+          ...(byline ? [{ type: "note", text: byline, size: "xs" } as ChatCardSection] : []),
+        ],
+      }],
+    })
+    if (result.ok) posted += 1
+    else console.error("store change reviewed post failed:", groupId, result.error)
+  }
+  return json({ ok: true, posted, groups: groupIds.length, approved }, 200)
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS })
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") ?? "").trim()
@@ -635,11 +955,44 @@ Deno.serve(async (req) => {
   const url = new URL(req.url)
   const action = String(url.searchParams.get("action") ?? "").trim().toLowerCase()
   const token = bearerToken(req)
-  if (req.method === "POST" && action === "dispatch" && await internalDispatchAuthorized(supabase, token)) {
+  const authorized = req.method === "POST" && await internalDispatchAuthorized(supabase, token)
+  if (authorized && action === "dispatch") {
     try {
       return await handleDispatch(req, supabase)
     } catch (error) {
       console.error("chat-knowledge dispatch error:", error)
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500)
+    }
+  }
+  if (authorized && action === "signup-notify") {
+    try {
+      return await handleSignupNotify(req, supabase)
+    } catch (error) {
+      console.error("chat-knowledge signup-notify error:", error)
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500)
+    }
+  }
+  if (authorized && action === "signup-reviewed") {
+    try {
+      return await handleSignupReviewed(req, supabase)
+    } catch (error) {
+      console.error("chat-knowledge signup-reviewed error:", error)
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500)
+    }
+  }
+  if (authorized && action === "store-change-notify") {
+    try {
+      return await handleStoreChangeNotify(req, supabase)
+    } catch (error) {
+      console.error("chat-knowledge store-change-notify error:", error)
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500)
+    }
+  }
+  if (authorized && action === "store-change-reviewed") {
+    try {
+      return await handleStoreChangeReviewed(req, supabase)
+    } catch (error) {
+      console.error("chat-knowledge store-change-reviewed error:", error)
       return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500)
     }
   }

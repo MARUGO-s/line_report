@@ -284,8 +284,8 @@
     function toLocalInput(value) { if (!value) return ''; const d = new Date(value); if (!Number.isFinite(d.getTime())) return ''; const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
     function avatarHtml(user, sizeClass) { const name = String(user.username || '?'); const inner = user.icon_url ? '<img src="' + escapeHtml(user.icon_url) + '" alt="">' : escapeHtml(name.slice(0,1)); return '<span class="avatar ' + (sizeClass || '') + '">' + inner + '</span>'; }
     function isRestrictionActive(access) { return !!(access && access.restricted_until && new Date(access.restricted_until).getTime() > Date.now()); }
-    function userStatus(user) { const access = user.access || {}; if (user.is_bot) return user.bot_deleted_at ? 'deleted_bot' : 'bot'; if (access.deleted_at) return 'deleted'; if (access.access_enabled === false || isRestrictionActive(access)) return 'suspended'; return 'active'; }
-    function statusBadge(user) { const value = userStatus(user); const map = {active:['ok','利用中'],suspended:['warn','停止中'],deleted:['danger','削除済み'],bot:['','Bot'],deleted_bot:['danger','削除済みBot']}; const item = map[value]; return '<span class="badge ' + item[0] + '">' + item[1] + '</span>'; }
+    function userStatus(user) { const access = user.access || {}; if (user.is_bot) return user.bot_deleted_at ? 'deleted_bot' : 'bot'; if (access.deleted_at) return 'deleted'; if (access.signup_status === 'pending') return 'pending'; if (access.signup_status === 'denied') return 'denied'; if (access.access_enabled === false || isRestrictionActive(access)) return 'suspended'; return 'active'; }
+    function statusBadge(user) { const value = userStatus(user); const map = {active:['ok','利用中'],pending:['warn','承認待ち'],denied:['danger','不許可'],suspended:['warn','停止中'],deleted:['danger','削除済み'],bot:['','Bot'],deleted_bot:['danger','削除済みBot']}; const item = map[value] || map.suspended; return '<span class="badge ' + item[0] + '">' + item[1] + '</span>'; }
     function toast(message, isError) { const el = $('toast'); el.textContent = message; el.className = 'toast' + (isError ? ' error' : ''); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 4200); }
     function setBusy(value) {
       state.busyDepth = Math.max(0, state.busyDepth + (value ? 1 : -1));
@@ -691,7 +691,7 @@
       const current = result.current || {}; const restore = result.restore_to || {};
       const rowsHtml = isMember
         ? '<tr><td>ルーム権限</td><td class="perm-cell">' + escapeHtml(permText(current)) + '</td><td class="perm-cell">' + escapeHtml(permText(restore)) + '</td></tr>'
-        : ['access_enabled','can_start_direct','can_create_group','can_browse_users','restriction_reason','restricted_until','deleted_at']
+        : ['access_enabled','can_start_direct','can_create_group','can_browse_users','default_can_send','signup_status','restriction_reason','restricted_until','deleted_at']
             .map((key) => '<tr class="' + (String(displayValue(current[key])) === String(displayValue(restore[key])) ? '' : 'changed') + '"><td>' + escapeHtml(key) + '</td><td>' + escapeHtml(displayValue(current[key])) + '</td><td>' + escapeHtml(displayValue(restore[key])) + '</td></tr>').join('');
       $('revertBody').innerHTML = '<dl class="kv"><dt>操作</dt><dd>' + escapeHtml(actionLabel(result.action)) + '（監査ID ' + Number(result.audit_id || 0) + '）</dd>' +
         '<dt>対象</dt><dd>' + escapeHtml(String(target.username || target.user_id || '')) + (isMember ? ' ／ ' + escapeHtml(String(target.group_name || ('ID ' + Number(target.group_id)))) : '') + '</dd></dl>' +

@@ -1,5 +1,46 @@
 # LINE Report Project Progress
 
+### 2026-08-27 - 所属店舗を必須にし、変更は管理者許可後、1対1は同じ所属のみ
+
+- Request: 新規登録で所属店舗を必須。複数可。後からプロフィールで変更できるが、
+  管理者の許可が下りてから反映。1対1の相手は所属店舗が同じ人だけ。
+- DB: `chat_store_catalog` / `chat_user_stores` / `chat_store_change_requests`。
+  登録は `chat_complete_signup`。変更申請は `chat_request_store_change`。
+  許可時だけ所属を書き換える。`chat_open_direct` は新規1対1に所属の重なりを要求。
+- UI: 初回フォームとプロフィール設定に複数選択。管理カードは許可／不許可。
+- Test: `tests/chat_user_stores.test.mjs`。
+
+### 2026-08-27 - 新規登録は管理者の許可待ち、許可後は閲覧のみ
+
+- Request: 新規登録者を、管理権限を持つユーザーへ通知し、許可／不許可できるようにする。
+  許可された時点では閲覧権限のみで始める。
+- DB: `chat_user_access.signup_status` / `default_can_send`。人間の新規は pending・利用停止。
+  Botと既存ユーザーは approved・送信可のまま。許可RPCはルーム管理権限が必要。
+  グループ参加は `default_can_send=false` なら閲覧のみ。
+- 通知: 登録トリガが `chat-knowledge?action=signup-notify` へ内部POSTし、管理者がいる
+  ルームへ許可／不許可カードを出す。カード操作は `chat_review_signup`。
+- UI: 承認待ち／不許可の専用画面。許可後は Realtime で本体へ入れる。
+- Test: `tests/chat_signup_approval.test.mjs`。本番反映には migration と Edge のデプロイが必要。
+
+### 2026-08-27 - 未参加グループは招待リンクで参加する
+
+- Symptom: 一覧の「参加」は押しても入らず、案内だけだった。
+- Fix: 見出しを「未参加のグループ」、ボタンを「招待で参加」にし、貼ったリンクを
+  `chat_join_by_invite` へ渡す。ルームID指定の直接参加はしない。
+- Test: `tests/chat_join_invite_list.test.mjs`。
+
+### 2026-08-27 - 検索ジャンプ中の新着穴を埋める
+
+- Symptom: 検索結果から途中の発言へ飛ぶと、その後の新着を継ぎ足さず間が空いていた。
+- Fix: `fillLatestGap()` が読み込み済み末尾より新しい発言をページ単位で取得してつなぐ。
+  見ていた位置は維持し、自動では最下部へ飛ばない。「最新へ」は最下部移動のまま。
+- Test: `tests/chat_history_since_join.test.mjs` に契約を追加。
+
+### 2026-08-27 - 本番管理画面の dry_run スモークを実施
+
+- ユーザーが `chat-admin.html` でルームを選び「変更内容を確認」を押した。
+- `dry_run:true` のため行も監査も書かない。管理トークン → admin-api → RPC は本番で通った。
+
 ### 2026-08-27 - M-talkで自分の発言を編集できるようにする
 
 - Request: 誤送信の訂正が削除しかなかったので、自分の本文を後から直せるようにする。
@@ -14,9 +55,8 @@
 ### 2026-08-27 - 推奨順1〜5: スモーク・文書追いつき・スタッフ使い方・複数ルーム一括UI
 
 - Smoke: 本番 Pages の `chat.html` / `chat-admin.html` は HTTP 200。未認証の
-  `/chat-admin/state`・templates・apply・audit revert は 401。管理ログイン画面を
-  ブラウザで確認。本部トークンがこの環境に無いため、「変更内容を確認」の
-  認証済み dry_run は未実施（手順は従来どおり、書き込みなし）。
+  `/chat-admin/state`・templates・apply・audit revert は 401。
+  「変更内容を確認」の本番 dry_run はユーザーが実施済み。
 - 1対1: 本番 `chat.html` にリンクプレビュー実装あり。AI使用料ページは
   Perplexity / Web検索の表示あり。天気・Web検索の実送信は従量課金と本文保護のため未実施。
 - Docs: 08-27 の天気（地域名）・Web検索（ON/OFF・出典URL・使用料）を

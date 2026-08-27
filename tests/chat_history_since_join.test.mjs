@@ -38,6 +38,15 @@ test('chat loads only the latest page, then paginates upward and caches room vie
   assert.match(chat, /const roomViewCache = new Map\(\)/);
 });
 
+test('search jump fills the latest gap instead of dropping incoming messages', () => {
+  assert.match(chat, /async function fillLatestGap\(\)/);
+  assert.match(chat, /if \(!viewHasLatest \|\| fillingLatestGap\)/);
+  assert.match(chat, /void fillLatestGap\(\)/);
+  assert.match(chat, /\.gt\('created_at', last\.created_at\)/);
+  assert.match(chat, /await fillLatestGap\(\);\s*addMessageToUI\(data\)/);
+  assert.doesNotMatch(chat, /途中へジャンプしている間は継ぎ足さない/);
+});
+
 test('reaching the end of an intermediate search window automatically loads latest messages', () => {
   assert.match(chat, /function resolveUnloadedLatestGap\(\)/);
   assert.match(chat, /currentMessages\.at\(-1\)\?\.id/);

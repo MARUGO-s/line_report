@@ -38,9 +38,12 @@ Data APIを直接呼ばれてもDBのRLS・RPC・Storage policyで同じ判定�
 | `can_start_direct` | 新しい1対1トークを開始できる |
 | `can_create_group` | 新しい複数人ルームを作成できる |
 | `can_browse_users` | 友だち・招待候補のユーザー一覧を見られる |
+| `signup_status` | pending / approved / denied。新規の人間ユーザーは pending |
+| `default_can_send` | falseなら以後のグループ参加は閲覧のみ |
 | `deleted_at` | M-talk上の論理削除。再ログインしても利用不可 |
 
-既存ユーザーと新規登録ユーザーは、現在の利用方法を壊さないため既定で有効。
+既存ユーザーは既定で有効（`signup_status=approved`、`default_can_send=true`）。
+新規の人間ユーザーは承認待ちで始まり、許可後も閲覧のみ。Botは従来どおり有効。
 Botの削除・復元は、通常のM-talk画面では行えず、**本部フル管理セッションの
 `chat-admin.html`だけ**で行う。物理削除はせず `chat_users.bot_deleted_at`
 による論理削除とし、過去メッセージ・所属履歴を保持する。削除済みBot名義の

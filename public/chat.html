@@ -615,6 +615,7 @@
       font-size: 13px;
       cursor: pointer;
       flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .empty-note { padding: 28px 18px; color: #6e6e73; font-size: 13px; }
@@ -2317,7 +2318,7 @@
       padding: 32px 24px;
       border-radius: 16px;
       width: 100%;
-      max-width: 380px;
+      max-width: 420px;
       color: #fff;
     }
 
@@ -2389,6 +2390,47 @@
       width: auto;
       margin: 0;
       accent-color: var(--line-green);
+    }
+
+    .store-pick-label {
+      display: block;
+      font-size: 13px;
+      color: #c7c7cc;
+      margin: 0 0 8px;
+    }
+    .store-pick {
+      max-height: 220px;
+      overflow: auto;
+      background: #2c2c2e;
+      border-radius: 10px;
+      padding: 6px 8px;
+      margin-bottom: 14px;
+    }
+    .store-pick-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 6px;
+      font-size: 13px;
+      color: #fff;
+      cursor: pointer;
+    }
+    .store-pick-item input {
+      width: auto;
+      margin: 0;
+      accent-color: var(--line-green);
+    }
+    .store-pick-hint {
+      font-size: 12px;
+      color: #8e8e93;
+      margin: -6px 0 12px;
+      line-height: 1.5;
+    }
+    .profile-settings-current {
+      font-size: 13px;
+      color: #c7c7cc;
+      margin: 0 0 12px;
+      line-height: 1.6;
     }
 
     .notice {
@@ -2731,7 +2773,7 @@
     <div class="groups-scroll">
       <div id="myGroupsList"></div>
       <div id="otherGroupsWrap">
-        <div class="section-label">参加できるグループ</div>
+        <div class="section-label">未参加のグループ</div>
         <div id="otherGroupsList"></div>
       </div>
       <div id="messageSearchWrap" class="hidden">
@@ -3003,6 +3045,7 @@
     <div class="account-menu" role="menu" aria-label="アカウントメニュー">
       <div class="account-menu-user" id="accountMenuUser"></div>
       <div class="account-menu-list">
+        <button type="button" role="menuitem" onclick="closeAccountMenu(); openProfileSettings()">プロフィール設定</button>
         <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
         <a href="./mtalk-help.html" role="menuitem">使い方</a>
         <a href="./chat-admin.html" role="menuitem">M-talk管理</a>
@@ -3019,6 +3062,19 @@
       </div>
       <div class="profile-icon-grid" id="profileIconGrid" aria-live="polite"></div>
       <button class="invite-close" type="button" onclick="closeUserIconPicker()">キャンセル</button>
+    </div>
+  </div>
+
+  <div class="invite-overlay hidden" id="profileSettingsOverlay" onclick="if (event.target === this) closeProfileSettings()">
+    <div class="invite-sheet" role="dialog" aria-modal="true" aria-label="プロフィール設定">
+      <h2>プロフィール設定</h2>
+      <p class="profile-settings-current" id="profileSettingsCurrent"></p>
+      <p class="store-pick-hint" id="profileSettingsPending"></p>
+      <span class="store-pick-label">所属店舗（複数可）</span>
+      <div class="store-pick" id="settingsStorePick"></div>
+      <p class="store-pick-hint">変更は管理者の許可後に反映されます。許可されるまでは今の所属のままです。</p>
+      <button type="button" class="schedule-confirm" id="profileSettingsSave" onclick="submitStoreChange()">変更を申請する</button>
+      <button class="invite-close" type="button" onclick="closeProfileSettings()">閉じる</button>
     </div>
   </div>
 
@@ -3108,18 +3164,21 @@
       </div>
 
       <div id="profileForm" class="hidden">
-        <p class="login-note" style="margin-bottom:14px;">初回のみ、表示名とアイコンを決めてください。</p>
+        <p class="login-note" style="margin-bottom:14px;">初回のみ、表示名・アイコン・所属店舗を決めてください。所属店舗は必須です。</p>
         <div class="icon-picker">
           <div class="icon-preview" id="profileIconPreview">?</div>
           <button type="button" class="icon-picker-btn" onclick="pickUserIcon()">アイコンを選ぶ</button>
         </div>
         <input type="text" id="usernameInput" placeholder="表示名" maxlength="50">
+        <span class="store-pick-label">所属店舗（必須・複数可）</span>
+        <div class="store-pick" id="profileStorePick"></div>
+        <p class="store-pick-hint">管理者が許可すると、選んだ店舗の所属として閲覧だけできる状態で始まります。</p>
         <button onclick="createProfile()" id="profileBtn">はじめる</button>
       </div>
 
       <div id="chatAccessBlocked" class="chat-access-blocked hidden">
         <h2 id="chatAccessBlockedTitle">M-talkの利用が停止されています</h2>
-        <p>M-talk専用の管理設定により、現在はチャットを利用できません。</p>
+        <p id="chatAccessBlockedBody">M-talk専用の管理設定により、現在はチャットを利用できません。</p>
         <div id="chatAccessBlockedReason" class="access-reason hidden"></div>
         <p id="chatAccessBlockedUntil" class="hidden"></p>
         <button type="button" class="access-logout" onclick="logout()">ログアウト</button>
@@ -3208,10 +3267,11 @@
     let historyExhausted = false;
     let loadingHistory = false;
     // 読み込み済みの範囲が最新の発言まで届いているか。
-    // 検索から途中へジャンプすると false になり、そのまま新着を継ぎ足すと
-    // 間が抜けた並びになるので、その場合は追記せず「最新へ」で読み直す。
+    // 検索から途中へジャンプすると false になる。その間に新着が来たら
+    // 間の発言を読み足して穴を埋め、見ていた位置は維持する。
     let viewHasLatest = true;
     let jumpingToLatest = false;
+    let fillingLatestGap = false;
     // 下端に張り付いているか（新着で自動スクロールするかの判断）。
     let followNewMessages = true;
     let messageSearchSeq = 0;
@@ -3233,7 +3293,9 @@
     let pendingPrivateNoteContent = null;
     const CHAT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b071';
     const CHAT_USER_COLUMNS = 'id, username, icon_url, is_bot, store_key, bot_deleted_at';
-    const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, restriction_reason, restricted_until, deleted_at';
+    const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at';
+    let userStoreKeysById = {};
+    let pendingStoreRequest = null;
     const STORE_BOT_LOGOS = Object.freeze({
       marugo: 'icons/store-bots/marugo.svg',
       marugosecond: 'icons/store-bots/marugosecond.svg',
@@ -3527,9 +3589,18 @@
 
     function chatAccessIsBlocked(access) {
       if (!access || access.access_enabled !== true || access.deleted_at) return true;
+      if (access.signup_status === 'pending' || access.signup_status === 'denied') return true;
       if (!access.restricted_until) return false;
       const until = new Date(access.restricted_until).getTime();
       return Number.isFinite(until) && until > Date.now();
+    }
+
+    function chatAccessSignupState(access) {
+      if (!access) return '';
+      if (access.deleted_at) return 'deleted';
+      if (access.signup_status === 'pending') return 'pending';
+      if (access.signup_status === 'denied') return 'denied';
+      return 'blocked';
     }
 
     async function loadCurrentChatAccess() {
@@ -3627,9 +3698,18 @@
       $('navRail').classList.add('hidden');
       $('sidebar').classList.add('hidden');
       $('mainContent').classList.add('hidden');
-      $('chatAccessBlockedTitle').textContent = access.deleted_at
-        ? 'M-talkのユーザー登録が削除されています'
+      const signupState = chatAccessSignupState(access);
+      $('chatAccessBlockedTitle').textContent =
+        signupState === 'deleted' ? 'M-talkのユーザー登録が削除されています'
+        : signupState === 'pending' ? '管理者の承認待ちです'
+        : signupState === 'denied' ? '利用が許可されませんでした'
         : 'M-talkの利用が停止されています';
+      $('chatAccessBlockedBody').textContent =
+        signupState === 'pending'
+          ? '登録は受け付けました。所属店舗を含む申請を、ルームの管理権限を持つ人が許可すると、閲覧だけできる状態で使い始められます。'
+        : signupState === 'denied'
+          ? 'このアカウントのM-talk利用は許可されていません。心当たりがある場合は管理者へ連絡してください。'
+        : 'M-talk専用の管理設定により、現在はチャットを利用できません。';
       const reason = String(access.restriction_reason || '').trim();
       $('chatAccessBlockedReason').textContent = reason;
       $('chatAccessBlockedReason').classList.toggle('hidden', !reason);
@@ -3665,6 +3745,7 @@
         $('loginForm').classList.add('hidden');
         $('signupForm').classList.add('hidden');
         $('profileForm').classList.remove('hidden');
+        renderStorePicker('profileStorePick', []);
         $('usernameInput').focus();
         return;
       }
@@ -3685,9 +3766,97 @@
       startSession();
     }
 
+    function listKnownStores() {
+      const pages = window.LINE_REPORT_PAGES || {};
+      if (typeof pages.listStores === 'function') return pages.listStores();
+      return Object.entries(pages.STORE_NAMES || {}).map(([store_key, store_name]) => ({
+        store_key,
+        store_name
+      }));
+    }
+
+    function storeDisplayLabel(storeKey) {
+      const pages = window.LINE_REPORT_PAGES || {};
+      if (typeof pages.getPreferredStoreDisplayLabel === 'function') {
+        return pages.getPreferredStoreDisplayLabel(storeKey) || storeKey;
+      }
+      return (pages.STORE_NAMES && pages.STORE_NAMES[storeKey]) || storeKey;
+    }
+
+    function formatStoreLabels(keys) {
+      return (keys || []).map((key) => storeDisplayLabel(key)).filter(Boolean).join('、');
+    }
+
+    function renderStorePicker(containerId, selectedKeys) {
+      const el = $(containerId);
+      if (!el) return;
+      const selected = new Set((selectedKeys || []).map((key) => String(key)));
+      el.innerHTML = listKnownStores().map((store) => {
+        const key = String(store.store_key || '');
+        if (!key) return '';
+        const checked = selected.has(key) ? ' checked' : '';
+        return `<label class="store-pick-item"><input type="checkbox" value="${escapeHtml(key)}"${checked}><span>${escapeHtml(storeDisplayLabel(key))}</span></label>`;
+      }).join('');
+    }
+
+    function selectedStoreKeys(containerId) {
+      return [...($(containerId)?.querySelectorAll('input[type="checkbox"]:checked') || [])]
+        .map((input) => String(input.value || '').trim())
+        .filter(Boolean);
+    }
+
+    function myStoreKeys() {
+      return (currentUser && userStoreKeysById[currentUser.id]) || [];
+    }
+
+    function sharesAffiliationWith(user) {
+      if (!user || !currentUser || user.id === currentUser.id) return false;
+      const mine = myStoreKeys();
+      if (!mine.length) return false;
+      if (isStoreBot(user)) return mine.includes(user.store_key);
+      if (isBotUser(user)) return false;
+      const theirs = userStoreKeysById[user.id] || [];
+      return mine.some((key) => theirs.includes(key));
+    }
+
+    async function loadUserStores() {
+      if (!currentUser) {
+        userStoreKeysById = {};
+        return;
+      }
+      const { data, error } = await sb.from('chat_user_stores').select('user_id, store_key');
+      if (error) throw error;
+      const next = {};
+      (data || []).forEach((row) => {
+        const id = String(row.user_id || '');
+        const key = String(row.store_key || '');
+        if (!id || !key) return;
+        if (!next[id]) next[id] = [];
+        if (!next[id].includes(key)) next[id].push(key);
+      });
+      userStoreKeysById = next;
+    }
+
+    async function loadPendingStoreRequest() {
+      if (!currentUser) {
+        pendingStoreRequest = null;
+        return;
+      }
+      const { data, error } = await sb
+        .from('chat_store_change_requests')
+        .select('id, kind, requested_store_keys, current_store_keys, status, created_at')
+        .eq('user_id', currentUser.id)
+        .eq('status', 'pending')
+        .maybeSingle();
+      if (error) throw error;
+      pendingStoreRequest = data || null;
+    }
+
     async function createProfile() {
       const username = $('usernameInput').value.trim();
       if (!username) return showLoginError('表示名を入力してください');
+      const storeKeys = selectedStoreKeys('profileStorePick');
+      if (!storeKeys.length) return showLoginError('所属店舗を1つ以上選んでください');
 
       $('profileBtn').disabled = true;
       try {
@@ -3698,11 +3867,22 @@
           return;
         }
 
-        const { data, error } = await sb
-          .from('chat_users')
-          .insert({ id: uid, username, icon_url: pendingPresetUserIconUrl || null })
-          .select('id, username, icon_url')
-          .single();
+        let iconUrl = pendingPresetUserIconUrl || null;
+        if (pendingUserIconFile) {
+          try {
+            iconUrl = await uploadIcon(`users/${uid}`, pendingUserIconFile);
+          } catch (iconError) {
+            console.error('Profile icon error:', iconError);
+          }
+          pendingUserIconFile = null;
+          pendingPresetUserIconUrl = iconUrl || '';
+        }
+
+        const { data, error } = await sb.rpc('chat_complete_signup', {
+          p_username: username,
+          p_store_keys: storeKeys,
+          p_icon_url: iconUrl
+        });
 
         if (error) {
           if (/許可されていません/.test(error.message)) {
@@ -3715,16 +3895,9 @@
           return;
         }
 
-        currentUser = data;
-        if (pendingUserIconFile) {
-          try {
-            await saveUserIcon(pendingUserIconFile);
-          } catch (iconError) {
-            console.error('Profile icon error:', iconError);
-          }
-          pendingUserIconFile = null;
-          pendingPresetUserIconUrl = '';
-        }
+        currentUser = Array.isArray(data) ? data[0] : data;
+        pendingUserIconFile = null;
+        pendingPresetUserIconUrl = '';
 
         if (pendingCredentials && pendingCredentials.remember) {
           saveCredentials(pendingCredentials.email, pendingCredentials.password);
@@ -3753,6 +3926,8 @@
       $('sidebar').classList.remove('hidden');
       $('mainContent').classList.remove('hidden');
       subscribeRealtime();
+      loadUserStores().catch((error) => console.error('Load stores error:', error));
+      loadPendingStoreRequest().catch((error) => console.error('Load store request error:', error));
       initializeChatPwa();
       warmImageAssets();
       void flushPushDiagnostics();
@@ -3796,6 +3971,18 @@
         .on('postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'chat_user_access', filter: `user_id=eq.${currentUser.id}` },
           () => handleCurrentChatAccessChange())
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_user_stores' },
+          () => {
+            loadUserStores().then(() => renderGroups()).catch((error) => console.error('Store update error:', error));
+          })
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_store_change_requests', filter: `user_id=eq.${currentUser.id}` },
+          () => {
+            loadPendingStoreRequest().then(() => {
+              if (!$('profileSettingsOverlay').classList.contains('hidden')) openProfileSettings();
+            }).catch((error) => console.error('Store request update error:', error));
+          })
         .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'chat_messages' },
           (payload) => handleIncomingMessage(payload.new))
@@ -4603,6 +4790,10 @@
         alert('1対1トークを開始する権限がありません');
         return;
       }
+      if (!sharesAffiliationWith(user)) {
+        alert('1対1トークは所属店舗が同じ相手だけ始められます');
+        return;
+      }
       try {
         const { data, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
         if (error) throw error;
@@ -4731,6 +4922,7 @@
           .order('username');
         if (error) throw error;
         registeredUsers = data || [];
+        await loadUserStores();
       } catch (error) {
         console.error('Load users error:', error);
         registeredUsers = [];
@@ -4785,8 +4977,11 @@
           const talkBtn = document.createElement('button');
           talkBtn.className = 'join-btn';
           talkBtn.textContent = '1対1';
-          talkBtn.disabled = !chatAccessAllows('can_start_direct');
-          talkBtn.title = talkBtn.disabled ? '1対1トークを開始する権限がありません' : '';
+          const sameStore = sharesAffiliationWith(user);
+          talkBtn.disabled = !chatAccessAllows('can_start_direct') || !sameStore;
+          talkBtn.title = !chatAccessAllows('can_start_direct')
+            ? '1対1トークを開始する権限がありません'
+            : (sameStore ? '' : '所属店舗が同じ相手だけ1対1を始められます');
           talkBtn.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
           row.appendChild(talkBtn);
           const inviteBtn = document.createElement('button');
@@ -5466,6 +5661,62 @@
 
     function closeAccountMenu() {
       $('accountMenu').classList.add('hidden');
+    }
+
+    async function openProfileSettings() {
+      closeAccountMenu();
+      try {
+        await loadUserStores();
+        await loadPendingStoreRequest();
+      } catch (error) {
+        console.error('Profile settings load error:', error);
+      }
+      const current = myStoreKeys();
+      $('profileSettingsCurrent').textContent = current.length
+        ? `現在の所属: ${formatStoreLabels(current)}`
+        : '現在の所属: 未設定。設定して管理者の許可を受けてください。';
+      const pending = pendingStoreRequest;
+      const pendingEl = $('profileSettingsPending');
+      const saveBtn = $('profileSettingsSave');
+      if (pending && pending.kind === 'change') {
+        pendingEl.textContent = `変更を申請中です（${formatStoreLabels(pending.requested_store_keys || [])}）。許可されるまで今の所属のままです。`;
+        pendingEl.classList.remove('hidden');
+        saveBtn.disabled = true;
+        saveBtn.textContent = '申請中';
+        renderStorePicker('settingsStorePick', pending.requested_store_keys || current);
+      } else {
+        pendingEl.textContent = '';
+        pendingEl.classList.add('hidden');
+        saveBtn.disabled = false;
+        saveBtn.textContent = '変更を申請する';
+        renderStorePicker('settingsStorePick', current);
+      }
+      $('profileSettingsOverlay').classList.remove('hidden');
+    }
+
+    function closeProfileSettings() {
+      $('profileSettingsOverlay').classList.add('hidden');
+    }
+
+    async function submitStoreChange() {
+      const keys = selectedStoreKeys('settingsStorePick');
+      if (!keys.length) {
+        alert('所属店舗を1つ以上選んでください');
+        return;
+      }
+      const saveBtn = $('profileSettingsSave');
+      saveBtn.disabled = true;
+      try {
+        const { error } = await sb.rpc('chat_request_store_change', { p_store_keys: keys });
+        if (error) throw error;
+        await loadPendingStoreRequest();
+        alert('所属店舗の変更を申請しました。管理者の許可後に反映されます。');
+        await openProfileSettings();
+      } catch (error) {
+        console.error('Store change request error:', error);
+        alert(error.message || '申請に失敗しました');
+        saveBtn.disabled = false;
+      }
     }
 
     async function openPresetIconPicker(target = 'user') {
@@ -6154,7 +6405,7 @@
       if (options.joinable) {
         const button = document.createElement('button');
         button.className = 'join-btn';
-        button.textContent = '参加';
+        button.textContent = '招待で参加';
         button.onclick = (e) => { e.stopPropagation(); joinGroup(group.id); };
         front.appendChild(button);
         front.onclick = () => {};
@@ -6282,6 +6533,7 @@
           u.id !== currentUser.id
           && !isBotUser(u)
           && !peerIds.has(u.id)
+          && sharesAffiliationWith(u)
           && (!q || u.username.toLowerCase().includes(q))
         ));
         const section = document.createElement('div');
@@ -6291,7 +6543,9 @@
         if (!candidates.length && !mineVisible.length) {
           const empty = document.createElement('div');
           empty.className = 'empty-note';
-          empty.textContent = '登録できるユーザーはいません';
+          empty.textContent = myStoreKeys().length
+            ? '所属店舗が同じ登録ユーザーはいません'
+            : '所属店舗を設定すると、同じ店舗の相手と1対1を始められます';
           mineList.appendChild(empty);
         }
         candidates.forEach((user) => {
@@ -6323,7 +6577,7 @@
         : [];
       otherWrap.classList.toggle('hidden', !showOther || others.length === 0);
       others.forEach((group) => {
-        otherList.appendChild(renderTalkRow(group, { joinable: true, preview: '参加して会話を始める' }));
+        otherList.appendChild(renderTalkRow(group, { joinable: true, preview: '招待リンクで参加できます' }));
       });
     }
 
@@ -6366,9 +6620,42 @@
       }
     }
 
+    function extractInviteToken(raw) {
+      const text = String(raw || '').trim();
+      if (!text) return '';
+      try {
+        const url = new URL(text);
+        const fromQuery = String(url.searchParams.get('invite') || '').trim();
+        if (fromQuery) return fromQuery;
+      } catch (_) {}
+      if (/^[A-Za-z0-9_-]{16,}$/.test(text)) return text;
+      return '';
+    }
+
     async function joinGroup(groupId) {
       if (!currentUser || !groupId) return;
-      alert('グループへの参加にはメンバーから届いた招待リンクを使用してください');
+      const pasted = prompt(
+        'この一覧から直接入ることはできません。\n'
+        + 'メンバーから届いた招待リンクを貼り付けてください。'
+      );
+      if (pasted === null) return;
+      const token = extractInviteToken(pasted);
+      if (!token) {
+        alert('招待リンクが見つかりませんでした。リンク全体を貼り付けてください。');
+        return;
+      }
+      try {
+        const { data, error } = await sb.rpc('chat_join_by_invite', { p_token: token });
+        if (error) throw error;
+        await loadGroups();
+        const joinedId = Number(data);
+        const group = myGroups.find((item) => Number(item.id) === joinedId);
+        if (group) selectGroup(group);
+        else alert('参加しました。トーク一覧を確認してください。');
+      } catch (error) {
+        console.error('Join group error:', error);
+        alert(error.message || '招待リンクが無効です');
+      }
     }
 
     function pruneRoomViewCache() {
@@ -7081,14 +7368,80 @@
       requestAnimationFrame(resolveUnloadedLatestGap);
     }
 
+    async function fillLatestGap() {
+      if (fillingLatestGap || jumpingToLatest || viewHasLatest || !currentGroupId) return viewHasLatest;
+      fillingLatestGap = true;
+      const groupId = currentGroupId;
+      const el = $('messages');
+      const keepNode = el
+        ? [...el.querySelectorAll('.message')].find((node) => {
+            const rect = node.getBoundingClientRect();
+            const viewport = el.getBoundingClientRect();
+            return rect.bottom > viewport.top && rect.top < viewport.bottom;
+          })
+        : null;
+      const keepId = keepNode?.dataset.messageId;
+      const keepOffset = keepNode ? keepNode.getBoundingClientRect().top : 0;
+      const prevTop = el ? el.scrollTop : 0;
+      try {
+        for (let page = 0; page < 20; page++) {
+          const last = currentMessages.at(-1);
+          if (!last || !last.created_at) {
+            viewHasLatest = true;
+            break;
+          }
+          const { data, error } = await sb.from('chat_messages')
+            .select(MESSAGE_COLUMNS)
+            .eq('group_id', groupId)
+            .gt('created_at', last.created_at)
+            .order('created_at', { ascending: true })
+            .limit(MESSAGE_PAGE_SIZE);
+          if (error) throw error;
+          if (Number(currentGroupId) !== Number(groupId)) return false;
+          const rows = data || [];
+          const batch = rows.filter((msg) => !seenMessageIds.has(msg.id));
+          if (batch.length) {
+            currentMessages = currentMessages.concat(batch);
+            batch.forEach((msg) => seenMessageIds.add(msg.id));
+            await Promise.all([
+              loadReactions(batch.map((msg) => msg.id)),
+              loadQuotedMessages(batch)
+            ]);
+          }
+          if (rows.length < MESSAGE_PAGE_SIZE) {
+            viewHasLatest = true;
+            break;
+          }
+        }
+        const latest = lastMessages[groupId];
+        if (latest && !seenMessageIds.has(latest.id)) viewHasLatest = false;
+        renderMessageList();
+        if (keepId && el) {
+          const node = el.querySelector(`.message[data-message-id="${keepId}"]`);
+          if (node) el.scrollTop += node.getBoundingClientRect().top - keepOffset;
+        } else if (el) {
+          el.scrollTop = prevTop;
+        }
+        snapshotRoomView(groupId);
+        updateJumpLatestButton();
+        return viewHasLatest;
+      } catch (error) {
+        console.error('Fill latest gap error:', error);
+        return false;
+      } finally {
+        fillingLatestGap = false;
+      }
+    }
+
     // 新着1件だけを末尾に足す（全体を描き直さずスクロール位置を保つ）。
     function addMessageToUI(msg) {
       if (Number(msg.group_id) !== currentGroupId) return;
       if (seenMessageIds.has(msg.id)) return;
-      // 途中へジャンプしている間は継ぎ足さない。間の発言を読み込んでいないため、
-      // ここで足すと並びに穴が空く。「最新へ」で読み直してもらう。
-      if (!viewHasLatest) {
+      // 途中へジャンプしている間は、間の発言を読み足してから末尾へつなぐ。
+      // 見ていた位置は fillLatestGap が維持する。
+      if (!viewHasLatest || fillingLatestGap) {
         updateJumpLatestButton();
+        void fillLatestGap();
         return;
       }
       seenMessageIds.add(msg.id);
@@ -7420,10 +7773,11 @@
       const users = registeredUsers.filter((u) => (
         u.id !== currentUser.id
         && !isBotUser(u)
+        && sharesAffiliationWith(u)
         && (!q || String(u.username || '').toLowerCase().includes(q))
       ));
       if (!users.length) {
-        list.innerHTML = '<div class="empty-note">転送できるユーザーはいません</div>';
+        list.innerHTML = '<div class="empty-note">所属店舗が同じ転送先はいません</div>';
         return;
       }
       users.forEach((user) => {
@@ -7855,7 +8209,11 @@
         if (display === 'compact') clearInlineSticker();
         lastMessages[data.group_id] = data;
         followNewMessages = true;
-        if (viewHasLatest) addMessageToUI(data); else await jumpToLatest();
+        if (viewHasLatest) addMessageToUI(data);
+        else {
+          await fillLatestGap();
+          addMessageToUI(data);
+        }
         scrollSentStickerIntoView(data.id);
         renderGroups();
         dispatchPushForMessage(data.id);
@@ -8158,7 +8516,10 @@
         lastMessages[data.group_id] = data;
         followNewMessages = true;
         if (viewHasLatest) addMessageToUI(data);
-        else await jumpToLatest();
+        else {
+          await fillLatestGap();
+          addMessageToUI(data);
+        }
         renderGroups();
         dispatchPushForMessage(data.id);
       } catch (error) {
@@ -8186,7 +8547,11 @@
         if (error) throw error;
         lastMessages[data.group_id] = data;
         followNewMessages = true;
-        if (viewHasLatest) addMessageToUI(data); else await jumpToLatest();
+        if (viewHasLatest) addMessageToUI(data);
+        else {
+          await fillLatestGap();
+          addMessageToUI(data);
+        }
         renderGroups();
         dispatchPushForMessage(data.id);
       } catch (error) {
@@ -8621,9 +8986,73 @@
       </div>`;
     }
 
+    function parseSignupReviewCommand(text) {
+      const match = /^mtalk-signup:(approve|deny):([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+        .exec(String(text || '').trim());
+      if (!match) return null;
+      return { approve: match[1].toLowerCase() === 'approve', userId: match[2] };
+    }
+
+    function parseStoreChangeCommand(text) {
+      const match = /^mtalk-stores:(approve|deny):(\d+)$/i.exec(String(text || '').trim());
+      if (!match) return null;
+      return { approve: match[1].toLowerCase() === 'approve', requestId: Number(match[2]) };
+    }
+
+    async function reviewSignupFromCard(approve, userId) {
+      if (!currentUser) return;
+      if (!canCurrentUserManage()) {
+        alert('この操作はルームの管理権限が必要です');
+        return;
+      }
+      try {
+        const { error } = await sb.rpc('chat_review_signup', {
+          p_user_id: userId,
+          p_approve: approve === true
+        });
+        if (error) throw error;
+        alert(approve
+          ? '許可しました。この人は閲覧のみで始まります。'
+          : '不許可にしました。');
+      } catch (error) {
+        console.error('Signup review error:', error);
+        alert(error.message || '操作に失敗しました');
+      }
+    }
+
+    async function reviewStoreChangeFromCard(approve, requestId) {
+      if (!currentUser) return;
+      if (!canCurrentUserManage()) {
+        alert('この操作はルームの管理権限が必要です');
+        return;
+      }
+      try {
+        const { error } = await sb.rpc('chat_review_store_change', {
+          p_request_id: requestId,
+          p_approve: approve === true
+        });
+        if (error) throw error;
+        alert(approve ? '所属店舗の変更を許可しました。' : '所属店舗の変更を不許可にしました。');
+      } catch (error) {
+        console.error('Store change review error:', error);
+        alert(error.message || '操作に失敗しました');
+      }
+    }
+
     async function sendCardCommand(text) {
       const content = String(text || '').trim();
-      if (!content || !currentGroupId || !currentUser) return;
+      if (!content || !currentUser) return;
+      const signup = parseSignupReviewCommand(content);
+      if (signup) {
+        await reviewSignupFromCard(signup.approve, signup.userId);
+        return;
+      }
+      const storeChange = parseStoreChangeCommand(content);
+      if (storeChange) {
+        await reviewStoreChangeFromCard(storeChange.approve, storeChange.requestId);
+        return;
+      }
+      if (!currentGroupId) return;
       if (!requireCurrentRoomSend()) return;
       try {
         const { data, error } = await sb
@@ -8641,7 +9070,10 @@
         lastMessages[data.group_id] = data;
         followNewMessages = true;
         if (viewHasLatest) addMessageToUI(data);
-        else await jumpToLatest();
+        else {
+          await fillLatestGap();
+          addMessageToUI(data);
+        }
         renderGroups();
         dispatchPushForMessage(data.id);
       } catch (error) {
@@ -8678,7 +9110,10 @@
         lastMessages[data.group_id] = data;
         followNewMessages = true;
         if (viewHasLatest) addMessageToUI(data);
-        else await jumpToLatest();
+        else {
+          await fillLatestGap();
+          addMessageToUI(data);
+        }
         renderGroups();
         dispatchPushForMessage(data.id);
         return true;
