@@ -337,3 +337,80 @@ Deno.test("GroqのMarkdown回答はgenerateCasualReplyの保存前経路で整�
     Deno.env.delete("GROQ_API_KEY")
   }
 })
+
+function jstDateStrForTest(offsetDays: number): string {
+  const now = new Date()
+  now.setUTCDate(now.getUTCDate() + offsetDays)
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(now)
+}
+
+Deno.test("天気の質問には店舗座標の予報を直接返し、Groqを呼ばない", async () => {
+  const originalFetch = globalThis.fetch
+  const todayStr = jstDateStrForTest(0)
+  const tomorrowStr = jstDateStrForTest(1)
+  const dayAfterStr = jstDateStrForTest(2)
+  let groqCalled = false
+
+  globalThis.fetch = ((input: string | URL) => {
+    const url = String(input)
+    if (url.includes("open-meteo.com")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        daily: {
+          time: [todayStr, tomorrowStr, dayAfterStr],
+          temperature_2m_max: [27.5, 29, 24],
+          precipitation_sum: [0, 2, 5],
+          weather_code: [1, 61, 3],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+    }
+    groqCalled = true
+    return Promise.reject(new Error("天気の質問はGroqを呼んではいけない"))
+  }) as typeof fetch
+
+  const weatherTable = {
+    select: () => weatherTable,
+    eq: () => weatherTable,
+    gte: () => weatherTable,
+    lte: () => Promise.resolve({ data: [], error: null }),
+    upsert: () => Promise.resolve({ error: null }),
+  }
+  const sb = {
+    from: (table: string) => {
+      if (table !== "line_weather_daily") throw new Error(`unexpected table ${table}`)
+      return weatherTable
+    },
+  }
+
+  try {
+    const result = await generateCasualReply(sb, {
+      groupId: 1,
+      messageId: 100,
+      storeName: "ビストロ サヴァサヴァ",
+      storeKey: "bistrocavacava",
+      botUserId: "bot1",
+      question: "今日の天気は",
+    })
+    assertEquals(result, `本日(${todayStr.slice(5).replace("-", "/")})は晴れ、最高27.5℃です。`)
+    assertEquals(groqCalled, false, "天気の質問はGroqを呼ばず直接答える")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+Deno.test("店舗座標が無い店舗では天気の質問も通常の雑談AI経路（Groq）へ渡す", async () => {
+  Deno.env.delete("GROQ_API_KEY")
+  const sb = {
+    from: () => {
+      throw new Error("店舗座標が無ければ天気データへ問い合わせてはいけない")
+    },
+  }
+  const result = await generateCasualReply(sb, {
+    groupId: 1,
+    messageId: 100,
+    storeName: "テスト店",
+    storeKey: "unknown-store",
+    botUserId: "bot1",
+    question: "今日の天気は",
+  })
+  assertEquals(result, null)
+})

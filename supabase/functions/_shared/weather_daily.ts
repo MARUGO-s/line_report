@@ -16,6 +16,25 @@ export type WeatherDailyResult = {
   fetched_new: number
 }
 
+/** WMO weather_code を日本語の天気表現へ変換する（analytics.html の weatherIcon() と同じ区分）。 */
+export function wmoWeatherLabel(code: number | null | undefined): string {
+  if (code == null) return ''
+  const c = Number(code)
+  if (!Number.isFinite(c)) return ''
+  if (c === 0) return '快晴'
+  if (c === 1) return '晴れ'
+  if (c === 2) return '晴れ時々曇り'
+  if (c === 3) return '曇り'
+  if (c >= 45 && c <= 48) return '霧'
+  if (c >= 51 && c <= 57) return '霧雨'
+  if (c >= 61 && c <= 67) return c >= 65 ? '大雨' : '雨'
+  if (c >= 71 && c <= 77) return '雪'
+  if (c >= 80 && c <= 82) return c >= 82 ? '強いにわか雨' : 'にわか雨'
+  if (c >= 85 && c <= 86) return 'にわか雪'
+  if (c >= 95) return '雷雨'
+  return ''
+}
+
 function shiftDateString(dateStr: string, days: number): string {
   const dt = new Date(`${dateStr}T00:00:00Z`)
   if (Number.isNaN(dt.getTime())) return dateStr

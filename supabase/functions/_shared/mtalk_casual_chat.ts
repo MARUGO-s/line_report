@@ -9,6 +9,8 @@
  */
 import { GROQ_TEXT_PRIMARY_MODEL, resolveGroqTextModel } from './groq_model.ts'
 import { buildMtalkHelpReference } from './mtalk_help_manual.ts'
+import { fetchWeatherDailyRange, wmoWeatherLabel } from './weather_daily.ts'
+import { STORE_COORDINATES } from './marugo_group_stores.ts'
 
 // deno-lint-ignore no-explicit-any
 type DbClient = any
@@ -207,6 +209,68 @@ export async function isSoloHumanRoom(
   return humans.length === 1 && String((humans[0] as { user_id?: unknown })?.user_id ?? '') === userId
 }
 
+const WEATHER_KEYWORD_RE = /天気|天候/
+const WEATHER_TOMORROW_RE = /明日|あした|あす/
+const WEATHER_DAY_AFTER_RE = /明後日|あさって/
+const WEATHER_TODAY_RE = /今日|本日/
+
+function jstDateStr(offsetDays = 0): string {
+  const now = new Date()
+  now.setUTCDate(now.getUTCDate() + offsetDays)
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(now)
+}
+
+/**
+ * 「今日/明日の天気は」に、店舗座標をもとにした実際の予報で直接答える。
+ * 該当しない質問や店舗座標が無い場合は null を返し、通常の雑談AI応答に任せる。
+ */
+async function buildWeatherForecastReply(
+  supabase: DbClient,
+  storeKey: string,
+  question: string,
+): Promise<string | null> {
+  if (!WEATHER_KEYWORD_RE.test(question)) return null
+  const coords = STORE_COORDINATES[String(storeKey ?? '').trim()]
+  if (!coords) return null
+
+  const wantsTomorrow = WEATHER_TOMORROW_RE.test(question)
+  const wantsDayAfter = WEATHER_DAY_AFTER_RE.test(question)
+  const wantsToday = WEATHER_TODAY_RE.test(question) || (!wantsTomorrow && !wantsDayAfter)
+
+  let result
+  try {
+    result = await fetchWeatherDailyRange(supabase, {
+      storeKey,
+      lat: coords.lat,
+      lon: coords.lon,
+      from: jstDateStr(0),
+      to: jstDateStr(2),
+    })
+  } catch (err) {
+    console.error('buildWeatherForecastReply: fetch failed', err instanceof Error ? err.message : String(err))
+    return null
+  }
+
+  const targets: Array<{ label: string; offset: number }> = []
+  if (wantsToday) targets.push({ label: '本日', offset: 0 })
+  if (wantsTomorrow) targets.push({ label: '明日', offset: 1 })
+  if (wantsDayAfter) targets.push({ label: '明後日', offset: 2 })
+
+  const lines = targets.map(({ label, offset }) => {
+    const date = jstDateStr(offset)
+    const md = date.slice(5).replace('-', '/')
+    const day = result.map[date]
+    if (!day) return `${label}(${md})の天気はまだ取得できていません。`
+    const desc = wmoWeatherLabel(day.code)
+    const tempPart = day.temp != null ? `最高${day.temp}℃` : ''
+    const rainPart = day.rain != null && day.rain > 0 ? `降水量${day.rain}mm見込み` : ''
+    const details = [desc, tempPart, rainPart].filter(Boolean).join('、')
+    return `${label}(${md})は${details || '天気データがありません'}です。`
+  })
+
+  return lines.length ? lines.join('\n') : null
+}
+
 /**
  * 雑談・簡単な相談の返信を作る。API未設定や失敗時は null を返すだけで、
  * 例外は投げない（この機能が落ちても他のBot機能に影響させない）。
@@ -217,15 +281,19 @@ export async function generateCasualReply(
     groupId: number
     messageId: number
     storeName: string
+    storeKey: string
     botUserId: string
     question: string
   },
 ): Promise<string | null> {
-  const apiKey = String(Deno.env.get('GROQ_API_KEY') ?? '').trim()
-  if (!apiKey) return null
-
   const question = String(params.question ?? '').trim().slice(0, QUESTION_MAX_CHARS)
   if (!question) return null
+
+  const weatherReply = await buildWeatherForecastReply(supabase, params.storeKey, question)
+  if (weatherReply) return weatherReply
+
+  const apiKey = String(Deno.env.get('GROQ_API_KEY') ?? '').trim()
+  if (!apiKey) return null
 
   const { data, error } = await supabase
     .from('chat_messages')

@@ -539,6 +539,7 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
         groupId,
         messageId,
         storeName: registry?.display_name || storeBot?.username || "",
+        storeKey,
         botUserId: storeBot?.id || "",
         question: text,
       })
