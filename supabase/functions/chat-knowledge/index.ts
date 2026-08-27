@@ -636,7 +636,7 @@ async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
   }
 }
 
-async function listSignupManagerGroupIds(supabase: DbClient): Promise<number[]> {
+async function listSignupManagerUserIds(supabase: DbClient): Promise<string[]> {
   const { data: groups, error: groupError } = await supabase
     .from("chat_groups")
     .select("id")
@@ -654,7 +654,7 @@ async function listSignupManagerGroupIds(supabase: DbClient): Promise<number[]> 
 
   const { data: members, error: memberError } = await supabase
     .from("chat_group_members")
-    .select("group_id, user_id")
+    .select("user_id")
     .in("group_id", groupIds)
     .eq("can_view", true)
     .eq("can_manage", true)
@@ -663,8 +663,9 @@ async function listSignupManagerGroupIds(supabase: DbClient): Promise<number[]> 
     console.error("signup manager members failed:", memberError.message)
     return []
   }
-  const memberRows = (members || []) as Array<{ group_id?: number; user_id?: string }>
-  const managerIds = [...new Set(memberRows.map((row) => String(row.user_id || "")).filter(Boolean))]
+  const managerIds = [...new Set(
+    (members || []).map((row: { user_id?: string }) => String(row.user_id || "")).filter(Boolean),
+  )]
   if (managerIds.length === 0) return []
   const { data: humans, error: humanError } = await supabase
     .from("chat_users")
@@ -675,13 +676,56 @@ async function listSignupManagerGroupIds(supabase: DbClient): Promise<number[]> 
     console.error("signup manager humans failed:", humanError.message)
     return []
   }
-  const humanSet = new Set((humans || []).map((row: { id?: string }) => String(row.id || "")))
-  return [...new Set(
-    memberRows
-      .filter((row) => humanSet.has(String(row.user_id || "")))
-      .map((row) => Number(row.group_id))
-      .filter((id) => Number.isSafeInteger(id) && id > 0),
-  )]
+  return (humans || []).map((row: { id?: string }) => String(row.id || "")).filter(Boolean)
+}
+
+async function ensureManagerNoticeDirect(supabase: DbClient, userId: string): Promise<number | null> {
+  const { data, error } = await supabase.rpc("chat_ensure_manager_notice_direct", {
+    p_user_id: userId,
+  })
+  if (error) {
+    console.error("ensure manager notice direct failed:", userId, error.message)
+    return null
+  }
+  const groupId = Number(data)
+  return Number.isSafeInteger(groupId) && groupId > 0 ? groupId : null
+}
+
+async function postAdminNoticeToManagers(
+  supabase: DbClient,
+  options: {
+    kind: string
+    dedupeKey: string
+    text: string
+    cards: ChatCard[]
+    independent?: boolean
+  },
+): Promise<{ posted: number; skipped: number; managers: number }> {
+  const managerIds = await listSignupManagerUserIds(supabase)
+  let posted = 0
+  let skipped = 0
+  for (const managerId of managerIds) {
+    const groupId = await ensureManagerNoticeDirect(supabase, managerId)
+    if (!groupId) continue
+    const result = options.independent === false
+      ? await postChatCard(supabase, {
+        groupId,
+        kind: options.kind,
+        text: options.text,
+        cards: options.cards,
+      })
+      : await postChatCardIndependent(supabase, {
+        groupId,
+        kind: options.kind,
+        dedupeKey: options.dedupeKey,
+        text: options.text,
+        cards: options.cards,
+      })
+    if ("skipped" in result && result.skipped) skipped += 1
+    else if (result.ok) posted += 1
+    else console.error("admin notice post failed:", groupId, result.error)
+  }
+  return { posted, skipped, managers: managerIds.length }
 }
 
 function signupApprovalCard(userId: string, username: string, storeNames: string) {
@@ -769,22 +813,13 @@ async function handleSignupNotify(req: Request, supabase: DbClient): Promise<Res
       .filter(Boolean)
       .join("、")
   }
-  const groupIds = await listSignupManagerGroupIds(supabase)
-  let posted = 0
-  let skipped = 0
-  for (const groupId of groupIds) {
-    const result = await postChatCardIndependent(supabase, {
-      groupId,
-      kind: "signup_approval",
-      dedupeKey: userId,
-      text: `新規登録: ${displayName} さん（${storeNames || "所属未設定"}）の利用を許可しますか？`,
-      cards: [signupApprovalCard(userId, displayName, storeNames)],
-    })
-    if (result.skipped) skipped += 1
-    else if (result.ok) posted += 1
-    else console.error("signup notify post failed:", groupId, result.error)
-  }
-  return json({ ok: true, posted, skipped, groups: groupIds.length }, 200)
+  const result = await postAdminNoticeToManagers(supabase, {
+    kind: "signup_approval",
+    dedupeKey: userId,
+    text: `新規登録: ${displayName} さん（${storeNames || "所属未設定"}）の利用を許可しますか？`,
+    cards: [signupApprovalCard(userId, displayName, storeNames)],
+  })
+  return json({ ok: true, ...result }, 200)
 }
 
 async function handleSignupReviewed(req: Request, supabase: DbClient): Promise<Response> {
@@ -796,35 +831,30 @@ async function handleSignupReviewed(req: Request, supabase: DbClient): Promise<R
   if (!SIGNUP_UUID_RE.test(userId)) {
     return json({ ok: false, error: "invalid user_id" }, 400)
   }
-  const groupIds = await listSignupManagerGroupIds(supabase)
   const storeNames = String(body.store_names ?? "").trim()
   const note = approved
     ? `${username} さんの利用を許可しました。閲覧のみで始まります。${storeNames ? `所属店舗: ${storeNames}` : ""}`
     : `${username} さんの利用を不許可にしました。`
   const byline = reviewerName ? `対応: ${reviewerName}` : ""
-  let posted = 0
-  for (const groupId of groupIds) {
-    const result = await postChatCard(supabase, {
-      groupId,
-      kind: "signup_reviewed",
-      text: note,
-      cards: [{
-        header: {
-          eyebrow: "新規登録",
-          title: approved ? "許可しました" : "不許可にしました",
-          subtitle: username,
-        },
-        sections: [
-          { type: "note", text: note },
-          ...(storeNames ? [{ type: "note", text: `所属店舗: ${storeNames}` } as ChatCardSection] : []),
-          ...(byline ? [{ type: "note", text: byline, size: "xs" } as ChatCardSection] : []),
-        ],
-      }],
-    })
-    if (result.ok) posted += 1
-    else console.error("signup reviewed post failed:", groupId, result.error)
-  }
-  return json({ ok: true, posted, groups: groupIds.length, approved }, 200)
+  const result = await postAdminNoticeToManagers(supabase, {
+    kind: "signup_reviewed",
+    dedupeKey: userId,
+    independent: false,
+    text: note,
+    cards: [{
+      header: {
+        eyebrow: "新規登録",
+        title: approved ? "許可しました" : "不許可にしました",
+        subtitle: username,
+      },
+      sections: [
+        { type: "note", text: note },
+        ...(storeNames ? [{ type: "note", text: `所属店舗: ${storeNames}` } as ChatCardSection] : []),
+        ...(byline ? [{ type: "note", text: byline, size: "xs" } as ChatCardSection] : []),
+      ],
+    }],
+  })
+  return json({ ok: true, ...result, approved }, 200)
 }
 
 function storeChangeCard(
@@ -889,22 +919,13 @@ async function handleStoreChangeNotify(req: Request, supabase: DbClient): Promis
   const requestedNames = String(body.store_names ?? "").trim()
     || "未設定"
   const currentNames = String(body.current_store_names ?? "").trim() || "未設定"
-  const groupIds = await listSignupManagerGroupIds(supabase)
-  let posted = 0
-  let skipped = 0
-  for (const groupId of groupIds) {
-    const result = await postChatCardIndependent(supabase, {
-      groupId,
-      kind: "store_change",
-      dedupeKey: String(requestId),
-      text: `所属店舗の変更: ${username} さん（${currentNames} → ${requestedNames}）を許可しますか？`,
-      cards: [storeChangeCard(requestId, username, currentNames, requestedNames)],
-    })
-    if (result.skipped) skipped += 1
-    else if (result.ok) posted += 1
-    else console.error("store change notify post failed:", groupId, result.error)
-  }
-  return json({ ok: true, posted, skipped, groups: groupIds.length }, 200)
+  const result = await postAdminNoticeToManagers(supabase, {
+    kind: "store_change",
+    dedupeKey: String(requestId),
+    text: `所属店舗の変更: ${username} さん（${currentNames} → ${requestedNames}）を許可しますか？`,
+    cards: [storeChangeCard(requestId, username, currentNames, requestedNames)],
+  })
+  return json({ ok: true, ...result }, 200)
 }
 
 async function handleStoreChangeReviewed(req: Request, supabase: DbClient): Promise<Response> {
@@ -917,29 +938,24 @@ async function handleStoreChangeReviewed(req: Request, supabase: DbClient): Prom
     ? `${username} さんの所属店舗を変更しました。${storeNames ? `新しい所属: ${storeNames}` : ""}`
     : `${username} さんの所属店舗の変更を不許可にしました。`
   const byline = reviewerName ? `対応: ${reviewerName}` : ""
-  const groupIds = await listSignupManagerGroupIds(supabase)
-  let posted = 0
-  for (const groupId of groupIds) {
-    const result = await postChatCard(supabase, {
-      groupId,
-      kind: "store_change_reviewed",
-      text: note,
-      cards: [{
-        header: {
-          eyebrow: "所属店舗",
-          title: approved ? "変更を許可しました" : "変更を不許可にしました",
-          subtitle: username,
-        },
-        sections: [
-          { type: "note", text: note },
-          ...(byline ? [{ type: "note", text: byline, size: "xs" } as ChatCardSection] : []),
-        ],
-      }],
-    })
-    if (result.ok) posted += 1
-    else console.error("store change reviewed post failed:", groupId, result.error)
-  }
-  return json({ ok: true, posted, groups: groupIds.length, approved }, 200)
+  const result = await postAdminNoticeToManagers(supabase, {
+    kind: "store_change_reviewed",
+    dedupeKey: `${approved ? "approved" : "denied"}:${username}`,
+    independent: false,
+    text: note,
+    cards: [{
+      header: {
+        eyebrow: "所属店舗",
+        title: approved ? "変更を許可しました" : "変更を不許可にしました",
+        subtitle: username,
+      },
+      sections: [
+        { type: "note", text: note },
+        ...(byline ? [{ type: "note", text: byline, size: "xs" } as ChatCardSection] : []),
+      ],
+    }],
+  })
+  return json({ ok: true, ...result, approved }, 200)
 }
 
 Deno.serve(async (req) => {

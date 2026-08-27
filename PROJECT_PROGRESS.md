@@ -1,5 +1,15 @@
 # LINE Report Project Progress
 
+### 2026-08-27 - 承認プロセスは管理者だけに見せる
+
+- Request: 店舗ルームの一般メンバーに、新規登録の許可／不許可カードが見えていた。
+- DB: 承認カードは `chat_is_admin_notice_message`。店舗ルームでは `can_manage` だけ
+  SELECT可。配信先は `chat_ensure_manager_notice_direct` の管理者1対1。未読RPCからも除外。
+  閲覧ユーザーに残っていた送信・招待は落とす。再招待時は `chat_add_members` が権限を下げられる。
+- Edge: `chat-knowledge` は店舗ルームへ出さず、管理者DMへ `postAdminNoticeToManagers`。
+- UI: 非管理者にはカードを描かない。Botタブは所属店舗のみ。招待ボタンは招待できるルームがあるときだけ。
+- Test: `tests/chat_admin_notices_private.test.mjs`。
+
 ### 2026-08-27 - 所属店舗を必須にし、変更は管理者許可後、1対1は同じ所属のみ
 
 - Request: 新規登録で所属店舗を必須。複数可。後からプロフィールで変更できるが、

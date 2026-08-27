@@ -3654,6 +3654,33 @@
     function canCurrentUserInvite(group = currentGroup()) { return roomCapability(group, 'can_invite'); }
     function canCurrentUserManage(group = currentGroup()) { return roomCapability(group, 'can_manage'); }
 
+    function currentUserIsSignupManager() {
+      return (myGroups || []).some((group) => (
+        group && !group.is_direct && !group.trashed_at && canCurrentUserManage(group)
+      ));
+    }
+
+    function adminNoticeKindFromMessage(msg) {
+      if (!msg || msg.kind !== 'card') return '';
+      const payload = typeof msg.payload === 'string' ? safeParseJson(msg.payload) : msg.payload;
+      return String((payload && payload.kind) || '').trim();
+    }
+
+    function isAdminNoticeMessage(msg) {
+      return ['signup_approval', 'signup_reviewed', 'store_change', 'store_change_reviewed']
+        .includes(adminNoticeKindFromMessage(msg));
+    }
+
+    function canSeeAdminNoticeMessage(msg, group) {
+      const target = group || currentGroup() || myGroups.find((g) => Number(g.id) === Number(msg && msg.group_id));
+      if (canCurrentUserManage(target)) return true;
+      return !!(target && target.is_direct && currentUserIsSignupManager());
+    }
+
+    function shouldHideAdminNotice(msg, group) {
+      return isAdminNoticeMessage(msg) && !canSeeAdminNoticeMessage(msg, group);
+    }
+
     function requireCurrentRoomSend() {
       if (canCurrentUserSend()) return true;
       alert('このルームは閲覧専用です。メッセージは送信できません。');
@@ -4199,6 +4226,7 @@
     }
 
     function handleIncomingMessage(msg) {
+      if (shouldHideAdminNotice(msg, myGroups.find((g) => Number(g.id) === Number(msg.group_id)))) return;
       lastMessages[msg.group_id] = msg;
       const group = myGroups.find((g) => Number(g.id) === Number(msg.group_id));
       if (group && group.hidden_at && msg.user_id !== currentUser.id) {
@@ -4970,7 +4998,7 @@
     }
 
     function isDirectoryUser(user) {
-      if (talkTab === 'bots') return isStoreBot(user);
+      if (talkTab === 'bots') return isStoreBot(user) && sharesAffiliationWith(user);
       return !isBotUser(user);
     }
 
@@ -4991,9 +5019,10 @@
         $('userInviteBar').classList.add('hidden');
         const users = directoryUsers();
         if (!users.length) {
-          list.innerHTML = '<div class="empty-note">店舗Botはいません</div>';
+          list.innerHTML = '<div class="empty-note">所属店舗の店舗Botはいません</div>';
           return;
         }
+        const canInviteSomewhere = myGroups.some((group) => !group.is_direct && !group.trashed_at && canCurrentUserInvite(group));
         users.forEach((user) => {
           const row = document.createElement('div');
           row.className = 'user-row';
@@ -5002,7 +5031,7 @@
             <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
             <div class="talk-body">
               <div class="group-item-name"><span>${escapeHtml(personName(user))}</span>${botMarkHtml()}</div>
-              <div class="group-item-info">1対1、またはルームへ招待</div>
+              <div class="group-item-info">${canInviteSomewhere ? '1対1、またはルームへ招待' : '所属店舗の店舗Bot'}</div>
             </div>
           `;
           const talkBtn = document.createElement('button');
@@ -5015,15 +5044,17 @@
             : (sameStore ? '' : '所属店舗が同じ相手だけ1対1を始められます');
           talkBtn.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
           row.appendChild(talkBtn);
-          const inviteBtn = document.createElement('button');
-          inviteBtn.className = 'join-btn';
-          inviteBtn.textContent = '招待';
-          inviteBtn.onclick = (e) => {
-            e.stopPropagation();
-            selectedUserIds = new Set([user.id]);
-            openUserInviteTarget();
-          };
-          row.appendChild(inviteBtn);
+          if (canInviteSomewhere) {
+            const inviteBtn = document.createElement('button');
+            inviteBtn.className = 'join-btn';
+            inviteBtn.textContent = '招待';
+            inviteBtn.onclick = (e) => {
+              e.stopPropagation();
+              selectedUserIds = new Set([user.id]);
+              openUserInviteTarget();
+            };
+            row.appendChild(inviteBtn);
+          }
           list.appendChild(row);
         });
         return;
@@ -7260,6 +7291,7 @@
     }
 
     function buildMessageNode(msg) {
+      if (shouldHideAdminNotice(msg)) return null;
       const div = document.createElement('div');
       const isOwn = currentUser && String(msg.user_id) === String(currentUser.id);
       const cards = cardsFromMessage(msg);
@@ -7394,7 +7426,8 @@
           el.appendChild(buildDayDivider(item.ts));
           lastDay = key;
         }
-        el.appendChild(item.kind === 'note' ? buildNoteNode(item.data) : buildMessageNode(item.data));
+        const node = item.kind === 'note' ? buildNoteNode(item.data) : buildMessageNode(item.data);
+        if (node) el.appendChild(node);
       });
       hydrateMessageImages();
       hydrateMessageFiles();
@@ -7470,6 +7503,7 @@
     // 新着1件だけを末尾に足す（全体を描き直さずスクロール位置を保つ）。
     function addMessageToUI(msg) {
       if (Number(msg.group_id) !== currentGroupId) return;
+      if (shouldHideAdminNotice(msg)) return;
       if (seenMessageIds.has(msg.id)) return;
       // 途中へジャンプしている間は、間の発言を読み足してから末尾へつなぐ。
       // 見ていた位置は fillLatestGap が維持する。
@@ -7489,7 +7523,8 @@
       const dividers = el.querySelectorAll('.day-divider');
       const lastDay = dividers.length ? dividers[dividers.length - 1].dataset.dayKey : '';
       if (dayKey(msg.created_at) !== lastDay) el.appendChild(buildDayDivider(msg.created_at));
-      el.appendChild(buildMessageNode(msg));
+      const node = buildMessageNode(msg);
+      if (node) el.appendChild(node);
 
       hydrateMessageImages();
       hydrateMessageFiles();
@@ -7623,6 +7658,10 @@
       const msg = currentMessages.find((m) => m.id === Number(messageId));
       if (!node || !msg) return;
       const replacement = buildMessageNode(msg);
+      if (!replacement) {
+        node.remove();
+        return;
+      }
       node.replaceWith(replacement);
       hydrateMessageImages();
     }

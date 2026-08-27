@@ -44,6 +44,8 @@ Data APIを直接呼ばれてもDBのRLS・RPC・Storage policyで同じ判定�
 
 既存ユーザーは既定で有効（`signup_status=approved`、`default_can_send=true`）。
 新規の人間ユーザーは承認待ちで始まり、許可後も閲覧のみ。Botは従来どおり有効。
+許可／不許可カード（`signup_approval` など）は管理者本人と予約Botの1対1へ送り、
+店舗ルームでは `can_manage` がある人だけが読める。一般メンバーの未読にも載せない。
 Botの削除・復元は、通常のM-talk画面では行えず、**本部フル管理セッションの
 `chat-admin.html`だけ**で行う。物理削除はせず `chat_users.bot_deleted_at`
 による論理削除とし、過去メッセージ・所属履歴を保持する。削除済みBot名義の
