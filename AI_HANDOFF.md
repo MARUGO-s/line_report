@@ -5,6 +5,7 @@
 - `public/chat.html`は約10,600行の単一ファイルから、画面構造497行＋`public/chat/`のCSS・11責務別JSへ分割した。読込順と`chat-sw.js`の`CHAT_SHELL`はセットで保つ。
 - フロントの権限判定は`public/chat/permissions.js`へ集約したが、正本の強制はDBのRLS・RPC・Storage policy。UIの非表示だけを認可に使わない。
 - `20260909010000_chat_least_privilege_cleanup.sql`でanonの`chat_*` GRANT、トリガ専用関数の公開EXECUTE、停止ユーザーのKeep・個人メモ経路を追加で閉じる。`20260909020000_chat_keep_private_active_policy_helper.sql`で、Keep・個人メモのRLSをauthenticatedから実行可能な本人固定ゲート`chat_is_registered()`へ接続する。
+- `20260909030000_revoke_authenticated_internal_rpcs.sql`で、M-talk JWTからチャット外のAI使用量・予約再集計・cron／trigger内部関数へ到達する経路を閉じ、service_role/postgresだけを残す。
 - 静的テストが実装全体を読めるよう`tests/helpers/chat-page-source.mjs`を追加。`npm run test:chat`は123/123。
 
 ## Project
