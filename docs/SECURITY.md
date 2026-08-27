@@ -64,6 +64,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - 停止・一時制限・論理削除中は、本文・添付に加えてKeepと個人メモもData APIから取得・変更できない。
 - トリガ専用のSECURITY DEFINER関数は`public / anon / authenticated`のEXECUTEを剥がし、RPCとして露出させない。
 - M-talkのauthenticated JWTを管理者資格として使わない。AI使用量集計、予約集計再構築、cron起動・履歴削除などの内部関数は`public / anon / authenticated`から剥がし、service_role・postgresだけに限定する。
+- `using (true)`のRLSポリシーを名前だけでservice-role専用と判断しない。週次経営レポート等の内部テーブルはGRANTとpolicyの両方をservice_roleに限定し、公開データを読む必要がある表もanon/authenticatedにはSELECTだけを与える。
 - 店舗Bot UUID生成などの補助関数も`search_path`を固定し、名前解決の差し替えを許さない。
 - `public/chat-admin.html`は`admin-api /chat-admin/*`を使用する。ブラウザへservice roleを渡さず、既存の本部フル管理セッションだけを許可する。店舗・ルーム・cronスコープは403。M-talk本体（`chat.html`）から管理画面へはリンクしない。管理画面は本部トップからの遷移以外では自動接続せず、明示的な本部セッション確認が必要。
 - 新規の人間ユーザーは全店舗ルームへ自動参加しない。所属店舗の承認後、その店舗ルームだけ閲覧権限で入る。`chat_group_members`の送信・招待・管理の既定は false。プロフィール作成は `chat_complete_signup` のみ（authenticated の INSERT は不可）。新規登録・所属変更の許可カードは専用の管理者通知ルームへ送り、予約通知の1対1は復活させない。店舗ルームの一般メンバーはSELECTできない。

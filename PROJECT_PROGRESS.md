@@ -7,7 +7,8 @@
 - Security audit: 本番DBで27対象テーブルのRLS有効、偽の非メンバーJWTでルーム・本文・所属・`chat-images`が全て0件、`chat-images`非公開を確認。匿名ロールに残っていた不要な`chat_*` GRANTと、トリガ専用SECURITY DEFINER関数のEXECUTEを追加migrationで剥がす。
 - Access hardening: 停止・一時制限・論理削除ユーザーはKeepと個人メモも、本人固定の`chat_is_registered()`で遮断する。低レベルの`chat_has_active_access(uuid)`はservice_role専用のまま維持する。
 - Cross-app boundary: M-talkのauthenticated JWTから、AI使用量・予約再集計・cron起動／履歴削除などチャット外の内部SECURITY DEFINER関数を実行できないようservice_role/postgres専用へ統一する。
-- Test: `npm run test:chat` 123/123。外部化した全JSの構文検査と最小権限migration専用テストを追加。
+- Public policy audit: `foodcourt_weekly_reports`の無条件ALLをservice_role専用へ修正し、`giants_game_results`は公開SELECTのみ維持してINSERT/UPDATE/DELETEをservice_roleへ限定する。
+- Test: `npm run test:chat` Deno 57/57・Node 129/129。外部化した全JSの構文検査と最小権限migration専用テストを追加。
 
 ### 2026-08-27 - 承認カードを予約通知の1対1へ送らない
 
