@@ -10,7 +10,7 @@
 import { GROQ_TEXT_PRIMARY_MODEL, resolveGroqTextModel } from './groq_model.ts'
 import { buildMtalkHelpReference } from './mtalk_help_manual.ts'
 import { fetchWeatherDailyRange, wmoWeatherLabel } from './weather_daily.ts'
-import { STORE_COORDINATES } from './marugo_group_stores.ts'
+import { STORE_COORDINATES, STORE_LOCATION_PROFILES } from './marugo_group_stores.ts'
 
 // deno-lint-ignore no-explicit-any
 type DbClient = any
@@ -267,8 +267,14 @@ async function buildWeatherForecastReply(
     const details = [desc, tempPart, rainPart].filter(Boolean).join('、')
     return `${label}(${md})は${details || '天気データがありません'}です。`
   })
+  if (!lines.length) return null
 
-  return lines.length ? lines.join('\n') : null
+  // どの地点を基準にした天気かが伝わるよう、おおまかな地域名を1行添える
+  // （STORE_COORDINATESの座標そのものは店舗の詳細住所に基づくが、返信では地域名までに留める）。
+  const area = STORE_LOCATION_PROFILES[String(storeKey ?? '').trim()]?.area
+  const header = area ? `${area}の天気予報です。` : null
+
+  return [header, ...lines].filter(Boolean).join('\n')
 }
 
 /**
