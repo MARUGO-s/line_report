@@ -715,6 +715,137 @@ Deno.test("Web検索がONなら検索結果をシステム指示へ渡し、選�
   }
 });
 
+Deno.test("Perplexity と Groq の実測トークンを ai_usage_events へ記録する", async () => {
+  const originalFetch = globalThis.fetch;
+  Deno.env.set("GROQ_API_KEY", "test-key");
+  Deno.env.set("PERPLEXITY_API_KEY", "test-pplx-key");
+  const inserted: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = ((input: string | URL) => {
+    if (String(input).includes("perplexity.ai")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        choices: [{ message: { content: "検索結果です。" } }],
+        citations: ["https://example.com/a"],
+        usage: { prompt_tokens: 1800, completion_tokens: 650, total_tokens: 2450 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    }
+    return Promise.resolve(new Response(JSON.stringify({
+      choices: [{ message: { content: "回答です。" } }],
+      usage: { prompt_tokens: 4200, completion_tokens: 780, total_tokens: 4980 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  }) as typeof fetch;
+
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    lt: () => chain,
+    order: () => chain,
+    limit: () => Promise.resolve({ data: [], error: null }),
+  };
+  const sb = {
+    from: (table: string) => {
+      if (table === "ai_usage_events") {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted.push(row);
+            return Promise.resolve({ error: null });
+          },
+        };
+      }
+      return chain;
+    },
+  };
+
+  try {
+    await generateCasualReply(sb, {
+      groupId: 1,
+      messageId: 100,
+      storeName: "ビストロ サヴァサヴァ",
+      storeKey: "bistrocavacava",
+      botUserId: "bot1",
+      question: "最近人気のワイン品種は何ですか？",
+      webSearchEnabled: true,
+      webSearchModel: "sonar",
+    });
+
+    assertEquals(inserted.length, 2, "検索と文章化で2行記録する");
+
+    const pplx = inserted.find((r) => r.provider === "perplexity");
+    assertEquals(pplx?.model, "sonar");
+    assertEquals(pplx?.input_tokens, 1800);
+    assertEquals(pplx?.output_tokens, 650);
+    assertEquals(pplx?.total_tokens, 2450);
+    // 用途タグが無いとフードコート/ジャーナルと混ざって実費が切り分けられない。
+    assertEquals(pplx?.surface, "mtalk");
+    assertEquals(pplx?.store_partition_key, "bistrocavacava");
+
+    const groq = inserted.find((r) => r.provider === "groq");
+    assertEquals(groq?.model, "openai/gpt-oss-120b");
+    assertEquals(groq?.input_tokens, 4200);
+    assertEquals(groq?.output_tokens, 780);
+    assertEquals(groq?.surface, "mtalk");
+  } finally {
+    globalThis.fetch = originalFetch;
+    Deno.env.delete("GROQ_API_KEY");
+    Deno.env.delete("PERPLEXITY_API_KEY");
+  }
+});
+
+Deno.test("Web検索OFFならPerplexityの使用量は記録されない", async () => {
+  const originalFetch = globalThis.fetch;
+  Deno.env.set("GROQ_API_KEY", "test-key");
+  const inserted: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = (() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "回答です。" } }],
+          usage: { prompt_tokens: 900, completion_tokens: 120, total_tokens: 1020 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    )) as typeof fetch;
+
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    lt: () => chain,
+    order: () => chain,
+    limit: () => Promise.resolve({ data: [], error: null }),
+  };
+  const sb = {
+    from: (table: string) => {
+      if (table === "ai_usage_events") {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted.push(row);
+            return Promise.resolve({ error: null });
+          },
+        };
+      }
+      return chain;
+    },
+  };
+
+  try {
+    await generateCasualReply(sb, {
+      groupId: 1,
+      messageId: 100,
+      storeName: "テスト店",
+      storeKey: "bistrocavacava",
+      botUserId: "bot1",
+      question: "最近人気のワイン品種は何ですか？",
+      webSearchEnabled: false,
+    });
+    assertEquals(inserted.length, 1, "文章化のGroqだけ記録する");
+    assertEquals(inserted[0]?.provider, "groq");
+  } finally {
+    globalThis.fetch = originalFetch;
+    Deno.env.delete("GROQ_API_KEY");
+  }
+});
+
 Deno.test("Web検索が失敗しても雑談AIの回答は返す", async () => {
   const originalFetch = globalThis.fetch;
   Deno.env.set("GROQ_API_KEY", "test-key");

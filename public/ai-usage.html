@@ -566,6 +566,18 @@
             </div>
           </details>
 
+          <!-- M-talk 雑談AIのWeb検索コスト（用途別に別表示・デフォルト閉じ） -->
+          <details class="assump" id="mtalkBox">
+            <summary>
+              <span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+              M-talk 雑談AI・Web検索の使用量（<span id="mtalkTotal" class="mono">¥0</span>）
+            </summary>
+            <div class="assump-body">
+              <p class="ms-sub" style="margin-top:4px">M-talkの1対1雑談AIの実測トークン。<strong>Perplexity</strong>（Web検索）と<strong>Groq</strong>（文章化）の2本立てです。Perplexityはトークンとは別に<strong>検索1回ごとの基本料金</strong>（sonar $5／sonar-pro $6 per 1,000回）が掛かり、下の金額にはこれを含めています。検索は権限設定でONにしたルームでだけ発生します。</p>
+              <div id="mtalkBrkBody"></div>
+            </div>
+          </details>
+
           <!-- モデル別コスト内訳（最も正確・実測トークン×モデル別単価・デフォルト閉じ） -->
           <details class="assump" id="modelBox">
             <summary>
@@ -680,11 +692,17 @@
       groq:     { inUsd: 0.15, outUsd: 0.60 },   // openai/gpt-oss-120b
       gemini:   { inUsd: 0.25, outUsd: 1.50 },   // Flash Lite 既定
       claude:   { inUsd: 1.00, outUsd: 5.00 },   // claude-haiku-4-5
+      perplexity:     { inUsd: 1.00, outUsd: 1.00 },  // sonar
+      perplexity_pro: { inUsd: 3.00, outUsd: 15.00 }, // sonar-pro
       jpyPerUsd: 155,
     };
-    const RATE_PROVIDER_KEYS = ['azure', 'openai', 'grok', 'grok_xsearch', 'groq', 'gemini', 'claude'];
+    const RATE_PROVIDER_KEYS = ['azure', 'openai', 'grok', 'grok_xsearch', 'groq', 'gemini', 'claude', 'perplexity', 'perplexity_pro'];
     // x_search 実行料（トークンとは別建て）。$5 / 1,000 calls。
     const X_SEARCH_FEE_PER_CALL_USD = 0.005;
+    // Perplexity のリクエスト基本料金（トークンとは別建て・検索1回ごと）。
+    // search_context_size は未指定＝low 既定。sonar $5 / sonar-pro $6 per 1,000 requests。
+    // M-talk検索のコストはこの固定費が大半を占めるため、トークンだけでは実費が出ない。
+    const PERPLEXITY_REQUEST_FEE_USD = { 'sonar': 0.005, 'sonar-pro': 0.006 };
 
     // 現行本番で使うモデルだけを表示・合算する（過去ログの未使用モデルは除外）。
     const ACTIVE_PRODUCTION_MODELS = new Set([
@@ -698,6 +716,8 @@
       'grok-3-mini',
       'grok-4.5',
       'openai/gpt-oss-120b',
+      'sonar',
+      'sonar-pro',
     ]);
     function normalizeModelId(model) {
       return String(model || '')
@@ -731,6 +751,9 @@
       }
       if (provider === 'gemini') return 'gemini';
       if (provider === 'claude') return 'claude';
+      if (provider === 'perplexity') {
+        return normalizeModelId(model) === 'sonar-pro' ? 'perplexity_pro' : 'perplexity';
+      }
       return 'azure';
     }
 
@@ -960,7 +983,12 @@
       const toolUsd = xCalls > 0
         ? xCalls * Math.max(1, Number(m.event_count || 1)) * X_SEARCH_FEE_PER_CALL_USD
         : 0;
-      return tokenUsd + toolUsd;
+      // Perplexity は検索1回ごとの基本料金がトークンとは別に掛かる（イベント1行＝1リクエスト）。
+      // これを足さないと実費の大半（sonarで約0.8円/回）が抜け落ちる。
+      const pplxFee = m.provider === 'perplexity'
+        ? Number(m.event_count || 0) * (PERPLEXITY_REQUEST_FEE_USD[normalizeModelId(m.model)] || PERPLEXITY_REQUEST_FEE_USD['sonar'])
+        : 0;
+      return tokenUsd + toolUsd + pplxFee;
     }
     // provider の合計USD＝そのproviderの各モデルをモデル別単価で合算（最も正確）。
     // models が無い旧レスポンスのときだけ従来のprovider一括計算にフォールバック。
@@ -1054,6 +1082,7 @@
 
       renderModelBreakdown();
       renderFoodcourtCard();
+      renderMtalkCard();
       renderTimeSeries();
     }
 
@@ -1194,13 +1223,58 @@
         '</table>';
     }
 
+    // M-talk雑談AI（Web検索=Perplexity ＋ 文章化=Groq）だけのAI使用量を別表示。
+    // Perplexityは検索1回ごとの基本料金が実費の大半なので、modelUsd() 側で加算済み。
+    function renderMtalkCard() {
+      const el = document.getElementById('mtalkBrkBody');
+      const totalEl = document.getElementById('mtalkTotal');
+      if (!el) return;
+      const mt = (state.data && state.data.mtalk) || null;
+      const models = filterActiveModels(mt && mt.models).slice();
+      const jpyPerUsd = state.rates.jpyPerUsd;
+      if (!models.length) {
+        if (totalEl) totalEl.textContent = '¥0';
+        el.innerHTML = '<p class="statusline">M-talk雑談AIの使用記録がまだありません（権限設定で「AIのWeb検索」をONにしたルームで質問すると記録されます）。</p>';
+        return;
+      }
+      models.sort(function (a, b) { return modelUsd(b) - modelUsd(a); });
+      let totalJpy = 0;
+      let searchCount = 0;
+      const rows = models.map(function (mm) {
+        const jpy = modelUsd(mm) * jpyPerUsd;
+        totalJpy += jpy;
+        if (mm.provider === 'perplexity') searchCount += Number(mm.event_count || 0);
+        const use = modelLabelFor(mm.model);
+        return '<tr>' +
+          '<td style="text-align:left"><span class="mono">' + escapeHtml(mm.model) + '</span>' +
+          (use ? '<br><span class="ms-sub" style="font-size:11px">' + escapeHtml(use) + '</span>' : '') + '</td>' +
+          '<td>' + fmtInt(mm.event_count) + '</td>' +
+          '<td>' + fmtInt(mm.input_tokens) + '</td>' +
+          '<td>' + fmtInt(Number(mm.output_tokens || 0)) + '</td>' +
+          '<td>' + fmtJpy(jpy) + '</td>' +
+          '</tr>';
+      }).join('');
+      if (totalEl) totalEl.textContent = fmtJpy(totalJpy);
+      // 「1回あたりいくらか」は運用判断で最も見たい数字なので、検索回数で割って併記する。
+      const perSearch = searchCount > 0
+        ? '<p class="ms-sub" style="margin-top:8px">Web検索 <strong>' + fmtInt(searchCount) + '回</strong>／検索1回あたり <strong>' + fmtJpy(totalJpy / searchCount) + '</strong>（文章化のGroq込み）</p>'
+        : '';
+      el.innerHTML = '<table class="brk-table">' +
+        '<thead><tr><th style="text-align:left">モデル（用途）</th><th>ログ件数</th><th>入力Tok</th><th>出力Tok</th><th>概算</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '<tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">合計</td><td style="font-weight:700">' + fmtJpy(totalJpy) + '</td></tr></tfoot>' +
+        '</table>' + perSearch;
+    }
+
     // モデル別の正確な内訳（実測トークン × モデル別単価）。現行本番モデルのみ。
     const MODEL_LABELS = {
       'gpt-5.4-nano': 'フードコート表抽出（本線）／レシート障害時の退避（Azure Foundry）',
       'gpt-5.6-luna': 'フードコート分析の最終統合',
       'grok-3-mini': 'フードコート運営改善AI（専門③）',
       'grok-4.5': 'Xトレンドブリーフ（Responses + x_search）',
-      'openai/gpt-oss-120b': 'フードコート専門AI①（数値・他店比較 / Groq）',
+      'openai/gpt-oss-120b': 'フードコート専門AI①（数値・他店比較 / Groq）／M-talk雑談AIの文章化',
+      'sonar': 'M-talk雑談AIのWeb検索（Perplexity 標準）',
+      'sonar-pro': 'M-talk雑談AIのWeb検索（Perplexity 高精度）',
       'claude-haiku-4-5': 'フードコート反証・評価／経費レシート解析（Claude Haiku）',
       'gemini-3.1-flash-lite': 'レシート通常解析（Flash Lite）',
       'gemini-3-flash-preview': 'レシート解析（Flash）',

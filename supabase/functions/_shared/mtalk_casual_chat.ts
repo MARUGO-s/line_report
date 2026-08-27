@@ -283,6 +283,55 @@ const WEATHER_TOMORROW_RE = /明日|あした|あす/
 const WEATHER_DAY_AFTER_RE = /明後日|あさって/
 const WEATHER_TODAY_RE = /今日|本日/
 
+/** M-talk雑談AIの用途タグ。フードコート/ジャーナルと混ぜずに実費を追えるようにする。 */
+export const MTALK_AI_USAGE_SURFACE = 'mtalk'
+
+/**
+ * 実測トークンを ai_usage_events へ1行記録し、AI使用料ページに反映させる。
+ * 記録に失敗しても返信は返す（課金ログのために会話を落とさない）。
+ */
+async function recordMtalkAiUsage(
+  supabase: DbClient,
+  storeKey: string,
+  usage: {
+    provider: 'perplexity' | 'groq'
+    model: string
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+  } | null,
+): Promise<void> {
+  const key = String(storeKey ?? '').trim()
+  if (!supabase || !key || !usage) return
+  try {
+    const { error } = await supabase.from('ai_usage_events').insert({
+      store_partition_key: key,
+      provider: usage.provider,
+      model: usage.model,
+      input_tokens: usage.inputTokens || 0,
+      output_tokens: usage.outputTokens || 0,
+      thinking_tokens: null,
+      total_tokens: usage.totalTokens || 0,
+      surface: MTALK_AI_USAGE_SURFACE,
+    })
+    if (error) console.error('mtalk ai_usage_events insert failed:', error.message)
+  } catch (err) {
+    console.error('mtalk ai_usage_events insert threw:', err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** Groq は OpenAI 互換の usage を返す。取れなければ null（記録しない）。 */
+function groqUsageFrom(payload: unknown, model: string) {
+  const raw = (payload && typeof payload === 'object') ? (payload as { usage?: unknown }).usage : null
+  if (!raw || typeof raw !== 'object') return null
+  const u = raw as Record<string, unknown>
+  const inputTokens = Number(u.prompt_tokens ?? 0) || 0
+  const outputTokens = Number(u.completion_tokens ?? 0) || 0
+  const totalTokens = Number(u.total_tokens ?? 0) || (inputTokens + outputTokens)
+  if (!inputTokens && !outputTokens && !totalTokens) return null
+  return { provider: 'groq' as const, model, inputTokens, outputTokens, totalTokens }
+}
+
 /** `openai/gpt-oss-120b` のような修飾付きモデル名を、注記用に短くする。 */
 function shortModelName(model: string): string {
   const name = String(model ?? '').trim()
@@ -410,6 +459,14 @@ export async function generateCasualReply(
       model: normalizeMtalkWebSearchModel(params.webSearchModel),
       storeName: params.storeName,
     })
+    // 課金は検索を叩いた時点で発生する。回答が空でも記録しないと実費が過小に見える。
+    if (result.usage) {
+      await recordMtalkAiUsage(supabase, params.storeKey, {
+        provider: 'perplexity',
+        model: result.model,
+        ...result.usage,
+      })
+    }
     if (result.ok) webSearch = result
   }
 
@@ -468,6 +525,7 @@ export async function generateCasualReply(
       console.error('generateCasualReply: Groq HTTP', response.status, JSON.stringify(payload).slice(0, 300))
       return null
     }
+    await recordMtalkAiUsage(supabase, params.storeKey, groqUsageFrom(payload, model))
     const text = formatCasualReplyForMtalk(String(
       (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content ?? '',
     ))

@@ -62,12 +62,38 @@ export function shouldMtalkWebSearch(question: string): boolean {
   return QUESTION_SHAPE_RE.test(q) && EXTERNAL_TOPIC_RE.test(q)
 }
 
+/**
+ * 実測トークン。ai_usage_events へ記録し、AI使用料ページで実費を出すために持ち回る。
+ * Perplexity はトークンとは別に「リクエスト基本料金」（sonar $5 / sonar-pro $6 per 1000req、
+ * search_context_size=low 既定）が掛かるため、回数（＝イベント1行）も課金単位になる。
+ */
+export type MtalkWebSearchUsage = {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
 export type MtalkWebSearchResult = {
   ok: boolean
   text: string
   citations: string[]
   model: MtalkWebSearchModel
+  usage?: MtalkWebSearchUsage | null
   error?: string
+}
+
+/** Perplexity は OpenAI 互換の usage を返す。取れなければ null（記録しない）。 */
+function usageFromPerplexity(payload: unknown): MtalkWebSearchUsage | null {
+  const raw = (payload && typeof payload === 'object')
+    ? (payload as { usage?: unknown }).usage
+    : null
+  if (!raw || typeof raw !== 'object') return null
+  const u = raw as Record<string, unknown>
+  const inputTokens = Number(u.prompt_tokens ?? 0) || 0
+  const outputTokens = Number(u.completion_tokens ?? 0) || 0
+  const totalTokens = Number(u.total_tokens ?? 0) || (inputTokens + outputTokens)
+  if (!inputTokens && !outputTokens && !totalTokens) return null
+  return { inputTokens, outputTokens, totalTokens }
 }
 
 const PERPLEXITY_ENDPOINT = 'https://api.perplexity.ai/chat/completions'
@@ -148,6 +174,7 @@ export async function fetchMtalkWebSearch(
       text,
       citations,
       model,
+      usage: usageFromPerplexity(payload),
       error: text ? undefined : 'empty_content',
     }
   } catch (err) {
