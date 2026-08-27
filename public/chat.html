@@ -3199,8 +3199,21 @@
     const SUPABASE_URL = CONFIG.PROJECT_URL || 'https://hocbnifuactbvmyjraxy.supabase.co';
     const SUPABASE_ANON_KEY = CONFIG.RECEIPT_ADMIN_ANON_KEY || '';
 
+    function authEmailRedirectUrl() {
+      try {
+        const url = new URL('chat.html', window.location.href);
+        return `${url.origin}${url.pathname}`;
+      } catch (_) {
+        return 'https://marugo-s.github.io/line_report/chat.html';
+      }
+    }
+
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: true, autoRefreshToken: true }
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
     });
 
     let currentUser = null;
@@ -3520,7 +3533,11 @@
 
       $('signupBtn').disabled = true;
       try {
-        const { data, error } = await sb.auth.signUp({ email, password });
+        const { data, error } = await sb.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: authEmailRedirectUrl() }
+        });
 
         if (error) {
           if (/already registered|already been registered/i.test(error.message)) {
@@ -3535,7 +3552,7 @@
 
         if (!data.session) {
           showLogin();
-          showNotice('確認メールを送信しました。メール内のリンクを開いてからログインしてください。');
+          showNotice('確認メールを送信しました。メール内のリンクを開くとM-talkに戻ります。戻ったらログインしてください。');
           $('emailInput').value = email;
           return;
         }
@@ -10548,9 +10565,26 @@
     syncChatViewport();
     ensureChatServiceWorker();
 
+    function consumeAuthRedirectUrl() {
+      const hash = String(location.hash || '');
+      const params = new URLSearchParams(location.search);
+      const fromHash = /access_token=|refresh_token=|type=signup|type=recovery|type=magiclink/.test(hash);
+      const fromCode = params.has('code');
+      if (!fromHash && !fromCode) return false;
+      const url = new URL(location.href);
+      url.hash = '';
+      if (fromCode) url.searchParams.delete('code');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+      return true;
+    }
+
     (async () => {
+      const pendingAuthLink = /access_token=|refresh_token=|type=signup|type=recovery|type=magiclink/.test(String(location.hash || ''))
+        || new URLSearchParams(location.search).has('code');
       const { data } = await sb.auth.getSession();
+      const fromAuthLink = consumeAuthRedirectUrl() || pendingAuthLink;
       if (data?.session) {
+        if (fromAuthLink) showNotice('メールアドレスの確認が完了しました。');
         await afterSignIn();
       } else {
         applySavedCredentials();
