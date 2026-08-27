@@ -52,7 +52,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - `chat_group_members`の`can_view / can_send / can_invite / can_manage`を、画面表示だけでなくメッセージ、Realtime、検索、既読・未読、リアクション、Storage、Push、予約送信、ルームRPCで強制する。
 - 生のメンバーINSERT/DELETEとルームINSERTは許可せず、権限検査付きRPCだけでルーム作成・招待参加・メンバー追加を行う。
 - `public/chat-admin.html`は`admin-api /chat-admin/*`を使用する。ブラウザへservice roleを渡さず、既存の本部フル管理セッションだけを許可する。店舗・ルーム・cronスコープは403。M-talk本体（`chat.html`）から管理画面へはリンクしない。管理画面は本部トップからの遷移以外では自動接続せず、明示的な本部セッション確認が必要。
-- 新規の人間ユーザーは全店舗ルームへ自動参加しない。所属店舗の承認後、その店舗ルームだけ閲覧権限で入る。`chat_group_members`の送信・招待・管理の既定は false。プロフィール作成は `chat_complete_signup` のみ（authenticated の INSERT は不可）。新規登録・所属変更の許可カードは管理者本人の1対1へ送り、店舗ルームの一般メンバーはSELECTできない。
+- 新規の人間ユーザーは全店舗ルームへ自動参加しない。所属店舗の承認後、その店舗ルームだけ閲覧権限で入る。`chat_group_members`の送信・招待・管理の既定は false。プロフィール作成は `chat_complete_signup` のみ（authenticated の INSERT は不可）。新規登録・所属変更の許可カードは専用の管理者通知ルームへ送り、予約通知の1対1は復活させない。店舗ルームの一般メンバーはSELECTできない。
 - 管理画面の「ユーザー削除」はM-talk上の論理削除。`auth.users`と`chat_users`を物理削除せず、作成ルーム・過去発言・他アプリのログインを保持する。
 - 詳細: [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md)
 

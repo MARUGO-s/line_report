@@ -38,10 +38,23 @@ test("admin notice cards are readable only by managers", async () => {
 test("chat-knowledge posts signup notices to manager DMs, not store rooms", async () => {
   const knowledge = await read("supabase/functions/chat-knowledge/index.ts")
   assert.match(knowledge, /postAdminNoticeToManagers/)
-  assert.match(knowledge, /chat_ensure_manager_notice_direct/)
+  assert.match(knowledge, /chat_ensure_manager_notice_room/)
+  assert.doesNotMatch(knowledge, /chat_ensure_manager_notice_direct/)
   assert.match(knowledge, /kind: "signup_approval"/)
   assert.match(knowledge, /kind: "store_change"/)
   assert.doesNotMatch(knowledge, /listSignupManagerGroupIds/)
+})
+
+test("admin notices use a dedicated room, not the reservation-bot DM", async () => {
+  const migration = await read("supabase/migrations/20260908010000_chat_admin_notice_room.sql")
+  assert.match(migration, /is_admin_notice_room/)
+  assert.match(functionDefinition(migration, "chat_ensure_manager_notice_room"), /00000000-0000-4000-8000-00000000b072/)
+  assert.doesNotMatch(functionDefinition(migration, "chat_ensure_manager_notice_room"), /00000000-0000-4000-8000-00000000b071/)
+  assert.match(functionDefinition(migration, "chat_ensure_manager_notice_direct"), /chat_ensure_manager_notice_room/)
+  assert.match(functionDefinition(migration, "chat_protect_admin_notice_room"), /管理者通知ルームは削除できません/)
+  const chat = await read("public/chat.html")
+  assert.match(chat, /is_admin_notice_room/)
+  assert.match(chat, /!group\.is_admin_notice_room/)
 })
 
 test("chat.html hides admin notices and bot invite for viewers", async () => {

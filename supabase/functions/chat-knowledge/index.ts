@@ -636,55 +636,10 @@ async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
   }
 }
 
-async function listSignupManagerUserIds(supabase: DbClient): Promise<string[]> {
-  const { data: groups, error: groupError } = await supabase
-    .from("chat_groups")
-    .select("id")
-    .eq("is_direct", false)
-    .is("trashed_at", null)
-    .limit(5000)
-  if (groupError) {
-    console.error("signup manager groups failed:", groupError.message)
-    return []
-  }
-  const groupIds = (groups || [])
-    .map((row: { id?: number }) => Number(row.id))
-    .filter((id: number) => Number.isSafeInteger(id) && id > 0)
-  if (groupIds.length === 0) return []
-
-  const { data: members, error: memberError } = await supabase
-    .from("chat_group_members")
-    .select("user_id")
-    .in("group_id", groupIds)
-    .eq("can_view", true)
-    .eq("can_manage", true)
-    .limit(20000)
-  if (memberError) {
-    console.error("signup manager members failed:", memberError.message)
-    return []
-  }
-  const managerIds = [...new Set(
-    (members || []).map((row: { user_id?: string }) => String(row.user_id || "")).filter(Boolean),
-  )]
-  if (managerIds.length === 0) return []
-  const { data: humans, error: humanError } = await supabase
-    .from("chat_users")
-    .select("id")
-    .in("id", managerIds)
-    .eq("is_bot", false)
-  if (humanError) {
-    console.error("signup manager humans failed:", humanError.message)
-    return []
-  }
-  return (humans || []).map((row: { id?: string }) => String(row.id || "")).filter(Boolean)
-}
-
-async function ensureManagerNoticeDirect(supabase: DbClient, userId: string): Promise<number | null> {
-  const { data, error } = await supabase.rpc("chat_ensure_manager_notice_direct", {
-    p_user_id: userId,
-  })
+async function ensureManagerNoticeRoom(supabase: DbClient): Promise<number | null> {
+  const { data, error } = await supabase.rpc("chat_ensure_manager_notice_room")
   if (error) {
-    console.error("ensure manager notice direct failed:", userId, error.message)
+    console.error("ensure manager notice room failed:", error.message)
     return null
   }
   const groupId = Number(data)
@@ -700,32 +655,27 @@ async function postAdminNoticeToManagers(
     cards: ChatCard[]
     independent?: boolean
   },
-): Promise<{ posted: number; skipped: number; managers: number }> {
-  const managerIds = await listSignupManagerUserIds(supabase)
-  let posted = 0
-  let skipped = 0
-  for (const managerId of managerIds) {
-    const groupId = await ensureManagerNoticeDirect(supabase, managerId)
-    if (!groupId) continue
-    const result = options.independent === false
-      ? await postChatCard(supabase, {
-        groupId,
-        kind: options.kind,
-        text: options.text,
-        cards: options.cards,
-      })
-      : await postChatCardIndependent(supabase, {
-        groupId,
-        kind: options.kind,
-        dedupeKey: options.dedupeKey,
-        text: options.text,
-        cards: options.cards,
-      })
-    if ("skipped" in result && result.skipped) skipped += 1
-    else if (result.ok) posted += 1
-    else console.error("admin notice post failed:", groupId, result.error)
-  }
-  return { posted, skipped, managers: managerIds.length }
+): Promise<{ posted: number; skipped: number }> {
+  const groupId = await ensureManagerNoticeRoom(supabase)
+  if (!groupId) return { posted: 0, skipped: 0 }
+  const result = options.independent === false
+    ? await postChatCard(supabase, {
+      groupId,
+      kind: options.kind,
+      text: options.text,
+      cards: options.cards,
+    })
+    : await postChatCardIndependent(supabase, {
+      groupId,
+      kind: options.kind,
+      dedupeKey: options.dedupeKey,
+      text: options.text,
+      cards: options.cards,
+    })
+  if ("skipped" in result && result.skipped) return { posted: 0, skipped: 1 }
+  if (result.ok) return { posted: 1, skipped: 0 }
+  console.error("admin notice post failed:", groupId, result.error)
+  return { posted: 0, skipped: 0 }
 }
 
 function signupApprovalCard(userId: string, username: string, storeNames: string) {

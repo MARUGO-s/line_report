@@ -4253,10 +4253,10 @@
       try {
         const [mineRes, allRes] = await Promise.all([
           sb.from('chat_group_members')
-            .select('pinned_at, muted_at, hidden_at, can_view, can_send, can_invite, can_manage, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, trashed_at)')
+            .select('pinned_at, muted_at, hidden_at, can_view, can_send, can_invite, can_manage, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, is_admin_notice_room, trashed_at)')
             .eq('user_id', currentUser.id),
           sb.from('chat_groups')
-            .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, trashed_at')
+            .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, is_admin_notice_room, trashed_at')
             .order('created_at', { ascending: false })
         ]);
 
@@ -4284,7 +4284,7 @@
         const mineIds = new Set(mine.map((g) => g.id));
 
         myGroups = mine;
-        otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id) && !g.is_direct && !g.trashed_at);
+        otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id) && !g.is_direct && !g.is_admin_notice_room && !g.trashed_at);
         if (currentGroupId && !mineIds.has(currentGroupId)) closeChat();
         await attachDirectPeers(myGroups);
         await loadLastMessages();
@@ -6323,7 +6323,7 @@
     }
 
     function canTrashTalk(group) {
-      return !!(group && !group.is_store_room && currentUser && canCurrentUserManage(group));
+      return !!(group && !group.is_store_room && !group.is_admin_notice_room && currentUser && canCurrentUserManage(group));
     }
 
     function canPurgeTalk(group) {
