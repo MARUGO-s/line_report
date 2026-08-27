@@ -53,6 +53,16 @@ test("new 1:1 chats require overlapping affiliated stores", async () => {
   assert.match(openDirect, /所属店舗が同じ相手だけ始められます/)
 })
 
+test("new users join only affiliated store rooms as viewers", async () => {
+  const migration = await read("supabase/migrations/20260905010000_chat_store_room_affiliation.sql")
+  const join = functionDefinition(migration, "chat_join_store_rooms")
+  assert.match(join, /人間は所属店舗の承認後に/i)
+  assert.doesNotMatch(join, /where g\.is_store_room\s+on conflict/i)
+  assert.match(functionDefinition(migration, "chat_sync_user_store_rooms"), /default_can_send = false/i)
+  assert.match(functionDefinition(migration, "chat_apply_user_stores"), /chat_sync_user_store_rooms/i)
+  assert.match(functionDefinition(migration, "chat_add_members"), /chat_user_can_join_group_by_store/i)
+})
+
 test("chat.html requires store pick, later change, and filters 1:1 candidates", async () => {
   const chat = await read("public/chat.html")
   const knowledge = await read("supabase/functions/chat-knowledge/index.ts")
@@ -67,6 +77,7 @@ test("chat.html requires store pick, later change, and filters 1:1 candidates", 
   assert.match(chat, /所属店舗を1つ以上選んでください/)
   assert.match(chat, /sharesAffiliationWith\(u\)/)
   assert.match(chat, /mtalk-stores:\(approve\|deny\)/)
+  assert.doesNotMatch(chat, /href="\.\/chat-admin\.html"/)
   assert.doesNotMatch(chat, /\.from\('chat_users'\)[\s\S]{0,120}?\.insert\(/)
 
   assert.match(knowledge, /action === "store-change-notify"/)

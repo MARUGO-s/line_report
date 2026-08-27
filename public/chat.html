@@ -3048,7 +3048,6 @@
         <button type="button" role="menuitem" onclick="closeAccountMenu(); openProfileSettings()">プロフィール設定</button>
         <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
         <a href="./mtalk-help.html" role="menuitem">使い方</a>
-        <a href="./chat-admin.html" role="menuitem">M-talk管理</a>
         <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
       </div>
     </div>
@@ -5324,7 +5323,10 @@
         inviteMembers = (memberRes.data || []).map((row) => row.chat_users).filter(Boolean);
         const memberIds = new Set(inviteMembers.map((u) => u.id));
         invitePeople = (userRes.data || []).filter((u) => (
-          u.id !== currentUser.id && !memberIds.has(u.id) && !isReservationBot(u)
+          u.id !== currentUser.id
+          && !memberIds.has(u.id)
+          && !isReservationBot(u)
+          && sharesAffiliationWith(u)
         ));
         renderInviteLists();
       } catch (error) {
