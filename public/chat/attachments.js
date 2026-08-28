@@ -973,8 +973,8 @@ function parseStoreChangeCommand(text) {
 
 async function reviewSignupFromCard(approve, userId) {
   if (!currentUser) return;
-  if (!canCurrentUserManage()) {
-    alert('この操作はルームの管理権限が必要です');
+  if (!currentUserIsSignupManager()) {
+    alert('この操作には申請承認権限が必要です');
     return;
   }
   try {
@@ -994,8 +994,8 @@ async function reviewSignupFromCard(approve, userId) {
 
 async function reviewStoreChangeFromCard(approve, requestId) {
   if (!currentUser) return;
-  if (!canCurrentUserManage()) {
-    alert('この操作はルームの管理権限が必要です');
+  if (!currentUserIsSignupManager()) {
+    alert('この操作には申請承認権限が必要です');
     return;
   }
   try {

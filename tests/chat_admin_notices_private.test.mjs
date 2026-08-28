@@ -9,6 +9,7 @@ const read = (relative) => relative === "public/chat.html"
   : readFile(new URL(relative, root), "utf8")
 const MIGRATION = "supabase/migrations/20260907010000_chat_admin_notices_private.sql"
 const SELF_SCOPE_MIGRATION = "supabase/migrations/20260909070000_self_scope_admin_notice_gate.sql"
+const EXPLICIT_ROOM_PERMISSION_MIGRATION = "supabase/migrations/20260910060000_chat_admin_notice_explicit_permissions.sql"
 
 function functionDefinition(sql, name) {
   const start = sql.search(new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${name}\\s*\\(`, "i"))
@@ -75,6 +76,18 @@ test("admin notices use a dedicated room, not the reservation-bot DM", async () 
   const chat = await read("public/chat.html")
   assert.match(chat, /is_admin_notice_room/)
   assert.match(chat, /!group\.is_admin_notice_room/)
+})
+
+test("admin notice synchronization preserves explicitly granted room administration", async () => {
+  const migration = await read(EXPLICIT_ROOM_PERMISSION_MIGRATION)
+  const ensureRoom = functionDefinition(migration, "chat_ensure_manager_notice_room")
+  const reviewerUpsert = ensureRoom.slice(
+    ensureRoom.indexOf("select v_id, u.id"),
+    ensureRoom.indexOf("delete from public.chat_group_members"),
+  )
+  assert.match(reviewerUpsert, /can_invite = chat_group_members\.can_invite/)
+  assert.match(reviewerUpsert, /can_manage = chat_group_members\.can_manage/)
+  assert.doesNotMatch(reviewerUpsert, /can_manage = false/)
 })
 
 test("chat.html hides admin notices and bot invite for viewers", async () => {

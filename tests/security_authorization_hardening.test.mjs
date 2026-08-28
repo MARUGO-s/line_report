@@ -276,10 +276,11 @@ test("M-talk Journal AI is explicit, store-scoped, short-lived, and data-minimiz
 })
 
 test("ordinary room managers cannot approve global signup or store access", async () => {
-  const [migration, api, admin, core, permissions] = await Promise.all([
+  const [migration, api, admin, core, permissions, attachments] = await Promise.all([
     read("supabase/migrations/20260910040000_security_authorization_hardening.sql"),
     read("supabase/functions/admin-api/index.ts"), read("public/chat-admin.html"),
     read("public/chat/core.js"), read("public/chat/permissions.js"),
+    read("public/chat/attachments.js"),
   ])
   assert.match(migration, /can_review_access boolean not null default false/)
   const manager = migration.slice(
@@ -302,6 +303,19 @@ test("ordinary room managers cannot approve global signup or store access", asyn
   assert.match(core, /can_review_access/)
   assert.match(permissions, /return chatAccessAllows\('can_review_access'\)/)
   assert.doesNotMatch(permissions, /function currentUserIsSignupManager\(\)[\s\S]{0,180}canCurrentUserManage/)
+  const signupReview = attachments.slice(
+    attachments.indexOf("async function reviewSignupFromCard"),
+    attachments.indexOf("async function reviewStoreChangeFromCard"),
+  )
+  const storeReview = attachments.slice(
+    attachments.indexOf("async function reviewStoreChangeFromCard"),
+    attachments.indexOf("async function sendCardCommand"),
+  )
+  for (const review of [signupReview, storeReview]) {
+    assert.match(review, /currentUserIsSignupManager\(\)/)
+    assert.match(review, /申請承認権限が必要です/)
+    assert.doesNotMatch(review, /canCurrentUserManage\(\)/)
+  }
 })
 
 test("profile system columns and advisor findings are hardened without widening RLS", async () => {

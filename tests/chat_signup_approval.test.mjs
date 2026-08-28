@@ -82,6 +82,6 @@ test("managers get allow/deny cards and the SPA intercepts the command", async (
   assert.match(knowledge, /postAdminNoticeToManagers/)
   assert.doesNotMatch(knowledge, /listSignupManagerGroupIds/)
 
-  assert.match(help, /管理権限を持つ人が許可するまで/)
+  assert.match(help, /本部から申請承認権限を付与された管理者が許可するまで/)
   assert.match(help, /閲覧だけできる状態/)
 })
