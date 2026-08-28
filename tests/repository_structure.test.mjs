@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { lstat, readFile, readdir } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -183,16 +185,23 @@ test('db push reconcile repairs remote-only migration history', async () => {
     'supabase migration repair --status reverted 20260827231120 20260828010039',
     '',
   ].join('\n');
-  const parsed = spawnSync(
-    'bash',
-    [fileURLToPath(scriptUrl), '--extract-orphan-versions', '/dev/stdin'],
-    { input: fixture, encoding: 'utf8' },
-  );
-  assert.equal(parsed.status, 0, parsed.stderr);
-  assert.deepEqual(parsed.stdout.trim().split('\n'), [
-    '20260827231120',
-    '20260828010039',
-  ]);
+  const fixtureDir = await mkdtemp(join(tmpdir(), 'line-report-migration-log-'));
+  const fixturePath = join(fixtureDir, 'supabase-cli.log');
+  try {
+    await writeFile(fixturePath, fixture, 'utf8');
+    const parsed = spawnSync(
+      'bash',
+      [fileURLToPath(scriptUrl), '--extract-orphan-versions', fixturePath],
+      { encoding: 'utf8' },
+    );
+    assert.equal(parsed.status, 0, parsed.stderr);
+    assert.deepEqual(parsed.stdout.trim().split('\n'), [
+      '20260827231120',
+      '20260828010039',
+    ]);
+  } finally {
+    await rm(fixtureDir, { recursive: true, force: true });
+  }
 });
 
 test('top-level markdown links from docs still resolve after moving the frontend', async () => {
