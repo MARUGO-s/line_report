@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { lstat, readFile, readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
@@ -166,14 +168,31 @@ test('Edge Functions workflow deploys from a single job on main push', async () 
 });
 
 test('db push reconcile repairs remote-only migration history', async () => {
+  const scriptUrl = new URL('scripts/supabase-db-push-reconcile.sh', root);
   const script = await readFile(
-    new URL('scripts/supabase-db-push-reconcile.sh', root),
+    scriptUrl,
     'utf8',
   );
   assert.match(script, /migration repair --status reverted/);
   assert.match(script, /20260806185129/);
   assert.match(script, /Remote migration versions not found/);
   assert.match(script, /Retrying supabase db push/);
+
+  const fixture = [
+    'Remote migration versions not found in local migrations directory.',
+    'supabase migration repair --status reverted 20260827231120 20260828010039',
+    '',
+  ].join('\n');
+  const parsed = spawnSync(
+    'bash',
+    [fileURLToPath(scriptUrl), '--extract-orphan-versions', '/dev/stdin'],
+    { input: fixture, encoding: 'utf8' },
+  );
+  assert.equal(parsed.status, 0, parsed.stderr);
+  assert.deepEqual(parsed.stdout.trim().split('\n'), [
+    '20260827231120',
+    '20260828010039',
+  ]);
 });
 
 test('top-level markdown links from docs still resolve after moving the frontend', async () => {

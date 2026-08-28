@@ -8,6 +8,21 @@
 #   bash scripts/supabase-db-push-reconcile.sh
 set -euo pipefail
 
+extract_orphan_versions() {
+  local source_log="${1:-$LOG}"
+  # CLI may place multiple versions on one repair command line. Restrict the
+  # first match to that hint, then emit every 14-digit version on the line.
+  grep -E 'migration repair --status reverted' "$source_log" \
+    | grep -Eo '[0-9]{14}' \
+    | sort -u
+}
+
+# Regression-test hook: parse a captured CLI log without contacting Supabase.
+if [ "${1:-}" = "--extract-orphan-versions" ]; then
+  extract_orphan_versions "${2:-/dev/stdin}"
+  exit 0
+fi
+
 LOG="$(mktemp)"
 cleanup() { rm -f "$LOG"; }
 trap cleanup EXIT
@@ -33,13 +48,6 @@ repair_versions() {
   [ "$repaired" -gt 0 ]
 }
 
-extract_orphan_versions() {
-  # CLI が案内する: supabase migration repair --status reverted 20260806185129
-  grep -Eo 'migration repair --status reverted [0-9]{14}' "$LOG" \
-    | awk '{print $NF}' \
-    | sort -u
-}
-
 echo "Running supabase db push..."
 set +e
 supabase db push 2>&1 | tee "$LOG"
@@ -56,7 +64,7 @@ if ! grep -q 'Remote migration versions not found in local migrations directory'
   exit "$status"
 fi
 
-mapfile -t DETECTED < <(extract_orphan_versions)
+mapfile -t DETECTED < <(extract_orphan_versions "$LOG")
 declare -A SEEN=()
 ORPHANS=()
 for version in "${DETECTED[@]}" "${KNOWN_ORPHANS[@]}"; do
