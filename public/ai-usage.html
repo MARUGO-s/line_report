@@ -779,7 +779,7 @@
 
     /* ---------- 認証トークン（共有セッション） ---------- */
     function getToken() {
-      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : '';
     }
     function updateAuthState() {
       const has = !!getToken();

@@ -9,6 +9,47 @@ type DbClient = any
 
 export type MtalkStoreBot = { id: string; username: string }
 
+/**
+ * Store-scoped Bot features must follow the user's current approved stores,
+ * not merely the room membership that existed when the Bot was invited.
+ * Store changes and account suspension therefore take effect immediately.
+ */
+export async function mtalkUserCanAccessStore(
+  supabase: DbClient,
+  userId: string,
+  storeKey: string,
+): Promise<boolean> {
+  const uid = String(userId || "").trim()
+  const key = String(storeKey || "").trim()
+  if (!uid || !key) return false
+  try {
+    const [{ data: access, error: accessError }, { data: affiliation, error: affiliationError }] =
+      await Promise.all([
+        supabase
+          .from("chat_user_access")
+          .select("access_enabled, signup_status, restricted_until, deleted_at")
+          .eq("user_id", uid)
+          .maybeSingle(),
+        supabase
+          .from("chat_user_stores")
+          .select("store_key")
+          .eq("user_id", uid)
+          .eq("store_key", key)
+          .maybeSingle(),
+      ])
+    if (accessError || affiliationError || !access || !affiliation) return false
+    const restrictedUntil = access.restricted_until
+      ? new Date(String(access.restricted_until)).getTime()
+      : 0
+    return access.access_enabled === true &&
+      access.signup_status === "approved" &&
+      !access.deleted_at &&
+      !(Number.isFinite(restrictedUntil) && restrictedUntil > Date.now())
+  } catch {
+    return false
+  }
+}
+
 export async function resolveMtalkRoomStoreKey(
   supabase: DbClient,
   groupId: number,

@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
 // PV(パブリックビューイング)の「日本戦」を“単独で”即LINE配信する cron。
 //  - 毎10分起動。tokyo_dome_events の venue='public-viewing' / is_japan=true / 未来日(JST) のうち、
@@ -29,6 +30,9 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing." }, 500)
   }
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
+  }
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
 

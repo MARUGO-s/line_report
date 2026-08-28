@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
 // 東京ドーム周辺の日次天気を取得し weather_daily へ upsert する cron。
 // マルゴS（東京ドーム内フードコート）の客数・売上との相関分析に使う。分析専用・送信なし。
@@ -17,6 +18,10 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ ok: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing." }, 500)
+  }
+  const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
   }
 
   const url = new URL(req.url)
@@ -59,7 +64,6 @@ Deno.serve(async (req) => {
     return json({ ok: true, dry_run: true, count: rows.length, range: { min: rows[0]?.weather_date, max: rows[rows.length - 1]?.weather_date }, sample: rows.slice(0, 5) }, 200)
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
   const { error } = await supabase.from("weather_daily").upsert(rows, { onConflict: "weather_date,location" })
   if (error) return json({ ok: false, error: `upsert failed: ${error.message}`, count: rows.length }, 500)
 

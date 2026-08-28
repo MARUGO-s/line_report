@@ -483,6 +483,7 @@ function currentRoomHasOnlyMeAndBots() {
 }
 
 function currentRoomAllowsJournalAi() {
+  if (!chatAccessAllows('can_use_journal_ai')) return false;
   if (!currentRoomHasOnlyMeAndBots()) return false;
   return groupMembers.some((user) => user && user.is_bot && user.store_key);
 }
@@ -869,10 +870,13 @@ function assertIconFile(file) {
   if (!file) throw new Error('ファイルを選んでください');
   const type = String(file.type || '');
   const name = String(file.name || '').toLowerCase();
-  const okType = /^image\/(jpeg|png|webp|gif|svg\+xml)$/.test(type);
-  const okName = /\.(jpe?g|png|webp|gif|svg)$/.test(name);
+  if (type === 'image/svg+xml' || name.endsWith('.svg')) {
+    throw new Error('SVGは安全のため使用できません。JPEG / PNG / WebP / GIF を選んでください');
+  }
+  const okType = /^image\/(jpeg|png|webp|gif)$/.test(type);
+  const okName = /\.(jpe?g|png|webp|gif)$/.test(name);
   if (!okType && !okName) {
-    throw new Error('JPEG / PNG / WebP / GIF / SVG を選んでください');
+    throw new Error('JPEG / PNG / WebP / GIF を選んでください');
   }
   if (file.size > ICON_SOURCE_MAX_BYTES) throw new Error('画像は 15MB 以下にしてください');
 }
@@ -1014,7 +1018,7 @@ async function openPresetIconPicker(target = 'user') {
     }
     grid.innerHTML = profileIconCatalog.map((icon) => `
       <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
-        aria-label="${escapeHtml(icon.label)}" onclick="choosePresetIcon('${escapeHtml(icon.path)}')">
+        aria-label="${escapeHtml(icon.label)}" data-icon-path="${escapeHtml(icon.path)}" onclick="choosePresetIcon(this.dataset.iconPath)">
         <img src="${escapeHtml(icon.path)}" alt="" loading="lazy" decoding="async">
       </button>`).join('');
   } catch (error) {

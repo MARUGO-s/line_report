@@ -353,7 +353,7 @@ function renderAlbumSourceList() {
   list.innerHTML = images.map((message) => {
     const image = imageFromMessage(message);
     const cached = signedImageUrls.get(image.path);
-    return `<div class="album-source-row"><img src="${escapeHtml(cached?.url || '')}" data-path="${escapeHtml(image.path)}" alt="画像を開く" onclick="if (this.src) openImageViewer(this.src,{messageId:${Number(message.id)},storagePath:'${escapeHtml(image.path)}'})"><span>${escapeHtml(albumDate(message.created_at))}</span><button type="button" aria-label="アルバムに追加" onclick="addMessageToAlbum(${Number(selectedAlbumId)},${Number(message.id)})">追加</button></div>`;
+    return `<div class="album-source-row"><img src="${escapeHtml(cached?.url || '')}" data-path="${escapeHtml(image.path)}" alt="画像を開く" onclick="if (this.src) openImageViewer(this.src,{messageId:${Number(message.id)},storagePath:this.dataset.path})"><span>${escapeHtml(albumDate(message.created_at))}</span><button type="button" aria-label="アルバムに追加" onclick="addMessageToAlbum(${Number(selectedAlbumId)},${Number(message.id)})">追加</button></div>`;
   }).join('');
   void hydrateAlbumSourceImages();
 }
@@ -396,7 +396,7 @@ function renderAlbums() {
   }
   const items = albumItemsById.get(Number(detail.id)) || [];
   const editable = canEditAlbum(detail);
-  list.innerHTML = `<div class="album-detail-meta">${items.length}枚 · 更新 ${escapeHtml(albumDate(detail.updated_at || detail.created_at))}</div><div class="album-detail-grid">${items.map((item) => item.url ? `<div class="album-photo"><img src="${escapeHtml(item.url)}" alt="画像を開く" title="クリックして拡大・ダウンロード" onclick="openImageViewer('${escapeHtml(item.url)}',{messageId:${Number(item.message_id)},storagePath:'${escapeHtml(item.storage_path)}'})">${editable ? `<button class="album-photo-remove" type="button" aria-label="このアルバムから外す" onclick="removeAlbumItem(${Number(item.id)},${Number(detail.id)})">×</button>` : ''}</div>` : '').join('')}</div>${items.length ? '' : '<div class="schedule-hint" style="padding:37px 0;text-align:center;">画像がありません。「画像を追加」から選んでください。</div>'}`;
+  list.innerHTML = `<div class="album-detail-meta">${items.length}枚 · 更新 ${escapeHtml(albumDate(detail.updated_at || detail.created_at))}</div><div class="album-detail-grid">${items.map((item) => item.url ? `<div class="album-photo"><img src="${escapeHtml(item.url)}" data-storage-path="${escapeHtml(item.storage_path)}" alt="画像を開く" title="クリックして拡大・ダウンロード" onclick="openImageViewer(this.src,{messageId:${Number(item.message_id)},storagePath:this.dataset.storagePath})">${editable ? `<button class="album-photo-remove" type="button" aria-label="このアルバムから外す" onclick="removeAlbumItem(${Number(item.id)},${Number(detail.id)})">×</button>` : ''}</div>` : '').join('')}</div>${items.length ? '' : '<div class="schedule-hint" style="padding:37px 0;text-align:center;">画像がありません。「画像を追加」から選んでください。</div>'}`;
   $('albumFooterNote').textContent = `${items.length}枚 · 更新 ${albumDate(detail.updated_at || detail.created_at)}`;
   if (!$('albumSourcePanel')?.classList.contains('hidden')) renderAlbumSourceList();
 }
@@ -1013,9 +1013,9 @@ function applySavedCredentials() {
   const saved = loadSavedCredentials();
   if (saved) {
     $('emailInput').value = saved.email;
-    $('passwordInput').value = saved.password || '';
+    $('passwordInput').value = '';
     $('rememberInput').checked = true;
-    $('loginBtn').focus();
+    $('passwordInput').focus();
   } else {
     $('passwordInput').value = '';
     $('rememberInput').checked = false;

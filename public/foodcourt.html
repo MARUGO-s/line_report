@@ -461,7 +461,7 @@
     .ms-ct{font-size:12.5px;font-weight:700;color:var(--tx-1);}
     .ms-cs{font-size:11.5px;color:var(--tx-3);margin-top:1px;}
     .ms-main{display:flex;flex-direction:column;min-width:0;}
-    /* サイドバーは常にフルメニューを出す。LINE経由でも項目は隠さない。 */
+    /* 管理画面ではフルメニュー。LINEの目的限定リンクでは分析画面だけを表示する。 */
     .ms-navtoggle{display:none;position:fixed;top:10px;left:10px;z-index:70;width:42px;height:42px;padding:0;border-radius:10px;border:1px solid var(--line);background:color-mix(in srgb, var(--surface) 88%, transparent);color:var(--tx-1);cursor:pointer;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
     .ms-navtoggle:hover{background:var(--hover);}
     .ms-nav-backdrop{display:none;position:fixed;inset:0;z-index:71;background:rgba(0,0,0,.45);}
@@ -473,6 +473,11 @@
       .ms-nav-backdrop.open{display:block;}
       .phead{padding-top:58px;}      /* 固定ハンバーガーと見出しの重なりを避ける */
     }
+    html[data-entry="line"] .ms-side,
+    html[data-entry="line"] .ms-navtoggle,
+    html[data-entry="line"] .ms-nav-backdrop { display:none !important; }
+    html[data-entry="line"] .ms-shell { grid-template-columns:1fr !important; }
+    html[data-entry="line"] #fallbackAdminCard { display:none !important; }
 
     /* AI分析進捗ポップアップ */
     .ai-progress-overlay {
@@ -836,7 +841,7 @@
           <div class="report-accordion-body" id="qaHistoryList"></div>
         </details>
       </div>
-      <div class="card">
+      <div class="card" id="fallbackAdminCard">
         <div class="card-h"><div class="card-t"><span class="em">⚠️</span>AIフォールバック履歴</div></div>
         <div class="card-note">各AI（専門AI・反証AI・統合AI・評価AI）が本来のAIで反応せず、別のAIに切り替わった（フォールバックした）事象を自動記録します。未確認の発生があるとタブに件数バッジが出ます。</div>
         <div class="fb-actions">
@@ -1937,7 +1942,7 @@
         + '<summary><span class="qa-archive-question">Q. ' + escapeHtml(it.question || '（質問なし）') + '</span>'
         + '<span class="qa-archive-meta">' + escapeHtml(created + score) + '</span></summary>'
         + '<div class="qa-archive-answer">' + escapeHtml(it.answer || '（回答なし）') + '</div>'
-        + '<div class="qa-archive-actions"><button type="button" class="btn secondary" data-delete-qa="' + escapeHtml(String(it.id)) + '">削除</button></div>'
+        + (isLineScopedFoodcourtView() ? '' : '<div class="qa-archive-actions"><button type="button" class="btn secondary" data-delete-qa="' + escapeHtml(String(it.id)) + '">削除</button></div>')
         + '</details>';
     }).join('');
     wrap.querySelectorAll('[data-delete-qa]').forEach((btn) => {
@@ -1983,7 +1988,7 @@
       dom.fallbackTabBadge.textContent = String(n);
       dom.fallbackTabBadge.hidden = n <= 0;
     }
-    if (dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.hidden = n <= 0;
+    if (dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.hidden = isLineScopedFoodcourtView() || n <= 0;
   }
   function renderFallbackAttempts(attempts){
     if (!Array.isArray(attempts) || !attempts.length) return '<div class="fb-attempt">（試行ログなし）</div>';
@@ -2037,7 +2042,7 @@
         + renderFallbackAttempts(it.attempts)
         + '<div class="fb-actions" style="margin-top:12px">'
         + '<span></span>'
-        + (unacked ? '<button type="button" class="btn secondary" data-fb-ack="' + escapeHtml(String(it.id)) + '">確認済みにする</button>' : '<span class="rl-empty" style="padding:0">確認済み</span>')
+        + (unacked && !isLineScopedFoodcourtView() ? '<button type="button" class="btn secondary" data-fb-ack="' + escapeHtml(String(it.id)) + '">確認済みにする</button>' : '<span class="rl-empty" style="padding:0">' + (unacked ? '未確認' : '確認済み') + '</span>')
         + '</div>'
         + '</div>'
         + '</details>';
@@ -2073,6 +2078,7 @@
   }
   // バッジだけ更新する軽量チェック（一覧を描画せず未確認件数のみ取得）。
   async function refreshFallbackBadge(){
+    if (isLineScopedFoodcourtView()) { updateFallbackBadge(0); return; }
     try {
       const body = await apiFetch('/foodcourt/ai-fallback-events?store_key=' + encodeURIComponent(currentStore()) + '&limit=1');
       updateFallbackBadge(body.unacked_count);
@@ -2249,7 +2255,8 @@
   function wdayJp(ymd){ const d=new Date(ymd); if(isNaN(d.getTime()))return '?'; const j=new Date(d.getTime()+9*3600*1000); return ['日','月','火','水','木','金','土'][j.getUTCDay()]; }
 
   // ===== auth / API (データ層・据え置き) =====
-  function getToken(){ try { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY)||''); } catch(_){ return ''; } }
+  function getToken(){ try { return AUTH ? AUTH.getToken() : ''; } catch(_){ return ''; } }
+  function isLineScopedFoodcourtView(){ return document.documentElement.getAttribute('data-entry') === 'line'; }
   function lockedStore(){ try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch(_){ return ''; } }
   // 通常の管理画面アクセスはマルゴエス固定。LINEリンクなどURLに店舗キーが明示された場合だけ
   // その店舗を使う。過去のLINEリンクがlocalStorageへ残っていても、直接アクセスへ持ち越さない。
@@ -3263,7 +3270,10 @@
       const estHint = estAtt != null
         ? '<span class="ld-att-hint" title="会場収容の参考値。学習・保存には使いません" style="font-size:10px;color:var(--tx-2)">参考'+nf.format(estAtt)+'人</span>'
         : '';
-      const attHtml='<span class="ld-att" data-date="'+escapeHtml(dOf(e))+'" data-venue="'+escapeHtml(venueOf(e))+'" data-title="'+escapeHtml(e.title||'')+'" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;vertical-align:middle">'
+      const attReadOnly = actualAtt != null ? nf.format(actualAtt)+'人' : (estAtt != null ? '参考'+nf.format(estAtt)+'人' : '未設定');
+      const attHtml=isLineScopedFoodcourtView()
+        ? '<span class="ld-att-readonly" style="font-size:11px;color:var(--tx-2);margin-left:6px">👥予想 '+escapeHtml(attReadOnly)+'</span>'
+        : '<span class="ld-att" data-date="'+escapeHtml(dOf(e))+'" data-venue="'+escapeHtml(venueOf(e))+'" data-title="'+escapeHtml(e.title||'')+'" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;vertical-align:middle">'
         +'<span style="font-size:11px;color:var(--tx-2)">👥予想</span>'
         +'<input type="number" min="0" step="1" class="ld-att-input" value="'+escapeHtml(attVal)+'" placeholder="人数" style="width:64px;font-size:11px;padding:1px 4px;border:1px solid var(--bd,#ccc);border-radius:4px">'
         +'<button type="button" class="ld-att-save" style="font-size:11px;padding:1px 6px;border:1px solid var(--bd,#ccc);border-radius:4px;background:var(--bg-2,#f2f2f2);cursor:pointer">保存</button>'
@@ -3462,9 +3472,8 @@
     if (!t){ dom.authMsg.className='msg err'; dom.authMsg.textContent='トークンを入力してください。'; return; }
     dom.tokenBtn.disabled = true;
     try {
-      if (AUTH && AUTH.loginWithToken){
-        await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
-      } else { localStorage.setItem(TOKEN_KEY, t); }
+      if (!AUTH || !AUTH.loginWithToken) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
+      await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
       setAuthBadge(true);
       await loadReports();
     } catch(e){ dom.authMsg.className='msg err'; dom.authMsg.textContent=(e&&e.message)||'認証に失敗しました。'; }
@@ -3492,7 +3501,10 @@
     // 東京ドーム一覧は表示された時点で初期スクロールを「今日」に合わせる（過去は上にスクロールで表示）。
     if(t.dataset.tab==='dome') requestAnimationFrame(scrollDomeToToday);
     // レポート一覧タブは開くたびに最新化する（店舗切替後も追随させるため毎回取得）。
-    if(t.dataset.tab==='reports') { loadDailyReportList(); loadWeeklyReportList(); loadQaHistoryList(); loadFallbackList(); }
+    if(t.dataset.tab==='reports') {
+      loadDailyReportList(); loadWeeklyReportList(); loadQaHistoryList();
+      if (!isLineScopedFoodcourtView()) loadFallbackList();
+    }
     // タブ切替時のページ全体の自動スクロールはしない（その場に留まる）。
   });
   if(dom.fallbackAckAllBtn) dom.fallbackAckAllBtn.addEventListener('click', ackAllFallbacks);
@@ -3612,7 +3624,7 @@
     (function(){ const d=new Date(); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day-7); const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); const a=document.getElementById('weeklyReportBtn'); if(a)a.href='foodcourt-weekly-report.html?store_key='+encodeURIComponent(currentStore())+'&week_start='+y+'-'+m+'-'+dd; })();
     setModeButtons();
     if (AUTH && AUTH.consumeUrlAuthParams){
-      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' }); } catch(_){}
+      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report', targetScopeKind: 'foodcourt_dashboard' }); } catch(_){}
     }
     setAuthBadge(!!getToken());
     if (getToken()) await loadReports();

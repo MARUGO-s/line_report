@@ -5,6 +5,7 @@ import { buildReceiptReportFlexMessages } from "./functions/_shared/receipt_repo
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts";
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts";
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const RECEIPT_MID_REPORT_TITLE = "中間報告";
 const RECEIPT_MONTH_END_REPORT_TITLE = "月間報告";
@@ -46,23 +47,19 @@ Deno.serve(async (req)=>{
       lineAccessToken
     });
   }
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "unauthorized" }, 401);
+  }
   // 非侵襲トークン点検（preflight）: LINE メッセージは一切送らない。
   // 各店舗の解決済みチャネルアクセストークンを /v2/bot/info（読み取り専用）で検証し、
   // 中間/月末レポートの push が成功し得るかを事前確認する。通常cron経路には影響しない。
-  // 認可は本処理と同じ CRON_AUTH_TOKEN ゲート（設定時のみ必須・フェイルクローズ）。
+  // 認可は上の共通Cronゲートで、Edge secretまたはVaultの専用トークンを必須にする。
   {
     const preflightUrl = new URL(req.url);
     const preflightFlag = String(preflightUrl.searchParams.get("preflight") ?? "").trim().toLowerCase();
     if (preflightFlag === "1" || preflightFlag === "true" || preflightFlag === "yes" || preflightFlag === "on") {
-      const pfToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
-      if (pfToken) {
-        const pfBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-        if (!constantTimeEqual(pfBearer, pfToken)) {
-          return json({ ok: false, error: "unauthorized" }, 401);
-        }
-      }
-      const pfSupabase = createClient(supabaseUrl, serviceRoleKey);
-      const { data: pfRooms, error: pfErr } = await pfSupabase
+      const { data: pfRooms, error: pfErr } = await supabase
         .from("room_summary_settings")
         .select("receipt_report_store_partition_key, receipt_midreport_enabled, receipt_monthend_report_enabled");
       if (pfErr) {
@@ -119,18 +116,11 @@ Deno.serve(async (req)=>{
   // 管理者へのLINE通知（notify）: スケジュールタスク等から検証レポートを管理者LINEへ送るための内部用。
   // body: { message: string, dry?: boolean }。dry=true なら送信せず宛先(マスク)のみ返す。
   // 宛先=LINE_USER_APPROVAL_ADMIN_USER_IDS、送信元=管理Botトークン(LINE_CHANNEL_ACCESS_TOKEN__ADMIN・サニタイズ)。
-  // 認可は本処理と同じ CRON_AUTH_TOKEN ゲート。通常cron経路には影響しない（追加early-returnブランチ）。
+  // 認可は上の共通Cronゲート。通常cron経路には影響しない（追加early-returnブランチ）。
   {
     const notifyUrl = new URL(req.url);
     const notifyFlag = String(notifyUrl.searchParams.get("notify") ?? "").trim().toLowerCase();
     if (notifyFlag === "1" || notifyFlag === "true" || notifyFlag === "yes" || notifyFlag === "on") {
-      const nfToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
-      if (nfToken) {
-        const nfBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-        if (!constantTimeEqual(nfBearer, nfToken)) {
-          return json({ ok: false, error: "unauthorized" }, 401);
-        }
-      }
       let parsed: any = {};
       try { parsed = await req.json(); } catch (_e) { parsed = {}; }
       const message = String(parsed?.message ?? "").trim();
@@ -162,15 +152,6 @@ Deno.serve(async (req)=>{
       return json({ mode: "notify_admin", to_filter: toFilter || null, recipients: targetIds.length, sent: sendResults.filter((r)=>r.ok).length, failed: sendResults.filter((r)=>!r.ok).length, results: sendResults }, 200);
     }
   }
-  // 定期実行(本処理)の認可: CRON_AUTH_TOKEN 設定時のみ Bearer 一致を必須化（フェイルクローズ）。
-  // 未設定の間は従来どおり通す＝pg_cron を壊さない。有効化は CRON_AUTH_TOKEN を vault と Edge secret の両方に同値設定。
-  const mainCronAuthToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim();
-  if (mainCronAuthToken) {
-    const mainBearer = String(req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-    if (!constantTimeEqual(mainBearer, mainCronAuthToken)) {
-      return json({ ok: false, error: "unauthorized" }, 401);
-    }
-  }
   if (!lineAccessToken) {
     return json({
       ok: true,
@@ -180,7 +161,6 @@ Deno.serve(async (req)=>{
   }
   const now = new Date();
   const jst = toJstDateParts(now);
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   // 全ルームのレポート設定（ON/OFF＋送信時刻の個別オーバーライド）を取得。
   const { data: roomSettings, error: settingsError } = await supabase
@@ -347,7 +327,7 @@ async function dispatchReceiptReport(supabase, lineAccessToken, schedule, target
     errors
   };
 }
-/** One-off test push (no DB log). Guard: Edge secret RECEIPT_MIDREPORT_CRON_TEST_KEY via query `key` or header `X-Receipt-Midreport-Test-Key`. */ function parseReceiptReportTestRequest(req) {
+/** One-off test push (no DB log). Guard: Edge secret RECEIPT_MIDREPORT_CRON_TEST_KEY via header `X-Receipt-Midreport-Test-Key`. */ function parseReceiptReportTestRequest(req) {
   const url = new URL(req.url);
   const flag = (url.searchParams.get("test_receipt_report") ?? url.searchParams.get("test_receipt_midreport") ?? "").trim().toLowerCase();
   if (flag !== "1" && flag !== "true" && flag !== "yes" && flag !== "on") {
@@ -363,7 +343,6 @@ async function dispatchReceiptReport(supabase, lineAccessToken, schedule, target
   let month = Number(url.searchParams.get("month"));
   if (!Number.isInteger(year) || year < 2000 || year > 2100) year = jst.year;
   if (!Number.isInteger(month) || month < 1 || month > 12) month = jst.month;
-  const keyFromQuery = (url.searchParams.get("key") ?? "").trim();
   const keyFromHeader = (req.headers.get("x-receipt-midreport-test-key") ?? "").trim();
   const storeKeyRaw = (url.searchParams.get("store_partition_key") ?? "").trim().toLowerCase();
   const storePartitionKey = /^[a-z0-9]{2,120}$/.test(storeKeyRaw) ? storeKeyRaw : null;
@@ -373,7 +352,6 @@ async function dispatchReceiptReport(supabase, lineAccessToken, schedule, target
     year,
     month,
     storePartitionKey,
-    keyFromQuery,
     keyFromHeader
   };
 }
@@ -385,7 +363,7 @@ async function handleReceiptReportTestSend(spec, deps) {
       error: "Test send is disabled. Set Edge secret RECEIPT_MIDREPORT_CRON_TEST_KEY."
     }, 503);
   }
-  const provided = spec.keyFromHeader || spec.keyFromQuery;
+  const provided = spec.keyFromHeader;
   if (!provided || !constantTimeEqual(provided, testKey)) {
     return json({
       ok: false,

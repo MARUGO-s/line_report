@@ -1,6 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
-import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts";
+import {
+  issueAdminDashboardLoginLinkToken,
+  RESERVATION_CALENDAR_SCOPE,
+} from "../_shared/admin_dashboard_link_auth.ts";
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts";
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts";
 import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_catalog.ts";
@@ -20,6 +23,7 @@ import {
   isLikelyReservationNotificationMail,
   resolveReservationYear,
 } from "../_shared/reservation_mail_rules.ts";
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts";
 
 type GmailAlertEnv = {
   enabled: boolean;
@@ -179,7 +183,7 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   if (url.searchParams.get("test_reservation") === "1") {
-    if (!(await isGmailAlertTestAuthorized(req, supabaseKey))) {
+    if (!(await isGmailAlertTestAuthorized(req, supabaseKey, supabase))) {
       return json({ ok: false, error: "unauthorized" }, 401);
     }
     try {
@@ -205,19 +209,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 定期実行(本処理)の認可: CRON_AUTH_TOKEN が設定されている場合のみ Bearer 一致を必須化する（フェイルクローズ）。
-  // 未設定の間は従来どおり通す＝pg_cron(resolve_edge_cron_auth_token の Bearer)を壊さない。
-  // 有効化手順: CRON_AUTH_TOKEN を vault（pg_cron 送信用）と Edge secret（この検証用）の両方に同値で設定する。
-  const mainCronAuthToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "")
-    .trim();
-  if (mainCronAuthToken) {
-    const mainBearer = String(req.headers.get("Authorization") ?? "").replace(
-      /^Bearer\s+/i,
-      "",
-    ).trim();
-    if (!constantTimeEqual(mainBearer, mainCronAuthToken)) {
-      return json({ ok: false, error: "unauthorized" }, 401);
-    }
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "unauthorized" }, 401);
   }
 
   try {
@@ -245,6 +238,7 @@ Deno.serve(async (req) => {
 async function isGmailAlertTestAuthorized(
   req: Request,
   serviceRoleKey: string,
+  supabase: Parameters<typeof isInternalCronAuthorized>[1],
 ): Promise<boolean> {
   const bearer = String(req.headers.get("Authorization") ?? "").replace(
     /^Bearer\s+/i,
@@ -253,28 +247,14 @@ async function isGmailAlertTestAuthorized(
   const sr = String(serviceRoleKey ?? "").trim();
   if (bearer && sr && constantTimeEqual(bearer, sr)) return true;
 
-  const testSecret = String(
-    Deno.env.get("GMAIL_ALERT_TEST_SECRET") ??
-      Deno.env.get("CRON_AUTH_TOKEN") ?? "",
-  ).trim();
+  const testSecret = String(Deno.env.get("GMAIL_ALERT_TEST_SECRET") ?? "").trim();
   const headerKey = String(req.headers.get("x-gmail-alert-test-key") ?? "")
     .trim();
   if (testSecret && headerKey && constantTimeEqual(headerKey, testSecret)) {
     return true;
   }
 
-  if (!bearer) return false;
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  if (!supabaseUrl) return false;
-  const probe = createClient(supabaseUrl, bearer);
-  const { error } = await probe.from("room_summary_settings").select("room_id")
-    .limit(1);
-  if (!error) return true;
-  const msg = String(error.message ?? "");
-  if (msg.includes("Invalid API key") || error.code === "PGRST301") {
-    return false;
-  }
-  return true;
+  return await isInternalCronAuthorized(req, supabase);
 }
 
 // 定数時間比較（秘密トークンの照合用・タイミング差で長さ/内容を漏らさない）
@@ -2227,6 +2207,7 @@ async function buildReservationCalendarUrlsForAlerts(
         store_partition_key: storeKey,
         target_month: targetMonth,
         gmail_message_id: alertId,
+        scope: RESERVATION_CALENDAR_SCOPE,
       });
       urls.set(
         alertId,

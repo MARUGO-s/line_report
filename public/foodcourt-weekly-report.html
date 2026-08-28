@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'; worker-src 'none'">
   <title>フードコート週次報告 - 可視化ダッシュボード</title>
-  
-  <!-- Chart.js and Marked.js (Markdown parser) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <script src="./vendor/chart.umd.min.js"></script>
   
   <style>
     :root {
@@ -91,7 +91,7 @@
     .tbl tr.base td { background: var(--accent-soft); color: var(--accent-tx); font-weight: bold; }
     
     /* Markdown AI Report Styling */
-    .md-report h2 { font-size: 15px; font-weight: 700; margin-top: 24px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--accent-tx); display: flex; align-items: center; gap: 8px; }
+    .md-report h2, .md-report h3 { font-size: 15px; font-weight: 700; margin-top: 24px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--accent-tx); display: flex; align-items: center; gap: 8px; }
     .md-report h2::before { content: '✦'; color: var(--accent); font-size: 11px; }
     .md-report p { margin-bottom: 14px; font-size: 13.5px; color: var(--tx-2); text-align: justify; }
     .md-report ul, .md-report ol { margin-left: 20px; margin-bottom: 14px; color: var(--tx-2); font-size: 13.5px; }
@@ -231,7 +231,8 @@
         if (window.LINE_REPORT_AUTH && typeof LINE_REPORT_AUTH.consumeUrlAuthParams === 'function') {
           await LINE_REPORT_AUTH.consumeUrlAuthParams({
             exchangeUrl: P.adminApiUrl('/auth/link-login', P.PROJECT_URL),
-            adminSurface: P.ADMIN_SURFACE || 'line_report'
+            adminSurface: P.ADMIN_SURFACE || 'line_report',
+            targetScopeKind: 'foodcourt_weekly_view'
           });
         }
         
@@ -284,15 +285,7 @@
         $('mainPanel').style.display = 'block';
         $('metaRange').textContent = `${data.week_start} (月) 〜 ${data.week_end} (日)`;
         
-        // Render markdown with marked.js
-        if (window.marked && typeof window.marked.parse === 'function') {
-          window.marked.setOptions({ gfm: true, breaks: true });
-          $('aiReportContainer').innerHTML = window.marked.parse(data.ai_report);
-        } else if (data.report_html) {
-          $('aiReportContainer').innerHTML = data.report_html;
-        } else {
-          $('aiReportContainer').innerHTML = `<pre style="white-space: pre-wrap; font-family: inherit;">${data.ai_report}</pre>`;
-        }
+        renderSafeAiReport(data.ai_report);
         
         const raw = data.raw_data;
         if (!raw) return;
@@ -317,6 +310,53 @@
         }
         
         renderTenantTable(raw.tenantRows || [], raw.baseName);
+      }
+
+      function renderSafeAiReport(report) {
+        const container = $('aiReportContainer');
+        container.replaceChildren();
+        let list = null;
+        let listType = '';
+
+        String(report || '').split(/\r?\n/).forEach((rawLine) => {
+          const line = rawLine.trim();
+          if (!line) {
+            list = null;
+            listType = '';
+            return;
+          }
+
+          const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+          if (heading) {
+            list = null;
+            listType = '';
+            const element = document.createElement(heading[1].length === 1 ? 'h2' : 'h3');
+            element.textContent = heading[2];
+            container.appendChild(element);
+            return;
+          }
+
+          const bullet = /^[-*]\s+(.+)$/.exec(line);
+          const numbered = /^\d+[.)]\s+(.+)$/.exec(line);
+          if (bullet || numbered) {
+            const nextType = numbered ? 'ol' : 'ul';
+            if (!list || listType !== nextType) {
+              list = document.createElement(nextType);
+              listType = nextType;
+              container.appendChild(list);
+            }
+            const item = document.createElement('li');
+            item.textContent = (bullet || numbered)[1];
+            list.appendChild(item);
+            return;
+          }
+
+          list = null;
+          listType = '';
+          const paragraph = document.createElement('p');
+          paragraph.textContent = line;
+          container.appendChild(paragraph);
+        });
       }
       
       function renderSalesChart(labels, sales, guests) {
@@ -444,23 +484,29 @@
       
       function renderTenantTable(tenantRows, baseName) {
         const tbody = $('tenantTable').querySelector('tbody');
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
         
         const sorted = [...tenantRows].sort((a, b) => (b.sales || 0) - (a.sales || 0));
         
         sorted.forEach((row) => {
           const tr = document.createElement('tr');
-          const isBase = row.name && row.name.toLowerCase().includes('marugo');
+          const tenantName = String(row && row.name != null ? row.name : '');
+          const isBase = tenantName.toLowerCase().includes('marugo');
           if (isBase) tr.className = 'base';
           
           const salesStr = row.sales != null ? `¥${row.sales.toLocaleString()}` : '-';
           const ratioStr = row.salesRatio != null ? `${row.salesRatio.toFixed(1)}%` : '-';
           
-          tr.innerHTML = `
-            <td class="l">${row.name}</td>
-            <td class="mono">${salesStr}</td>
-            <td class="mono">${ratioStr}</td>
-          `;
+          const nameCell = document.createElement('td');
+          nameCell.className = 'l';
+          nameCell.textContent = tenantName;
+          const salesCell = document.createElement('td');
+          salesCell.className = 'mono';
+          salesCell.textContent = salesStr;
+          const ratioCell = document.createElement('td');
+          ratioCell.className = 'mono';
+          ratioCell.textContent = ratioStr;
+          tr.append(nameCell, salesCell, ratioCell);
           tbody.appendChild(tr);
         });
       }

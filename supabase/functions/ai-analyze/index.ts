@@ -10,7 +10,11 @@ import {
   normalizeJournalChatIntent,
   orchestrationNote,
 } from "../_shared/journal_ai_orchestrate.ts";
-import { authenticateAdminDashboardSessionToken } from "../_shared/admin_dashboard_link_auth.ts";
+import {
+  authenticateAdminDashboardSessionToken,
+  CHAT_JOURNAL_AI_SCOPE,
+  validateChatScopedSessionAccess,
+} from "../_shared/admin_dashboard_link_auth.ts";
 import { sanitizeJournalAiPayload } from "../_shared/journal_ai_privacy.ts";
 import { buildStoreLocationPromptBlock } from "../_shared/marugo_group_stores.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
@@ -497,8 +501,12 @@ async function consumeAiRateLimit(
       return { allowed: false, retryAfterMs: AI_RATE_LIMIT_WINDOW_MS };
     }
     const row = Array.isArray(data) ? data[0] : null;
+    if (!row || typeof row.allowed !== "boolean") {
+      console.error("Rate limit RPC returned an invalid response (ai-analyze).");
+      return { allowed: false, retryAfterMs: AI_RATE_LIMIT_WINDOW_MS };
+    }
     return {
-      allowed: row?.allowed !== false,
+      allowed: row.allowed,
       retryAfterMs: Math.max(
         1000,
         Number(row?.retry_after_seconds ?? windowSeconds) * 1000,
@@ -1206,8 +1214,22 @@ Deno.serve(async (req: Request, info) => {
     supabase,
     adminToken,
   );
-  if (!authResult.ok || authResult.scopeKind === "room_config") {
+  if (
+    !authResult.ok ||
+    (authResult.scopeKind !== null && authResult.scopeKind !== CHAT_JOURNAL_AI_SCOPE) ||
+    (authResult.scopeKind === CHAT_JOURNAL_AI_SCOPE && !authResult.storeScope)
+  ) {
     return jsonResponse({ error: "Unauthorized." }, 401);
+  }
+  if (
+    authResult.scopeKind === CHAT_JOURNAL_AI_SCOPE &&
+    !await validateChatScopedSessionAccess(
+      supabase,
+      authResult.metadata,
+      { requireJournalAi: true },
+    )
+  ) {
+    return jsonResponse({ error: "電子ジャーナルAI権限が失効しました。" }, 403);
   }
 
   try {

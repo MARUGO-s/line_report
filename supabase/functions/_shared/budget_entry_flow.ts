@@ -5,7 +5,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
-import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { issueAdminDashboardLoginLinkToken, RECEIPT_ANALYTICS_SCOPE } from './admin_dashboard_link_auth.ts'
 import { buildReceiptAnalyticsDashboardUri } from './receipt_line_actions.ts'
 
 const PENDING_TABLE = 'store_budget_entry_pending'
@@ -195,6 +195,7 @@ async function commitBudgetAndReply(
       source: 'line_budget_entry',
       store_partition_key: budgetStoreKey,
       target_month: targetMonth,
+      scope: RECEIPT_ANALYTICS_SCOPE,
     })
     dashboardUri = buildReceiptAnalyticsDashboardUri(urlStoreKey, targetMonth, { loginToken: issued.token })
   } catch (_e) {

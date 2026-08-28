@@ -1196,7 +1196,7 @@
     };
 
     function getToken() {
-      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : '';
     }
 
     function clearSiteCacheForToken(token, projectUrl) {
@@ -1214,11 +1214,7 @@
       if (window.LINE_REPORT_AUTH) {
         if (next) LINE_REPORT_AUTH.setToken(next);
         else LINE_REPORT_AUTH.clearToken();
-      } else if (next) {
-        localStorage.setItem(STORE_TOKEN_KEY, next);
-      } else {
-        localStorage.removeItem(STORE_TOKEN_KEY);
-      }
+      } else if (next) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
       updateAuthState();
     }
 
@@ -1702,7 +1698,7 @@
       const item = state.popupItems[popupId];
       if (!item) return;
       state.activePopupItem = item;
-      if (dom.resvEditBtn) dom.resvEditBtn.hidden = false;
+      if (dom.resvEditBtn) dom.resvEditBtn.hidden = isLineScopedReservationView();
       const sourceLabel = sourceLabelFromItem(item);
       const summary = buildReservationSummary(item);
       dom.resvModalTitle.textContent = '予約詳細';
@@ -2253,10 +2249,7 @@
             adminSurface: 'line_report',
           });
           updateAuthState();
-        } else {
-          setToken(entered);
-          updateAuthState();
-        }
+        } else throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
         await loadCalendar();
       } catch (error) {
         alert(error.message || String(error));
@@ -2451,6 +2444,7 @@
     async function refreshSalesSheetNavLink() {
       var el = document.getElementById('salesSheetNavLink');
       if (!el) return;
+      if (isLineScopedReservationView()) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); return; }
       var enabled = !!(window.LINE_REPORT_PAGES && LINE_REPORT_PAGES.RECEIPT_SHEETS_PILOT_ENABLED === true);
       if (!enabled || !getToken()) { el.hidden = true; el.setAttribute('aria-hidden', 'true'); return; }
       try {
@@ -2468,6 +2462,7 @@
           await LINE_REPORT_AUTH.consumeUrlAuthParams({
             exchangeUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/link-login', FIXED_PROJECT_URL),
             adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+            targetScopeKind: 'reservation_calendar',
           });
         } catch (error) {
           console.error('consumeUrlAuthParams failed:', error);

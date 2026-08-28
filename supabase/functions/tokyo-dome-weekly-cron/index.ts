@@ -4,6 +4,10 @@ import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggre
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
+import {
+  constantTimeEqualSecret,
+  isInternalCronAuthorized,
+} from "../_shared/internal_cron_auth.ts"
 
 // ドームシティ「週次イベント配信」cron。
 // 毎分起動し、ルームごとの設定（dome_weekly_enabled / 曜日 / 時刻）が「今この瞬間(JST)」に一致する
@@ -43,12 +47,15 @@ Deno.serve(async (req) => {
   const now = new Date()
   const jst = toJstDateParts(now)
 
-  // ?test_send=1&room_id=...&key=... で1ルームへ即時プレビュー送信（ログ更新なし）。
+  // ?test_send=1&room_id=... と専用ヘッダーで1ルームへ即時プレビュー送信（ログ更新なし）。
+  // 秘密値はURL・アクセスログへ残さない。
   const testFlag = ["1", "true", "yes", "on"].includes((url.searchParams.get("test_send") ?? "").toLowerCase())
   if (testFlag) {
     const testKey = (Deno.env.get("TOKYO_DOME_WEEKLY_TEST_KEY") ?? "").trim()
-    const provided = (url.searchParams.get("key") ?? req.headers.get("x-dome-weekly-test-key") ?? "").trim()
-    if (!testKey || provided !== testKey) return json({ ok: false, error: "Forbidden" }, 403)
+    const provided = (req.headers.get("x-dome-weekly-test-key") ?? "").trim()
+    if (!testKey || !provided || !constantTimeEqualSecret(provided, testKey)) {
+      return json({ ok: false, error: "Forbidden" }, 403)
+    }
     const roomId = (url.searchParams.get("room_id") ?? "").trim()
     if (!roomId) return json({ ok: false, error: "room_id required" }, 400)
     const storeKey = (url.searchParams.get("store_partition_key") ?? "marugos").trim()
@@ -57,6 +64,10 @@ Deno.serve(async (req) => {
     const flex = buildWeeklyFlex(win, events)
     const r = await sendLinePush(roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
     return json({ ok: r.ok, mode: "test_send", room_id: roomId, week: `${win.startStr}〜${win.endStr}`, event_count: events.length, error: r.ok ? undefined : r.error }, r.ok ? 200 : 502)
+  }
+
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
   }
 
   if (!dryRun && !lineAccessToken) {

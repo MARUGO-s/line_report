@@ -15,7 +15,11 @@ import {
   type SalesBudgetAllocationWeights,
 } from './sales_budget_allocation.ts'
 import { fetchJapaneseHolidaySet } from './japanese_holidays.ts'
-import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import {
+  FOODCOURT_DAILY_LOG_SCOPE,
+  issueAdminDashboardLoginLinkToken,
+  RECEIPT_ANALYTICS_SCOPE,
+} from './admin_dashboard_link_auth.ts'
 import {
   fetchManualMonthSales,
   type ManualMonthSalesRecord,
@@ -250,6 +254,7 @@ async function buildReceiptAnalyticsDashboardUrlForLine(
       source: 'line_receipt_report',
       store_partition_key: storePartitionKey,
       target_month: targetMonth,
+      scope: RECEIPT_ANALYTICS_SCOPE,
     })
     return buildReceiptAnalyticsDashboardUri(storePartitionKey, targetMonth, {
       loginToken: issued.token,
@@ -486,6 +491,7 @@ export async function loadReceiptReplyContext(
       const issued = await issueAdminDashboardLoginLinkToken(supabase, {
         source: 'line_receipt_report_dailylog',
         store_partition_key: params.storePartitionKey,
+        scope: FOODCOURT_DAILY_LOG_SCOPE,
       })
       foodcourtReportUrl = buildFoodcourtReportUri({ loginToken: issued.token })
     } catch (err) {

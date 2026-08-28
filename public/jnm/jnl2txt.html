@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
-<meta name="referrer" content="same-origin">
+<meta name="referrer" content="no-referrer">
 <title>Journal Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -2800,7 +2800,9 @@ document.addEventListener('DOMContentLoaded', async function () {
   if (AUTH && AUTH.consumeUrlAuthParams) {
     try {
       await AUTH.consumeUrlAuthParams({
-        exchangeUrl: PAGES.adminApiUrl ? PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL) : '',
+        exchangeUrl: PAGES.adminApiUrl
+          ? PAGES.adminApiUrl(MTALK_EMBED ? '/auth/chat-journal-link-login' : '/auth/link-login', PAGES.PROJECT_URL)
+          : '',
         adminSurface: PAGES.ADMIN_SURFACE || 'line_report'
       });
     } catch (_) {}
@@ -2811,7 +2813,7 @@ document.addEventListener('DOMContentLoaded', async function () {
   if (MTALK_EMBED) {
     try { openAiChat(); } catch (_) {}
   }
-  if (getAdminToken()) {
+  if (getAdminToken() && !MTALK_EMBED) {
     try {
       const overridesNow = await loadProductCategoryOverridesFromCloud();
       const keys = Object.keys(overridesNow);
@@ -8425,6 +8427,9 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
  * タブを開いていなくても、分析時に最新の店舗情報を読む。
  */
 async function ensureStoreOpsProfileForAi(storeKey = STORE_KEY) {
+  if (MTALK_EMBED) {
+    return normalizeStoreOpsProfile(defaultStoreOpsProfile(storeKey));
+  }
   let profile = readStoreOpsProfile(storeKey);
   const cloud = await loadStoreOpsProfileFromCloud(storeKey);
   if (cloud) {
@@ -8453,8 +8458,10 @@ async function buildIntegratedAnalysisContext({
   let knowledgeCount = 0;
   let knowledgeSelectedCount = 0;
   let knowledgePartialCount = 0;
-  let knowledgeState = { status: 'idle', truncated: false, error: '' };
-  try {
+  let knowledgeState = MTALK_EMBED
+    ? { status: 'auth_missing', truncated: false, error: '' }
+    : { status: 'idle', truncated: false, error: '' };
+  if (!MTALK_EMBED) try {
     // LINEから直前に登録されたメモも取り込むため、AI実行時は一覧を再検証する。
     const items = await loadStoreKnowledgeForAi({ forceRefresh: true });
     knowledgeState = { ...knowledgeLoadState };
@@ -11257,6 +11264,7 @@ async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo) 
 
 /** 予約確定事実 API。通常は軽量集計のみ、予約者・顧客質問だけ明細を取得し、AI送信時は仮名化する。 */
 async function fetchReservationAiFacts(monthFrom, monthTo, includeItems = false) {
+  if (MTALK_EMBED) throw new Error('M-talk埋め込みでは予約データを利用できません');
   const params = new URLSearchParams({ store_key: STORE_KEY });
   if (monthFrom) params.set('month_from', monthFrom);
   if (monthTo) params.set('month_to', monthTo);
@@ -14363,11 +14371,19 @@ async function handleKnowledgeFileChange(file) {
 
   const name = String(file.name || '').toLowerCase();
   const type = String(file.type || '');
+  if (/\.xls$/.test(name) && !/\.xlsx$/.test(name)) {
+    setKnowledgeStatus('旧形式 .xls は安全確認できないため利用できません。.xlsx 形式で保存し直してください。', true);
+    return;
+  }
+  if (Number(file.size) > 20 * 1024 * 1024) {
+    setKnowledgeStatus('添付ファイルは20MB以下にしてください。', true);
+    return;
+  }
   // 画像・PDF は Gemini がそのまま読み取り、Excel / Word / テキストはサーバ側で
   // テキスト化してから解析する（いずれも /knowledge/analyze-image が処理する）。
   const isImage = /^(image\/)/.test(type) || /\.(png|jpg|jpeg|webp)$/.test(name);
   const isPdf = type === 'application/pdf' || /\.pdf$/.test(name);
-  const isSheet = /spreadsheetml|ms-excel/.test(type) || /\.(xlsx|xlsm|xls)$/.test(name);
+  const isSheet = /spreadsheetml|ms-excel/.test(type) || /\.(xlsx|xlsm)$/.test(name);
   const isDoc = /wordprocessingml/.test(type) || /\.docx$/.test(name);
   const isText = /^(text\/|application\/csv)/.test(type) || /\.(txt|csv|md|markdown)$/.test(name);
 
@@ -16246,6 +16262,16 @@ async function sendAiChat() {
   appendAiChatMessage('user', msg);
   aiChatHistory.push({ role: 'user', content: msg });
 
+  if (MTALK_EMBED && isReservationFocusedQuery(msg)) {
+    const reply = 'この画面では、管理者から許可された電子ジャーナルの売上・商品データだけを参照できます。予約者・予約履歴にはアクセスできません。';
+    appendAiChatMessage('ai', reply, { question: msg, provider: 'permission-gate' });
+    aiChatHistory.push({ role: 'assistant', content: reply });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    return;
+  }
+
   const loadingId = appendAiChatLoading();
   const compactData = buildCompactSalesDataForAI();
 
@@ -16689,12 +16715,14 @@ function appendAiChatMessage(role, text, meta) {
     // 確認質問を挟んだ場合は、元の質問＋確認のやり取り全体を質問として記録する
     const questionThread = buildAiChatQuestionThread();
     if (questionThread) pdfMeta.question = questionThread;
-    const pdfBtn = document.createElement('button');
-    pdfBtn.type = 'button';
-    pdfBtn.className = 'ai-msg-pdf-btn';
-    pdfBtn.textContent = '📄 PDFにする';
-    pdfBtn.onclick = () => saveAndOpenAiChatMessagePdf(pdfMeta.question, text, pdfMeta);
-    div.appendChild(pdfBtn);
+    if (!MTALK_EMBED) {
+      const pdfBtn = document.createElement('button');
+      pdfBtn.type = 'button';
+      pdfBtn.className = 'ai-msg-pdf-btn';
+      pdfBtn.textContent = '📄 PDFにする';
+      pdfBtn.onclick = () => saveAndOpenAiChatMessagePdf(pdfMeta.question, text, pdfMeta);
+      div.appendChild(pdfBtn);
+    }
 
     // M-talk から開いたときだけ、回答をそのトークへ書き戻せるようにする。
     // M-talk 側で同じAIを組み直さず、この画面の答えをそのまま渡すため。
@@ -16972,6 +17000,7 @@ function openAiChatMessagePdfView(text, question) {
  * 取得失敗と0件を区別する（混同すると「記録は存在しない」とAIが誤断定する）。
  */
 async function fetchAiChatPdfHistoryForAi() {
+  if (MTALK_EMBED) return { status: 'no-session', items: [] };
   if (!getAdminToken()) return { status: 'no-session', items: [] };
   try {
     const body = await adminApiFetch(

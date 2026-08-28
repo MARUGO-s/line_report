@@ -6,7 +6,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0
 import type { StoreRegistryRow } from './store_receipt.ts'
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
-import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { issueAdminDashboardLoginLinkToken, PETTY_CASH_SCOPE } from './admin_dashboard_link_auth.ts'
 import { fetchLineDisplayNameByUserId } from './line_display_names.ts'
 import { looksLikeSalesSettlementReceipt } from './receipt_parse.ts'
 
@@ -613,6 +613,7 @@ async function buildPettyCashDashboardLink(
     const issued = await issueAdminDashboardLoginLinkToken(supabase, {
       source: 'line_petty_cash',
       store_partition_key: key,
+      scope: PETTY_CASH_SCOPE,
     })
     return buildPettyCashPageUrl(key, issued.token, spentOn)
   } catch (e) {

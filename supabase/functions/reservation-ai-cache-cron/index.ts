@@ -1,5 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import {
+  extractBearerToken,
+  isInternalCronAuthorized,
+} from "../_shared/internal_cron_auth.ts"
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -12,16 +16,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store" },
   })
-}
-
-function secureEqual(a: string, b: string): boolean {
-  const encoder = new TextEncoder()
-  const aa = encoder.encode(a)
-  const bb = encoder.encode(b)
-  if (aa.length !== bb.length) return false
-  let diff = 0
-  for (let i = 0; i < aa.length; i += 1) diff |= aa[i] ^ bb[i]
-  return diff === 0
 }
 
 Deno.serve(async (req) => {
@@ -37,20 +31,10 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
-  const auth = String(req.headers.get("authorization") ?? "").trim()
-  const bearer = /^Bearer\s+(.+)$/i.exec(auth)?.[1]?.trim() ?? ""
-  const envCronToken = String(Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
-  let dbCronToken = ""
-  try {
-    const { data } = await supabase.rpc("resolve_edge_cron_auth_token")
-    dbCronToken = String(data ?? "").trim()
-  } catch {
-    // Vault未設定/一時障害時は環境変数照合だけを使用する。
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized." }, 401)
   }
-  const authorized =
-    (!!envCronToken && secureEqual(bearer, envCronToken)) ||
-    (!!dbCronToken && secureEqual(bearer, dbCronToken))
-  if (!authorized) return json({ ok: false, error: "Unauthorized." }, 401)
+  const bearer = extractBearerToken(req)
 
   let body: Record<string, unknown> = {}
   try {

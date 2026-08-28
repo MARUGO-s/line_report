@@ -3,7 +3,7 @@
 // 安全策: ①対象店舗を限定（FOODCOURT_STORE_KEYS）②マーカー判定 ③抽出が表として成立しなければ未処理を返し
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
-import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { FOODCOURT_DASHBOARD_SCOPE, issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
   buildFoodCourtRevisionMessages,
@@ -72,7 +72,9 @@ async function buildFoodCourtDashboardLink(supabase: SupabaseClient, storeKey: s
   const key = String(storeKey || '').trim()
   if (!key) return ''
   try {
-    const issued = await issueAdminDashboardLoginLinkToken(supabase, { source: 'line_foodcourt', store_partition_key: key })
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+      source: 'line_foodcourt', store_partition_key: key, scope: FOODCOURT_DASHBOARD_SCOPE,
+    })
     return buildFoodCourtPageUrl(key, issued.token)
   } catch (e) {
     console.error('buildFoodCourtDashboardLink failed:', e instanceof Error ? e.message : String(e))

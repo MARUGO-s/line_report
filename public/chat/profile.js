@@ -179,7 +179,7 @@ async function createProfile() {
     pendingPresetUserIconUrl = '';
 
     if (pendingCredentials && pendingCredentials.remember) {
-      saveCredentials(pendingCredentials.email, pendingCredentials.password);
+      saveCredentials(pendingCredentials.email);
     }
     pendingCredentials = null;
 

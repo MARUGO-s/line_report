@@ -7,8 +7,15 @@ import { type ChatCard, postChatCardIndependent, resolveChatGroupId } from "../_
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
-import { issueAdminDashboardLoginLinkToken } from "../_shared/admin_dashboard_link_auth.ts"
+import {
+  issueAdminDashboardLoginLinkToken,
+  RESERVATION_CALENDAR_SCOPE,
+} from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
+import {
+  constantTimeEqualSecret,
+  isInternalCronAuthorized,
+} from "../_shared/internal_cron_auth.ts"
 import {
   pilotStorePartitionKeysMatch,
   resolveReceiptSheetsStoreDisplayName,
@@ -51,13 +58,17 @@ Deno.serve(async (req) => {
     return await handleTestSend(testSpec, { supabaseUrl, serviceRoleKey, lineAccessToken })
   }
 
+  const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
+  }
+
   if (!lineAccessToken) {
     return json({ ok: true, skipped: true, reason: "missing_line_channel_access_token" }, 200)
   }
 
   const now = new Date()
   const jst = toJstDateParts(now)
-  const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
 
   const { data: roomSettings, error: settingsError } = await supabase
     .from("room_summary_settings")
@@ -719,7 +730,7 @@ function json(payload: unknown, status = 200): Response {
 
 // --- test send (preview, no dedup log) ---
 
-type TestSpec = { roomId: string; storePartitionKey: string | null; targetDate: string | null; keyFromQuery: string; keyFromHeader: string }
+type TestSpec = { roomId: string; storePartitionKey: string | null; targetDate: string | null; keyFromHeader: string }
 
 function parseTestRequest(req: Request): TestSpec | null {
   const url = new URL(req.url)
@@ -734,7 +745,6 @@ function parseTestRequest(req: Request): TestSpec | null {
     roomId,
     storePartitionKey: storeKeyRaw || null,
     targetDate,
-    keyFromQuery: (url.searchParams.get("key") ?? "").trim(),
     keyFromHeader: (req.headers.get("x-reservation-today-test-key") ?? "").trim(),
   }
 }
@@ -747,8 +757,8 @@ async function handleTestSend(
   if (!testKey) {
     return json({ ok: false, error: "Test send is disabled. Set Edge secret RESERVATION_TODAY_CRON_TEST_KEY." }, 503)
   }
-  const provided = spec.keyFromHeader || spec.keyFromQuery
-  if (!provided || provided !== testKey) {
+  const provided = spec.keyFromHeader
+  if (!provided || !constantTimeEqualSecret(provided, testKey)) {
     return json({ ok: false, error: "Forbidden" }, 403)
   }
   if (!deps.lineAccessToken) {
@@ -841,6 +851,7 @@ async function buildTodayReservationCalendarUrl(
       source: "line_today_reservation",
       store_partition_key: key,
       target_month: targetMonth,
+      scope: RESERVATION_CALENDAR_SCOPE,
     })
     return buildReservationCalendarPageUrl(key, {
       loginToken: issued.token,

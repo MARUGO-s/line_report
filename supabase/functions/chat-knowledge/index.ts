@@ -10,7 +10,11 @@ import {
   resolveRoomStoreKey,
 } from "../_shared/chat_store_file_bridge.ts"
 import { postChatCard, postChatCardIndependent, type ChatCardSection } from "../_shared/chat_bridge.ts"
-import { ensureMtalkRoomSettings, loadMtalkRoomFlags } from "../_shared/mtalk_room_settings.ts"
+import {
+  ensureMtalkRoomSettings,
+  loadMtalkRoomFlags,
+  mtalkUserCanAccessStore,
+} from "../_shared/mtalk_room_settings.ts"
 import { mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { tryAutoRegisterRoomSchedule } from "../_shared/mtalk_schedule_register.ts"
 import { handleMtalkSearchText } from "../_shared/mtalk_search.ts"
@@ -369,6 +373,12 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     return json({ ok: true, skipped: true, reason: "journal paste" }, 200)
   }
   const candidateStoreKey = fromDispatch || String(resolved.storeKey ?? "").trim()
+  if (
+    candidateStoreKey &&
+    !await mtalkUserCanAccessStore(supabase, String(message.user_id ?? ""), candidateStoreKey)
+  ) {
+    return json({ ok: true, skipped: true, reason: "store access revoked" }, 200)
+  }
   const activeStoreBot = candidateStoreKey
     ? await loadChatStoreBot(supabase, candidateStoreKey)
     : null

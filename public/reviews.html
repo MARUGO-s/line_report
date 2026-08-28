@@ -579,15 +579,14 @@ const dom = {
 
 /* ── helpers ── */
 function getToken() {
-  return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(TOKEN_KEY) || '');
+  return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : '';
 }
 function setToken(t) {
-  if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.setToken(t);
-  else localStorage.setItem(TOKEN_KEY, t);
+  if (!window.LINE_REPORT_AUTH) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
+  LINE_REPORT_AUTH.setToken(t);
 }
 function removeToken() {
   if (window.LINE_REPORT_AUTH) LINE_REPORT_AUTH.clearToken();
-  else localStorage.removeItem(TOKEN_KEY);
 }
 async function logoutToken() {
   if (window.LINE_REPORT_AUTH) {
@@ -1221,10 +1220,7 @@ dom.saveToken.addEventListener('click', () => {
           adminSurface: 'line_report',
         });
         updateAuthBadge();
-      } else {
-        setToken(t);
-        updateAuthBadge();
-      }
+      } else throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
       await loadReviews();
     } catch (error) {
       alert(error && error.message ? error.message : String(error));
@@ -1364,11 +1360,8 @@ applyLineEntryChrome();
     if (!t) { msg.textContent = 'トークンを入力してください。'; return; }
     submit.disabled = true;
     try {
-      if (window.LINE_REPORT_AUTH) {
-        await LINE_REPORT_AUTH.loginWithToken(t, { sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', LINE_REPORT_PAGES.PROJECT_URL), adminSurface: 'line_report' });
-      } else {
-        try { localStorage.setItem('line_summary_admin_token', t); } catch (_) {}
-      }
+      if (!window.LINE_REPORT_AUTH) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
+      await LINE_REPORT_AUTH.loginWithToken(t, { sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', LINE_REPORT_PAGES.PROJECT_URL), adminSurface: 'line_report' });
       try { sessionStorage.setItem('line_report_admin_unlock', '1'); } catch (_) {}
       try { localStorage.removeItem('line_locked_store'); sessionStorage.removeItem('line_locked_store'); } catch (_) {}
       location.replace(location.pathname);
@@ -1603,17 +1596,6 @@ if (lineEntryFromUrl) applyLineEntryStoreLock(lineEntryFromUrl);
     if (LINE_REPORT_AUTH.consumeLegacyTokenNotice && LINE_REPORT_AUTH.consumeLegacyTokenNotice()) {
       alert('以前保存されていた古いログイン情報は削除しました。LINEの新しいメッセージから開くか、管理トークンを再入力してください。');
     }
-  } else {
-    (function () {
-      const params = new URLSearchParams(location.search);
-      const urlToken = params.get('t');
-      if (urlToken) {
-        setToken(urlToken);
-        params.delete('t');
-        const qs = params.toString();
-        history.replaceState(null, '', location.pathname + (qs ? ('?' + qs) : '') + (location.hash || ''));
-      }
-    })();
   }
 
   updateAuthBadge();

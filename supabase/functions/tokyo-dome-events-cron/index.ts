@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { parseTokyoDomeSchedule, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
 import { GROQ_TEXT_FALLBACK_MODEL, resolveGroqTextModel } from "../_shared/groq_model.ts"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
 // 東京ドーム＋ドームシティ各会場の公式イベント予定を取得し、tokyo_dome_events へ upsert する cron。
 // マルゴS（東京ドーム内フードコート）の客数・売上との相関分析に使う。分析専用・送信なし。
@@ -35,6 +36,10 @@ Deno.serve(async (req) => {
   const groqApiKey = (Deno.env.get("GROQ_API_KEY") ?? "").trim()
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ ok: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing." }, 500)
+  }
+  const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
   }
   if (!groqApiKey) {
     return json({ ok: false, error: "GROQ_API_KEY is missing." }, 500)
@@ -100,7 +105,6 @@ Deno.serve(async (req) => {
   }
 
   // 3) upsert（冪等。主キー event_date+venue+title）。会場ごとに venue を付与。
-  const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
   // 東京ドーム抽出でLLMフォールバックを使った場合のみ、実測トークンをAI使用料に記録（確定パース時は usage=null）。
   if (domeUsage) {
     try {

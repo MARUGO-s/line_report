@@ -172,7 +172,7 @@ OpenAIの `developer/system`、Claudeの `system` へ置き、店舗資料・確
 
 ## 6-2. LINE から資料を登録する（引用返信 `#メモ`）— 2026-08-03 稼働
 
-Web の「資料」タブと同じ登録を、LINE からも行える。**画像・PDF・Excel・Word・テキスト**に対応。
+Web の「資料」タブと同じ登録を、LINE からも行える。**画像・PDF・Excel（.xlsx）・Word・テキスト**に対応。旧`.xls`は安全なZIP事前検査ができないため、`.xlsx`へ保存し直してから登録する。
 
 ### 使い方
 

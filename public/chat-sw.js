@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v54';
+const CHAT_CACHE = 'line-report-chat-v55';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css',
@@ -30,14 +30,34 @@ const CHAT_SHELL = [
   './icons/chat-favicon-48x48-v3.png',
 ];
 const CHAT_ENTRY_URL = new URL('./chat.html', self.location.href).href;
+const CHAT_ENTRY_PATH = new URL(CHAT_ENTRY_URL).pathname;
 const CHAT_ASSET_URLS = new Set(CHAT_SHELL.map((path) => new URL(path, self.location.href).href));
 const CHAT_PUSH_DIAGNOSTIC_QUEUE = 'line-report-chat-push-diagnostics';
+const CHAT_PUSH_TEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function safeChatNavigationUrl(value) {
+  try {
+    const resolved = new URL(String(value || ''), self.location.origin);
+    if (resolved.origin !== self.location.origin || resolved.pathname !== CHAT_ENTRY_PATH) {
+      return CHAT_ENTRY_URL;
+    }
+    const safe = new URL(CHAT_ENTRY_URL);
+    const groupId = resolved.searchParams.get('group');
+    if (/^[1-9][0-9]{0,18}$/.test(groupId || '')) safe.searchParams.set('group', groupId);
+    return safe.href;
+  } catch (_) {
+    return CHAT_ENTRY_URL;
+  }
+}
 
 async function queuePushDiagnostic(testId, stage, detail) {
-  if (!testId) return;
+  if (!CHAT_PUSH_TEST_ID_RE.test(String(testId || ''))) return;
   try {
     const cache = await caches.open(CHAT_PUSH_DIAGNOSTIC_QUEUE);
-    const key = new Request(new URL(`./__push-diagnostic__/${testId}/${stage}`, self.location.href).href);
+    const key = new Request(new URL(
+      `./__push-diagnostic__/${encodeURIComponent(testId)}/${encodeURIComponent(stage)}`,
+      self.location.href,
+    ).href);
     await cache.put(key, new Response(JSON.stringify({
       test_id: testId,
       stage,
@@ -141,15 +161,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => (
+    caches.open(CHAT_CACHE).then((cache) => cache.match(event.request).then((cached) => (
       cached || fetch(event.request).then((response) => {
-        if (response && response.ok) {
-          const copy = response.clone();
-          caches.open(CHAT_CACHE).then((cache) => cache.put(event.request, copy));
-        }
+        if (response && response.ok) cache.put(event.request, response.clone());
         return response;
       })
-    )),
+    ))),
   );
 });
 
@@ -171,12 +188,14 @@ self.addEventListener('push', (event) => {
     ? declarative.data
     : data;
   const title = String(declarative?.title || data.title || 'M-talk');
-  const targetUrl = String(declarative?.navigate || metadata?.url || data.url || './chat.html');
+  const targetUrl = safeChatNavigationUrl(
+    declarative?.navigate || metadata?.url || data.url || CHAT_ENTRY_URL,
+  );
   const testId = String(metadata?.test_id || '');
   const options = {
     body: String(declarative?.body || data.body || '新しいメッセージがあります'),
-    icon: declarative?.icon || data.icon || './icons/chat-android-192x192-v3.png',
-    badge: declarative?.badge || data.badge || './icons/chat-favicon-48x48-v3.png',
+    icon: './icons/chat-android-192x192-v3.png',
+    badge: './icons/chat-favicon-48x48-v3.png',
     tag: declarative?.tag || data.tag || 'line-report-chat',
     renotify: true,
     data: {
@@ -216,7 +235,7 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || './chat.html', self.location.origin).href;
+  const target = safeChatNavigationUrl(event.notification.data?.url);
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
       for (const client of clients) {

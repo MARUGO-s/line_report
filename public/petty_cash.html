@@ -108,6 +108,10 @@
     body.line-locked .ms-navtoggle, body.line-locked .ms-nav-backdrop { display: none !important; }
     body.line-locked .ms-shell { grid-template-columns: 1fr; }
     body.line-locked .ms-topbar { padding-left: 32px; }
+    body.line-locked .card.entry,
+    body.line-locked [data-edit],
+    body.line-locked [data-del],
+    body.line-locked #editDeleteBtn { display: none !important; }
     @media (max-width: 880px) { body.line-locked .ms-topbar { padding-left: 16px; } }
 
     /* 管理者ログイン（キオスク解除）ボタン＋モーダル */
@@ -732,7 +736,7 @@
     /* ===== テーマは共有モジュール app-theme.js が一元管理 ===== */
 
     /* ===== 認証・店舗ロック ===== */
-    function getToken() { return AUTH ? AUTH.getToken() : (localStorage.getItem(TOKEN_KEY) || ''); }
+    function getToken() { return AUTH ? AUTH.getToken() : ''; }
     function lockedStore() {
       try { return sessionStorage.getItem('line_locked_store') || localStorage.getItem('line_locked_store') || ''; } catch (_) { return ''; }
     }
@@ -768,11 +772,8 @@
       if (!t) { dom.admMsg.textContent = 'トークンを入力してください。'; return; }
       dom.admSubmit.disabled = true;
       try {
-        if (AUTH) {
-          await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
-        } else {
-          localStorage.setItem(TOKEN_KEY, t);
-        }
+        if (!AUTH) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
+        await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
         // 認証成功 → 店舗ロック解除＋URLの from=line/store_key/lt を除去して通常モードで再読込。
         try { localStorage.removeItem('line_locked_store'); sessionStorage.removeItem('line_locked_store'); } catch (_) {}
         location.replace(location.pathname);
@@ -1375,9 +1376,8 @@
       if (!t) { dom.authMsg.textContent = 'トークンを入力してください。'; return; }
       dom.tokenInput.value = '';
       try {
-        if (AUTH) {
-          await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
-        } else { localStorage.setItem(TOKEN_KEY, t); }
+        if (!AUTH) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
+        await AUTH.loginWithToken(t, { sessionUrl: PAGES.adminApiUrl('/auth/session', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
         dom.authMsg.textContent = '';
         setAuthBadge(true);
         await loadEntries();
@@ -1454,7 +1454,11 @@
       dom.monthF.value = urlMonth || (fromLine ? currentMonth() : (savedMonth || currentMonth()));
       if (AUTH && AUTH.consumeUrlAuthParams) {
         try {
-          await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report' });
+          await AUTH.consumeUrlAuthParams({
+            exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL),
+            adminSurface: PAGES.ADMIN_SURFACE || 'line_report',
+            targetScopeKind: 'petty_cash',
+          });
         } catch (e) { /* トークン入力にフォールバック */ }
       }
       setAuthBadge(!!getToken());

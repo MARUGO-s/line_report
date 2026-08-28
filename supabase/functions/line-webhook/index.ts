@@ -274,13 +274,20 @@ async function verifyLineSignature(
     encoder.encode(channelSecret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ['sign'],
+    ['verify'],
   )
-  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody))
-  const hashArray = Array.from(new Uint8Array(signatureBuffer))
-  const hashString = String.fromCharCode(...hashArray)
-  const hashBase64 = btoa(hashString)
-  return hashBase64 === signatureHeader
+  let provided: Uint8Array<ArrayBuffer>
+  try {
+    const binary = atob(signatureHeader)
+    provided = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) {
+      provided[index] = binary.charCodeAt(index)
+    }
+  } catch {
+    return false
+  }
+  if (provided.byteLength !== 32) return false
+  return await crypto.subtle.verify('HMAC', key, provided, encoder.encode(rawBody))
 }
 
 function webhookReplyLog(
