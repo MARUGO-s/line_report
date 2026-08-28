@@ -318,6 +318,40 @@ test("ordinary room managers cannot approve global signup or store access", asyn
   }
 })
 
+test("full administrators automatically cover every store and shared room", async () => {
+  const [migration, api, admin, core, rooms] = await Promise.all([
+    read("supabase/migrations/20260910070000_chat_full_admin_all_stores.sql"),
+    read("supabase/functions/admin-api/index.ts"),
+    read("public/chat-admin.html"),
+    read("public/chat/core.js"),
+    read("public/chat/rooms.js"),
+  ])
+  assert.match(migration, /is_full_admin boolean not null default false/)
+  assert.match(migration, /create or replace function public\.chat_admin_set_full_admin/)
+  assert.match(migration, /perform public\.chat_sync_full_admin_scope\(p_user_id\)/)
+  assert.match(migration, /from public\.chat_store_catalog c/)
+  assert.match(migration, /coalesce\(g\.is_direct, false\) = false/)
+  assert.match(migration, /after insert on public\.chat_store_catalog/)
+  assert.match(migration, /after insert or update of trashed_at on public\.chat_groups/)
+  assert.match(migration, /全権管理者は共有ルームから外せません/)
+  assert.match(migration, /coalesce\(current_setting\([\s\S]{0,120}allow_full_admin_permission_change/)
+  assert.match(migration, /on conflict \(group_id, user_id\) do nothing/)
+  assert.match(migration, /set is_full_admin = false,[\s\S]*access_enabled = false/)
+  assert.match(migration, /delete from public\.chat_user_stores[\s\S]{0,100}where user_id = p_user_id/)
+  assert.match(migration, /coalesce\(v_previous_access_bypass, ''\)/)
+  assert.match(migration, /direct_rooms_modified', false/)
+  assert.match(migration, /revoke all on function public\.chat_admin_set_full_admin[\s\S]*from public, anon, authenticated/)
+  assert.match(migration, /grant execute on function public\.chat_admin_set_full_admin[\s\S]*to service_role/)
+  assert.match(api, /updateFullAdmin = Object\.prototype\.hasOwnProperty\.call\(body, "is_full_admin"\)/)
+  assert.match(api, /updateFullAdmin[\s\S]{0,220}!authority\.isFullAdmin/)
+  assert.match(api, /rpc\("chat_admin_set_full_admin"/)
+  assert.match(admin, /editIsFullAdmin/)
+  assert.match(admin, /全権管理者（全店舗・全共有ルーム・全機能）/)
+  assert.match(core, /can_review_access, is_full_admin, default_can_send/)
+  assert.match(rooms, /currentChatAccess\?\.is_full_admin === true/)
+  assert.match(rooms, /全権管理者として全店舗に所属しています/)
+})
+
 test("profile system columns and advisor findings are hardened without widening RLS", async () => {
   const [migration, followup] = await Promise.all([
     read("supabase/migrations/20260910040000_security_authorization_hardening.sql"),

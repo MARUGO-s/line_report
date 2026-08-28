@@ -4611,7 +4611,7 @@ async function fetchChatAdminState(
       .limit(5000),
     supabase
       .from("chat_user_access")
-      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, can_use_journal_ai, can_review_access, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
+      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, can_use_journal_ai, can_review_access, is_full_admin, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
       .limit(5000),
     supabase
       .from("chat_groups")
@@ -4749,6 +4749,7 @@ async function fetchChatAdminState(
         can_browse_users: access.can_browse_users !== false,
         can_use_journal_ai: access.can_use_journal_ai === true,
         can_review_access: access.can_review_access === true,
+        is_full_admin: access.is_full_admin === true,
         default_can_send: access.default_can_send !== false,
         signup_status: String(access.signup_status || "approved"),
         restriction_reason: access.restriction_reason ?? null,
@@ -4828,9 +4829,20 @@ async function updateChatAdminUserAccess(
   const updateUntil = Object.prototype.hasOwnProperty.call(body, "restricted_until")
   const updateJournalAi = Object.prototype.hasOwnProperty.call(body, "can_use_journal_ai")
   const updateReviewAccess = Object.prototype.hasOwnProperty.call(body, "can_review_access")
-  const updateSensitiveAccess = updateJournalAi || updateReviewAccess
+  const updateFullAdmin = Object.prototype.hasOwnProperty.call(body, "is_full_admin")
+  const updateSensitiveAccess = updateJournalAi || updateReviewAccess || updateFullAdmin
   if (updateSensitiveAccess && !authority.isFullAdmin) {
-    throw { status: 403, message: "承認・電子ジャーナルAI権限を変更できるのは本部管理者だけです。" } satisfies AppError
+    throw { status: 403, message: "全権管理者・承認・電子ジャーナルAI権限を変更できるのは本部管理者だけです。" } satisfies AppError
+  }
+  if (updateFullAdmin) {
+    const { data, error } = await supabase.rpc("chat_admin_set_full_admin", {
+      p_user_id: userId,
+      p_enabled: chatAdminOptionalBoolean(body.is_full_admin, "is_full_admin"),
+      p_expected_updated_at: chatAdminExpectedTimestamp(body.expected_updated_at),
+      p_actor: actor,
+    })
+    if (error) throw chatAdminRpcError(error)
+    return { ok: true, access: data }
   }
   const reason = updateReason ? (String(body.restriction_reason ?? "").trim() || null) : null
   if (reason && reason.length > 500) {

@@ -276,7 +276,7 @@ test("dedicated admin API uses chat-only soft removal and exposes direct-room co
   assert.match(adminUi, /document\.querySelector\('\.app'\)\.inert = state\.loading/)
   assert.doesNotMatch(adminUi, /SUPABASE_SERVICE_ROLE_KEY/)
 
-  assert.match(chat, /const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, can_use_journal_ai, can_review_access, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at'/)
+  assert.match(chat, /const CHAT_ACCESS_COLUMNS = 'user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, can_use_journal_ai, can_review_access, is_full_admin, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at'/)
   assert.match(chat, /async function loadCurrentChatAccess\(\)/)
   assert.match(chat, /\.from\('chat_user_access'\)/)
   assert.match(chat, /function chatAccessIsBlocked\(access\)/)

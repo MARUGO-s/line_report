@@ -960,7 +960,15 @@ async function openProfileSettings() {
   const pending = pendingStoreRequest;
   const pendingEl = $('profileSettingsPending');
   const saveBtn = $('profileSettingsSave');
-  if (pending && pending.kind === 'change') {
+  const fullAdmin = currentChatAccess?.is_full_admin === true;
+  if (fullAdmin) {
+    pendingEl.textContent = '全権管理者として全店舗に所属しています。所属店舗は自動同期されるため、ここでは変更できません。';
+    pendingEl.classList.remove('hidden');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '全店舗所属';
+    renderStorePicker('settingsStorePick', current);
+    $('settingsStorePick').querySelectorAll('input').forEach((input) => { input.disabled = true; });
+  } else if (pending && pending.kind === 'change') {
     pendingEl.textContent = `変更を申請中です（${formatStoreLabels(pending.requested_store_keys || [])}）。許可されるまで今の所属のままです。`;
     pendingEl.classList.remove('hidden');
     saveBtn.disabled = true;
@@ -981,6 +989,10 @@ function closeProfileSettings() {
 }
 
 async function submitStoreChange() {
+  if (currentChatAccess?.is_full_admin === true) {
+    alert('全権管理者は全店舗へ自動所属するため、所属店舗は変更できません');
+    return;
+  }
   const keys = selectedStoreKeys('settingsStorePick');
   if (!keys.length) {
     alert('所属店舗を1つ以上選んでください');

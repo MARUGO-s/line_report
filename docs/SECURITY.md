@@ -80,6 +80,7 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 
 - `chat_user_access`はM-talkだけの利用停止・一時制限・論理削除を保持する。Supabase AuthやLINE Botの`line_user_permissions`は変更しない。
 - `can_review_access`（新規登録・所属店舗変更の全体承認）と`can_use_journal_ai`（電子ジャーナルAI）は本部限定の明示権限。一般利用者、通常ルーム管理者、委任管理者は付与・変更できない。
+- `is_full_admin`は本部だけが認定・解除できるM-talk全権管理者。認定時に全店舗・全共有ルーム・全機能を同期し、将来追加される店舗・共有ルームも自動付与する。個人間の1対1は含めない。通常の委任管理者・ルーム管理者・本人による変更はDBで拒否する。
 - `chat_group_members`の`can_view / can_send / can_invite / can_manage`を、画面表示だけでなくメッセージ、Realtime、検索、既読・未読、リアクション、Storage、Push、予約送信、ルームRPCで強制する。
 - Data APIの列権限も最小化する。一般利用者が直接`UPDATE`できるのは、`chat_groups`の表示名・アイコン、`chat_users`の自分の表示名・アイコン、`chat_messages`の本文・メンションだけ。ルーム所有者・店舗紐付け・投稿者・投稿先・投稿種別・作成時刻・編集履歴等は、RLSと保護トリガに加えてSQL GRANTでも変更不可にする。
 - 店舗Botを通じる管理APIと`chat-knowledge`は、ルーム権限に加えて現在承認済みの`chat_user_stores`を毎回確認する。所属取消、Bot退出・差替え、ルームと固定店舗の不一致は既存リンク・セッションを含め拒否する。

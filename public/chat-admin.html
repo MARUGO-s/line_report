@@ -262,6 +262,7 @@
       <div class="dialog-body">
         <div class="person" id="dialogPerson"></div>
         <div class="switches">
+          <label class="switch"><input id="editIsFullAdmin" type="checkbox" onchange="syncFullAdminForm()"><span>全権管理者（全店舗・全共有ルーム・全機能）</span></label>
           <label class="switch"><input id="editAccessEnabled" type="checkbox"><span>M-talkを利用できる</span></label>
           <label class="switch"><input id="editCanStartDirect" type="checkbox"><span>1対1を開始できる</span></label>
           <label class="switch"><input id="editCanCreateGroup" type="checkbox"><span>グループを作成できる</span></label>
@@ -271,7 +272,7 @@
         </div>
         <label class="field">制限理由<textarea id="editRestrictionReason" rows="3" maxlength="500" placeholder="停止理由を入力（ユーザー画面にも表示）"></textarea></label>
         <label class="field">一時停止の終了日時<input id="editRestrictedUntil" type="datetime-local"></label>
-        <div class="notice">「M-talkを利用できる」をオフにすると即時停止します。日時だけ設定した場合は、その時刻まで一時停止します。</div>
+        <div class="notice">全権管理者は本部管理者だけが認定できます。認定すると全店舗・全共有ルーム・全機能が自動付与され、1対1トークには入りません。解除時は安全のためM-talkを停止し、通常権限の再設定が必要です。</div>
       </div>
       <div class="dialog-foot"><button class="btn ghost-danger" id="removeUserBtn" type="button">ユーザーを削除</button><button class="btn" id="restoreUserBtn" type="button">ユーザーを復元</button><button class="btn primary" id="saveUserBtn" type="submit">保存</button></div>
     </form>
@@ -430,7 +431,7 @@
         const actions = locked
           ? '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button>' + (can('manage_bots') ? (botDeleted ? '<button class="btn" type="button" data-restore-bot="' + escapeHtml(user.id) + '">Bot復元</button>' : '<button class="btn ghost-danger" type="button" data-remove-bot="' + escapeHtml(user.id) + '">Bot削除</button>') : '')
           : '<button class="btn" type="button" data-user-access="' + escapeHtml(user.id) + '">アクセス</button>' + (can('manage_users') ? '<button class="btn" type="button" data-edit-user="' + escapeHtml(user.id) + '">' + (deleted ? '復元' : '権限設定') + '</button>' + (!deleted ? '<button class="btn ghost-danger" type="button" data-toggle-access="' + escapeHtml(user.id) + '">' + (access.access_enabled === false ? '再開' : '利用停止') + '</button>' : '') : '');
-        return '<tr><td><div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (locked ? ' <span class="badge">Bot</span>' : '') + '</strong><small>' + escapeHtml(user.id) + '</small></div></div></td>' +
+        return '<tr><td><div class="person">' + avatarHtml(user) + '<div><strong>' + escapeHtml(user.username || '名称なし') + (locked ? ' <span class="badge">Bot</span>' : '') + (access.is_full_admin ? ' <span class="badge ok">全権管理者</span>' : '') + '</strong><small>' + escapeHtml(user.id) + '</small></div></div></td>' +
           '<td>' + statusBadge(user) + (access.restriction_reason ? '<small style="display:block;margin-top:4px;color:var(--muted)">' + escapeHtml(access.restriction_reason) + '</small>' : '') + '</td>' +
           '<td>' + Number(user.room_count || 0) + '</td><td>' + boolBadge(access.can_start_direct) + '</td><td>' + boolBadge(access.can_create_group) + '</td><td>' + boolBadge(access.can_browse_users) + '</td>' +
           '<td><div class="row-actions">' + actions + '</div></td></tr>';
@@ -654,18 +655,39 @@
       finally { setBusy(false); }
     }
 
+    function syncFullAdminForm() {
+      const user = state.selectedUser; const access = (user && user.access) || {};
+      const deleted = !!access.deleted_at; const fullAdmin = $('editIsFullAdmin').checked;
+      $('editIsFullAdmin').disabled = deleted || !isHeadquarters();
+      const controlled = ['editAccessEnabled','editCanStartDirect','editCanCreateGroup','editCanBrowseUsers','editCanReviewAccess','editCanUseJournalAi'];
+      controlled.forEach((id) => {
+        if (fullAdmin) $(id).checked = true;
+        $(id).disabled = deleted || fullAdmin || ((id === 'editCanReviewAccess' || id === 'editCanUseJournalAi') && !isHeadquarters());
+      });
+      $('editRestrictionReason').disabled = deleted || fullAdmin;
+      $('editRestrictedUntil').disabled = deleted || fullAdmin;
+    }
+
     function openUserDialog(userId) {
       if (!can('manage_users')) return;
       const user = state.users.find((item) => item.id === userId); if (!user || user.is_bot) return;
       state.selectedUser = user; const access = user.access || {};
       $('dialogPerson').innerHTML = avatarHtml(user) + '<div><h3>' + escapeHtml(user.username || '名称なし') + '</h3><small>' + escapeHtml(user.id) + '</small></div>';
-      $('editAccessEnabled').checked = access.access_enabled !== false; $('editCanStartDirect').checked = access.can_start_direct !== false; $('editCanCreateGroup').checked = access.can_create_group !== false; $('editCanBrowseUsers').checked = access.can_browse_users !== false; $('editCanReviewAccess').checked = access.can_review_access === true; $('editCanUseJournalAi').checked = access.can_use_journal_ai === true; $('editCanReviewAccess').disabled = !isHeadquarters(); $('editCanUseJournalAi').disabled = !isHeadquarters();
+      $('editIsFullAdmin').checked = access.is_full_admin === true; $('editAccessEnabled').checked = access.access_enabled !== false; $('editCanStartDirect').checked = access.can_start_direct !== false; $('editCanCreateGroup').checked = access.can_create_group !== false; $('editCanBrowseUsers').checked = access.can_browse_users !== false; $('editCanReviewAccess').checked = access.can_review_access === true; $('editCanUseJournalAi').checked = access.can_use_journal_ai === true;
       $('editRestrictionReason').value = access.restriction_reason || ''; $('editRestrictedUntil').value = toLocalInput(access.restricted_until);
-      const deleted = !!access.deleted_at; document.querySelectorAll('#userForm input,#userForm textarea').forEach((input) => input.disabled = deleted); $('editCanReviewAccess').disabled = deleted || !isHeadquarters(); $('editCanUseJournalAi').disabled = deleted || !isHeadquarters(); $('saveUserBtn').classList.toggle('hidden', deleted); $('removeUserBtn').classList.toggle('hidden', deleted); $('restoreUserBtn').classList.toggle('hidden', !deleted);
+      const deleted = !!access.deleted_at; syncFullAdminForm(); $('saveUserBtn').classList.toggle('hidden', deleted); $('removeUserBtn').classList.toggle('hidden', deleted); $('restoreUserBtn').classList.toggle('hidden', !deleted);
       $('userDialog').showModal();
     }
     async function saveUser(event) {
       event.preventDefault(); const user = state.selectedUser; if (!can('manage_users') || !user || user.is_bot) return;
+      const fullAdminChanged = isHeadquarters() && $('editIsFullAdmin').checked !== (user.access?.is_full_admin === true);
+      if (fullAdminChanged) {
+        const enable = $('editIsFullAdmin').checked;
+        if (!enable && !confirm('全権管理者を解除するとM-talkを停止し、全店舗・全共有ルーム権限を外します。通常権限は改めて設定が必要です。続けますか？')) return;
+        await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify({is_full_admin:enable,expected_updated_at:user.access?.updated_at})}, enable ? '全権管理者として全店舗・全共有ルームへ登録しました' : '全権管理者を解除し、M-talkを停止しました');
+        $('userDialog').close();
+        return;
+      }
       const restricted = $('editRestrictedUntil').value;
       const payload = {access_enabled:$('editAccessEnabled').checked,can_start_direct:$('editCanStartDirect').checked,can_create_group:$('editCanCreateGroup').checked,can_browse_users:$('editCanBrowseUsers').checked,restriction_reason:$('editRestrictionReason').value.trim() || null,restricted_until:restricted ? new Date(restricted).toISOString() : null,expected_updated_at:user.access?.updated_at};
       if (isHeadquarters() && $('editCanReviewAccess').checked !== (user.access?.can_review_access === true)) payload.can_review_access = $('editCanReviewAccess').checked;
@@ -893,6 +915,7 @@
         '<dl class="kv" style="margin-top:14px">' +
         '<dt>M-talk全体</dt><dd>' + (effective.can_use_mtalk ? '<span class="badge ok">利用できる</span>' : '<span class="badge danger">利用できない</span> ' + escapeHtml(globalReason)) + '</dd>' +
         '<dt>1対1 / ルーム作成 / ユーザー参照</dt><dd>' + boolBadge(access.can_start_direct) + ' ' + boolBadge(access.can_create_group) + ' ' + boolBadge(access.can_browse_users) + '</dd>' +
+        '<dt>管理者ロール</dt><dd>' + (access.is_full_admin ? '<span class="badge ok">全権管理者（全店舗・全共有ルーム）</span>' : '<span class="badge">通常ユーザー</span>') + '</dd>' +
         '<dt>本部限定の付与権限</dt><dd>登録・所属承認 ' + boolBadge(access.can_review_access) + ' ／ 電子ジャーナルAI ' + boolBadge(access.can_use_journal_ai) + '</dd>' +
         '<dt>停止理由</dt><dd>' + escapeHtml(access.restriction_reason || '—') + '</dd>' +
         '<dt>停止期限</dt><dd>' + escapeHtml(formatDate(access.restricted_until)) + '</dd>' +
