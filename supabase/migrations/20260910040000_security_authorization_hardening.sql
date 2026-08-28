@@ -326,6 +326,7 @@ create policy "Service role line_file_templates"
 
 drop policy if exists chat_users_select_self on public.chat_users;
 drop policy if exists chat_users_select_registered on public.chat_users;
+drop policy if exists chat_users_select_visible on public.chat_users;
 create policy chat_users_select_visible
   on public.chat_users
   for select
