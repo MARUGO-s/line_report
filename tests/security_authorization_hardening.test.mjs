@@ -316,6 +316,11 @@ test("profile system columns and advisor findings are hardened without widening 
   for (const field of ["id", "created_at", "is_bot", "store_key", "bot_deleted_at", "bot_deleted_by"]) {
     assert.match(profileGuard, new RegExp(`new\\.${field} := old\\.${field}`))
   }
+  assert.ok(
+    migration.indexOf("drop policy if exists chat_users_select_visible") <
+      migration.indexOf("create policy chat_users_select_visible"),
+    "the replacement policy must be dropped before a production replay",
+  )
   assert.match(migration, /create policy chat_users_select_visible[\s\S]*id = \(select auth\.uid\(\)\)[\s\S]*chat_can_see_directory_user/)
   assert.match(migration, /drop index if exists public\.idx_foodcourt_daily_logs_store_date/)
   assert.match(migration, /alter extension pg_trgm set schema extensions/)
