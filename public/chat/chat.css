@@ -397,6 +397,7 @@ body {
 }
 .account-menu button + button,
 .account-menu button + a,
+.account-menu a + a,
 .account-menu a + button {
   border-top: 1px solid #3a3a3c;
 }

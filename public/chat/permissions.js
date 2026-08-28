@@ -55,6 +55,16 @@ function currentUserIsSignupManager() {
   return chatAccessAllows('can_review_access');
 }
 
+function syncAccountAdminLink() {
+  const link = $('chatAdminMenuLink');
+  if (!link) return;
+  const visible = !chatAccessIsBlocked(currentChatAccess)
+    && currentChatAccess?.is_full_admin === true;
+  link.classList.toggle('hidden', !visible);
+  link.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  link.tabIndex = visible ? 0 : -1;
+}
+
 function adminNoticeKindFromMessage(msg) {
   if (!msg || msg.kind !== 'card') return '';
   const payload = typeof msg.payload === 'string' ? safeParseJson(msg.payload) : msg.payload;
@@ -88,6 +98,7 @@ function requireCurrentRoomView() {
 }
 
 function syncGlobalCapabilityUi() {
+  syncAccountAdminLink();
   const canBrowse = chatAccessAllows('can_browse_users');
   const canCreate = chatAccessAllows('can_create_group');
   document.querySelectorAll('[data-tab="users"], [data-tab="bots"]').forEach((tab) => tab.classList.toggle('hidden', !canBrowse));

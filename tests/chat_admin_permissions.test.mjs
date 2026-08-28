@@ -28,6 +28,23 @@ function policyDefinition(sql, name) {
   return sql.slice(start, end + 1)
 }
 
+function javascriptFunctionDefinition(source, name) {
+  const start = source.indexOf(`function ${name}(`)
+  assert.ok(start >= 0, `${name} must exist`)
+  let depth = 0
+  let bodyStarted = false
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === '{') {
+      depth += 1
+      bodyStarted = true
+    } else if (source[index] === '}') {
+      depth -= 1
+      if (bodyStarted && depth === 0) return source.slice(start, index + 1)
+    }
+  }
+  assert.fail(`${name} must terminate`)
+}
+
 test("chat-only access schema has global and four per-room permission boundaries", async () => {
   const migration = await read("supabase/migrations/20260824010000_chat_admin_permissions.sql")
 
@@ -284,6 +301,15 @@ test("dedicated admin API uses chat-only soft removal and exposes direct-room co
   assert.match(chat, /function canCurrentUserInvite/)
   assert.match(chat, /function canCurrentUserManage/)
   assert.match(chat, /function requireCurrentRoomSend/)
+  assert.match(chat, /<a id="chatAdminMenuLink" href="\.\/chat-admin\.html" class="hidden" role="menuitem" aria-hidden="true" tabindex="-1">M-talk権限管理<\/a>/)
+  assert.match(chat, /function syncAccountAdminLink\(\)[\s\S]*currentChatAccess\?\.is_full_admin === true/)
+  assert.match(chat, /function openAccountMenu\(\)[\s\S]{0,240}syncAccountAdminLink\(\)/)
+  const adminLinkGuard = chat.slice(
+    chat.indexOf('function syncAccountAdminLink()'),
+    chat.indexOf('function adminNoticeKindFromMessage'),
+  )
+  assert.match(adminLinkGuard, /chatAccessIsBlocked\(currentChatAccess\)/)
+  assert.doesNotMatch(adminLinkGuard, /can_manage|can_review_access|canCurrentUserManage/)
   assert.match(chat, /function safeImageDimension\(value\)/)
   assert.match(chat, /imageElement\.style\.aspectRatio\s*=/)
   assert.doesNotMatch(chat, /aspect-ratio:\$\{image\.w\}/)
@@ -296,4 +322,40 @@ test("dedicated admin API uses chat-only soft removal and exposes direct-room co
   assert.match(chat, /sb\.rpc\('chat_add_members'/)
   assert.doesNotMatch(chat, /\.from\('chat_groups'\)[\s\S]{0,160}?\.insert\s*\(/)
   assert.doesNotMatch(chat, /\.from\('chat_group_members'\)[\s\S]{0,160}?\.(?:insert|upsert)\s*\(/)
+})
+
+test("the chat account menu exposes administration only to active full administrators", async () => {
+  const chat = await read("public/chat.html")
+  const source = javascriptFunctionDefinition(chat, "syncAccountAdminLink")
+
+  function run(access, blocked = false) {
+    const classes = new Set(["hidden"])
+    const attributes = new Map([["aria-hidden", "true"]])
+    const link = {
+      classList: { toggle(name, force) { if (force) classes.add(name); else classes.delete(name) } },
+      setAttribute(name, value) { attributes.set(name, value) },
+      tabIndex: -1,
+    }
+    new Function("$", "chatAccessIsBlocked", "currentChatAccess", `${source}; syncAccountAdminLink()`)(
+      (id) => id === "chatAdminMenuLink" ? link : null,
+      () => blocked,
+      access,
+    )
+    return { classes, attributes, tabIndex: link.tabIndex }
+  }
+
+  const generalUser = run({ is_full_admin: false })
+  assert.ok(generalUser.classes.has("hidden"))
+  assert.equal(generalUser.attributes.get("aria-hidden"), "true")
+  assert.equal(generalUser.tabIndex, -1)
+
+  const fullAdmin = run({ is_full_admin: true })
+  assert.ok(!fullAdmin.classes.has("hidden"))
+  assert.equal(fullAdmin.attributes.get("aria-hidden"), "false")
+  assert.equal(fullAdmin.tabIndex, 0)
+
+  const blockedFullAdmin = run({ is_full_admin: true }, true)
+  assert.ok(blockedFullAdmin.classes.has("hidden"))
+  assert.equal(blockedFullAdmin.attributes.get("aria-hidden"), "true")
+  assert.equal(blockedFullAdmin.tabIndex, -1)
 })

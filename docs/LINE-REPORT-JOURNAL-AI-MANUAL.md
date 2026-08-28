@@ -592,6 +592,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 **要点:** M-talk専用の委任範囲を含む、利用者・ルーム・Bot・監査機能を説明する。
 
 - M-talk管理画面はLINEユーザー承認や売上・予約・資料管理とは分離されています。本部管理者は、M-talk全体、選択店舗、選択ルームのいずれかと、閲覧・監査・メンバー・ルーム・Bot・一括設定・全体ユーザー・監査復元の操作を組み合わせた専用管理リンクを発行できます。
+- M-talkの全権管理者には、通常のトーク画面で右上の自分のアイコンを押すと「M-talk権限管理」が表示されます。一般利用者、申請承認者、通常のルーム管理者には表示されません。遷移先では保存済みの管理セッションまたは本部管理資格を改めて検証します。
 - 委任管理セッションはM-talk管理API以外を403で拒否します。委任設定は有効期限必須・初期は閲覧だけで、各書込みはDB行をロックし、委任ID・操作能力・対象の確認と変更を同じトランザクションで行います。停止または期限切れにすると保存済みセッションも次のAPI呼び出しから使えません。管理範囲・操作権限・期限の変更、停止・再開ではセッション世代を更新するため、停止前のセッションは再開しても復活せず、新しいリンクが必要です。店舗・ルーム限定者はM-talk全体のユーザー停止・削除、ルーム限定者はBot管理、すべての委任者はルーム完全削除を行えません。
 - ユーザー全体の利用停止・期限付き制限・論理削除と、ルームごとの閲覧・送信・招待・管理権限を設定できます。ルームを作成・管理できても、新規登録や所属店舗変更を承認する全体権限にはなりません。この承認権限は本部管理者が利用者ごとに明示付与し、許可カードはその承認者だけが入る管理者通知ルームに届きます。許可後の一般利用者は閲覧のみで始まります。
 - 「新規登録・所属店舗の変更を承認できる」と「電子ジャーナルAIを利用できる」は本部限定の付与権限です。委任管理者や一般のルーム管理者は、自分自身を含めて付与・変更できません。変更は監査ログへ残り、承認権限の取消時は管理者通知ルームからも同じ処理内で外れます。
@@ -600,9 +601,9 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 監査ログは変更前後を記録し、競合がない場合に限り一度だけ復元できます。復元操作そのものも監査されます。
 - 管理画面では通常ルームのゴミ箱・復元と、Botの論理削除・復元を行えます。復元不能な完全削除は本部管理者だけです。通常M-talk画面からBotは削除できません。
 
-**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / botを削除 / botは削除 / 通常画面 / 普通のトーク画面 / トーク画面から削除 / ルームゴミ箱 / 委任管理者 / m-talk専用管理者 / 店舗限定管理 / ルーム限定管理 / 監査専用
+**検索語:** m-talk管理 / chat-admin / 利用停止 / 論理削除 / ルーム権限 / 権限テンプレート / 一括設定 / ユーザー別アクセス / 監査ログ / 復元 / bot削除 / bot復元 / botを削除 / botは削除 / 通常画面 / 普通のトーク画面 / トーク画面から削除 / ルームゴミ箱 / 委任管理者 / m-talk専用管理者 / 店舗限定管理 / ルーム限定管理 / 監査専用 / 右上アイコン / アカウントメニュー / 権限管理リンク
 
-**主な実装根拠:** `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `supabase/functions/_shared/chat_admin_delegation.ts` / `supabase/migrations/20260910010000_chat_delegated_admin.sql` / `docs/CHAT-ADMIN-PERMISSIONS.md` / `tests/chat_admin_permissions.test.mjs` / `tests/chat_admin_templates.test.mjs` / `tests/chat_admin_delegation.test.mjs` / `tests/chat_admin_delegation_scope.test.ts`
+**主な実装根拠:** `public/chat.html` / `public/chat/permissions.js` / `public/chat/rooms.js` / `public/chat-admin.html` / `supabase/functions/admin-api/index.ts` / `supabase/functions/_shared/chat_admin_delegation.ts` / `supabase/migrations/20260910010000_chat_delegated_admin.sql` / `docs/CHAT-ADMIN-PERMISSIONS.md` / `tests/chat_admin_permissions.test.mjs` / `tests/chat_admin_templates.test.mjs` / `tests/chat_admin_delegation.test.mjs` / `tests/chat_admin_delegation_scope.test.ts`
 
 ## DEV コード構成・API・データ基盤
 

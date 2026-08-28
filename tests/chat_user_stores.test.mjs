@@ -80,7 +80,7 @@ test("chat.html requires store pick, later change, and filters 1:1 candidates", 
   assert.match(chat, /所属店舗を1つ以上選んでください/)
   assert.match(chat, /sharesAffiliationWith\(u\)/)
   assert.match(chat, /mtalk-stores:\(approve\|deny\)/)
-  assert.doesNotMatch(chat, /href="\.\/chat-admin\.html"/)
+  assert.match(chat, /id="chatAdminMenuLink" href="\.\/chat-admin\.html" class="hidden"[^>]*aria-hidden="true" tabindex="-1"/)
   assert.doesNotMatch(chat, /\.from\('chat_users'\)[\s\S]{0,120}?\.insert\(/)
 
   assert.match(knowledge, /action === "store-change-notify"/)
@@ -101,7 +101,7 @@ test("privilege boundaries: no self insert, viewer defaults, store-room join, no
   assert.match(functionDefinition(boundary, "chat_create_group"), /chat_shares_affiliation/i)
   assert.match(boundary, /signup_status = 'pending'/i)
 
-  assert.doesNotMatch(chat, /href="\.\/chat-admin\.html"/)
+  assert.match(chat, /function syncAccountAdminLink\(\)[\s\S]{0,500}?is_full_admin === true/)
   assert.match(admin, /referrerIsHqDashboard/)
   assert.match(admin, /resumeAdminBtn/)
   assert.match(admin, /ここは M-talk の利用者画面ではありません/)

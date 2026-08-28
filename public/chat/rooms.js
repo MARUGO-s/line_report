@@ -938,6 +938,7 @@ async function uploadIcon(folder, file) {
 function openAccountMenu() {
   const nameEl = $('accountMenuUser');
   if (nameEl) nameEl.textContent = (currentUser && currentUser.username) || 'アカウント';
+  syncAccountAdminLink();
   $('accountMenu').classList.remove('hidden');
 }
 

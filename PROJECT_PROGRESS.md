@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-08-28 - chat.htmlから全権管理者用の権限管理導線を復旧
+
+- Symptom: `chat-admin.html`は稼働していたが、通常の`chat.html`から開くリンクがアカウントメニューに無く、直URLまたは本部管理画面を経由する必要があった。
+- UI: 右上アバターのアカウントメニューへ「M-talk権限管理」を追加する。初期状態は非表示で、本人だけが読める`chat_user_access.is_full_admin=true`かつ有効な利用状態の場合だけ表示する。
+- Boundary: `can_manage`、`can_review_access`、一般利用者では表示しない。表示は導線に限り、`chat-admin.html`と`admin-api /chat-admin/*`の管理セッション・スコープ認証は従来どおり別途必須とする。
+- PWA: `chat.html`と責務別JSの更新をホーム画面版へ届けるため、`chat-sw.js`のキャッシュをv58へ更新する。
+
 ### 2026-08-28 - 板川与志人を全共有ルーム管理者として復旧
 
 - Incident: 所属未設定になった板川与志人がBistro CAVACAVAを申請したが、唯一の承認者本人による自己承認はDBが正しく拒否し、承認カード側も誤ってルーム管理権限を確認していたため申請中から進めなかった。

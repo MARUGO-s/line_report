@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v57';
+const CHAT_CACHE = 'line-report-chat-v58';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css',

@@ -6,6 +6,9 @@
 - 管理画面: `https://marugo-s.github.io/line_report/chat-admin.html`
 - 管理API: `admin-api /chat-admin/*`
 - 対象アプリ: `public/chat.html` と、その通知・画像・予約送信・ルーム設定経路
+- 通常画面からの入口: 有効な`is_full_admin=true`の利用者だけ、`chat.html`右上の
+  アカウントメニューに「M-talk権限管理」を表示する。`can_manage`や`can_review_access`では
+  表示せず、遷移後も管理セッション／本部管理資格を別途検証する。
 
 ## 信頼境界
 
