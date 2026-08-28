@@ -23,21 +23,34 @@ function createServiceClient() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
 }
 
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = new TextEncoder().encode(String(a || ''))
+  const right = new TextEncoder().encode(String(b || ''))
+  if (left.length !== right.length) return false
+  let diff = 0
+  for (let i = 0; i < left.length; i += 1) diff |= left[i] ^ right[i]
+  return diff === 0
+}
+
+function bearerToken(req: Request): string {
+  const auth = String(req.headers.get('authorization') || '').trim()
+  return /^Bearer\s+(.+)$/i.exec(auth)?.[1]?.trim() || ''
+}
+
 function isAuthorized(req: Request): boolean {
   const secret = String(Deno.env.get('ROOM_MESSAGES_RETENTION_SECRET') || '').trim()
   if (!secret) return false
   const headerKey = String(req.headers.get('x-room-messages-retention-key') || '').trim()
-  if (headerKey && headerKey === secret) return true
-  const auth = String(req.headers.get('authorization') || '').trim()
-  if (auth === `Bearer ${secret}`) return true
-  return false
+  if (headerKey && constantTimeEqual(headerKey, secret)) return true
+  const bearer = bearerToken(req)
+  return Boolean(bearer && constantTimeEqual(bearer, secret))
 }
 
 async function isServiceRoleAuthorized(req: Request): Promise<boolean> {
   const serviceKey = String(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '').trim()
   if (!serviceKey) return false
-  const auth = String(req.headers.get('authorization') || '').trim()
-  return auth === `Bearer ${serviceKey}`
+  const bearer = bearerToken(req)
+  return Boolean(bearer && constantTimeEqual(bearer, serviceKey))
 }
 
 Deno.serve(async (req) => {

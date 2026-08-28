@@ -86,6 +86,22 @@ function bearerToken(req: Request): string {
   return /^Bearer\s+(.+)$/i.exec(String(req.headers.get("authorization") ?? "").trim())?.[1]?.trim() ?? ""
 }
 
+function isAllowedPushServiceEndpoint(endpoint: string): boolean {
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    return false
+  }
+  if (url.protocol !== "https:" || url.username || url.password) return false
+  if (url.port && url.port !== "443") return false
+  const host = url.hostname.toLowerCase().replace(/\.$/, "")
+  return host === "fcm.googleapis.com" ||
+    host === "push.services.mozilla.com" ||
+    host.endsWith(".push.services.mozilla.com") ||
+    host.endsWith(".push.apple.com")
+}
+
 function normalizeVapidConfig(value: unknown): VapidConfig | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const row = value as Record<string, unknown>
@@ -184,14 +200,12 @@ function parseSubscription(value: unknown): {
   const endpoint = String(input.endpoint ?? "").trim()
   const p256dh = String(input.keys?.p256dh ?? "").trim()
   const auth = String(input.keys?.auth ?? "").trim()
-  let parsedEndpoint: URL
-  try {
-    parsedEndpoint = new URL(endpoint)
-  } catch {
-    throw new Error("Push endpoint is invalid.")
+  if (!endpoint || endpoint.length > 4096 || !isAllowedPushServiceEndpoint(endpoint)) {
+    throw new Error("Push endpoint is not an allowed browser push service.")
   }
-  if (parsedEndpoint.protocol !== "https:") throw new Error("Push endpoint must use HTTPS.")
-  if (!p256dh || !auth) throw new Error("Push subscription keys are missing.")
+  if (!/^[A-Za-z0-9_-]{40,200}$/.test(p256dh) || !/^[A-Za-z0-9_-]{16,200}$/.test(auth)) {
+    throw new Error("Push subscription keys are invalid.")
+  }
 
   const expirationMs = input.expirationTime == null ? null : Number(input.expirationTime)
   const expirationTime = Number.isFinite(expirationMs) && Number(expirationMs) > 0
@@ -357,6 +371,13 @@ async function handleTest(
   if (error) return json({ ok: false, error: `subscription load failed: ${error.message}` }, 500)
   const row = data as PushSubscriptionRow | null
   if (!row) return json({ ok: false, error: "Active subscription not found." }, 404)
+  if (!isAllowedPushServiceEndpoint(row.endpoint)) {
+    await supabase.from("chat_push_subscriptions").update({
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    }).eq("id", row.id)
+    return json({ ok: false, error: "Stored push endpoint is not allowed." }, 400)
+  }
 
   const safeClientState = {
     permission: String(clientState.permission ?? "").slice(0, 20),
@@ -718,6 +739,15 @@ async function handleDispatch(
   let failed = 0
   const errors: string[] = []
   for (const row of subscriptions) {
+    if (!isAllowedPushServiceEndpoint(row.endpoint)) {
+      failed += 1
+      errors.push(`subscription ${row.id}: endpoint is not allowed`)
+      await supabase.from("chat_push_subscriptions").update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      }).eq("id", row.id)
+      continue
+    }
     const preference = preferences.get(row.user_id)
     const preview = preference?.preview_enabled !== false
       ? messagePreview(message.content)

@@ -131,7 +131,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v54/)
+  assert.match(serviceWorker, /line-report-chat-v55/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -240,7 +240,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v54/)
+  assert.match(serviceWorker, /line-report-chat-v55/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -673,6 +673,13 @@ test("chat push endpoint requires Supabase Auth and excludes the sender", async 
   assert.match(edge, /Chat access is disabled or restricted\./)
   assert.match(edge, /internalDispatchAuthorized/)
   assert.match(edge, /secureEqual/)
+  assert.match(edge, /function isAllowedPushServiceEndpoint/)
+  assert.match(edge, /host === "fcm\.googleapis\.com"/)
+  assert.match(edge, /host\.endsWith\("\.push\.apple\.com"\)/)
+  assert.match(edge, /host\.endsWith\("\.push\.services\.mozilla\.com"\)/)
+  assert.match(edge, /Push endpoint is not an allowed browser push service/)
+  assert.match(edge, /if \(!isAllowedPushServiceEndpoint\(row\.endpoint\)\)/)
+  assert.match(edge, /is_active: false/)
   assert.match(edge, /Only the message sender can dispatch its notification/)
   assert.match(edge, /\.neq\("user_id", message\.user_id\)/)
   assert.match(edge, /\.eq\("can_view", true\)/)
@@ -764,6 +771,7 @@ test("chat service worker displays a declarative push and persists delivery diag
   const listeners = new Map<string, (event: any) => void>()
   const notifications: Array<{ title: string; options: Record<string, unknown> }> = []
   const diagnostics: Array<Record<string, unknown>> = []
+  const openedWindows: string[] = []
   const cache = {
     async add() {},
     async addAll() {},
@@ -796,6 +804,7 @@ test("chat service worker displays a declarative push and persists delivery diag
       clients: {
         async matchAll() { return [] },
         async claim() {},
+        async openWindow(url: string) { openedWindows.push(url) },
       },
       async skipWaiting() {},
       addEventListener(type: string, listener: (event: any) => void) {
@@ -825,6 +834,21 @@ test("chat service worker displays a declarative push and persists delivery diag
   assert.equal(notifications[0].options.body, "受信確認")
   assert.deepEqual(diagnostics.map((row) => row.stage).sort(), ["notification_shown", "sw_received"])
   assert.ok(diagnostics.every((row) => row.test_id === "123e4567-e89b-42d3-a456-426614174000"))
+
+  pending = null
+  listeners.get("notificationclick")?.({
+    notification: {
+      data: { url: "https://example.invalid/phishing?group=999" },
+      close() {},
+    },
+    waitUntil(value: Promise<unknown>) { pending = value },
+  })
+  assert.ok(pending)
+  await pending
+  assert.deepEqual(openedWindows, ["https://marugo-s.github.io/line_report/chat.html"])
+  assert.match(serviceWorker, /resolved\.origin !== self\.location\.origin/)
+  assert.match(serviceWorker, /resolved\.pathname !== CHAT_ENTRY_PATH/)
+  assert.match(serviceWorker, /caches\.open\(CHAT_CACHE\).*cache\.match\(event\.request\)/s)
 })
 
 test("Web Push request uses VAPID and aes128gcm encryption", async () => {

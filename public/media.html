@@ -1398,7 +1398,7 @@
     ]);
 
     function getToken() {
-      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : '';
     }
 
     function clearSiteCacheForToken(token, projectUrl) {
@@ -1416,11 +1416,7 @@
       if (window.LINE_REPORT_AUTH) {
         if (next) LINE_REPORT_AUTH.setToken(next);
         else LINE_REPORT_AUTH.clearToken();
-      } else if (next) {
-        localStorage.setItem(STORE_TOKEN_KEY, next);
-      } else {
-        localStorage.removeItem(STORE_TOKEN_KEY);
-      }
+      } else if (next) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
       updateAuthState();
     }
 
@@ -2744,10 +2740,7 @@
             adminSurface: 'line_report',
           });
           updateAuthState();
-        } else {
-          setToken(entered);
-          updateAuthState();
-        }
+        } else throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
         await loadRoomFilterOptions();
         await loadFirstPage();
         await loadFirstDocumentPage();

@@ -9,7 +9,7 @@
   var STORAGE_PREFIX = 'line_report_site_cache__';
   /** キャッシュを破棄するまでの最大保持時間 */
   var DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-  /** 1認証あたりの localStorage 上限目安 */
+  /** 1認証あたりの sessionStorage 上限目安 */
   var MAX_STORE_BYTES = 4 * 1024 * 1024;
 
   function activeStorage() {

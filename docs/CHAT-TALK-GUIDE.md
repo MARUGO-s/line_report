@@ -60,15 +60,16 @@ CSSカスタムプロパティ `--chat-viewport-height` 等は `syncChatViewport
 - メール＋パスワードでログイン（`login()`）。8文字以上のパスワードでセルフ登録（`signup()`）。
 - ログイン失敗時のエラーメッセージは「メールアドレスまたはパスワードが違います」
   「メールアドレスの確認が完了していません」など、Supabaseのエラー文字列を判定して日本語化する。
-- 「この端末にメールとパスワードを保存する」チェックで `localStorage`（キー
-  `chat_saved_credentials`）へ**平文**保存し、次回訪問時に自動入力する
-  （`applySavedCredentials()`）。共用端末では使わせないこと。
+- 「この端末にメールアドレスだけ保存する」チェックでは`localStorage`（キー
+  `chat_saved_credentials`）へメールだけを保存する。パスワードは保存しない。
+  旧版が保存した`password`項目を見つけた場合は、起動時にメールだけへ即時移行する。
 - 初回のみ `#profileForm` で表示名とアイコンを決める（`createProfile()`）。
   `chat_users` への insert が許可リスト外だと「このアカウントはチャットの利用を
   許可されていません」で弾かれる。
 - プロフィール作成後、`chat_user_access.signup_status` は `pending`、
   `access_enabled` は false。所属店舗は必須（複数可）。許可／不許可カードは
-  管理者専用の「管理者通知」ルームへ届き、予約通知の1対1や店舗ルームの一般メンバーには見えない。
+  本部が`can_review_access`を明示付与した承認者専用の「管理者通知」ルームへ届き、
+  通常ルームの管理者、予約通知の1対1、店舗ルームの一般メンバーには見えない。
   許可されると閲覧のみで、申請した所属店舗が反映される。
   所属の後からの変更も管理者許可後に `chat_user_stores` へ書き込む。
   新しい1対1は所属店舗が重なる相手だけ（既存の1対1はそのまま）。
@@ -88,8 +89,10 @@ CSSカスタムプロパティ `--chat-viewport-height` 等は `syncChatViewport
 管理画面から状態を変えられた場合も即座に反映される。
 
 `chat_user_access` は個別権限も持つ（`can_start_direct` / `can_create_group` /
-`can_browse_users`）。これらは「友だち」「登録ユーザー」「Bot」タブの表示、FABの
+`can_browse_users` / `can_review_access` / `can_use_journal_ai`）。前3つは「友だち」
+「登録ユーザー」「Bot」タブの表示、FABの
 表示、1対1開始ボタンの活性・非活性などUI全体に反映される（`syncGlobalCapabilityUi()`）。
+後2つは本部限定の明示権限で、通常ルームの`can_manage`や委任管理者権限からは付かない。
 
 ---
 
@@ -497,6 +500,7 @@ M-talkの画面のまま。
    （`is_direct`ではなく実際の人数で判定。利用者が自分でBotを招待して作った
    2人部屋も対象になる）。
 2. `groupMembers`に`store_key`を持つ店舗Botがいる（取込先の店舗が一意に決まる）。
+3. 本人の`chat_user_access.can_use_journal_ai`がtrueで、M-talk全体の利用も有効。
 
 満たさない場合はボタン自体が出ないか、押しても理由付きのアラートで案内する。
 
@@ -514,7 +518,13 @@ chat.html → mtalk_journal_ai.html?group_id=<id>
   → iframe: jnl2txt.html?mtalk_embed=1&lt=…&mtalk_group_id=…
 ```
 
-発行されるのは**その店舗にスコープを固定した**ワンタイムリンク（5分）。
+発行されるのは**店舗・ルーム・本人・電子ジャーナルAI用途に固定した**ワンタイムリンク（5分）。
+専用交換endpointだけが受理し、交換後は30分セッションになる。各API呼び出しで
+M-talk利用状態、期限付き制限、ルーム参加、閲覧権限、電子ジャーナルAI権限、
+対象店舗への現在承認済み所属、ルーム内店舗Botと固定店舗の一致を再確認する。
+所属取消、Bot退出・差替え、店舗不一致は既存セッションを含め次のAPIで拒否する。
+参照できるのは保存済み売上・商品検索・商品比較だけで、予約者情報、資料、店舗設定、
+PDF履歴、原本取込、削除・更新等の管理APIには到達できない。
 `?mtalk_embed=1`ではAIチャットパネル以外を隠し全面表示にする（CSSと起動条件のみで、
 AIロジックには一切触れない）。回答に「💬 M-talkに貼る」が出るのは`mtalk_group_id`
 付きアクセス時のみで、押すとMarkdownを読みやすいプレーンテキストへ整形してから
@@ -679,7 +689,7 @@ Webを見て答えたときは出典URLを1行に保ち、本文中でも開け�
 | --- | --- |
 | `chat_allowed_emails` | 旧許可リスト。セルフ登録の制限には現在使わない |
 | `chat_users` | 表示名とアイコン。`id`は`auth.users(id)` |
-| `chat_user_access` | M-talkだけの利用状態、1対1開始・ルーム作成・ユーザー一覧権限 |
+| `chat_user_access` | M-talkだけの利用状態、通常全体権限、本部付与の全体承認・電子ジャーナルAI権限 |
 | `chat_groups` | トークルーム。`is_direct`が真なら1対1 |
 | `chat_group_members` | 参加関係とルーム別の閲覧・送信・招待・管理権限 |
 | `chat_messages` | 発言。`kind`は`text`/`card`/`image`/`file`/`sticker`。本文を直すと`edited_at`と`edit_history`（取り消し線用） |

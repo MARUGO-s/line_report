@@ -52,9 +52,7 @@ function canCurrentUserInvite(group = currentGroup()) { return roomCapability(gr
 function canCurrentUserManage(group = currentGroup()) { return roomCapability(group, 'can_manage'); }
 
 function currentUserIsSignupManager() {
-  return (myGroups || []).some((group) => (
-    group && !group.is_direct && !group.trashed_at && canCurrentUserManage(group)
-  ));
+  return chatAccessAllows('can_review_access');
 }
 
 function adminNoticeKindFromMessage(msg) {
@@ -70,8 +68,7 @@ function isAdminNoticeMessage(msg) {
 
 function canSeeAdminNoticeMessage(msg, group) {
   const target = group || currentGroup() || myGroups.find((g) => Number(g.id) === Number(msg && msg.group_id));
-  if (canCurrentUserManage(target)) return true;
-  return !!(target && target.is_direct && currentUserIsSignupManager());
+  return currentUserIsSignupManager() && roomCapability(target, 'can_view');
 }
 
 function shouldHideAdminNotice(msg, group) {

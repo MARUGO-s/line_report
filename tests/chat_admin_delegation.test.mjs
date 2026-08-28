@@ -53,7 +53,7 @@ test("delegated session is reloaded from DB and fenced from every non-M-talk adm
   assert.match(authority, /sessionVersion !== currentVersion/)
   assert.match(authority, /new Date\(expiresAt\)\.getTime\(\) <= Date\.now\(\)/)
   assert.match(api, /session\.scopeKind === MTALK_ADMIN_SCOPE[\s\S]*loadMtalkAdminAuthority\(supabase, session\.metadata\)/)
-  assert.match(api, /session\.scopeKind !== null && session\.scopeKind !== ROOM_CONFIG_SCOPE[\s\S]*この管理スコープは利用できません/)
+  assert.match(api, /session\.scopeKind !== null[\s\S]{0,180}session\.scopeKind !== ROOM_CONFIG_SCOPE[\s\S]{0,180}!STORE_LINK_SCOPES\.has\(session\.scopeKind\)[\s\S]*この管理スコープは利用できません/)
   assert.match(api, /authResult\.scopeKind === MTALK_ADMIN_SCOPE[\s\S]*path !== "\/auth\/logout"[\s\S]*!path\.startsWith\("\/chat-admin\/"\)[\s\S]*403/)
   const storePaths = api.slice(api.indexOf("const STORE_SCOPED_ALLOWED_PATHS"), api.indexOf("if (!STORE_SCOPED_ALLOWED_PATHS.has(path))"))
   assert.doesNotMatch(storePaths, /chat-admin/i)

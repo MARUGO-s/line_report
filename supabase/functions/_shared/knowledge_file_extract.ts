@@ -1,7 +1,7 @@
 // 店舗ナレッジ（資料）に添付されたファイルから、Gemini へ渡すテキストを抽出する共通モジュール。
 //
 // Gemini 2.0 Flash が inlineData で直接受け取れるのは画像と PDF のみ。
-// Excel(.xlsx/.xls) と Word(.docx) はバイナリのまま渡しても解釈できないため、
+// Excel(.xlsx/.xlsm) と Word(.docx) はバイナリのまま渡しても解釈できないため、
 // ここでプレーンテキストへ変換してから text パートとして渡す。
 //
 // PDF も Gemini に直接読ませられるが、ページ数が多いと全文の文字起こしが出力上限に
@@ -52,7 +52,7 @@ function clip(text: string): string {
   return s.length > KNOWLEDGE_EXTRACT_MAX_CHARS ? s.slice(0, KNOWLEDGE_EXTRACT_MAX_CHARS) : s
 }
 
-/** Excel(.xlsx/.xls) の全シートを「シート名 + CSV」のテキストへ変換する。 */
+/** Excel(.xlsx/.xlsm) の全シートを「シート名 + CSV」のテキストへ変換する。 */
 export function extractSpreadsheetText(bytes: Uint8Array): string {
   try {
     const wb = XLSX.read(bytes, { type: "array" })

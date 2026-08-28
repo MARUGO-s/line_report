@@ -266,6 +266,8 @@
           <label class="switch"><input id="editCanStartDirect" type="checkbox"><span>1対1を開始できる</span></label>
           <label class="switch"><input id="editCanCreateGroup" type="checkbox"><span>グループを作成できる</span></label>
           <label class="switch"><input id="editCanBrowseUsers" type="checkbox"><span>登録ユーザーを参照できる</span></label>
+          <label class="switch"><input id="editCanReviewAccess" type="checkbox"><span>新規登録・所属店舗の変更を承認できる（全店舗）</span></label>
+          <label class="switch"><input id="editCanUseJournalAi" type="checkbox"><span>電子ジャーナルAIを利用できる</span></label>
         </div>
         <label class="field">制限理由<textarea id="editRestrictionReason" rows="3" maxlength="500" placeholder="停止理由を入力（ユーザー画面にも表示）"></textarea></label>
         <label class="field">一時停止の終了日時<input id="editRestrictedUntil" type="datetime-local"></label>
@@ -657,15 +659,18 @@
       const user = state.users.find((item) => item.id === userId); if (!user || user.is_bot) return;
       state.selectedUser = user; const access = user.access || {};
       $('dialogPerson').innerHTML = avatarHtml(user) + '<div><h3>' + escapeHtml(user.username || '名称なし') + '</h3><small>' + escapeHtml(user.id) + '</small></div>';
-      $('editAccessEnabled').checked = access.access_enabled !== false; $('editCanStartDirect').checked = access.can_start_direct !== false; $('editCanCreateGroup').checked = access.can_create_group !== false; $('editCanBrowseUsers').checked = access.can_browse_users !== false;
+      $('editAccessEnabled').checked = access.access_enabled !== false; $('editCanStartDirect').checked = access.can_start_direct !== false; $('editCanCreateGroup').checked = access.can_create_group !== false; $('editCanBrowseUsers').checked = access.can_browse_users !== false; $('editCanReviewAccess').checked = access.can_review_access === true; $('editCanUseJournalAi').checked = access.can_use_journal_ai === true; $('editCanReviewAccess').disabled = !isHeadquarters(); $('editCanUseJournalAi').disabled = !isHeadquarters();
       $('editRestrictionReason').value = access.restriction_reason || ''; $('editRestrictedUntil').value = toLocalInput(access.restricted_until);
-      const deleted = !!access.deleted_at; document.querySelectorAll('#userForm input,#userForm textarea').forEach((input) => input.disabled = deleted); $('saveUserBtn').classList.toggle('hidden', deleted); $('removeUserBtn').classList.toggle('hidden', deleted); $('restoreUserBtn').classList.toggle('hidden', !deleted);
+      const deleted = !!access.deleted_at; document.querySelectorAll('#userForm input,#userForm textarea').forEach((input) => input.disabled = deleted); $('editCanReviewAccess').disabled = deleted || !isHeadquarters(); $('editCanUseJournalAi').disabled = deleted || !isHeadquarters(); $('saveUserBtn').classList.toggle('hidden', deleted); $('removeUserBtn').classList.toggle('hidden', deleted); $('restoreUserBtn').classList.toggle('hidden', !deleted);
       $('userDialog').showModal();
     }
     async function saveUser(event) {
       event.preventDefault(); const user = state.selectedUser; if (!can('manage_users') || !user || user.is_bot) return;
       const restricted = $('editRestrictedUntil').value;
-      await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify({access_enabled:$('editAccessEnabled').checked,can_start_direct:$('editCanStartDirect').checked,can_create_group:$('editCanCreateGroup').checked,can_browse_users:$('editCanBrowseUsers').checked,restriction_reason:$('editRestrictionReason').value.trim() || null,restricted_until:restricted ? new Date(restricted).toISOString() : null,expected_updated_at:user.access?.updated_at})}, 'ユーザー権限を保存しました');
+      const payload = {access_enabled:$('editAccessEnabled').checked,can_start_direct:$('editCanStartDirect').checked,can_create_group:$('editCanCreateGroup').checked,can_browse_users:$('editCanBrowseUsers').checked,restriction_reason:$('editRestrictionReason').value.trim() || null,restricted_until:restricted ? new Date(restricted).toISOString() : null,expected_updated_at:user.access?.updated_at};
+      if (isHeadquarters() && $('editCanReviewAccess').checked !== (user.access?.can_review_access === true)) payload.can_review_access = $('editCanReviewAccess').checked;
+      if (isHeadquarters() && $('editCanUseJournalAi').checked !== (user.access?.can_use_journal_ai === true)) payload.can_use_journal_ai = $('editCanUseJournalAi').checked;
+      await mutate('/chat-admin/users/' + encodeURIComponent(user.id), {method:'PATCH',body:JSON.stringify(payload)}, 'ユーザー権限を保存しました');
       $('userDialog').close();
     }
     async function toggleUserAccess(userId) {
@@ -747,7 +752,7 @@
     }
     const PERMISSION_KEYS = ['can_view','can_send','can_invite','can_manage'];
     const PERMISSION_LABELS = {can_view:'閲覧',can_send:'送信',can_invite:'招待',can_manage:'管理'};
-    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',bot_remove:'Botの削除',bot_restore:'Botの復元',room_trash:'ルームをゴミ箱へ移動',room_restore:'ルームの復元',room_purge:'ルームの完全削除',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元',delegation_create:'委任管理者の作成',delegation_update:'委任管理者の変更',delegation_link_issue:'委任ログインリンクの発行'};
+    const ACTION_LABELS = {user_access_update:'ユーザー権限の変更',user_sensitive_access_update:'本部限定権限の変更',user_remove:'ユーザーの削除',user_restore:'ユーザーの復元',bot_remove:'Botの削除',bot_restore:'Botの復元',room_trash:'ルームをゴミ箱へ移動',room_restore:'ルームの復元',room_purge:'ルームの完全削除',member_permissions_update:'ルーム権限の変更',member_remove:'ルームアクセスの解除',template_apply:'テンプレートの一括適用',audit_revert:'監査ログからの復元',delegation_create:'委任管理者の作成',delegation_update:'委任管理者の変更',delegation_link_issue:'委任ログインリンクの発行'};
     const REASON_LABELS = {user_deleted:'M-talkから削除済み',user_disabled:'全体で利用停止中',user_restricted:'期限付きで停止中',room_view_denied:'このルームは閲覧不可',room_send_denied:'送信不可',room_invite_denied:'招待不可',room_manage_denied:'管理不可',room_direct_locked:'1対1のため招待・管理は不可',room_trashed:'ルームがゴミ箱にある'};
     function actionLabel(value) { return ACTION_LABELS[String(value || '')] || String(value || ''); }
     function permText(perms) { return PERMISSION_KEYS.map((key) => PERMISSION_LABELS[key] + (perms && perms[key] === true ? '○' : '×')).join(' '); }
@@ -888,6 +893,7 @@
         '<dl class="kv" style="margin-top:14px">' +
         '<dt>M-talk全体</dt><dd>' + (effective.can_use_mtalk ? '<span class="badge ok">利用できる</span>' : '<span class="badge danger">利用できない</span> ' + escapeHtml(globalReason)) + '</dd>' +
         '<dt>1対1 / ルーム作成 / ユーザー参照</dt><dd>' + boolBadge(access.can_start_direct) + ' ' + boolBadge(access.can_create_group) + ' ' + boolBadge(access.can_browse_users) + '</dd>' +
+        '<dt>本部限定の付与権限</dt><dd>登録・所属承認 ' + boolBadge(access.can_review_access) + ' ／ 電子ジャーナルAI ' + boolBadge(access.can_use_journal_ai) + '</dd>' +
         '<dt>停止理由</dt><dd>' + escapeHtml(access.restriction_reason || '—') + '</dd>' +
         '<dt>停止期限</dt><dd>' + escapeHtml(formatDate(access.restricted_until)) + '</dd>' +
         '<dt>参加ルーム</dt><dd>' + total + '件' + (rooms.length < total ? '（先頭' + rooms.length + '件を表示）' : '') + '</dd></dl>';

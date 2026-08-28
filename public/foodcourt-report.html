@@ -500,6 +500,10 @@
 
   // ─── auth ───────────────────────────────────────────────────────────────────
   function getToken() { try { return AUTH ? AUTH.getToken() : ''; } catch(_) { return ''; } }
+  function isLineScopedDailyLogView() {
+    try { return new URLSearchParams(location.search).get('from') === 'line'; }
+    catch(_) { return false; }
+  }
 
   function setAuthBadge(ok) {
     const b = $('authBadge');
@@ -759,7 +763,7 @@
     $('fIssues').value       = String(existing?.issues || '');
     $('fNextActions').value  = String(existing?.next_actions || '');
     $('fMemo').value         = String(existing?.memo || '');
-    $('deleteBtn').style.display = existing ? 'inline-flex' : 'none';
+    $('deleteBtn').style.display = existing && !isLineScopedDailyLogView() ? 'inline-flex' : 'none';
     $('saveMsg').textContent = '';
     $('saveMsg').className = 'save-msg';
   }
@@ -837,7 +841,7 @@
       if (idx >= 0) logs[idx] = result.log; else logs.unshift(result.log);
       logs.sort((a, b) => String(b.log_date || '') < String(a.log_date || '') ? -1 : 1);
       $('saveMsg').textContent = '✓ 保存しました';
-      $('deleteBtn').style.display = 'inline-flex';
+      $('deleteBtn').style.display = isLineScopedDailyLogView() ? 'none' : 'inline-flex';
       renderCalendar();
       renderRecent();
     } catch(e) {
@@ -850,6 +854,7 @@
   });
 
   $('deleteBtn').addEventListener('click', async () => {
+    if (isLineScopedDailyLogView()) return;
     if (savingOrDeleting || !selectedDate) return;
     if (!confirm(`${ymd2label(selectedDate)} の日報を削除しますか？`)) return;
     savingOrDeleting = true;
@@ -919,8 +924,9 @@
       const kpis = [gv && `👥 <b>${esc(gv)}</b>`, sv && `💴 <b>${esc(sv)}</b>`].filter(Boolean).join(' ');
 
       const actHtml = acts.map(a => {
-        const catCls = `cat-${a.cat || 'other'}`;
-        const catLabel = CAT_LABEL[a.cat] || 'その他';
+        const safeCat = Object.prototype.hasOwnProperty.call(CAT_LABEL, a.cat) ? a.cat : 'other';
+        const catCls = `cat-${safeCat}`;
+        const catLabel = CAT_LABEL[safeCat];
         return `<span class="log-card-action"><span class="cat-badge ${catCls}">${esc(catLabel)}</span> ${esc(String(a.text||'').slice(0,40))}</span>`;
       }).join('');
 
@@ -946,7 +952,7 @@
   // ─── Init ────────────────────────────────────────────────────────────────────
   (async function init() {
     if (AUTH?.consumeUrlAuthParams) {
-      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report', targetStore: STORE }); }
+      try { await AUTH.consumeUrlAuthParams({ exchangeUrl: PAGES.adminApiUrl('/auth/link-login', PAGES.PROJECT_URL), adminSurface: PAGES.ADMIN_SURFACE || 'line_report', targetStore: STORE, targetScopeKind: 'foodcourt_daily_log' }); }
       catch(_) {}
     }
     const authed = !!getToken();

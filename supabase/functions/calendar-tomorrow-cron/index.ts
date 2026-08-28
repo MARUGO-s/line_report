@@ -5,6 +5,7 @@ import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { type ChatCard, postChatCardIndependent, resolveChatGroupId } from "../_shared/chat_bridge.ts"
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 import {
   addJstDays,
   buildMtalkSchedulePageUrl,
@@ -42,6 +43,9 @@ Deno.serve(async (req) => {
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
+  }
   const now = new Date()
   const jst = toJstDateParts(now)
   const today = { year: jst.year, month: jst.month, day: jst.day }

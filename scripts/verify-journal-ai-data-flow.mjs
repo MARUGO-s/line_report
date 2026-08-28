@@ -274,7 +274,7 @@ core(
     "rebuildReservationAiDailyCache",
     'path === "/reservations/ai-cache/rebuild"',
   ]) && containsAll(reservationCacheCron, [
-    "resolve_edge_cron_auth_token",
+    "isInternalCronAuthorized",
     "/reservations/ai-cache/rebuild",
   ]) && containsAll(aiAnalyze, [
     "buildReservationImportCoveragePolicy",

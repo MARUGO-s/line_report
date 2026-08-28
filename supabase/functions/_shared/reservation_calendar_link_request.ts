@@ -4,7 +4,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
-import { issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
+import { issueAdminDashboardLoginLinkToken, RESERVATION_CALENDAR_SCOPE } from './admin_dashboard_link_auth.ts'
 import { buildReservationCalendarPageUrl } from './reservation_calendar_link.ts'
 
 // 完全一致だけで起動し、通常会話中の「予約確認」を含む文章では誤作動させない。
@@ -67,6 +67,7 @@ export async function handleReservationCalendarLinkTextMessage(
       source: 'line_reservation_calendar_request',
       store_partition_key: storeKey,
       room_id: roomId,
+      scope: RESERVATION_CALENDAR_SCOPE,
     })
     const uri = buildReservationCalendarPageUrl(storeKey, { loginToken: issued.token })
     const result = await replyLineMessages(

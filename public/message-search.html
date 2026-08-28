@@ -445,7 +445,7 @@
     };
 
     function getToken() {
-      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : (localStorage.getItem(STORE_TOKEN_KEY) || '');
+      return window.LINE_REPORT_AUTH ? LINE_REPORT_AUTH.getToken() : '';
     }
 
     function setToken(value) {
@@ -453,11 +453,7 @@
       if (window.LINE_REPORT_AUTH) {
         if (next) LINE_REPORT_AUTH.setToken(next);
         else LINE_REPORT_AUTH.clearToken();
-      } else if (next) {
-        localStorage.setItem(STORE_TOKEN_KEY, next);
-      } else {
-        localStorage.removeItem(STORE_TOKEN_KEY);
-      }
+      } else if (next) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
       updateAuthState();
     }
 
@@ -835,8 +831,14 @@
     });
 
     dom.saveTokenBtn.addEventListener('click', async function() {
-      setToken(dom.tokenInput.value);
       try {
+        if (!window.LINE_REPORT_AUTH) throw new Error('安全なログイン機能を読み込めませんでした。再読み込みしてください。');
+        await LINE_REPORT_AUTH.loginWithToken(dom.tokenInput.value, {
+          sessionUrl: LINE_REPORT_PAGES.adminApiUrl('/auth/session', FIXED_PROJECT_URL),
+          adminSurface: LINE_REPORT_PAGES.ADMIN_SURFACE || 'line_report',
+        });
+        dom.tokenInput.value = '';
+        updateAuthState();
         await loadRooms();
         dom.statusText.textContent = 'ルーム一覧を読み込みました。';
         dom.statusText.className = 'empty';

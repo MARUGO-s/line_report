@@ -130,10 +130,19 @@ import {
   issueAdminDashboardLoginLinkToken,
   issueAdminDashboardSessionToken,
   CHAT_MEDIA_VIEW_SCOPE,
+  CHAT_JOURNAL_AI_SCOPE,
+  FOODCOURT_DAILY_LOG_SCOPE,
+  FOODCOURT_DASHBOARD_SCOPE,
+  FOODCOURT_WEEKLY_VIEW_SCOPE,
+  PETTY_CASH_SCOPE,
+  RECEIPT_ANALYTICS_SCOPE,
   REUSABLE_VIEW_LINK_TTL_SEC,
+  RESERVATION_CALENDAR_SCOPE,
   revokeAdminDashboardSessionToken,
   revokeAllAdminDashboardAuthTokens,
   ROOM_CONFIG_SCOPE,
+  STORE_LINK_SCOPES,
+  validateChatScopedSessionAccess,
 } from "../_shared/admin_dashboard_link_auth.ts"
 import {
   CHAT_ADMIN_CAPABILITIES,
@@ -204,7 +213,11 @@ import {
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import JSZip from "https://esm.sh/jszip@3.10.1"
 import { isMtalkSyntheticRoomId, mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
-import { ensureMtalkRoomSettings, resolveMtalkRoomStoreKey } from "../_shared/mtalk_room_settings.ts"
+import {
+  ensureMtalkRoomSettings,
+  mtalkUserCanAccessStore,
+  resolveMtalkRoomStoreKey,
+} from "../_shared/mtalk_room_settings.ts"
 
 const ADMIN_SURFACE_LEGACY = "legacy"
 const ADMIN_SURFACE_LINE_REPORT = "line_report"
@@ -216,6 +229,70 @@ const corsHeaders = {
 }
 
 const FOODCOURT_WEEKLY_REPORT_PAGE_BASE = "https://marugo-s.github.io/line_report/foodcourt-weekly-report.html"
+
+const STORE_LINK_ALLOWED_REQUESTS: Readonly<Record<string, ReadonlySet<string>>> = {
+  [RESERVATION_CALENDAR_SCOPE]: new Set([
+    "GET /reservations/calendar",
+    "GET /reservations/search",
+  ]),
+  [PETTY_CASH_SCOPE]: new Set([
+    "GET /petty-cash",
+    "GET /petty-cash/receipt-media",
+  ]),
+  [RECEIPT_ANALYTICS_SCOPE]: new Set([
+    "GET /analytics/holidays",
+    "GET /analytics/monthly",
+    "GET /weather/daily",
+    "GET /receipts/sales",
+    "GET /receipts/sales-budget",
+    "GET /receipts/sales-daily-budget",
+    "GET /receipts/sales-manual-days",
+    "GET /receipts/sales-manual-months",
+  ]),
+  [FOODCOURT_DASHBOARD_SCOPE]: new Set([
+    "GET /foodcourt/reports",
+    "GET /foodcourt/daily-summary",
+    "GET /foodcourt/daily-summary/list",
+    "GET /foodcourt/weekly-report",
+    "GET /foodcourt/weekly-report/list",
+    "GET /foodcourt/period-summary",
+    "GET /foodcourt/qa-history",
+    "POST /foodcourt/ask",
+  ]),
+  [FOODCOURT_DAILY_LOG_SCOPE]: new Set([
+    "GET /foodcourt/daily-logs",
+    "GET /foodcourt/reports",
+    "PUT /foodcourt/daily-logs",
+  ]),
+  [FOODCOURT_WEEKLY_VIEW_SCOPE]: new Set([
+    "GET /foodcourt/weekly-report",
+  ]),
+  [CHAT_JOURNAL_AI_SCOPE]: new Set([
+    "GET /pos-journals/saved-reports",
+    "GET /pos-journals/saved-reports/item",
+    "GET /pos-journals/product-search",
+    "GET /pos-journals/product-cohort",
+    "POST /pos-journals/cohort-compare",
+  ]),
+}
+
+// CRON_AUTH_TOKEN は「内部処理なら何でもできる鍵」にはしない。現在この関数へ
+// cron が直接委譲する2処理だけを明示し、管理APIの他経路への横展開を拒否する。
+const CRON_ALLOWED_REQUESTS = new Set<string>([
+  "POST /reservations/ai-cache/rebuild",
+  "POST /foodcourt/weekly-report",
+])
+
+function isStoreLinkRequestAllowed(scopeKind: string | null, method: string, path: string): boolean {
+  if (method === "POST" && path === "/auth/logout") return true
+  if (!scopeKind || !STORE_LINK_SCOPES.has(scopeKind)) return false
+  return STORE_LINK_ALLOWED_REQUESTS[scopeKind]?.has(`${method.toUpperCase()} ${path}`) === true
+}
+
+const GENERIC_LINK_LOGIN_SCOPES = [
+  ...[...STORE_LINK_SCOPES].filter((scope) => scope !== CHAT_JOURNAL_AI_SCOPE),
+  MTALK_ADMIN_SCOPE,
+]
 
 async function resolveFoodCourtPassingAwareCacheVersion(
   supabase: ReturnType<typeof createClient>,
@@ -275,10 +352,16 @@ function weeklyReportHtml(report: string): string {
 }
 
 async function buildFoodCourtWeeklyReportLink(supabase: ReturnType<typeof createClient>, storeKey: string, weekStart: string): Promise<string> {
-  // 閲覧専用（設定変更なし）のレポートリンクなので、単一使用・期限つきにせず何度でも開けるようにする。
+  // 閲覧専用（設定変更なし）なので35日間は再利用できる。実質無期限にはせず、
+  // 交換後セッションも30分に限定する。
   const issued = await issueAdminDashboardLoginLinkToken(
     supabase,
-    { source: "line_foodcourt_weekly", store_partition_key: storeKey, reusable: true },
+    {
+      source: "line_foodcourt_weekly",
+      store_partition_key: storeKey,
+      scope: FOODCOURT_WEEKLY_VIEW_SCOPE,
+      reusable: true,
+    },
     { ttlSeconds: REUSABLE_VIEW_LINK_TTL_SEC },
   )
   const params = new URLSearchParams({ store_key: storeKey, week_start: weekStart, from: "line", lt: issued.token })
@@ -1121,6 +1204,12 @@ Deno.serve(async (req, info) => {
     rateLimit.maxRequests,
     rateLimit.windowMs,
   )
+  if (!rateLimitResult.available) {
+    return json({
+      error: "Request protection is temporarily unavailable. Please retry later.",
+      code: "rate_limit_unavailable",
+    }, 503)
+  }
   if (!rateLimitResult.allowed) {
     return json({
       error: "Too many requests. Please retry later.",
@@ -1135,6 +1224,9 @@ Deno.serve(async (req, info) => {
       const authResult = await authenticate(req, supabase, fallbackToken)
       if (!authResult.ok) {
         return json({ error: authResult.message }, authResult.status)
+      }
+      if (authResult.scopeKind === "cron") {
+        return json({ error: "この内部実行権限に許可された操作ではありません。" }, 403)
       }
       return json({
         ok: true,
@@ -1165,6 +1257,7 @@ Deno.serve(async (req, info) => {
       const adminSurface = resolveAdminSurface(req, url)
       const session = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, {
         rememberLogin,
+        requiredScopes: GENERIC_LINK_LOGIN_SCOPES,
         metadata: {
           admin_surface: adminSurface,
           exchanged_via: "admin_api",
@@ -1188,7 +1281,7 @@ Deno.serve(async (req, info) => {
         expires_at: session.expires_at,
       }, 200)
     } catch (e) {
-      if (e instanceof Error && /invalid|expired/i.test(e.message)) {
+      if (e instanceof Error && /invalid|expired|already used|cannot be used/i.test(e.message)) {
         return json({ error: e.message }, 401)
       }
       const err = asAppError(e)
@@ -1424,9 +1517,19 @@ Deno.serve(async (req, info) => {
     try { return json(await issueChatJournalLoginLink(req, workReq, supabase), 200) }
     catch (e) { const err = asAppError(e); return json({ error: err.message }, err.status) }
   }
+  if (req.method === "POST" && path === "/auth/chat-journal-link-login") {
+    try { return json(await exchangeChatJournalLoginLink(workReq, supabase), 200) }
+    catch (e) {
+      if (e instanceof Error) return json({ error: "電子ジャーナルAIリンクが無効または期限切れです。" }, 401)
+      const err = asAppError(e); return json({ error: err.message }, err.status)
+    }
+  }
   if (req.method === "POST" && path === "/auth/chat-media-login") {
     try { return json(await exchangeChatMediaViewLink(workReq, supabase), 200) }
-    catch (e) { const err = asAppError(e); return json({ error: err.message }, err.status) }
+    catch (e) {
+      if (e instanceof Error) return json({ error: "メディア閲覧リンクが無効または期限切れです。" }, 401)
+      const err = asAppError(e); return json({ error: err.message }, err.status)
+    }
   }
   if (req.method === "GET" && path === "/chat-media-view") {
     try { return json(await fetchChatMediaView(req, supabase, url), 200) }
@@ -1437,6 +1540,13 @@ Deno.serve(async (req, info) => {
   const authResult = await authenticate(req, supabase, fallbackAdminToken)
   if (!authResult.ok) {
     return json({ error: authResult.message }, authResult.status)
+  }
+
+  if (
+    authResult.scopeKind === "cron" &&
+    !CRON_ALLOWED_REQUESTS.has(`${req.method.toUpperCase()} ${path}`)
+  ) {
+    return json({ error: "この内部実行権限に許可された操作ではありません。" }, 403)
   }
 
   // 委任されたM-talk管理セッションは、売上・予約・資料・店舗設定など通常管理APIへ
@@ -1455,6 +1565,9 @@ Deno.serve(async (req, info) => {
   // 生adminトークン由来(storeScope=null)は全店アクセスのまま(従来どおり)。
   const storeScope = authResult.storeScope
   if (storeScope) {
+    if (!isStoreLinkRequestAllowed(authResult.scopeKind, req.method, path)) {
+      return json({ error: "この店舗リンクに許可された操作ではありません。" }, 403)
+    }
     const STORE_SCOPED_ALLOWED_PATHS = new Set<string>([
       "/auth/logout",
       "/reservations/calendar",
@@ -3173,7 +3286,20 @@ Deno.serve(async (req, info) => {
       if (!storeKey) return json({ error: "store_key is required." }, 400)
       const logDate = String(body.log_date ?? "").slice(0, 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(logDate)) return json({ error: "log_date (YYYY-MM-DD) is required." }, 400)
-      const actions = Array.isArray(body.actions) ? body.actions : []
+      const actionInput = Array.isArray(body.actions) ? body.actions : []
+      if (actionInput.length > 50) return json({ error: "actions must contain at most 50 items." }, 400)
+      const allowedActionCategories = new Set(["promotion", "menu", "service", "environment", "staff", "other"])
+      const actions: Array<{ cat: string; text: string }> = []
+      for (const item of actionInput) {
+        if (!isRecord(item)) return json({ error: "Each action must be an object." }, 400)
+        const text = String(item.text ?? "").trim().slice(0, 2000)
+        if (!text) continue
+        const requestedCategory = String(item.cat ?? "other").trim()
+        actions.push({
+          cat: allowedActionCategories.has(requestedCategory) ? requestedCategory : "other",
+          text,
+        })
+      }
       const now = new Date().toISOString()
       const { data, error } = await supabase
         .from("foodcourt_daily_logs")
@@ -4485,7 +4611,7 @@ async function fetchChatAdminState(
       .limit(5000),
     supabase
       .from("chat_user_access")
-      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
+      .select("user_id, access_enabled, can_start_direct, can_create_group, can_browse_users, can_use_journal_ai, can_review_access, default_can_send, signup_status, restriction_reason, restricted_until, deleted_at, updated_at, updated_by")
       .limit(5000),
     supabase
       .from("chat_groups")
@@ -4621,6 +4747,8 @@ async function fetchChatAdminState(
         can_start_direct: access.can_start_direct !== false,
         can_create_group: access.can_create_group !== false,
         can_browse_users: access.can_browse_users !== false,
+        can_use_journal_ai: access.can_use_journal_ai === true,
+        can_review_access: access.can_review_access === true,
         default_can_send: access.default_can_send !== false,
         signup_status: String(access.signup_status || "approved"),
         restriction_reason: access.restriction_reason ?? null,
@@ -4698,12 +4826,18 @@ async function updateChatAdminUserAccess(
 ): Promise<Record<string, unknown>> {
   const updateReason = Object.prototype.hasOwnProperty.call(body, "restriction_reason")
   const updateUntil = Object.prototype.hasOwnProperty.call(body, "restricted_until")
+  const updateJournalAi = Object.prototype.hasOwnProperty.call(body, "can_use_journal_ai")
+  const updateReviewAccess = Object.prototype.hasOwnProperty.call(body, "can_review_access")
+  const updateSensitiveAccess = updateJournalAi || updateReviewAccess
+  if (updateSensitiveAccess && !authority.isFullAdmin) {
+    throw { status: 403, message: "承認・電子ジャーナルAI権限を変更できるのは本部管理者だけです。" } satisfies AppError
+  }
   const reason = updateReason ? (String(body.restriction_reason ?? "").trim() || null) : null
   if (reason && reason.length > 500) {
     throw { status: 400, message: "制限理由は500文字以内にしてください。" } satisfies AppError
   }
 
-  const args = {
+  const args: Record<string, unknown> = {
     p_user_id: userId,
     p_access_enabled: chatAdminOptionalBoolean(body.access_enabled, "access_enabled"),
     p_can_start_direct: chatAdminOptionalBoolean(body.can_start_direct, "can_start_direct"),
@@ -4716,11 +4850,19 @@ async function updateChatAdminUserAccess(
     p_expected_updated_at: chatAdminExpectedTimestamp(body.expected_updated_at),
     p_actor: actor,
   }
+  if (updateSensitiveAccess) {
+    args.p_can_use_journal_ai = updateJournalAi
+      ? chatAdminOptionalBoolean(body.can_use_journal_ai, "can_use_journal_ai")
+      : null
+    args.p_can_review_access = updateReviewAccess
+      ? chatAdminOptionalBoolean(body.can_review_access, "can_review_access")
+      : null
+  }
   const { data, error } = await runChatAdminMutation(
     supabase,
     authority,
     "update_user_access",
-    "chat_admin_update_user_access",
+    updateSensitiveAccess ? "chat_admin_update_user_access_secure" : "chat_admin_update_user_access",
     args,
   )
   if (error) {
@@ -5301,7 +5443,7 @@ async function authenticateChatMember(
   req: Request,
   supabase: ReturnType<typeof createClient<any>>,
   groupId: number,
-  capability: "view" | "send" | "manage" = "view",
+  capability: "view" | "send" | "manage" | "journal_ai" = "view",
 ): Promise<string> {
   const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers.get("Authorization") ?? "").trim())?.[1]?.trim() ?? ""
   if (!jwt) {
@@ -5314,7 +5456,7 @@ async function authenticateChatMember(
   }
   const { data: access, error: accessError } = await supabase
     .from("chat_user_access")
-    .select("access_enabled, restricted_until, deleted_at")
+    .select("access_enabled, restricted_until, deleted_at, can_use_journal_ai")
     .eq("user_id", userId)
     .maybeSingle()
   if (accessError) {
@@ -5323,6 +5465,9 @@ async function authenticateChatMember(
   const restrictedUntil = access?.restricted_until ? new Date(String(access.restricted_until)).getTime() : 0
   if (!access || access.access_enabled !== true || access.deleted_at || restrictedUntil > Date.now()) {
     throw { status: 403, message: "M-talkの利用が停止されています。" } satisfies AppError
+  }
+  if (capability === "journal_ai" && access.can_use_journal_ai !== true) {
+    throw { status: 403, message: "電子ジャーナルAIの利用権限がありません。管理者へ確認してください。" } satisfies AppError
   }
 
   const { data: member, error: memberError } = await supabase
@@ -5347,6 +5492,32 @@ async function authenticateChatMember(
     throw { status: 403, message: "このルームを管理する権限がありません。" } satisfies AppError
   }
   return userId
+}
+
+async function requireMtalkStoreAccess(
+  supabase: ReturnType<typeof createClient<any>>,
+  userId: string,
+  storeKey: string | null,
+): Promise<string> {
+  const key = String(storeKey ?? "").trim()
+  if (!key || !await mtalkUserCanAccessStore(supabase, userId, key)) {
+    throw { status: 403, message: "この店舗の機能を利用する権限がありません。" } satisfies AppError
+  }
+  return key
+}
+
+async function requireMtalkRoomStoreBinding(
+  supabase: ReturnType<typeof createClient<any>>,
+  userId: string,
+  groupId: number,
+  storeKey: string | null,
+): Promise<string> {
+  const key = await requireMtalkStoreAccess(supabase, userId, storeKey)
+  const currentRoomStore = await resolveMtalkRoomStoreKey(supabase, groupId)
+  if (currentRoomStore.ambiguous || currentRoomStore.storeKey !== key) {
+    throw { status: 403, message: "このルームの店舗Botと対象店舗が一致しません。" } satisfies AppError
+  }
+  return key
 }
 
 async function resolveChatMediaRoom(
@@ -5399,6 +5570,7 @@ async function archiveChatMedia(
   }
   const room = await resolveChatMediaRoom(supabase, groupId)
   if (!room) return { saved: false, reason: "not_linked_room" }
+  await requireMtalkRoomStoreBinding(supabase, userId, groupId, room.storeKey)
   const { data: blob, error: downloadError } = await supabase.storage.from("chat-images").download(imagePath)
   if (downloadError || !blob) {
     throw { status: 500, message: `送信画像の取得に失敗しました: ${downloadError?.message ?? "unknown error"}` } satisfies AppError
@@ -5423,10 +5595,8 @@ async function archiveChatMedia(
 /**
  * M-talk の1対1から、ジャーナルレポートへ入るためのワンタイムログインリンクを出す。
  *
- * jnl2txt.html は ?lt=<token> を見て /auth/link-login で交換するので、
- * 画面側は無改修で入れる。発行するセッションは店舗スコープ付きなので、
- * STORE_SCOPED_ALLOWED_PATHS の範囲（保存済みレポート・AI・予約など）に限られ、
- * 全店アクセスにはならない。
+ * 発行トークンには専用scopeを付け、専用交換APIで30分の短命セッションへ交換する。
+ * 保存済み売上・商品分析・AI以外の予約、資料、店舗設定、書込APIには利用できない。
  *
  * 条件は M-talk 側と揃える。1対1であること、その部屋の参加者であること、
  * 店舗Botがいて店舗が一意に決まること。
@@ -5441,7 +5611,7 @@ async function issueChatJournalLoginLink(
   if (!Number.isSafeInteger(groupId) || groupId <= 0) {
     throw { status: 400, message: "group_id is required." } satisfies AppError
   }
-  const userId = await authenticateChatMember(req, supabase, groupId, "view")
+  const userId = await authenticateChatMember(req, supabase, groupId, "journal_ai")
 
   // 売上の質問と回答が他の人間に見えるのを避けたいだけなので、判定は
   // is_direct フラグ（自動作成のDMかどうか）ではなく「人間メンバーが
@@ -5475,8 +5645,10 @@ async function issueChatJournalLoginLink(
         : "このトークには店舗Botがいないため、電子ジャーナルへ質問できません。",
     } satisfies AppError
   }
+  await requireMtalkStoreAccess(supabase, userId, resolved.storeKey)
 
   const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+    scope: CHAT_JOURNAL_AI_SCOPE,
     store_partition_key: resolved.storeKey,
     chat_user_id: userId,
     group_id: String(groupId),
@@ -5489,6 +5661,47 @@ async function issueChatJournalLoginLink(
   }
 }
 
+async function exchangeChatJournalLoginLink(
+  workReq: Request,
+  supabase: ReturnType<typeof createClient<any>>,
+): Promise<Record<string, unknown>> {
+  const body = await parseJson(workReq)
+  const loginToken = String(isRecord(body) ? body.login_token ?? "" : "").trim()
+  if (!loginToken) throw { status: 400, message: "login_token is required." } satisfies AppError
+  const issued = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, {
+    rememberLogin: false,
+    ttlSeconds: 30 * 60,
+    requiredScopes: [CHAT_JOURNAL_AI_SCOPE],
+    metadata: { exchanged_via: "chat_journal_ai" },
+  })
+  const session = await authenticateAdminDashboardSessionToken(supabase, issued.token)
+  const groupId = Number(session.metadata.group_id)
+  const chatUserId = String(session.metadata.chat_user_id ?? "").trim()
+  const accessStillValid = session.ok && await validateChatScopedSessionAccess(
+    supabase,
+    session.metadata,
+    { requireJournalAi: true },
+  )
+  if (
+    !session.ok ||
+    !accessStillValid ||
+    session.scopeKind !== CHAT_JOURNAL_AI_SCOPE ||
+    !session.storeScope ||
+    !Number.isSafeInteger(groupId) ||
+    groupId <= 0 ||
+    !chatUserId
+  ) {
+    await revokeAdminDashboardSessionToken(supabase, issued.token)
+    throw { status: 401, message: "このリンクは電子ジャーナルAI用ではありません。" } satisfies AppError
+  }
+  return {
+    session_token: issued.token,
+    expires_at: issued.expires_at,
+    store_key: session.storeScope,
+    group_id: groupId,
+  }
+}
+
 async function issueChatMediaViewLink(req: Request, workReq: Request, supabase: ReturnType<typeof createClient<any>>): Promise<Record<string, unknown>> {
   const body = await parseJson(workReq)
   const groupId = Number(isRecord(body) ? body.group_id : 0)
@@ -5496,6 +5709,7 @@ async function issueChatMediaViewLink(req: Request, workReq: Request, supabase: 
   const userId = await authenticateChatMember(req, supabase, groupId, "view")
   const room = await resolveChatMediaRoom(supabase, groupId)
   if (!room) throw { status: 404, message: "このトークには対応するBotメディアが設定されていません。" } satisfies AppError
+  await requireMtalkRoomStoreBinding(supabase, userId, groupId, room.storeKey)
   const issued = await issueAdminDashboardLoginLinkToken(supabase, {
     scope: CHAT_MEDIA_VIEW_SCOPE, group_id: String(groupId), room_id: room.roomId, store_partition_key: room.storeKey, chat_user_id: userId, capabilities: ["media_read"],
   }, { ttlSeconds: 5 * 60 })
@@ -5506,9 +5720,14 @@ async function exchangeChatMediaViewLink(workReq: Request, supabase: ReturnType<
   const body = await parseJson(workReq)
   const loginToken = String(isRecord(body) ? body.login_token ?? "" : "").trim()
   if (!loginToken) throw { status: 400, message: "login_token is required." } satisfies AppError
-  const issued = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, { rememberLogin: false, ttlSeconds: 15 * 60 })
+  const issued = await exchangeAdminDashboardLoginLinkToken(supabase, loginToken, {
+    rememberLogin: false,
+    ttlSeconds: 15 * 60,
+    requiredScopes: [CHAT_MEDIA_VIEW_SCOPE],
+  })
   const session = await authenticateAdminDashboardSessionToken(supabase, issued.token)
-  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || (!session.roomScope && !session.storeScope)) {
+  const accessStillValid = session.ok && await validateChatScopedSessionAccess(supabase, session.metadata)
+  if (!session.ok || !accessStillValid || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || !session.roomScope || !session.storeScope) {
     await revokeAdminDashboardSessionToken(supabase, issued.token)
     throw { status: 401, message: "このリンクはM-talkメディア閲覧用ではありません。" } satisfies AppError
   }
@@ -5517,7 +5736,8 @@ async function exchangeChatMediaViewLink(workReq: Request, supabase: ReturnType<
 
 async function fetchChatMediaView(req: Request, supabase: ReturnType<typeof createClient<any>>, url: URL): Promise<Record<string, unknown>> {
   const session = await authenticateAdminDashboardSessionToken(supabase, String(req.headers.get("x-admin-token") ?? "").trim())
-  if (!session.ok || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || (!session.roomScope && !session.storeScope)) {
+  const accessStillValid = session.ok && await validateChatScopedSessionAccess(supabase, session.metadata)
+  if (!session.ok || !accessStillValid || session.scopeKind !== CHAT_MEDIA_VIEW_SCOPE || !session.roomScope || !session.storeScope) {
     throw { status: 401, message: "メディア閲覧リンクが無効または期限切れです。" } satisfies AppError
   }
   const limit = clampInt(url.searchParams.get("limit"), 24, 1, 60)
@@ -5622,8 +5842,11 @@ async function requireChatScheduleMember(
   if (!Number.isSafeInteger(groupId) || groupId <= 0) {
     throw { status: 400, message: "group_id is required." } satisfies AppError
   }
-  await authenticateChatMember(req, supabase, groupId, capability)
+  const userId = await authenticateChatMember(req, supabase, groupId, capability)
   const resolved = await resolveMtalkRoomStoreKey(supabase, groupId)
+  if (resolved.storeKey) {
+    await requireMtalkStoreAccess(supabase, userId, resolved.storeKey)
+  }
   return {
     groupId,
     storeKey: resolved.storeKey,
@@ -5965,7 +6188,14 @@ async function handleChatRoomConfig(
   if (!Number.isSafeInteger(groupId) || groupId <= 0) {
     throw { status: 400, message: "group_id is required." } satisfies AppError
   }
-  await authenticateChatMember(req, supabase, groupId, req.method === "GET" ? "view" : "manage")
+  const userId = await authenticateChatMember(req, supabase, groupId, req.method === "GET" ? "view" : "manage")
+  const resolved = await resolveMtalkRoomStoreKey(supabase, groupId)
+  if (resolved.ambiguous) {
+    throw { status: 403, message: "複数店舗のBotがいるルームは設定できません。" } satisfies AppError
+  }
+  if (resolved.storeKey) {
+    await requireMtalkStoreAccess(supabase, userId, resolved.storeKey)
+  }
   const ensured = await ensureMtalkRoomSettings(supabase, groupId)
   if (!ensured) throw { status: 500, message: "ルーム設定を作れませんでした。" } satisfies AppError
   if (req.method === "PUT") {
@@ -6052,8 +6282,29 @@ async function authenticate(
         actorLabel: delegated.authority.label,
       }
     }
-    if (session.scopeKind !== null && session.scopeKind !== ROOM_CONFIG_SCOPE) {
+    if (
+      session.scopeKind === CHAT_JOURNAL_AI_SCOPE &&
+      !await validateChatScopedSessionAccess(supabase, session.metadata, { requireJournalAi: true })
+    ) {
+      return { ok: false, status: 403, message: "電子ジャーナルAI権限が失効しました。" }
+    }
+    if (
+      session.scopeKind !== null &&
+      session.scopeKind !== ROOM_CONFIG_SCOPE &&
+      !STORE_LINK_SCOPES.has(session.scopeKind)
+    ) {
       return { ok: false, status: 403, message: "この管理スコープは利用できません。" }
+    }
+    // 旧形式の「店舗だけ・用途なし」セッションは複数管理画面へ横展開できたため廃止。
+    // 新規発行元は必ず用途別scopeを付ける。既発行トークンもここで即時無効化される。
+    if (session.storeScope && session.scopeKind === null) {
+      return { ok: false, status: 403, message: "この旧形式の店舗リンクは無効です。新しいリンクを発行してください。" }
+    }
+    if (session.scopeKind && STORE_LINK_SCOPES.has(session.scopeKind) && !session.storeScope) {
+      return { ok: false, status: 403, message: "店舗情報のないリンクは利用できません。" }
+    }
+    if (session.scopeKind === ROOM_CONFIG_SCOPE && (!session.roomScope || session.storeScope)) {
+      return { ok: false, status: 403, message: "ルーム情報のない設定リンクは利用できません。" }
     }
     // ログインリンク由来のセッションは storeScope か roomScope を持つ＝その店舗/ルームだけに制限。
     return {
@@ -15352,6 +15603,28 @@ const STORE_KNOWLEDGE_GEMINI_TOTAL_BUDGET_MS = 140_000
 const STORE_KNOWLEDGE_BATCH_MAX_ITEMS = 20
 
 /**
+ * 店舗ナレッジの解析前検査。Officeファイルは圧縮サイズだけでなく、展開後サイズ・
+ * 圧縮率・entry数・必須XML・パストラバーサルを検査してから展開する。
+ * 古いバイナリ .xls は安全なZIP事前検査ができないため、.xlsxへ変換してもらう。
+ */
+async function validateStoreKnowledgePayloadSafety(
+  kind: ReturnType<typeof classifyKnowledgeFile>,
+  bytes: Uint8Array,
+): Promise<string | null> {
+  if (kind === "image") return null
+  if (kind === "pdf") return await validateDocumentPayloadSafety(bytes, "application/pdf")
+  if (kind === "document") return await validateDocumentPayloadSafety(bytes, DOCX_MIME_TYPE)
+  if (kind === "spreadsheet") {
+    if (!hasZipMagicHeader(bytes)) {
+      return "Excelファイルは安全確認可能な .xlsx 形式で保存してください（旧 .xls は利用できません）。"
+    }
+    return await validateDocumentPayloadSafety(bytes, XLSX_MIME_TYPE)
+  }
+  if (kind === "text") return await validateDocumentPayloadSafety(bytes, "text/plain")
+  return "対応していないファイル形式です。"
+}
+
+/**
  * 店舗ナレッジ専用の店舗キー正規化。
  *
  * POS 本体には既存データとの互換性のため大文字小文字を保持する経路があるが、
@@ -15938,6 +16211,13 @@ async function uploadStoreKnowledgeFile(
   supabase: ReturnType<typeof createClient>,
   storeScope: string | null,
 ) {
+  const contentLength = Number(req.headers.get("content-length") ?? "")
+  if (
+    Number.isFinite(contentLength) &&
+    contentLength > STORE_KNOWLEDGE_MAX_FILE_BYTES + 1024 * 1024
+  ) {
+    throw { status: 413, message: "アップロード容量が上限を超えています。" } satisfies AppError
+  }
   let formData: FormData
   try {
     formData = await req.formData()
@@ -15957,6 +16237,13 @@ async function uploadStoreKnowledgeFile(
       message: `ファイルサイズは1件${Math.floor(STORE_KNOWLEDGE_MAX_FILE_BYTES / 1024 / 1024)}MBまでです。`,
     } satisfies AppError
   }
+  const kind = classifyKnowledgeFile(file.name || "", file.type || "")
+  if (kind === "unsupported") {
+    throw {
+      status: 400,
+      message: "対応していないファイル形式です。画像・PDF・Excel（.xlsx）・Word・テキストをご利用ください。",
+    } satisfies AppError
+  }
   const requestedStore = toSafeString(formData.get("store_key"))
   if (
     storeScope && requestedStore &&
@@ -15966,6 +16253,10 @@ async function uploadStoreKnowledgeFile(
   }
   const storeKey = normalizeStoreKnowledgeStoreKey(storeScope || requestedStore)
   const bytes = new Uint8Array(await file.arrayBuffer())
+  const safetyError = await validateStoreKnowledgePayloadSafety(kind, bytes)
+  if (safetyError) {
+    throw { status: 400, message: safetyError } satisfies AppError
+  }
   const digest = await crypto.subtle.digest("SHA-256", bytes)
   const sha256Hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -16154,10 +16445,13 @@ async function callKnowledgeGemini(
     }
     try {
       const endpoint =
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiApiKey,
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(remainingMs),
       })
@@ -16232,6 +16526,13 @@ async function analyzeStoreKnowledgeImage(req: Request) {
       message: "GEMINI_API_KEY is not configured",
     } satisfies AppError
   }
+  const contentLength = Number(req.headers.get("content-length") ?? "")
+  if (
+    Number.isFinite(contentLength) &&
+    contentLength > STORE_KNOWLEDGE_MAX_FILE_BYTES + 1024 * 1024
+  ) {
+    throw { status: 413, message: "アップロード容量が上限を超えています。" } satisfies AppError
+  }
   let formData: FormData
   try {
     formData = await req.formData()
@@ -16257,8 +16558,12 @@ async function analyzeStoreKnowledgeImage(req: Request) {
   if (kind === "unsupported") {
     throw {
       status: 400,
-      message: "対応していないファイル形式です。画像・PDF・Excel・Word・テキストをご利用ください。",
+      message: "対応していないファイル形式です。画像・PDF・Excel（.xlsx）・Word・テキストをご利用ください。",
     } satisfies AppError
+  }
+  const safetyError = await validateStoreKnowledgePayloadSafety(kind, bytes)
+  if (safetyError) {
+    throw { status: 400, message: safetyError } satisfies AppError
   }
 
   // Excel / Word / テキスト / PDF はサーバ側でテキスト化してから text パートとして渡す。
@@ -17493,7 +17798,14 @@ function extractClientIp(headers: Headers, info?: { remoteAddr?: { hostname?: st
 
 function resolveAdminRateLimit(method: string, path: string): { maxRequests: number; windowMs: number } {
   // 資格情報を提示する認証エンドポイントは総当たりの標的。既定(180/分)より厳しくする。
-  if (method === "POST" && (path === "/auth/link-login" || path === "/auth/session" || path === "/auth/room-config-login" || path === "/auth/verify")) {
+  if (method === "POST" && (
+    path === "/auth/link-login" ||
+    path === "/auth/chat-journal-link-login" ||
+    path === "/auth/chat-media-login" ||
+    path === "/auth/session" ||
+    path === "/auth/room-config-login" ||
+    path === "/auth/verify"
+  )) {
     return {
       maxRequests: 20,
       windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
@@ -17522,7 +17834,7 @@ async function consumeRateLimitFromDb(
   bucket: string,
   maxRequests: number,
   windowMs: number,
-): Promise<{ allowed: boolean; retryAfterMs: number }> {
+): Promise<{ available: boolean; allowed: boolean; retryAfterMs: number }> {
   const windowSeconds = Math.max(1, Math.floor(windowMs / 1000))
   try {
     const { data, error } = await supabase.rpc("consume_security_rate_limit", {
@@ -17532,16 +17844,20 @@ async function consumeRateLimitFromDb(
     })
     if (error) {
       console.error("Rate limit RPC failed (admin-api):", error.message)
-      return { allowed: true, retryAfterMs: windowMs }
+      return { available: false, allowed: false, retryAfterMs: windowMs }
     }
     const row = Array.isArray(data) ? data[0] : null
+    if (!row || typeof row.allowed !== "boolean") {
+      console.error("Rate limit RPC returned an invalid response (admin-api).")
+      return { available: false, allowed: false, retryAfterMs: windowMs }
+    }
     const allowed = row?.allowed !== false
     const retryAfterSeconds = Number(row?.retry_after_seconds ?? windowSeconds)
     const retryAfterMs = Math.max(1000, retryAfterSeconds * 1000)
-    return { allowed, retryAfterMs }
+    return { available: true, allowed, retryAfterMs }
   } catch (error) {
     console.error("Unexpected rate limit error (admin-api):", error)
-    return { allowed: true, retryAfterMs: windowMs }
+    return { available: false, allowed: false, retryAfterMs: windowMs }
   }
 }
 

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
+import { mtalkUserCanAccessStore, resolveMtalkRoomStoreKey } from "./mtalk_room_settings.ts"
 
 const TOKEN_TABLE = "admin_dashboard_auth_tokens"
 const LOGIN_LINK_PREFIX = "lrlt_"
@@ -7,14 +8,34 @@ const SESSION_PREFIX = "lrst_"
 export const ROOM_CONFIG_SCOPE = "room_config"
 // 既発行の旧M-talkメディア閲覧トークンを、期限まで通常の管理APIから遮断するためだけに残す。
 export const CHAT_MEDIA_VIEW_SCOPE = "chat_media_view"
+// 店舗リンクは用途ごとに分離する。store_partition_key だけの旧リンクは
+// admin-api 側で拒否し、別画面・書込APIへの横展開を防ぐ。
+export const RESERVATION_CALENDAR_SCOPE = "reservation_calendar"
+export const PETTY_CASH_SCOPE = "petty_cash"
+export const RECEIPT_ANALYTICS_SCOPE = "receipt_analytics"
+export const FOODCOURT_DASHBOARD_SCOPE = "foodcourt_dashboard"
+export const FOODCOURT_DAILY_LOG_SCOPE = "foodcourt_daily_log"
+export const FOODCOURT_WEEKLY_VIEW_SCOPE = "foodcourt_weekly_view"
+export const CHAT_JOURNAL_AI_SCOPE = "chat_journal_ai"
+
+export const STORE_LINK_SCOPES = new Set<string>([
+  RESERVATION_CALENDAR_SCOPE,
+  PETTY_CASH_SCOPE,
+  RECEIPT_ANALYTICS_SCOPE,
+  FOODCOURT_DASHBOARD_SCOPE,
+  FOODCOURT_DAILY_LOG_SCOPE,
+  FOODCOURT_WEEKLY_VIEW_SCOPE,
+  CHAT_JOURNAL_AI_SCOPE,
+])
 // M-talkから開く店舗Botメディア専用の、閲覧のみ・短命セッション。
 // ログインリンク(lt)はLINEに平文配信されるため漏えい窓を短く。単一使用(used_at)と併用。
 const LOGIN_LINK_TTL_SEC = 24 * 60 * 60
 const SESSION_TTL_REMEMBER_SEC = 3 * 24 * 60 * 60
 const SESSION_TTL_EPHEMERAL_SEC = 12 * 60 * 60
 // 設定変更を伴わない「閲覧専用」リンク（例: フードコート週次レポート）向け。
-// metadata.reusable===true で発行すると、単一使用にせず・実質無期限（10年）で何度でも開ける。
-export const REUSABLE_VIEW_LINK_TTL_SEC = 10 * 365 * 24 * 60 * 60
+// 毎週新しいリンクが発行されるため、漏えい時の窓を35日に制限する。
+export const REUSABLE_VIEW_LINK_TTL_SEC = 35 * 24 * 60 * 60
+const REUSABLE_VIEW_SESSION_TTL_SEC = 30 * 60
 
 function toIsoAfterSeconds(seconds: number): string {
   return new Date(Date.now() + (seconds * 1000)).toISOString()
@@ -112,7 +133,12 @@ export async function issueAdminDashboardSessionToken(
 export async function exchangeAdminDashboardLoginLinkToken(
   supabase: SupabaseClient,
   rawToken: string,
-  options?: { rememberLogin?: boolean; metadata?: Record<string, unknown>; ttlSeconds?: number },
+  options?: {
+    rememberLogin?: boolean
+    metadata?: Record<string, unknown>
+    ttlSeconds?: number
+    requiredScopes?: readonly string[]
+  },
 ): Promise<{ token: string; expires_at: string }> {
   const token = String(rawToken ?? "").trim()
   if (!token.startsWith(LOGIN_LINK_PREFIX)) {
@@ -135,6 +161,12 @@ export async function exchangeAdminDashboardLoginLinkToken(
     throw new Error("Login link is invalid, already used, or expired.")
   }
   const existingMeta = normalizeMetadata(data.metadata)
+  const existingScope = typeof existingMeta.scope === "string" ? existingMeta.scope : ""
+  // 交換エンドポイントごとに受理できる用途を固定する。これが無いと、例えば
+  // パスワード必須のroom_configリンクを汎用交換APIへ渡して迂回できてしまう。
+  if (options?.requiredScopes && !options.requiredScopes.includes(existingScope)) {
+    throw new Error("This login link cannot be used on this endpoint.")
+  }
   // 設定変更を伴わない閲覧専用リンク（reusable===true。フードコート週次レポート等）は、
   // 単一使用にせず・何度でも・どの端末からでも開けるようにする（used_atを消費しない）。
   const isReusableViewLink = existingMeta.reusable === true
@@ -156,15 +188,77 @@ export async function exchangeAdminDashboardLoginLinkToken(
     }
   }
   const mergedMetadata = {
-    ...existingMeta,
     ...normalizeMetadata(options?.metadata),
+    // Link metadata is the authority source. Exchange-time metadata is audit/UI
+    // context only and must not replace scope, store, room, or user bindings.
+    ...existingMeta,
     exchanged_at: nowIso,
   }
   return await issueAdminDashboardSessionToken(supabase, {
     rememberLogin: options?.rememberLogin,
     metadata: mergedMetadata,
-    ttlSeconds: isReusableViewLink ? REUSABLE_VIEW_LINK_TTL_SEC : options?.ttlSeconds,
+    ttlSeconds: isReusableViewLink ? REUSABLE_VIEW_SESSION_TTL_SEC : options?.ttlSeconds,
   })
+}
+
+/**
+ * Re-check a short-lived M-talk link on every privileged request.
+ * Removing the member, stopping M-talk, or revoking Journal AI therefore takes
+ * effect immediately instead of waiting for the exchanged session to expire.
+ */
+export async function validateChatScopedSessionAccess(
+  supabase: SupabaseClient,
+  metadata: Record<string, unknown>,
+  options: { requireJournalAi?: boolean } = {},
+): Promise<boolean> {
+  const chatUserId = String(metadata.chat_user_id ?? "").trim()
+  const groupId = Number(metadata.group_id)
+  const storeKey = String(metadata.store_partition_key ?? "").trim()
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(chatUserId) ||
+    !Number.isSafeInteger(groupId) ||
+    groupId <= 0 ||
+    !storeKey
+  ) return false
+
+  try {
+    const [{ data: access, error: accessError }, { data: member, error: memberError }, { data: group, error: groupError }] =
+      await Promise.all([
+        supabase
+          .from("chat_user_access")
+          .select("access_enabled, can_use_journal_ai, restricted_until, deleted_at")
+          .eq("user_id", chatUserId)
+          .maybeSingle(),
+        supabase
+          .from("chat_group_members")
+          .select("can_view")
+          .eq("group_id", groupId)
+          .eq("user_id", chatUserId)
+          .maybeSingle(),
+        supabase
+          .from("chat_groups")
+          .select("trashed_at")
+          .eq("id", groupId)
+          .maybeSingle(),
+      ])
+    if (accessError || memberError || groupError || !access || !member || !group) return false
+    const restrictedUntil = access.restricted_until
+      ? new Date(String(access.restricted_until)).getTime()
+      : 0
+    if (
+      access.access_enabled !== true ||
+      access.deleted_at ||
+      (Number.isFinite(restrictedUntil) && restrictedUntil > Date.now()) ||
+      member.can_view !== true ||
+      group.trashed_at
+    ) return false
+    if (!await mtalkUserCanAccessStore(supabase, chatUserId, storeKey)) return false
+    const currentRoomStore = await resolveMtalkRoomStoreKey(supabase, groupId)
+    if (currentRoomStore.ambiguous || currentRoomStore.storeKey !== storeKey) return false
+    return options.requireJournalAi !== true || access.can_use_journal_ai === true
+  } catch {
+    return false
+  }
 }
 
 // ルーム・セルフ設定リンク(lt)をパスワード検証つきで交換する。

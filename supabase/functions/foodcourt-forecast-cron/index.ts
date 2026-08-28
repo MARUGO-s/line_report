@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { chooseFoodCourtGlm } from "../_shared/foodcourt_forecast_utils.ts"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
 // フードコート（MARUGO S）来客予測の「自己再学習型」モデル cron。
 // 毎日、蓄積された全実績から係数を学習し直し（＝貯まるほど精度が上がる）、客数・売上を予測する。
@@ -91,6 +92,9 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing." }, 500)
   }
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
+  }
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
 

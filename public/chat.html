@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; script-src-elem 'self'; script-src-attr 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co wss://hocbnifuactbvmyjraxy.supabase.co; img-src 'self' data: blob: https://hocbnifuactbvmyjraxy.supabase.co; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob: https://hocbnifuactbvmyjraxy.supabase.co; frame-src 'self' https://hocbnifuactbvmyjraxy.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="theme-color" content="#4B0B1A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,9 +20,9 @@
   <link rel="stylesheet" href="chat/chat.css">
 </head>
 <body>
-  <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
-  <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
-  <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg" class="hidden">
+  <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+  <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+  <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
   <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.heic,.heif,.lzh" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
@@ -428,7 +430,7 @@
         <input type="password" id="passwordInput" placeholder="パスワード" autocomplete="current-password">
         <label class="remember">
           <input type="checkbox" id="rememberInput">
-          <span>この端末にメールとパスワードを保存する</span>
+          <span>この端末にメールアドレスだけ保存する</span>
         </label>
         <button type="button" onclick="login()" id="loginBtn">ログイン</button>
         <p class="login-note">
@@ -444,7 +446,7 @@
         <input type="password" id="signupPasswordConfirm" placeholder="パスワード（確認）" autocomplete="new-password">
         <label class="remember">
           <input type="checkbox" id="signupRememberInput">
-          <span>この端末にメールとパスワードを保存する</span>
+          <span>この端末にメールアドレスだけ保存する</span>
         </label>
         <button onclick="signup()" id="signupBtn">登録する</button>
         <p class="login-note">

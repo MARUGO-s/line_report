@@ -262,6 +262,10 @@ const securityConfig = {
   envAdminToken: String(process.env.ADMIN_TOKEN || "").trim()
 };
 
+const ADMIN_TOKEN_MIN_LENGTH = 32;
+const INGESTION_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
+const INGESTION_MAX_ROWS = 100_000;
+
 const opsConfig = {
   backupDir:
     String(process.env.BACKUP_DIR || "").trim() ||
@@ -412,12 +416,14 @@ const isSameAdminToken = (receivedToken, requiredToken) => {
 
 const requireAdminAuth = (req, res, next) => {
   const tokenState = resolveAdminTokenState();
-  if (!tokenState.token) {
+  if (req.path === "/health") {
     return next();
   }
 
-  if (req.path === "/health") {
-    return next();
+  // 設定漏れを「認証不要」と解釈しない。管理トークンが無い状態では、
+  // ヘルスチェック以外の全APIを閉じてから運用側に設定不備を知らせる。
+  if (!tokenState.token) {
+    return sendError(res, 503, "admin authentication is not configured");
   }
 
   const token = extractAdminTokenFromRequest(req);
@@ -694,7 +700,8 @@ const parseCsvText = (csvText, { headerMapping = null, delimiter: fixedDelimiter
 const parseExcelBuffer = (fileBuffer, { headerMapping = null } = {}) => {
   const workbook = XLSX.read(fileBuffer, {
     type: "buffer",
-    raw: false
+    raw: false,
+    sheetRows: INGESTION_MAX_ROWS + 2
   });
   const firstSheetName = Array.isArray(workbook.SheetNames) ? workbook.SheetNames[0] : "";
   if (!firstSheetName) {
@@ -5151,8 +5158,10 @@ app.post("/webhooks/line", express.raw({ type: "application/json" }), async (req
   }
 });
 
-app.use(express.json({ limit: "20mb" }));
+// 認証前に最大20MBのJSONを解析すると、未認証リクエストだけでメモリを消費できる。
+// /api は先に資格情報を検証し、通過した管理者のbodyだけを解析する。
 app.use("/api", requireAdminAuth);
+app.use(express.json({ limit: "20mb" }));
 app.use("/admin", express.static(path.join(projectRoot, "public"), { extensions: ["html"] }));
 
 app.get("/", (req, res) => {
@@ -5160,9 +5169,22 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
+  const adminTokenState = resolveAdminTokenState();
+  const configured = Boolean(adminTokenState.token);
+  const provided = extractAdminTokenFromRequest(req);
+  const authorized = configured && provided && isSameAdminToken(provided, adminTokenState.token);
+
+  // 無認証の監視には最小限のreadinessだけを返し、DBパス・モデル・外部サービスID等は
+  // 管理トークンを提示した運用者にだけ開示する。
+  if (!authorized) {
+    return res.status(configured ? 200 : 503).json({
+      ok: configured,
+      adminAuthConfigured: configured
+    });
+  }
+
   const activeLlmProvider = resolveActiveLlmProvider();
   const activeVisionProvider = resolveActiveVisionProvider();
-  const adminTokenState = resolveAdminTokenState();
   res.json({
     ok: true,
     dbPath,
@@ -5212,8 +5234,12 @@ app.post("/api/admin/auth-token", (req, res) => {
     if (!newAdminToken) {
       return sendError(res, 400, "newAdminToken is required");
     }
-    if (newAdminToken.length < 8) {
-      return sendError(res, 400, "newAdminToken must be at least 8 characters");
+    if (newAdminToken.length < ADMIN_TOKEN_MIN_LENGTH) {
+      return sendError(
+        res,
+        400,
+        `newAdminToken must be at least ${ADMIN_TOKEN_MIN_LENGTH} characters`
+      );
     }
     if (newAdminToken.length > 200) {
       return sendError(res, 400, "newAdminToken is too long");
@@ -5700,12 +5726,22 @@ app.post("/api/ingestion/csv", (req, res) => {
   let parsed = null;
   let fileHashInput = "";
   if (csvText.trim()) {
+    if (Buffer.byteLength(csvText, "utf8") > INGESTION_UPLOAD_MAX_BYTES) {
+      return sendError(res, 413, "CSV file is too large (8MB maximum)");
+    }
     parsed = parseCsvText(csvText, parseOptions);
     fileHashInput = csvText;
   } else if (fileBase64.trim()) {
+    // base64は元データの約4/3倍。decode前にも上限を掛け、巨大なBuffer確保を防ぐ。
+    if (fileBase64.length > Math.ceil(INGESTION_UPLOAD_MAX_BYTES * 4 / 3) + 1024) {
+      return sendError(res, 413, "uploaded file is too large (8MB maximum)");
+    }
     const fileBuffer = decodeBase64Payload(fileBase64);
     if (!fileBuffer) {
       return sendError(res, 400, "fileBase64 is invalid");
+    }
+    if (fileBuffer.byteLength > INGESTION_UPLOAD_MAX_BYTES) {
+      return sendError(res, 413, "uploaded file is too large (8MB maximum)");
     }
 
     const isExcel =
@@ -5738,6 +5774,9 @@ app.post("/api/ingestion/csv", (req, res) => {
 
   if (!parsed.rows.length) {
     return sendError(res, 400, "ingestion rows are empty");
+  }
+  if (parsed.rows.length > INGESTION_MAX_ROWS) {
+    return sendError(res, 413, `ingestion has too many rows (${INGESTION_MAX_ROWS} maximum)`);
   }
 
   const uploadedBy = String(req.body?.uploadedBy || "admin").trim() || "admin";

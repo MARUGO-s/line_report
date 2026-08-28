@@ -20,6 +20,7 @@ import {
   resolveReceiptSheetsStoreDisplayName,
   resolveReceiptSheetsStoreKey,
 } from "../_shared/receipt_sheets_store_catalog.ts"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -45,8 +46,7 @@ Deno.serve(async (req) => {
   }
 
   if (body?.get_gas_config === true) {
-    const canRead =
-      (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    const canRead = await isAuthorized(req)
     if (!canRead) {
       return json({ ok: false, error: "Forbidden." }, 403)
     }
@@ -78,8 +78,7 @@ Deno.serve(async (req) => {
   }
 
   if (body?.write_gas_config === true) {
-    const canWrite =
-      (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    const canWrite = await isAuthorized(req)
     if (!canWrite) {
       return json({
         ok: false,
@@ -97,7 +96,7 @@ Deno.serve(async (req) => {
   }
 
   if (body?.clear_sheets_except_stores === true) {
-    const canRun = (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    const canRun = await isAuthorized(req)
     if (!canRun) {
       return json({ ok: false, error: "Forbidden." }, 403)
     }
@@ -136,7 +135,7 @@ Deno.serve(async (req) => {
   }
 
   if (body?.clear_store_budget_tabs === true) {
-    const canRun = (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    const canRun = await isAuthorized(req)
     if (!canRun) {
       return json({ ok: false, error: "Forbidden." }, 403)
     }
@@ -165,7 +164,7 @@ Deno.serve(async (req) => {
   }
 
   if (body?.bistrocavacava_cleanup_and_push === true) {
-    const canRun = (await isServiceRoleAuthorized(req)) || isAuthorized(req)
+    const canRun = await isAuthorized(req)
     if (!canRun) {
       return json({ ok: false, error: "Forbidden." }, 403)
     }
@@ -188,7 +187,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (!isAuthorized(req)) {
+  if (!(await isAuthorized(req))) {
     return json({ ok: false, error: "Unauthorized." }, 401)
   }
 
@@ -481,24 +480,12 @@ function bearerToken(req: Request): string {
   return authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : ""
 }
 
-/** プロジェクト API キー（CLI の service_role JWT 等）が有効か検証 */
-async function isServiceRoleAuthorized(req: Request): Promise<boolean> {
+/** service_role は値の完全一致だけを許可する。DBエラーから権限を推測しない。 */
+function isServiceRoleAuthorized(req: Request): boolean {
   const bearer = bearerToken(req)
   if (!bearer) return false
   const sr = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim()
-  if (sr && bearer === sr) return true
-
-  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim()
-  if (!supabaseUrl) return false
-  const client = createClient(supabaseUrl, bearer)
-  const { error } = await client
-    .from("receipt_sheets_past_sales_export_snapshot")
-    .select("store_partition_key")
-    .limit(1)
-  if (!error) return true
-  const msg = String(error.message ?? "")
-  if (msg.includes("Invalid API key") || error.code === "PGRST301") return false
-  return true
+  return Boolean(sr && constantTimeEqual(bearer, sr))
 }
 
 // 定数時間比較（秘密トークン照合用・タイミング差で内容を漏らさない）
@@ -512,14 +499,18 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-function isAuthorized(req: Request): boolean {
+async function isAuthorized(req: Request): Promise<boolean> {
+  if (isServiceRoleAuthorized(req)) return true
   const syncSecret = (Deno.env.get("RECEIPT_SHEETS_SYNC_SECRET") ?? "").trim()
-  const cronToken = (Deno.env.get("CRON_AUTH_TOKEN") ?? "").trim()
   const bearer = bearerToken(req)
   const headerKey = (req.headers.get("x-receipt-sheets-sync-key") ?? "").trim()
   if (syncSecret && (constantTimeEqual(bearer, syncSecret) || constantTimeEqual(headerKey, syncSecret))) return true
-  if (cronToken && constantTimeEqual(bearer, cronToken)) return true
-  return false
+
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim()
+  const serviceRoleKey = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim()
+  if (!supabaseUrl || !serviceRoleKey) return false
+  const supabase = createClient(supabaseUrl, serviceRoleKey)
+  return await isInternalCronAuthorized(req, supabase)
 }
 
 function json(body: unknown, status = 200): Response {

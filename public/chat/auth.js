@@ -5,16 +5,27 @@ function loadSavedCredentials() {
     const raw = localStorage.getItem(CREDENTIAL_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw);
-    return saved && saved.email ? saved : null;
+    const email = saved && typeof saved.email === 'string' ? saved.email.trim() : '';
+    if (!email) {
+      localStorage.removeItem(CREDENTIAL_KEY);
+      return null;
+    }
+    // 旧版はpasswordも保存していた。読み込み時に即座に削除し、メールだけへ移行する。
+    if (Object.prototype.hasOwnProperty.call(saved, 'password')) {
+      localStorage.setItem(CREDENTIAL_KEY, JSON.stringify({ email }));
+    }
+    return { email };
   } catch (_) {
     localStorage.removeItem(CREDENTIAL_KEY);
     return null;
   }
 }
 
-function saveCredentials(email, password) {
+function saveCredentials(email) {
   try {
-    localStorage.setItem(CREDENTIAL_KEY, JSON.stringify({ email, password }));
+    const safeEmail = String(email || '').trim();
+    if (!safeEmail) return clearCredentials();
+    localStorage.setItem(CREDENTIAL_KEY, JSON.stringify({ email: safeEmail }));
   } catch (error) {
     console.error('Credential save error:', error);
   }
@@ -78,7 +89,7 @@ async function signup() {
 
     $('signupPasswordInput').value = '';
     $('signupPasswordConfirm').value = '';
-    pendingCredentials = { email, password, remember: $('signupRememberInput').checked };
+    pendingCredentials = { email, remember: $('signupRememberInput').checked };
     await afterSignIn();
   } catch (error) {
     console.error('Signup error:', error);
@@ -108,7 +119,7 @@ async function login() {
     }
 
     if ($('rememberInput').checked) {
-      saveCredentials(email, password);
+      saveCredentials(email);
     } else {
       clearCredentials();
     }

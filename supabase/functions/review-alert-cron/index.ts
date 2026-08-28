@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { refreshStoreReview, refreshCompetitorReviews } from "../_shared/competitor_review_context.ts"
 import { pushLineMessagesToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
+import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
 // 自店舗・登録済み競合店の「新着口コミ」をLINEに通知するcron。
 //  - pg_cronは毎分起動。ルームごとの配信時刻(review_alert_hour/minute、既定8時10分)に一致した時だけ処理する
@@ -65,6 +66,9 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing." }, 500)
   }
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
+  if (!(await isInternalCronAuthorized(req, supabase))) {
+    return json({ ok: false, error: "Unauthorized" }, 401)
+  }
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())
 
