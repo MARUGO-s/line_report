@@ -27,8 +27,15 @@ test('既読数と既読メンバー一覧は同じ条件を使う', () => {
 test('既読マークは自分の発言にだけあり、押すと内訳を開く', () => {
   assert.match(chatSource, /\$\{isOwn \? readMarkHtml\(msg\) : ''\}/);
   assert.match(chatSource, /<button type="button" class="read-mark" data-read-for="\$\{msg\.id\}"/);
+  assert.match(chatSource, /onclick="openReadDetails\(this\.dataset\.readFor\)"/);
   assert.match(chatSource, /const readMark = e\.target\.closest\('\.read-mark'\);/);
   assert.match(chatSource, /openReadDetails\(Number\(readMark\.dataset\.readFor\)\)/);
+});
+
+test('既読者表示用の公開ファイルは更新時にキャッシュを回避する', () => {
+  assert.match(chatSource, /chat\/messages\.js\?v=20260829-read-receipts-2/);
+  assert.match(chatSource, /chat\/bootstrap\.js\?v=20260829-read-receipts-2/);
+  assert.match(chatSource, /chat\/chat\.css\?v=20260829-read-receipts-2/);
 });
 
 test('既読メンバー一覧は閉じられ、名前と既読時刻を表示する', () => {

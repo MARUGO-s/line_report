@@ -6,11 +6,11 @@ const publicDir = new URL('../../public/', import.meta.url);
 
 function referencedAssets(html) {
   const paths = [];
-  for (const match of html.matchAll(/<link\b[^>]*\bhref="(chat\/[^"]+\.css)"[^>]*>/gi)) {
-    paths.push(match[1]);
+  for (const match of html.matchAll(/<link\b[^>]*\bhref="(chat\/[^"?]+\.css(?:[?#][^"]*)?)"[^>]*>/gi)) {
+    paths.push(match[1].replace(/[?#].*$/, ''));
   }
-  for (const match of html.matchAll(/<script\b[^>]*\bsrc="(chat\/[^"]+\.js)"[^>]*><\/script>/gi)) {
-    paths.push(match[1]);
+  for (const match of html.matchAll(/<script\b[^>]*\bsrc="(chat\/[^"?]+\.js(?:[?#][^"]*)?)"[^>]*><\/script>/gi)) {
+    paths.push(match[1].replace(/[?#].*$/, ''));
   }
   return paths;
 }

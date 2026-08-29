@@ -127,7 +127,7 @@ function readMarkHtml(msg) {
   const others = groupMembers.filter((u) => u.id !== currentUser.id).length;
   const label = others <= 1 ? '既読' : `既読 ${count}`;
   // 押すと誰が読んだかを開く。data 属性は refreshReadMarks の textContent 更新でも残る。
-  return `<button type="button" class="read-mark" data-read-for="${msg.id}" aria-label="${label}の内訳を見る">${label}</button>`;
+  return `<button type="button" class="read-mark" data-read-for="${msg.id}" onclick="openReadDetails(this.dataset.readFor)" aria-label="${label}の内訳を見る">${label}<span aria-hidden="true">⌄</span></button>`;
 }
 
 function isMobileLayout() {

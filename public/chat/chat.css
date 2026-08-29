@@ -1295,19 +1295,29 @@ body.modal-open .input-area {
 /* 既読 */
 /* button だが吹き出し内の小さな注記なので、既定の見た目は消して文字だけにする。 */
 .read-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 26px;
+  margin: -6px -8px;
+  padding: 6px 8px;
   font-size: 10px;
   color: rgba(255, 255, 255, 0.9);
   white-space: nowrap;
   border: 0;
-  background: transparent;
-  padding: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
   font-family: inherit;
   line-height: inherit;
   cursor: pointer;
 }
 .read-mark:hover,
 .read-mark:focus-visible {
-  text-decoration: underline;
+  background: rgba(0, 0, 0, 0.22);
+  outline: none;
+}
+.read-mark:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.72);
 }
 
 /* 返信の引用 */
