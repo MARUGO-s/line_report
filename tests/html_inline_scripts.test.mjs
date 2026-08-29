@@ -45,6 +45,6 @@ test('M-talk keeps presentation and behavior in external assets', async () => {
   const html = await readFile(new URL('../public/chat.html', import.meta.url), 'utf8');
   assert.doesNotMatch(html, /<style\b/i);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>\s*\S/i);
-  assert.match(html, /href="chat\/chat\.css"/);
+  assert.match(html, /href="chat\/chat\.css(?:[?#][^"]*)?"/);
   assert.equal(chatScriptPaths().length, 11);
 });
