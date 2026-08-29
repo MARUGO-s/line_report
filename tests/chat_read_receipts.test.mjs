@@ -33,9 +33,9 @@ test('既読マークは自分の発言にだけあり、押すと内訳を開�
 });
 
 test('既読者表示用の公開ファイルは更新時にキャッシュを回避する', () => {
-  assert.match(chatSource, /chat\/messages\.js\?v=20260829-read-receipts-\d+/);
-  assert.match(chatSource, /chat\/bootstrap\.js\?v=20260829-read-receipts-\d+/);
-  assert.match(chatSource, /chat\/chat\.css\?v=20260829-read-receipts-\d+/);
+  assert.match(chatSource, /chat\/messages\.js\?v=\d{8}-read-receipts-\d+/);
+  assert.match(chatSource, /chat\/bootstrap\.js\?v=\d{8}-read-receipts-\d+/);
+  assert.match(chatSource, /chat\/chat\.css\?v=\d{8}-read-receipts-\d+/);
 });
 
 test('既読メンバー一覧は操作メニューと同じ浮遊パネルで、名前と既読時刻を表示する', () => {

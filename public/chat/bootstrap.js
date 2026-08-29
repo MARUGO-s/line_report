@@ -201,6 +201,38 @@ document.addEventListener('click', (e) => {
   closeMessageMenu();
   closeReadDetails();
 });
+
+// Macのトラックパッドで右へ2本指スワイプした時は、開いているトークを閉じて一覧へ戻る。
+// 途中からSafari等のブラウザ履歴へ遷移しないよう、トーク画面上の横方向ジェスチャだけを扱う。
+const MAC_BACK_SWIPE_DISTANCE = 72;
+let macBackSwipeDistance = 0;
+let macBackSwipeAt = 0;
+function resetMacBackSwipe() {
+  macBackSwipeDistance = 0;
+  macBackSwipeAt = 0;
+}
+document.addEventListener('wheel', (e) => {
+  const target = e.target;
+  if (!currentGroupId || !target?.closest || e.deltaMode !== 0
+    || !target.closest('#mainContent')
+    || target.closest('input, textarea, select, #stickerPicker, .msg-menu, .read-menu, .invite-overlay, .image-viewer')) {
+    resetMacBackSwipe();
+    return;
+  }
+  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) || e.deltaX >= -1) {
+    resetMacBackSwipe();
+    return;
+  }
+  // 右スワイプはブラウザ上では負のdeltaXとして届く。縦スクロールには反応しない。
+  if (e.cancelable) e.preventDefault();
+  const now = performance.now();
+  if (now - macBackSwipeAt > 180) macBackSwipeDistance = 0;
+  macBackSwipeDistance += Math.abs(e.deltaX);
+  macBackSwipeAt = now;
+  if (macBackSwipeDistance < MAC_BACK_SWIPE_DISTANCE) return;
+  resetMacBackSwipe();
+  closeChat();
+}, { passive: false });
 document.addEventListener('click', (e) => {
   if (!composerSheetOpen || !e.target.closest) return;
   if (e.target.closest('#composerSheet, #composerPlusBtn')) return;
