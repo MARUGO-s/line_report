@@ -1569,6 +1569,22 @@ body.modal-open .input-area {
   gap: 9px;
   animation: msgMenuIn .14s ease-out;
 }
+.read-menu {
+  position: fixed;
+  z-index: 320;
+  width: min(292px, calc(100vw - 24px));
+  background: rgba(35, 35, 38, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  animation: msgMenuIn .14s ease-out;
+}
 @keyframes msgMenuIn {
   from { opacity: 0; transform: translateY(5px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -1623,6 +1639,47 @@ body.modal-open .input-area {
 .msg-menu-reply:hover { background: rgba(255, 255, 255, 0.08); }
 .msg-menu-delete { color: #ff6b6b; font-weight: 700; }
 .msg-menu-delete .msg-menu-action-icon { background: rgba(255, 107, 107, 0.14); }
+
+/* 既読者一覧も、メッセージ操作と同じ半透明の浮遊パネルとして表示する。 */
+.read-menu { color: #fff; }
+.read-menu-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+  font-weight: 700;
+}
+.read-menu-heading button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.read-menu-heading button:hover { background: rgba(255, 255, 255, 0.18); }
+.read-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: min(48vh, 300px);
+  overflow-y: auto;
+  padding-top: 7px;
+}
+.read-menu .read-detail-row {
+  min-height: 48px;
+  padding: 3px 2px;
+  border-radius: 10px;
+}
+.read-menu .read-detail-row:hover { background: rgba(255, 255, 255, 0.08); }
+.read-menu .reaction-detail-avatar { width: 40px; height: 40px; }
+.read-menu .reaction-detail-name { font-size: 14px; }
+.read-menu .read-detail-time { color: rgba(255, 255, 255, 0.66); }
 
 .attach-btn {
   width: 38px;

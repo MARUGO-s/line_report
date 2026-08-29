@@ -27,9 +27,9 @@ test('既読数と既読メンバー一覧は同じ条件を使う', () => {
 test('既読マークは自分の発言にだけあり、押すと内訳を開く', () => {
   assert.match(chatSource, /\$\{isOwn \? readMarkHtml\(msg\) : ''\}/);
   assert.match(chatSource, /<button type="button" class="read-mark" data-read-for="\$\{msg\.id\}"/);
-  assert.match(chatSource, /onclick="openReadDetails\(this\.dataset\.readFor\)"/);
+  assert.match(chatSource, /onclick="openReadDetails\(this\.dataset\.readFor, this\)"/);
   assert.match(chatSource, /const readMark = e\.target\.closest\('\.read-mark'\);/);
-  assert.match(chatSource, /openReadDetails\(Number\(readMark\.dataset\.readFor\)\)/);
+  assert.match(chatSource, /openReadDetails\(Number\(readMark\.dataset\.readFor\), readMark\)/);
 });
 
 test('既読者表示用の公開ファイルは更新時にキャッシュを回避する', () => {
@@ -38,9 +38,12 @@ test('既読者表示用の公開ファイルは更新時にキャッシュを�
   assert.match(chatSource, /chat\/chat\.css\?v=20260829-read-receipts-\d+/);
 });
 
-test('既読メンバー一覧は閉じられ、名前と既読時刻を表示する', () => {
-  assert.match(chatSource, /id="readDetailOverlay"/);
+test('既読メンバー一覧は操作メニューと同じ浮遊パネルで、名前と既読時刻を表示する', () => {
+  assert.match(chatSource, /menu\.className = 'read-menu';/);
+  assert.match(chatSource, /class="read-menu-heading"/);
+  assert.match(chatSource, /class="read-menu-list"/);
   assert.match(chatSource, /function closeReadDetails\(\)/);
+  assert.match(chatSource, /document\.querySelector\('\.read-menu'\)\?\.remove\(\)/);
   assert.match(chatSource, /const name = user \? personName\(user\) : '退出したユーザー';/);
   assert.match(chatSource, /class="read-detail-time">\$\{escapeHtml\(formatTalkTime\(row\.last_read_at\)\)\}/);
 });

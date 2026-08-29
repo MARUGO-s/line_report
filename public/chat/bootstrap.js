@@ -185,7 +185,7 @@ $('messages').addEventListener('click', (e) => {
   if (chip) { openReactionDetails(Number(chip.dataset.messageId)); return; }
 
   const readMark = e.target.closest('.read-mark');
-  if (readMark) { openReadDetails(Number(readMark.dataset.readFor)); return; }
+  if (readMark) { openReadDetails(Number(readMark.dataset.readFor), readMark); return; }
 
   const menuBtn = e.target.closest('[data-menu-for]');
   if (menuBtn) { openMessageMenu(menuBtn.dataset.menuFor, menuBtn); return; }
@@ -197,8 +197,9 @@ $('messages').addEventListener('click', (e) => {
 // メニューの外側を触ったら閉じる。
 document.addEventListener('click', (e) => {
   if (!e.target.closest) return;
-  if (e.target.closest('.msg-menu') || e.target.closest('[data-menu-for]')) return;
+  if (e.target.closest('.msg-menu, .read-menu, [data-menu-for], .read-mark')) return;
   closeMessageMenu();
+  closeReadDetails();
 });
 document.addEventListener('click', (e) => {
   if (!composerSheetOpen || !e.target.closest) return;

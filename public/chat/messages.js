@@ -127,7 +127,7 @@ function readMarkHtml(msg) {
   const others = groupMembers.filter((u) => u.id !== currentUser.id).length;
   const label = others <= 1 ? '既読' : `既読 ${count}`;
   // 押すと誰が読んだかを開く。data 属性は refreshReadMarks の textContent 更新でも残る。
-  return `<button type="button" class="read-mark" data-read-for="${msg.id}" onclick="openReadDetails(this.dataset.readFor)" aria-label="${label}の内訳を見る">${label}<span aria-hidden="true">⌄</span></button>`;
+  return `<button type="button" class="read-mark" data-read-for="${msg.id}" onclick="openReadDetails(this.dataset.readFor, this)" aria-label="${label}の内訳を見る">${label}<span aria-hidden="true">⌄</span></button>`;
 }
 
 function isMobileLayout() {
@@ -146,6 +146,7 @@ function resetMessageView() {
   quotedMessages = new Map();
   clearReplyTarget();
   closeMessageMenu();
+  closeReadDetails();
   $('mentionPop').classList.add('hidden');
   $('messages').innerHTML = '';
   $('jumpLatestBtn').classList.add('hidden');
@@ -389,16 +390,21 @@ function openReactionDetails(messageId) {
 }
 
 function closeReadDetails() {
-  $('readDetailOverlay').classList.add('hidden');
+  document.querySelector('.read-menu')?.remove();
 }
 
-// 既読マークを押したとき、誰がいつ読んだかを出す。
-function openReadDetails(messageId) {
+// 既読マークのそばに、メッセージ操作と同じ浮遊パネルで誰がいつ読んだかを出す。
+function openReadDetails(messageId, anchor) {
   const msg = currentMessages.find((m) => String(m.id) === String(messageId));
   const readers = readersFor(msg);
   if (!readers.length) return;
-  $('readDetailHeading').textContent = `既読 ${readers.length}`;
-  $('readDetailList').innerHTML = readers.map((row) => {
+  closeReadDetails();
+  const menu = document.createElement('div');
+  menu.className = 'read-menu';
+  menu.setAttribute('role', 'dialog');
+  menu.setAttribute('aria-label', `既読 ${readers.length}人`);
+  menu.innerHTML = `<div class="read-menu-heading"><span>既読 ${readers.length}</span><button type="button" aria-label="閉じる">×</button></div>
+    <div class="read-menu-list">${readers.map((row) => {
     // 退出した人の既読も履歴としては残るため、名前が引けない場合を潰さない。
     const user = groupMembers.find((member) => String(member.id) === String(row.user_id));
     const name = user ? personName(user) : '退出したユーザー';
@@ -409,8 +415,21 @@ function openReadDetails(messageId) {
       <div class="reaction-detail-name">${escapeHtml(name)}</div>
       <div class="read-detail-time">${escapeHtml(formatTalkTime(row.last_read_at))}</div>
     </div>`;
-  }).join('');
-  $('readDetailOverlay').classList.remove('hidden');
+  }).join('')}</div>`;
+  document.body.appendChild(menu);
+
+  const target = anchor || document.querySelector(`.read-mark[data-read-for="${msg.id}"]`);
+  const rect = target?.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const left = rect
+    ? Math.min(Math.max(8, rect.right - menuRect.width), window.innerWidth - menuRect.width - 8)
+    : Math.max(8, (window.innerWidth - menuRect.width) / 2);
+  const preferredTop = rect && rect.top - menuRect.height - 8 >= 8
+    ? rect.top - menuRect.height - 8
+    : (rect ? rect.bottom + 8 : 56);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${Math.min(preferredTop, window.innerHeight - menuRect.height - 8)}px`;
+  menu.querySelector('button')?.addEventListener('click', closeReadDetails);
 }
 
 function messageEditHistory(msg) {

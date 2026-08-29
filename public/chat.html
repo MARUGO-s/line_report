@@ -17,7 +17,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="icons/chat-favicon-16x16-v3.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/chat-apple-touch-icon-v3.png">
   <title>M-talk</title>
-  <link rel="stylesheet" href="chat/chat.css?v=20260829-read-receipts-3">
+  <link rel="stylesheet" href="chat/chat.css?v=20260829-read-receipts-4">
 </head>
 <body>
   <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
@@ -381,16 +381,6 @@
     </div>
   </div>
 
-  <div class="invite-overlay hidden" id="readDetailOverlay" onclick="if (event.target === this) closeReadDetails()">
-    <div class="invite-sheet reaction-detail-sheet" role="dialog" aria-modal="true" aria-labelledby="readDetailHeading">
-      <div class="reaction-detail-title">
-        <h2 id="readDetailHeading">既読</h2>
-        <button class="reaction-detail-close" type="button" onclick="closeReadDetails()" aria-label="閉じる">×</button>
-      </div>
-      <div class="reaction-detail-list" id="readDetailList"></div>
-    </div>
-  </div>
-
   <div class="invite-overlay hidden" id="forwardOverlay" onclick="if (event.target === this) closeForward()">
     <div class="invite-sheet" role="dialog" aria-label="転送">
       <h2>転送</h2>
@@ -502,9 +492,9 @@
   <script src="chat/realtime.js"></script>
   <script src="chat/notifications.js"></script>
   <script src="chat/rooms.js"></script>
-  <script src="chat/messages.js?v=20260829-read-receipts-3"></script>
+  <script src="chat/messages.js?v=20260829-read-receipts-4"></script>
   <script src="chat/attachments.js"></script>
   <script src="chat/composer.js"></script>
-  <script src="chat/bootstrap.js?v=20260829-read-receipts-3"></script>
+  <script src="chat/bootstrap.js?v=20260829-read-receipts-4"></script>
 </body>
 </html>
