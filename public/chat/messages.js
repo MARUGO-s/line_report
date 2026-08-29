@@ -102,13 +102,22 @@ function resolveQuoted(id) {
   return currentMessages.find((m) => m.id === id) || quotedMessages.get(id) || null;
 }
 
+// 自分の発言を、自分以外の誰が読んだか。読んだ時刻の新しい順。
+// 既読数と既読メンバー一覧はここだけを出所にして、両者がずれないようにする。
+function readersFor(msg) {
+  if (!msg || msg.user_id !== currentUser.id) return [];
+  const sentAt = new Date(msg.created_at).getTime();
+  return groupReadStates
+    .filter((row) => (
+      row.user_id !== currentUser.id && new Date(row.last_read_at).getTime() >= sentAt
+    ))
+    .slice()
+    .sort((a, b) => new Date(b.last_read_at).getTime() - new Date(a.last_read_at).getTime());
+}
+
 // 自分の発言を、自分以外の何人が読んだか。
 function readCountFor(msg) {
-  if (msg.user_id !== currentUser.id) return 0;
-  const sentAt = new Date(msg.created_at).getTime();
-  return groupReadStates.filter((row) => (
-    row.user_id !== currentUser.id && new Date(row.last_read_at).getTime() >= sentAt
-  )).length;
+  return readersFor(msg).length;
 }
 
 function readMarkHtml(msg) {
@@ -116,7 +125,9 @@ function readMarkHtml(msg) {
   if (count <= 0) return '';
   // 1対1では人数を出さず「既読」だけにする（LINE と同じ見え方）。
   const others = groupMembers.filter((u) => u.id !== currentUser.id).length;
-  return `<span class="read-mark">${others <= 1 ? '既読' : `既読 ${count}`}</span>`;
+  const label = others <= 1 ? '既読' : `既読 ${count}`;
+  // 押すと誰が読んだかを開く。data 属性は refreshReadMarks の textContent 更新でも残る。
+  return `<button type="button" class="read-mark" data-read-for="${msg.id}" aria-label="${label}の内訳を見る">${label}</button>`;
 }
 
 function isMobileLayout() {
@@ -375,6 +386,31 @@ function openReactionDetails(messageId) {
     </div>`;
   }).join('');
   $('reactionDetailOverlay').classList.remove('hidden');
+}
+
+function closeReadDetails() {
+  $('readDetailOverlay').classList.add('hidden');
+}
+
+// 既読マークを押したとき、誰がいつ読んだかを出す。
+function openReadDetails(messageId) {
+  const msg = currentMessages.find((m) => String(m.id) === String(messageId));
+  const readers = readersFor(msg);
+  if (!readers.length) return;
+  $('readDetailHeading').textContent = `既読 ${readers.length}`;
+  $('readDetailList').innerHTML = readers.map((row) => {
+    // 退出した人の既読も履歴としては残るため、名前が引けない場合を潰さない。
+    const user = groupMembers.find((member) => String(member.id) === String(row.user_id));
+    const name = user ? personName(user) : '退出したユーザー';
+    const iconUrl = user ? personIconUrl(user) : '';
+    const avatarBackground = iconUrl ? 'transparent' : avatarStyle(name);
+    return `<div class="read-detail-row">
+      <div class="reaction-detail-avatar" style="background:${avatarBackground}">${avatarHtml(user ? personAvatarKey(user) : '?', iconUrl)}</div>
+      <div class="reaction-detail-name">${escapeHtml(name)}</div>
+      <div class="read-detail-time">${escapeHtml(formatTalkTime(row.last_read_at))}</div>
+    </div>`;
+  }).join('');
+  $('readDetailOverlay').classList.remove('hidden');
 }
 
 function messageEditHistory(msg) {

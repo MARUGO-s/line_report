@@ -184,6 +184,9 @@ $('messages').addEventListener('click', (e) => {
   const chip = e.target.closest('.reaction-chip');
   if (chip) { openReactionDetails(Number(chip.dataset.messageId)); return; }
 
+  const readMark = e.target.closest('.read-mark');
+  if (readMark) { openReadDetails(Number(readMark.dataset.readFor)); return; }
+
   const menuBtn = e.target.closest('[data-menu-for]');
   if (menuBtn) { openMessageMenu(menuBtn.dataset.menuFor, menuBtn); return; }
 
