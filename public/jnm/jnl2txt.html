@@ -14352,17 +14352,6 @@ ${policy}
 ${endMarker}`;
 }
 
-/** 現在開いているレポートの期間から、AI分析レポート用のナレッジを選ぶ */
-async function buildStoreKnowledgeBlockForReport() {
-  const items = await loadStoreKnowledgeForAi({ forceRefresh: true });
-  if (!items.length) return '';
-  const period = String(currentReport?.period || '');
-  const range = resolveKnowledgeRangeFromText(`${period} ${currentReport?.title || ''}`);
-  const query = `${currentReport?.title || ''} ${period} 売上分析 施策 メニュー`;
-  const selected = selectStoreKnowledgeForQuery(query, range, items);
-  return formatStoreKnowledgeBlock(await hydrateKnowledgeItemsForAi(selected), query, items);
-}
-
 /** テキストまたは画像ファイルを添付した際の全自動判定処理 */
 async function handleKnowledgeFileChange(file) {
   if (!file) return;
