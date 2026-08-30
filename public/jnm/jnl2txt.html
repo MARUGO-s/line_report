@@ -2600,6 +2600,7 @@ function listJournalStores() {
 // Journal Reportの保存先キーは小文字で扱う（例: marugos）が、共通店舗マスターには
 // marugoS / marugoD のように大文字を含む正式キーがある。selectには正式キーを渡す。
 // 保存先を変更せず、表示だけを既存のoptionへ正しく対応付けるためのヘルパー。
+// 大文字を含む正式キー（marugoS / marugoD）にも同じ規則を適用する。
 function resolveJournalStoreOptionKey(rawKey, stores = listJournalStores()) {
   const key = String(rawKey || '').trim();
   if (!key) return '';
