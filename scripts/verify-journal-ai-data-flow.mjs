@@ -51,7 +51,7 @@ core(
   "monthly_reports",
   "保存済み月次レポート",
   containsAll(html, [
-    "fetchSupabaseReports({ kind: 'monthly'",
+    /fetchSupabaseReports\(\{\s*(?:kind:\s*'monthly'|\.\.\.requestOptions,\s*kind:\s*'monthly')/,
     "selectReportsForSavedMonthGroup",
     "isSingleMonthCanonicalReport",
   ]),
@@ -63,9 +63,9 @@ core(
   "daily_reports",
   "保存済み日別レポート",
   containsAll(html, [
-    "fetchSupabaseReports({ kind: 'daily'",
+    /fetchSupabaseReports\(\{\s*(?:kind:\s*'daily'|\.\.\.requestOptions,\s*kind:\s*'daily')/,
     "mergeMonthlyAndDailyReportIndex",
-    "月間が無い月の日別",
+    "月間が無い月だけ",
     "summarizeDayScope",
   ]),
   "daily saved_reports → 月次欠損補完 / 単日・日付範囲集計",

@@ -87,6 +87,13 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /shouldRetryBudget/);
   assert.match(ai, /auth_error/);
   assert.match(ai, /recordJournalAiFallback/);
+  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 30_000/);
+  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 25_000/);
+  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 85_000/);
+  assert.match(ai, /fetchTextWithTimeout\(OPENAI_ENDPOINT/);
+  assert.match(ai, /fetchTextWithTimeout\(CLAUDE_ENDPOINT/);
+  assert.match(ai, /providerTimeoutWithinDeadline\(deadlineAt/);
+  assert.match(ai, /"timeout",/);
   assert.match(ai, /"clarifier"/);
   assert.match(ai, /api\.anthropic\.com/);
   assert.match(ai, /sanitizeJournalAiPayload/);
@@ -126,6 +133,9 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
   assert.match(client, /LINE_REPORT_AUTH/);
   assert.match(client, /ログインが必要です/);
   assert.match(client, /privacy\.sanitizePayload/);
+  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 110000/);
+  assert.match(client, /AIの応答が/);
+  assert.match(client, /AbortController/);
 });
 
 test('Journal AI privacy layer is loaded before the network client', async () => {

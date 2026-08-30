@@ -64,10 +64,16 @@ type SynthesizerResult =
     attempts: SynthesisAttempt[];
   };
 
-/** 既定の完了トークン枠。入力が大きい場合に備え、縮小して再試行する段階も持つ。 */
-const OPENAI_COMPLETION_BUDGET_PRIMARY = 10192 + 4000;
-/** 縮小再試行の枠。foodcourt 側（1200+4000）で実績のある水準に合わせる。 */
-const OPENAI_COMPLETION_BUDGET_RETRY = 5200;
+/** 対話応答用の完了トークン枠。過大な出力枠で接続を占有しない。 */
+const OPENAI_COMPLETION_BUDGET_PRIMARY = 5200;
+/** 文脈長など入力由来の失敗時だけ使う縮小再試行枠。 */
+const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
+/** 個々の外部AIが応答停止した場合の打ち切り。 */
+const OPENAI_REQUEST_TIMEOUT_MS = 30_000;
+const CLAUDE_REQUEST_TIMEOUT_MS = 25_000;
+/** 外部ブリーフ取得を含む、1回の分析リクエスト全体の上限。 */
+const JOURNAL_AI_REQUEST_DEADLINE_MS = 85_000;
+const MIN_PROVIDER_REQUEST_TIMEOUT_MS = 4_000;
 
 /** HTTPステータスやエラー本文から、集計しやすい短い理由コードを作る。 */
 function classifyOpenAiFailure(error: string): string {
@@ -607,9 +613,21 @@ async function fetchTextWithTimeout(
     const response = await fetch(url, { ...init, signal: controller.signal });
     const text = await response.text();
     return { ok: response.ok, status: response.status, text };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`provider request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function providerTimeoutWithinDeadline(
+  deadlineAt: number,
+  providerTimeoutMs: number,
+): number {
+  return Math.max(0, Math.min(providerTimeoutMs, deadlineAt - Date.now()));
 }
 
 function buildClarificationMessages(
@@ -970,6 +988,7 @@ async function clarifyWithFallback(
 async function callOpenAiLuna(
   contents: ChatContent[],
   completionBudget: number = OPENAI_COMPLETION_BUDGET_PRIMARY,
+  timeoutMs: number = OPENAI_REQUEST_TIMEOUT_MS,
 ): Promise<
   | { ok: true; text: string; model: string; usage: JournalAiUsage | null }
   | {
@@ -983,6 +1002,9 @@ async function callOpenAiLuna(
   if (!apiKey) {
     return { ok: false, error: "OPENAI_API_KEY not configured", model };
   }
+  if (timeoutMs < MIN_PROVIDER_REQUEST_TIMEOUT_MS) {
+    return { ok: false, error: "journal AI request deadline exceeded", model };
+  }
 
   // gpt-5 系は max_tokens を拒否し max_completion_tokens を要求。
   // 思考トークンも同枠を消費するため余裕を足し、reasoning_effort:'low' で抑える。
@@ -995,7 +1017,7 @@ async function callOpenAiLuna(
     : { max_tokens: Math.max(1024, completionBudget - 4000), temperature: 0.3 };
 
   try {
-    const res = await fetch(OPENAI_ENDPOINT, {
+    const res = await fetchTextWithTimeout(OPENAI_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1006,13 +1028,12 @@ async function callOpenAiLuna(
         messages,
         ...tokenParam,
       }),
-    });
+    }, timeoutMs);
     if (!res.ok) {
-      const errText = await res.text();
-      console.error("OpenAI API error:", model, res.status, errText);
-      return { ok: false, error: errText, model };
+      console.error("OpenAI API error:", model, res.status, res.text);
+      return { ok: false, error: res.text, model };
     }
-    const data = await res.json();
+    const data = JSON.parse(res.text);
     const rawText = data?.choices?.[0]?.message?.content || "";
     const text = stripThinkingBlocks(rawText);
     if (!text) {
@@ -1027,6 +1048,7 @@ async function callOpenAiLuna(
 
 async function callClaude(
   contents: ChatContent[],
+  timeoutMs: number = CLAUDE_REQUEST_TIMEOUT_MS,
 ): Promise<
   | { ok: true; text: string; model: string; usage: JournalAiUsage | null }
   | {
@@ -1040,6 +1062,9 @@ async function callClaude(
   if (!apiKey) {
     return { ok: false, error: "Anthropic API key not configured", model };
   }
+  if (timeoutMs < MIN_PROVIDER_REQUEST_TIMEOUT_MS) {
+    return { ok: false, error: "journal AI request deadline exceeded", model };
+  }
   const converted = openAiMessagesToClaude(
     contentsToOpenAiMessages(contents) as Array<{
       role: "system" | "user" | "assistant";
@@ -1048,7 +1073,7 @@ async function callClaude(
   );
 
   try {
-    const res = await fetch(CLAUDE_ENDPOINT, {
+    const res = await fetchTextWithTimeout(CLAUDE_ENDPOINT, {
       method: "POST",
       headers: {
         "x-api-key": apiKey,
@@ -1057,18 +1082,17 @@ async function callClaude(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 10192,
+        max_tokens: OPENAI_COMPLETION_BUDGET_PRIMARY,
         temperature: 0.2,
         ...(converted.system ? { system: converted.system } : {}),
         messages: converted.messages,
       }),
-    });
+    }, timeoutMs);
     if (!res.ok) {
-      const errText = await res.text();
-      console.error("Claude API error:", model, res.status, errText);
-      return { ok: false, error: errText, model };
+      console.error("Claude API error:", model, res.status, res.text);
+      return { ok: false, error: res.text, model };
     }
-    const data = await res.json();
+    const data = JSON.parse(res.text);
     const text = stripThinkingBlocks(extractClaudeText(data));
     if (!text) {
       return { ok: false, error: "Claude returned an empty response", model };
@@ -1090,12 +1114,17 @@ async function callClaude(
  */
 async function synthesizeWithFallback(
   contents: ChatContent[],
+  deadlineAt: number = Date.now() + JOURNAL_AI_REQUEST_DEADLINE_MS,
 ): Promise<SynthesizerResult> {
   const attempts: SynthesisAttempt[] = [];
 
   const tryLuna = async (budget: number) => {
     const startedAt = Date.now();
-    const result = await callOpenAiLuna(contents, budget);
+    const result = await callOpenAiLuna(
+      contents,
+      budget,
+      providerTimeoutWithinDeadline(deadlineAt, OPENAI_REQUEST_TIMEOUT_MS),
+    );
     attempts.push({
       ok: result.ok,
       provider: "openai",
@@ -1117,6 +1146,7 @@ async function synthesizeWithFallback(
       "rate_limit",
       "missing_key",
       "quota",
+      "timeout",
     ].includes(failReason);
     if (shouldRetryBudget) {
       console.warn(
@@ -1152,7 +1182,10 @@ async function synthesizeWithFallback(
     lunaResult.error.slice(0, 240),
   );
   const claudeStartedAt = Date.now();
-  const claudeResult = await callClaude(contents);
+  const claudeResult = await callClaude(
+    contents,
+    providerTimeoutWithinDeadline(deadlineAt, CLAUDE_REQUEST_TIMEOUT_MS),
+  );
   attempts.push({
     ok: claudeResult.ok,
     provider: "claude",
@@ -1418,6 +1451,7 @@ Deno.serve(async (req: Request, info) => {
       );
     }
 
+    const requestDeadlineAt = Date.now() + JOURNAL_AI_REQUEST_DEADLINE_MS;
     let contents: ChatContent[] = [];
     let intent: JournalChatIntent = "data";
     let briefs: Awaited<ReturnType<typeof gatherExternalBriefs>> = [];
@@ -1541,7 +1575,7 @@ Deno.serve(async (req: Request, info) => {
       ];
     }
 
-    const synth = await synthesizeWithFallback(contents);
+    const synth = await synthesizeWithFallback(contents, requestDeadlineAt);
     await recordJournalAiFallback(
       supabase,
       effectiveStoreKey,

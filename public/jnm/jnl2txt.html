@@ -2877,7 +2877,10 @@ async function adminApiFetch(path, options) {
   // GET はタイムアウト付きで自動リトライする。一時的な通信断・サーバー混雑（5xx/429）で
   // AI チャットの保存データ参照が即エラーにならないようにする。書き込み系は二重実行を避けるため1回のみ。
   const method = String(opts.method || 'GET').toUpperCase();
-  const maxAttempts = method === 'GET' ? 3 : 1;
+  const requestedAttempts = Number(opts.maxAttempts);
+  const maxAttempts = method === 'GET'
+    ? (requestedAttempts > 0 ? Math.min(3, Math.floor(requestedAttempts)) : 3)
+    : 1;
   // 既定は45秒。ページ数の多いPDF/WordのAI解析など、45秒では終わらない処理は
   // 呼び出し側が opts.timeoutMs で個別に延長する。
   const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 45000;
@@ -4630,7 +4633,11 @@ async function fetchSupabaseReports(options = {}) {
           limit: String(lim),
           kind: k
         });
-        const body = await adminApiFetch('/pos-journals/saved-reports?' + qs.toString(), { method: 'GET' });
+        const body = await adminApiFetch('/pos-journals/saved-reports?' + qs.toString(), {
+          method: 'GET',
+          timeoutMs: options.timeoutMs,
+          maxAttempts: options.maxAttempts
+        });
         const rows = mapRows(body.items);
         savedReportsIndexCache.set(cacheKey, { time: Date.now(), rows });
         return rows;
@@ -4811,14 +4818,21 @@ async function readSavedReports(options = {}) {
       return remoteReports;
     }
 
-    const monthly = await fetchSupabaseReports({ kind: 'monthly', limit: options.monthlyLimit || 500 });
-    if (monthly === null) return [];
-    // 月間が無い月の日別は、その月の全日分を残して月次集計時に合算する。
-    let daily = [];
+    const requestOptions = {
+      timeoutMs: options.timeoutMs,
+      maxAttempts: options.maxAttempts
+    };
     const needDailyFill = options.includeDailyFill !== false;
-    if (needDailyFill) {
-      daily = await fetchSupabaseReports({ kind: 'daily', limit: options.dailyLimit || 1000 }) || [];
-    }
+    // 一覧は独立した読み取りなので並列化する。通信不調時にAIチャットの待機表示を
+    // 月間→日別で二重に引き延ばさない。
+    const [monthly, dailyResult] = await Promise.all([
+      fetchSupabaseReports({ ...requestOptions, kind: 'monthly', limit: options.monthlyLimit || 500 }),
+      needDailyFill
+        ? fetchSupabaseReports({ ...requestOptions, kind: 'daily', limit: options.dailyLimit || 1000 })
+        : Promise.resolve([])
+    ]);
+    if (monthly === null) return [];
+    const daily = dailyResult || [];
 
     // 月間がある月は月間を正本にし、月間が無い月だけ全日別レポートで補完する。
     const merged = mergeMonthlyAndDailyReportIndex(monthly, daily);
@@ -15293,7 +15307,11 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     return { needsIntentClarification: true };
   }
 
-  const reports = Array.isArray(prefetchedReports) ? prefetchedReports : await readSavedReports();
+  // 対話中の一覧照会は、通信断時に3回×45秒待つよりも早く明示的に失敗させる。
+  // 既に得たキャッシュは fetchSupabaseReports 側でそのまま使用される。
+  const reports = Array.isArray(prefetchedReports)
+    ? prefetchedReports
+    : await readSavedReports({ timeoutMs: 15000, maxAttempts: 1 });
   const allReports = currentReport ? [currentReport, ...reports] : reports;
   const cloudLookupUnavailable = Array.isArray(prefetchedReports)
     ? false
