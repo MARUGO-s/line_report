@@ -8,8 +8,8 @@ const catalog = JSON.parse(readFileSync(new URL('../public/profile-icons/catalog
 const files = readdirSync(new URL('../public/profile-icons/', import.meta.url)).filter((name) => name.endsWith('.png'));
 
 test('profile icon catalog exposes every optimized bundled icon', () => {
-  assert.equal(catalog.length, 70);
-  assert.equal(files.length, 70);
+  assert.equal(catalog.length, 93);
+  assert.equal(files.length, 93);
   assert.ok(catalog.every((icon) => /^profile-icons\/\d{3}\.png$/.test(icon.path)));
 });
 

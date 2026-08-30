@@ -348,5 +348,120 @@
     "id": "070",
     "label": "鼻ちょうちんが出ている猫さん",
     "path": "profile-icons/070.png"
+  },
+  {
+    "id": "071",
+    "label": "0001",
+    "path": "profile-icons/071.png"
+  },
+  {
+    "id": "072",
+    "label": "004",
+    "path": "profile-icons/072.png"
+  },
+  {
+    "id": "073",
+    "label": "abyss_icon_07",
+    "path": "profile-icons/073.png"
+  },
+  {
+    "id": "074",
+    "label": "abyss_icon_15",
+    "path": "profile-icons/074.png"
+  },
+  {
+    "id": "075",
+    "label": "anya01",
+    "path": "profile-icons/075.png"
+  },
+  {
+    "id": "076",
+    "label": "anya02",
+    "path": "profile-icons/076.png"
+  },
+  {
+    "id": "077",
+    "label": "anya03",
+    "path": "profile-icons/077.png"
+  },
+  {
+    "id": "078",
+    "label": "anya04",
+    "path": "profile-icons/078.png"
+  },
+  {
+    "id": "079",
+    "label": "anya05",
+    "path": "profile-icons/079.png"
+  },
+  {
+    "id": "080",
+    "label": "anya06",
+    "path": "profile-icons/080.png"
+  },
+  {
+    "id": "081",
+    "label": "anya09",
+    "path": "profile-icons/081.png"
+  },
+  {
+    "id": "082",
+    "label": "anya12",
+    "path": "profile-icons/082.png"
+  },
+  {
+    "id": "083",
+    "label": "anya23",
+    "path": "profile-icons/083.png"
+  },
+  {
+    "id": "084",
+    "label": "anya31",
+    "path": "profile-icons/084.png"
+  },
+  {
+    "id": "085",
+    "label": "anya38",
+    "path": "profile-icons/085.png"
+  },
+  {
+    "id": "086",
+    "label": "anya39",
+    "path": "profile-icons/086.png"
+  },
+  {
+    "id": "087",
+    "label": "hanakokun_ghosthotel_icon_6",
+    "path": "profile-icons/087.png"
+  },
+  {
+    "id": "088",
+    "label": "hanakokun_ghosthotel_icon_7",
+    "path": "profile-icons/088.png"
+  },
+  {
+    "id": "089",
+    "label": "icon_1",
+    "path": "profile-icons/089.png"
+  },
+  {
+    "id": "090",
+    "label": "icon_2",
+    "path": "profile-icons/090.png"
+  },
+  {
+    "id": "091",
+    "label": "icon_3",
+    "path": "profile-icons/091.png"
+  },
+  {
+    "id": "092",
+    "label": "icon_4",
+    "path": "profile-icons/092.png"
+  },
+  {
+    "id": "093",
+    "label": "icon_d01",
+    "path": "profile-icons/093.png"
   }
 ]
