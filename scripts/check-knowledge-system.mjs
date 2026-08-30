@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   access,
+  mkdir,
   readFile,
   readdir,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, relative } from "node:path";
@@ -32,6 +34,56 @@ async function exists(path) {
 async function md5(path) {
   const content = await readFile(path);
   return createHash("md5").update(content).digest("hex");
+}
+
+// Vault は Dropbox の CloudStorage 上にあり、実体が未ダウンロードだと
+// 1ファイル読むたびに約1.3秒の取得が走る。6,500件を逐次で読むと約140分かかる。
+// 取得はネットワーク待ちなので同時実行で縮むが、実測では同時8で頭打ち
+// (296ms/件・約32分)。Dropbox 側の制限のため、これ以上は上がらない。
+// そこで mtime+size が前回と同じファイルは読み飛ばし、2回目以降を秒で終わらせる。
+const VAULT_SCAN_CONCURRENCY = 32;
+const vaultScanCachePath = join(projectDir, ".local", "knowledge-vault-scan-cache.json");
+
+async function loadVaultScanCache() {
+  try {
+    const parsed = JSON.parse(await readFile(vaultScanCachePath, "utf8"));
+    return parsed?.pattern === secretPattern.source && parsed?.entries
+      ? parsed.entries
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveVaultScanCache(entries) {
+  try {
+    await mkdir(join(projectDir, ".local"), { recursive: true });
+    await writeFile(
+      vaultScanCachePath,
+      JSON.stringify({ pattern: secretPattern.source, entries }),
+    );
+  } catch {
+    // キャッシュは高速化のためだけのもの。書けなくても検査自体は成立する。
+  }
+}
+
+/** 順序を保ったまま、同時実行数を絞って map する。 */
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) return;
+        results[index] = await worker(items[index]);
+      }
+    },
+  );
+  await Promise.all(runners);
+  return results;
 }
 
 async function collectFiles(directory) {
@@ -116,6 +168,10 @@ for (const file of (await readdir(join(projectDir, "docs"))).filter((name) =>
   }
 }
 
+// Graphify のコード限定抽出が再ハッシュしない拡張子。これらを突き合わせると
+// 更新されない ast_hash と比較することになり、永久に stale になる。
+const STALENESS_EXEMPT_EXTENSIONS = new Set(["md", "html", "yml", "yaml"]);
+
 const manifestPath = join(projectDir, "graphify-out/manifest.json");
 if (!(await exists(manifestPath))) {
   errors.push("missing graphify-out/manifest.json; run npm run knowledge:update");
@@ -131,7 +187,12 @@ if (!(await exists(manifestPath))) {
     // knowledge:update is intentionally code-only. Older manifests can still carry
     // semantic hashes for Markdown/public HTML from full Graphify runs, so checking
     // those against the code-only manifest makes every docs edit permanently stale.
-    if (extension === "md" || extension === "html") continue;
+    //
+    // YAML も同じ理由で除外する。Graphify は .yml を「分類対象外」として再抽出しない
+    // ため、過去のフル実行で入った ast_hash が更新されない。実測では manifest 内の
+    // 588ファイルで ast_hash が md5 と一致し、不一致は .github/workflows の .yml 2件
+    // だけだった。除外しないと、ワークフローを直すたびに恒久的な stale 報告が残る。
+    if (STALENESS_EXEMPT_EXTENSIONS.has(extension)) continue;
     const currentHash = await md5(path);
     if (entry.ast_hash && currentHash !== entry.ast_hash) {
       errors.push(`Graphify is stale for ${file}`);
@@ -200,13 +261,45 @@ if (await exists(knowledgeManifestPath)) {
 
 const secretPattern =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----|sb_secret_[A-Za-z0-9]+|SUPABASE_SERVICE_ROLE_KEY\s*=\s*\S+|LINE_CHANNEL_ACCESS_TOKEN(?:__\w+)?\s*=\s*\S+|GMAIL_CLIENT_SECRET\s*=\s*\S+/i;
-for (const file of await collectFiles(vaultAppDir)) {
-  const info = await stat(file);
-  if (info.size > 2_000_000) continue;
-  const content = await readFile(file, "utf8").catch(() => "");
-  if (secretPattern.test(content)) {
-    errors.push(`potential secret marker in vault: ${relative(vaultAppDir, file)}`);
-  }
+const vaultFiles = await collectFiles(vaultAppDir);
+const vaultScanCache = await loadVaultScanCache();
+const nextVaultScanCache = {};
+let vaultFilesRead = 0;
+const vaultHits = await mapWithConcurrency(
+  vaultFiles,
+  VAULT_SCAN_CONCURRENCY,
+  async (file) => {
+    const key = relative(vaultAppDir, file);
+    const info = await stat(file);
+    // mtime と size が前回と一致すれば内容も同じとみなし、取得を省く。
+    // 前回の判定結果(ヒットしたパス or null)をそのまま引き継ぐ。
+    const signature = `${info.mtimeMs}:${info.size}`;
+    const cached = vaultScanCache[key];
+    if (cached && cached.signature === signature) {
+      nextVaultScanCache[key] = cached;
+      return cached.hit ? key : null;
+    }
+    if (info.size > 2_000_000) {
+      nextVaultScanCache[key] = { signature, hit: false };
+      return null;
+    }
+    vaultFilesRead += 1;
+    const content = await readFile(file, "utf8").catch(() => "");
+    const hit = secretPattern.test(content);
+    nextVaultScanCache[key] = { signature, hit };
+    return hit ? key : null;
+  },
+);
+await saveVaultScanCache(nextVaultScanCache);
+if (vaultFilesRead) {
+  console.error(
+    `[knowledge] vault scan: ${vaultFilesRead}/${vaultFiles.length} 件を読み込み` +
+      `（残りは前回から未変更のため省略）`,
+  );
+}
+// 並列化しても報告順は入力順に固定し、出力を安定させる。
+for (const hit of vaultHits) {
+  if (hit) errors.push(`potential secret marker in vault: ${hit}`);
 }
 
 const gitStatus = spawnSync("git", ["status", "--short"], {
