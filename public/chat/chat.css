@@ -417,6 +417,13 @@ body {
   padding: 6px 8px 16px;
   scrollbar-gutter: stable;
 }
+.profile-icon-group-label {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #8e8e93;
+}
 .profile-icon-option {
   border: 2px solid transparent;
   border-radius: 16px;

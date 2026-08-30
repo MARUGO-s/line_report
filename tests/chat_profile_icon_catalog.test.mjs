@@ -13,6 +13,18 @@ test('profile icon catalog exposes every optimized bundled icon', () => {
   assert.ok(catalog.every((icon) => /^profile-icons\/\d{3}\.png$/.test(icon.path)));
 });
 
+// 店舗ロゴはカタログへ複製せず STORE_BOT_LOGOS から組み立てる。複製すると
+// 店舗の追加時に二重管理となり、表示名も実際の店舗名からずれる。
+test('store logos are offered from the store registry, not duplicated into the catalog', () => {
+  assert.ok(catalog.every((icon) => !icon.path.includes('icons/store-bots/')));
+  assert.match(chat, /function storeIconOptions\(\)/);
+  assert.match(chat, /Object\.entries\(STORE_BOT_LOGOS\)\.map\(\(\[storeKey, path\]\) => \(\{/);
+  assert.match(chat, /label: storeDisplayLabel\(storeKey\)/);
+  assert.match(chat, /\.\.\.storeIconOptions\(\)\.map\(iconOptionHtml\)/);
+  assert.match(chat, /\.\.\.profileIconCatalog\.map\(iconOptionHtml\)/);
+  assert.match(chat, /\.profile-icon-group-label \{[\s\S]*?grid-column: 1 \/ -1/);
+});
+
 test('new and existing users can select bundled icons while uploads remain available', () => {
   assert.match(chat, /function pickUploadedIcon\(\)/);
   assert.match(chat, /function choosePresetIcon\(url\)/);

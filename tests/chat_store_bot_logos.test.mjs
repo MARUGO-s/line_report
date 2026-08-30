@@ -37,7 +37,20 @@ test('store Bot logos use a white background without changing regular profile im
 });
 
 test('store Bot logos show a red bot mark inside the avatar', () => {
-  assert.match(chat, /isStoreBotLogo \? '<span class="store-bot-avatar-mark" aria-hidden="true">bot<\/span>' : ''/);
+  assert.match(chat, /showBotMark \? '<span class="store-bot-avatar-mark" aria-hidden="true">bot<\/span>' : ''/);
   assert.match(chat, /\.store-bot-avatar-mark \{[\s\S]*?color: #d70015;[\s\S]*?font-size: 8px;/);
   assert.match(chat, /right: 7px;[\s\S]*?bottom: 6px;/);
+});
+
+// 店舗ロゴは一般ユーザー・グループも選べるため、アイコンのパスで bot を判定すると
+// 人やグループに bot バッジが付く。判定は必ず相手が店舗Botかどうかで行う。
+test('bot mark follows the account, not the icon path', () => {
+  assert.doesNotMatch(chat, /icons\/store-bots\/'\)/);
+  assert.match(chat, /function avatarHtml\(name, iconUrl, showBotMark = false\)/);
+  assert.match(chat, /function paintAvatar\(el, name, iconUrl, showBotMark = false\)/);
+  assert.match(chat, /avatarHtml\(personAvatarKey\(user\), iconUrl, isStoreBot\(user\)\)/);
+  assert.match(chat, /avatarHtml\(user\.username, user\.icon_url, isStoreBot\(user\)\)/);
+  assert.match(chat, /function roomAvatarIsBot\(group\)/);
+  assert.match(chat, /if \(group\.is_direct && group\.peer\) return isStoreBot\(group\.peer\)/);
+  assert.match(chat, /paintAvatar\(\$\('chatGroupAvatar'\), roomTitle\(group\), roomIcon\(group\), roomAvatarIsBot\(group\)\)/);
 });

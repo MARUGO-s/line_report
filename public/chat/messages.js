@@ -381,7 +381,7 @@ function openReactionDetails(messageId) {
     const iconUrl = user ? personIconUrl(user) : '';
     const avatarBackground = iconUrl ? 'transparent' : avatarStyle(name);
     return `<div class="reaction-detail-row">
-      <div class="reaction-detail-avatar" style="background:${avatarBackground}">${avatarHtml(user ? personAvatarKey(user) : '?', iconUrl)}</div>
+      <div class="reaction-detail-avatar" style="background:${avatarBackground}">${avatarHtml(user ? personAvatarKey(user) : '?', iconUrl, isStoreBot(user))}</div>
       <div class="reaction-detail-name">${escapeHtml(name)}${user && String(user.id) === String(currentUser.id) ? '（自分）' : ''}</div>
       <div class="reaction-detail-emoji" aria-label="${escapeHtml(row.emoji)}">${escapeHtml(row.emoji)}</div>
     </div>`;
@@ -411,7 +411,7 @@ function openReadDetails(messageId, anchor) {
     const iconUrl = user ? personIconUrl(user) : '';
     const avatarBackground = iconUrl ? 'transparent' : avatarStyle(name);
     return `<div class="read-detail-row">
-      <div class="reaction-detail-avatar" style="background:${avatarBackground}">${avatarHtml(user ? personAvatarKey(user) : '?', iconUrl)}</div>
+      <div class="reaction-detail-avatar" style="background:${avatarBackground}">${avatarHtml(user ? personAvatarKey(user) : '?', iconUrl, isStoreBot(user))}</div>
       <div class="reaction-detail-name">${escapeHtml(name)}</div>
       <div class="read-detail-time">${escapeHtml(formatTalkTime(row.last_read_at))}</div>
     </div>`;
@@ -1021,7 +1021,7 @@ function renderForwardUsers() {
     const row = document.createElement('div');
     row.className = 'user-row';
     row.innerHTML = `
-      <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+      <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url, isStoreBot(user))}</div>
       <div class="talk-body">
         <div class="group-item-name"><span>${escapeHtml(user.username)}</span></div>
       </div>
@@ -1171,7 +1171,7 @@ function updateMentionPicker() {
     const iconUrl = personIconUrl(user);
     return `
       <div class="mention-row ${index === mentionActiveIndex ? 'active' : ''}" data-index="${index}">
-        <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
+        <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl, isStoreBot(user))}</div>
         <span>${escapeHtml(personName(user))}</span>
       </div>
     `;

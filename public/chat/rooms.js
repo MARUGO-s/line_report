@@ -56,6 +56,14 @@ function roomIcon(group) {
   return group && group.icon_url;
 }
 
+// ルームのアイコンが店舗Botのロゴとして出ているときだけ bot バッジを付ける。
+// 通常のグループが店舗ロゴを選んだ場合はBotではないので付けない。
+function roomAvatarIsBot(group) {
+  if (!group) return false;
+  if (group.is_direct && group.peer) return isStoreBot(group.peer);
+  return !!(group.is_store_room && storeBotLogoForKey(group.store_key));
+}
+
 async function registerDirectFriend(user) {
   if (!user || user.id === currentUser.id) return;
   if (!chatAccessAllows('can_start_direct')) {
@@ -241,7 +249,7 @@ function renderRegisteredUsers() {
       row.className = 'user-row';
       const iconUrl = personIconUrl(user);
       row.innerHTML = `
-        <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
+        <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl, isStoreBot(user))}</div>
         <div class="talk-body">
           <div class="group-item-name"><span>${escapeHtml(personName(user))}</span>${botMarkHtml()}</div>
           <div class="group-item-info">${canInviteSomewhere ? '1対1、またはルームへ招待' : '所属店舗の店舗Bot'}</div>
@@ -284,7 +292,7 @@ function renderRegisteredUsers() {
       row.className = 'user-row' + (selected ? ' selected' : '');
       row.innerHTML = `
         ${mine ? '' : '<div class="user-check"></div>'}
-        <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+        <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url, isStoreBot(user))}</div>
         <div class="talk-body">
           <div class="group-item-name"><span>${escapeHtml(user.username)}</span>${mine ? '（自分）' : ''}</div>
         </div>
@@ -595,7 +603,7 @@ function renderInviteLists() {
       const lockedBot = isReservationBot(user) || (isStoreBot(user) && current && current.is_store_room);
       const iconUrl = personIconUrl(user);
       row.innerHTML = `
-        <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
+        <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl, isStoreBot(user))}</div>
         <div>${escapeHtml(personName(user))}${mine ? '（自分）' : ''}${bot ? botMarkHtml() : ''}</div>
       `;
       if (canKick && !mine && !lockedBot) {
@@ -630,7 +638,7 @@ function renderInvitePeople() {
     row.className = 'invite-person';
     const iconUrl = personIconUrl(user);
     row.innerHTML = `
-      <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>
+      <div class="talk-avatar" style="width:36px;height:36px;font-size:14px;background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl, isStoreBot(user))}</div>
       <div>${escapeHtml(personName(user))}${isBotUser(user) ? botMarkHtml() : ''}</div>
     `;
     const button = document.createElement('button');
@@ -765,19 +773,20 @@ function avatarStyle(name) {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-function avatarHtml(name, iconUrl) {
+// bot バッジは「その相手が Bot か」で決める。アイコンのパスでは判定しない。
+// 店舗ロゴは一般ユーザーやグループも選べるため、パスで見ると人に bot が付く。
+function avatarHtml(name, iconUrl, showBotMark = false) {
   const letter = escapeHtml((name || '?').trim().slice(0, 1) || '?');
   if (iconUrl) {
-    const isStoreBotLogo = String(iconUrl).includes('icons/store-bots/');
-    return `<img src="${escapeHtml(iconUrl)}" alt="" loading="lazy" decoding="async">${isStoreBotLogo ? '<span class="store-bot-avatar-mark" aria-hidden="true">bot</span>' : ''}`;
+    return `<img src="${escapeHtml(iconUrl)}" alt="" loading="lazy" decoding="async">${showBotMark ? '<span class="store-bot-avatar-mark" aria-hidden="true">bot</span>' : ''}`;
   }
   return letter;
 }
 
-function paintAvatar(el, name, iconUrl) {
+function paintAvatar(el, name, iconUrl, showBotMark = false) {
   if (!el) return;
   el.style.background = iconUrl ? '#2c2c2e' : avatarStyle(name || '?');
-  el.innerHTML = avatarHtml(name, iconUrl);
+  el.innerHTML = avatarHtml(name, iconUrl, showBotMark);
 }
 
 function roomHasStoreBot(group) {
@@ -788,7 +797,7 @@ function roomHasStoreBot(group) {
 function paintChatHeader(group) {
   if (!group) return;
   $('chatGroupName').textContent = roomTitle(group);
-  paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group));
+  paintAvatar($('chatGroupAvatar'), roomTitle(group), roomIcon(group), roomAvatarIsBot(group));
   if ($('chatGroupAvatar')) $('chatGroupAvatar').disabled = !canCurrentUserManage(group);
   if ($('inviteHeaderBtn')) $('inviteHeaderBtn').classList.toggle('hidden', !!group.is_direct || !canCurrentUserInvite(group));
   // スマホ・タブレット幅ではPC専用のShift+Enter注釈を出さず、1行で読める文言にする。
@@ -834,7 +843,7 @@ function renderMemberStrip() {
     item.className = 'member-strip-item';
     item.title = personName(user) + (isBotUser(user) ? '（Bot）' : '');
     const iconUrl = personIconUrl(user);
-    item.innerHTML = `<div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl)}</div>`;
+    item.innerHTML = `<div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl, isStoreBot(user))}</div>`;
     strip.appendChild(item);
   });
 }
@@ -1029,14 +1038,32 @@ async function openPresetIconPicker(target = 'user') {
       if (!response.ok) throw new Error('アイコン一覧を読み込めませんでした');
       profileIconCatalog = await response.json();
     }
-    grid.innerHTML = profileIconCatalog.map((icon) => `
-      <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
-        aria-label="${escapeHtml(icon.label)}" data-icon-path="${escapeHtml(icon.path)}" onclick="choosePresetIcon(this.dataset.iconPath)">
-        <img src="${escapeHtml(icon.path)}" alt="" loading="lazy" decoding="async">
-      </button>`).join('');
+    grid.innerHTML = [
+      '<p class="profile-icon-group-label">イラスト</p>',
+      ...profileIconCatalog.map(iconOptionHtml),
+      '<p class="profile-icon-group-label">店舗ロゴ</p>',
+      ...storeIconOptions().map(iconOptionHtml)
+    ].join('');
   } catch (error) {
     grid.innerHTML = `<p class="error">${escapeHtml(error.message || error)}</p>`;
   }
+}
+
+// 店舗ロゴは STORE_BOT_LOGOS を唯一の出所にする。カタログへ複製すると
+// 店舗の追加時に二重管理になり、表示名も実際の店舗名からずれる。
+function storeIconOptions() {
+  return Object.entries(STORE_BOT_LOGOS).map(([storeKey, path]) => ({
+    label: storeDisplayLabel(storeKey),
+    path
+  }));
+}
+
+function iconOptionHtml(icon) {
+  return `
+      <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
+        aria-label="${escapeHtml(icon.label)}" data-icon-path="${escapeHtml(icon.path)}" onclick="choosePresetIcon(this.dataset.iconPath)">
+        <img src="${escapeHtml(icon.path)}" alt="" loading="lazy" decoding="async">
+      </button>`;
 }
 
 function pickUserIcon() {
@@ -1684,7 +1711,7 @@ function renderTalkRow(group, options) {
   const front = document.createElement('div');
   front.className = 'group-item swipe-front' + (currentGroupId === group.id ? ' active' : '');
   front.innerHTML = `
-    <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon)}</div>
+    <div class="talk-avatar" style="background:${icon ? '#2c2c2e' : avatarStyle(title)}">${avatarHtml(title, icon, roomAvatarIsBot(group))}</div>
     <div class="talk-body">
       <div class="talk-row">
         <div class="group-item-name">${pinned ? pinMarkHtml() : ''}${muted ? muteMarkHtml() : ''}${group.is_store_room ? '<span class="store-room-mark">店舗</span>' : ''}${roomBotMarkHtml(group)}${group.trashed_at ? '<span class="trash-room-mark">ゴミ箱</span>' : ''}<span>${escapeHtml(title)}</span>${talkListCountLabel(group) ? `<span class="talk-list-count">${escapeHtml(talkListCountLabel(group))}</span>` : ''}</div>
@@ -1847,7 +1874,7 @@ function renderGroups() {
       const row = document.createElement('div');
       row.className = 'user-row';
       row.innerHTML = `
-        <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url)}</div>
+        <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url, isStoreBot(user))}</div>
         <div class="talk-body">
           <div class="group-item-name">${escapeHtml(user.username)}</div>
           <div class="group-item-info">1対1トークを始める</div>
