@@ -1,142 +1,142 @@
 [
   {
     "id": "001",
-    "label": "1",
+    "label": "サングラスとアイスコーヒー",
     "path": "profile-icons/001.png"
   },
   {
     "id": "002",
-    "label": "1のコピー",
+    "label": "緑のワンピースの女の子",
     "path": "profile-icons/002.png"
   },
   {
     "id": "003",
-    "label": "2",
+    "label": "アイスコーヒー2杯",
     "path": "profile-icons/003.png"
   },
   {
     "id": "004",
-    "label": "2のコピー",
+    "label": "茶髪ロングの女の子",
     "path": "profile-icons/004.png"
   },
   {
     "id": "005",
-    "label": "3",
+    "label": "黒髪ロングの女の子",
     "path": "profile-icons/005.png"
   },
   {
     "id": "006",
-    "label": "Design-2",
+    "label": "Coffee みどりのロゴ",
     "path": "profile-icons/006.png"
   },
   {
     "id": "007",
-    "label": "Design-3",
+    "label": "Roast のロゴ",
     "path": "profile-icons/007.png"
   },
   {
     "id": "008",
-    "label": "Design-4",
+    "label": "珈琲焙煎工房のロゴ",
     "path": "profile-icons/008.png"
   },
   {
     "id": "009",
-    "label": "Design",
+    "label": "マフラーをした猫",
     "path": "profile-icons/009.png"
   },
   {
     "id": "010",
-    "label": "job_sommelier_tasting_man",
+    "label": "テイスティングするソムリエの男性",
     "path": "profile-icons/010.png"
   },
   {
     "id": "011",
-    "label": "job_sommelier_woman",
+    "label": "ワインを持つソムリエの女性",
     "path": "profile-icons/011.png"
   },
   {
     "id": "012",
-    "label": "mark_manpu01_yuge",
+    "label": "湯気のマーク",
     "path": "profile-icons/012.png"
   },
   {
     "id": "013",
-    "label": "mark_manpu03_ikari",
+    "label": "怒りマーク",
     "path": "profile-icons/013.png"
   },
   {
     "id": "014",
-    "label": "mark_manpu07_heart",
+    "label": "ハートマーク",
     "path": "profile-icons/014.png"
   },
   {
     "id": "015",
-    "label": "mark_manpu12_hirameki",
+    "label": "ひらめきの電球マーク",
     "path": "profile-icons/015.png"
   },
   {
     "id": "016",
-    "label": "mark_manpu13_kega",
+    "label": "ばんそうこうのマーク",
     "path": "profile-icons/016.png"
   },
   {
     "id": "017",
-    "label": "mark_manpu14_aseru",
+    "label": "焦り汗のマーク",
     "path": "profile-icons/017.png"
   },
   {
     "id": "018",
-    "label": "onepiece01_luffy",
+    "label": "ルフィ",
     "path": "profile-icons/018.png"
   },
   {
     "id": "019",
-    "label": "onepiece02_zoro_bandana",
+    "label": "ゾロ（バンダナ）",
     "path": "profile-icons/019.png"
   },
   {
     "id": "020",
-    "label": "onepiece06_chopper",
+    "label": "チョッパー",
     "path": "profile-icons/020.png"
   },
   {
     "id": "021",
-    "label": "onepiece08_franky",
+    "label": "フランキー",
     "path": "profile-icons/021.png"
   },
   {
     "id": "022",
-    "label": "onepiece09_brook",
+    "label": "ブルック",
     "path": "profile-icons/022.png"
   },
   {
     "id": "023",
-    "label": "onepiece10_jinbe",
+    "label": "ジンベエ",
     "path": "profile-icons/023.png"
   },
   {
     "id": "024",
-    "label": "onepiece13_crocodile",
+    "label": "クロコダイル",
     "path": "profile-icons/024.png"
   },
   {
     "id": "025",
-    "label": "onepiece14_enel",
+    "label": "エネル",
     "path": "profile-icons/025.png"
   },
   {
     "id": "026",
-    "label": "onepiece15_lucci",
+    "label": "ルッチ",
     "path": "profile-icons/026.png"
   },
   {
     "id": "027",
-    "label": "onepiece18_linlin_kaido",
+    "label": "ビッグ・マムとカイドウ",
     "path": "profile-icons/027.png"
   },
   {
     "id": "028",
-    "label": "onepiece19_kurohige_teach2",
+    "label": "黒ひげ",
     "path": "profile-icons/028.png"
   },
   {
@@ -351,117 +351,117 @@
   },
   {
     "id": "071",
-    "label": "0001",
+    "label": "サングラスと白パーカーの女の子",
     "path": "profile-icons/071.png"
   },
   {
     "id": "072",
-    "label": "004",
+    "label": "水色の髪の男の子",
     "path": "profile-icons/072.png"
   },
   {
     "id": "073",
-    "label": "abyss_icon_07",
+    "label": "白い髪の女の子（笑顔）",
     "path": "profile-icons/073.png"
   },
   {
     "id": "074",
-    "label": "abyss_icon_15",
+    "label": "探検帽のちびキャラ",
     "path": "profile-icons/074.png"
   },
   {
     "id": "075",
-    "label": "anya01",
+    "label": "カップを持つピンク髪の女の子",
     "path": "profile-icons/075.png"
   },
   {
     "id": "076",
-    "label": "anya02",
+    "label": "驚いた顔のピンク髪の女の子",
     "path": "profile-icons/076.png"
   },
   {
     "id": "077",
-    "label": "anya03",
+    "label": "青ざめた顔のピンク髪の女の子",
     "path": "profile-icons/077.png"
   },
   {
     "id": "078",
-    "label": "anya04",
+    "label": "得意げに笑うピンク髪の女の子",
     "path": "profile-icons/078.png"
   },
   {
     "id": "079",
-    "label": "anya05",
+    "label": "澄まし顔のピンク髪の女の子",
     "path": "profile-icons/079.png"
   },
   {
     "id": "080",
-    "label": "anya06",
+    "label": "叫ぶピンク髪の女の子",
     "path": "profile-icons/080.png"
   },
   {
     "id": "081",
-    "label": "anya09",
+    "label": "涙目のピンク髪の女の子",
     "path": "profile-icons/081.png"
   },
   {
     "id": "082",
-    "label": "anya12",
+    "label": "指をさすピンク髪の女の子",
     "path": "profile-icons/082.png"
   },
   {
     "id": "083",
-    "label": "anya23",
+    "label": "笑顔のピンク髪の女の子",
     "path": "profile-icons/083.png"
   },
   {
     "id": "084",
-    "label": "anya31",
+    "label": "物陰から覗くピンク髪の女の子",
     "path": "profile-icons/084.png"
   },
   {
     "id": "085",
-    "label": "anya38",
+    "label": "泣きそうな制服の女の子",
     "path": "profile-icons/085.png"
   },
   {
     "id": "086",
-    "label": "anya39",
+    "label": "むくれ顔の制服の女の子",
     "path": "profile-icons/086.png"
   },
   {
     "id": "087",
-    "label": "hanakokun_ghosthotel_icon_6",
+    "label": "フードを被った金髪の男の子",
     "path": "profile-icons/087.png"
   },
   {
     "id": "088",
-    "label": "hanakokun_ghosthotel_icon_7",
+    "label": "ピンクのうさぎ3匹",
     "path": "profile-icons/088.png"
   },
   {
     "id": "089",
-    "label": "icon_1",
+    "label": "ピンク髪で青い目の女の子",
     "path": "profile-icons/089.png"
   },
   {
     "id": "090",
-    "label": "icon_2",
+    "label": "金髪ツインテールの女の子",
     "path": "profile-icons/090.png"
   },
   {
     "id": "091",
-    "label": "icon_3",
+    "label": "青い髪のショートヘアの女の子",
     "path": "profile-icons/091.png"
   },
   {
     "id": "092",
-    "label": "icon_4",
+    "label": "赤い髪の女の子（笑顔）",
     "path": "profile-icons/092.png"
   },
   {
     "id": "093",
-    "label": "icon_d01",
+    "label": "オーバーオールの金髪の女の子",
     "path": "profile-icons/093.png"
   }
 ]
