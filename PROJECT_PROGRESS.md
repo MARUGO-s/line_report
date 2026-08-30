@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-08-30 - マルゴエスのPOS電子ジャーナル店舗コードを登録
+
+- Finding: KIOXIA上の実LZH 260件（2025-12-09〜2026-08-25）は、すべてファイル名先頭が`1022`で、共通パーサーでも260/260件を解析できた。一方、本番の`pos_journal_store_codes`には`1022`が無く、マルゴエス（`marugos`）の原本・保存済みレポートはいずれも0件だった。
+- Fix: `1022 → marugos（マルゴエス）`を静的マップと`pos_journal_store_codes`へ追加。migrationは別店舗へ既に割り当てられている場合に上書きせず失敗する。
+- Production: `20260830054941_add_marugos_pos_journal_store_code.sql`を本番適用し、対応表を読み取り確認済み。既存データは削除していない。
+- Verification: `deno check supabase/functions/_shared/pos_journal.ts`、`npm run test:pos-journal`（80件）が成功。再取込は認証済みの電子ジャーナル画面で9フォルダを選び直して実施し、保存後に`pos_journal_files`と`saved_reports`を再確認する。
+
 ### 2026-08-28 - chat.htmlから全権管理者用の権限管理導線を復旧
 
 - Symptom: `chat-admin.html`は稼働していたが、通常の`chat.html`から開くリンクがアカウントメニューに無く、直URLまたは本部管理画面を経由する必要があった。

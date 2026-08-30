@@ -67,7 +67,7 @@ function wrapLevel2Lh0(fileName: string, payload: Uint8Array): Uint8Array {
   return archive;
 }
 
-Deno.test("POS store codes 1015 and 1020 resolve to Bistro CAVACAVA", () => {
+Deno.test("POS store codes resolve to their verified stores", () => {
   assertEquals(
     detectPosJournalStoreCode("101520260602221907580001.lzh"),
     "1015",
@@ -84,6 +84,14 @@ Deno.test("POS store codes 1015 and 1020 resolve to Bistro CAVACAVA", () => {
     storeKey: "bistrocavacava",
     storeName: "Bistro CAVACAVA",
   });
+  assertEquals(
+    detectPosJournalStoreCode("102220260825222010000001.lzh"),
+    "1022",
+  );
+  assertEquals(resolvePosJournalStore("1022"), {
+    storeKey: "marugos",
+    storeName: "マルゴエス",
+  });
   assertEquals(resolvePosJournalStore("9999"), null);
 });
 
@@ -96,6 +104,21 @@ Deno.test("POS store code migration seeds the historical CAVACAVA code", async (
   );
   assertEquals(
     /'1020'\s*,\s*'bistrocavacava'\s*,\s*'Bistro CAVACAVA'/.test(sql),
+    true,
+  );
+  assertEquals(sql.includes("on conflict (store_code) do update"), true);
+  assertEquals(sql.includes("raise exception"), true);
+});
+
+Deno.test("POS store code migration registers the verified MARUGO S code", async () => {
+  const sql = await Deno.readTextFile(
+    new URL(
+      "../supabase/migrations/20260830054941_add_marugos_pos_journal_store_code.sql",
+      import.meta.url,
+    ),
+  );
+  assertEquals(
+    /'1022'\s*,\s*'marugos'\s*,\s*'マルゴエス'/.test(sql),
     true,
   );
   assertEquals(sql.includes("on conflict (store_code) do update"), true);
