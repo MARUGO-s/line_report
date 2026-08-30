@@ -229,14 +229,28 @@ test("reservation-based visitor structure is limited to the actual store and imp
   const enrichEnd = html.indexOf("function formatSignedDelta(", enrichStart)
   assert.ok(enrichStart >= 0 && enrichEnd > enrichStart)
   const enrich = html.slice(enrichStart, enrichEnd)
-  assert.match(enrich, /const coverage = getReservationImportCoverage\(\)/)
+  assert.match(
+    enrich,
+    /const requestedStoreKey = String\(options\.storeKey \|\| STORE_KEY \|\| ''\)\.trim\(\)\.toLowerCase\(\)/,
+  )
+  assert.match(enrich, /const coverage = getReservationImportCoverage\(requestedStoreKey\)/)
   assert.match(enrich, /if \(!coverage\) return null/)
   assert.match(enrich, /filter\(\(m\) => String\(m\?\.key \|\| ''\) >= coverage\.startMonth\)/)
   assert.match(enrich, /buildReservationWalkInMonthlyFlow\(coveredMonthlyBreakdown, byMonth\)/)
   assert.match(html, /利用開始前を予約0件・飛び込み100%・予約減少として扱わない/)
   assert.match(admin, /function buildReservationImportCoveragePolicy\(storeKey: string\)/)
-  assert.match(admin, /buildJournalAiServerPolicy\("analyze", locationBlock, effectiveStoreKey\)/)
-  assert.match(admin, /buildJournalAiServerPolicy\("chat", locationBlock, effectiveStoreKey\)/)
+  assert.match(
+    admin,
+    /buildJournalAiServerPolicy\("analyze", locationBlock, canonicalStoreKey \|\| ""\)/,
+  )
+  assert.match(
+    admin,
+    /buildJournalAiServerPolicy\("chat", locationBlock, canonicalStoreKey \|\| ""\)/,
+  )
+  assert.doesNotMatch(
+    admin,
+    /buildJournalAiServerPolicy\([^\n]*effectiveStoreKey/,
+  )
   assert.match(coverageDoc, /Bistro CAVACAVA \(`bistrocavacava`\).*2026-05/)
   assert.match(coverageDoc, /それ以外の店舗 \| 未開始/)
 })

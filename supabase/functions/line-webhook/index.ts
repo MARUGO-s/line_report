@@ -4,6 +4,7 @@ import {
   replyLineFlex,
   replyLineMessages,
   replyLineText,
+  pushLineMessagesToTarget,
   resolveChannelAccessToken,
   resolveGeminiApiKey,
   resolveReceiptGeminiFlashModel,
@@ -2147,6 +2148,7 @@ async function registerQuotedImageAsKnowledge(
     }
     const uploadJson = await uploadRes.json()
     const storagePath = String(uploadJson.storage_path || '').trim()
+    const sha256Hex = String(uploadJson.sha256_hex || '').trim().toLowerCase()
     if (!storagePath || !storagePath.toLowerCase().startsWith(`${storeKey}/`)) {
       console.warn('Knowledge file upload returned an invalid store path')
       return false
@@ -2170,6 +2172,7 @@ async function registerQuotedImageAsKnowledge(
       original_file_name: fileName,
       mime_type: contentType,
       file_size_bytes: binary.length,
+      sha256_hex: sha256Hex,
       source_type: 'line_post',
       created_by: createdBy || 'LINEユーザー',
       line_timestamp: lineTimestamp ?? null,
@@ -2741,16 +2744,34 @@ Deno.serve(async (req) => {
         // 旧実装の https://api.line.me/v2/bot/message/react は LINE Messaging API に
         // 存在しないエンドポイントで、登録成否にかかわらず一度も通知が届いていなかった。
         const memoFeedback = async (message: string) => {
-          if (!memoReplyToken || !memoAccessToken) return
+          if (!memoAccessToken) return
+          const pushTarget = eventRoomId || eventUserId
+          let replied: { ok: boolean; error?: string } | null = null
+          if (memoReplyToken) {
+            try {
+              replied = await replyLineText(
+                memoReplyToken,
+                message,
+                memoAccessToken,
+                webhookReplyLog(registry as StoreRegistryRow, eventRoomId, 'knowledge_memo_feedback'),
+              )
+            } catch (e) {
+              console.warn('knowledge memo feedback reply failed:', e)
+            }
+          }
+          if (replied?.ok || !pushTarget) return
           try {
-            await replyLineText(
-              memoReplyToken,
-              message,
+            const pushed = await pushLineMessagesToTarget(
+              pushTarget,
+              [{ type: 'text', text: String(message).slice(0, 4900) }],
               memoAccessToken,
-              webhookReplyLog(registry as StoreRegistryRow, eventRoomId, 'knowledge_memo_feedback'),
+              webhookReplyLog(registry as StoreRegistryRow, pushTarget, 'knowledge_memo_feedback_fallback'),
             )
+            if (!pushed?.ok) {
+              console.warn('knowledge memo feedback push fallback failed:', pushed?.error || 'unknown error')
+            }
           } catch (e) {
-            console.warn('knowledge memo feedback reply failed:', e)
+            console.warn('knowledge memo feedback push fallback threw:', e)
           }
         }
 

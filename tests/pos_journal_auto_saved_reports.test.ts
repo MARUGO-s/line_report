@@ -179,7 +179,7 @@ Deno.test("day summary remains the guest group and tax source of truth", () => {
   );
 });
 
-Deno.test("duplicate payment-change receipt copies keep only the latest copy", () => {
+Deno.test("explicit VOID payment change removes the original and VOID copy", () => {
   const day = sampleDay("2026-01-30", 64_000);
   const duplicatedItems = [
     { code: "0000000000102", name: "コース8品", unit: 10_000, qty: 2, amount: 20_000 },
@@ -209,6 +209,15 @@ Deno.test("duplicate payment-change receipt copies keep only the latest copy", (
       pay: "クレジット",
       total: 32_000,
       guests: 2,
+      void_ref: "6591",
+      items: duplicatedItems,
+    },
+    {
+      no: "6593",
+      time: "22:13",
+      pay: "クレジット",
+      total: 32_000,
+      guests: 2,
       items: duplicatedItems,
     },
   ];
@@ -226,7 +235,7 @@ Deno.test("duplicate payment-change receipt copies keep only the latest copy", (
     days: [day],
   });
 
-  assertEquals(daily.data.sales.map((sale) => sale.no), ["6590", "6592"]);
+  assertEquals(daily.data.sales.map((sale) => sale.no), ["6590", "6593"]);
   assertEquals(daily.data.salesCount, 2);
   assertEquals(daily.data.total, 64_000);
   assertEquals(

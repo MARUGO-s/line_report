@@ -748,9 +748,9 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 公開コード入口: 41件
 - Edge Functions: 20件
 - 共有TypeScriptモジュール: 94件
-- 補助・運用・レガシーコード: 37件
-- admin-api静的ルート: 138件
-- SQL migrations: 293件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- 補助・運用・レガシーコード: 39件
+- admin-api静的ルート: 139件
+- SQL migrations: 294件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 83件
 
 ### 公開画面・ブラウザコード
@@ -937,6 +937,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `ocr-bridge/app.py` | SAL-02 / DEV-05 |
 | `ocr-bridge/requirements.txt` | SAL-02 / DEV-05 |
 | `schema.sql` | DEV-05 |
+| `scripts/backfill-pos-journal-v21.mjs` | DEV-04 |
 | `scripts/check-graphify-sql-coverage.mjs` | DEV-04 |
 | `scripts/check-knowledge-system.mjs` | DEV-04 |
 | `scripts/check-line-report-help-coverage.ts` | DEV-04 |
@@ -962,6 +963,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `scripts/update-knowledge-vault.sh` | DEV-04 |
 | `scripts/verify-journal-ai-data-flow.mjs` | DEV-04 |
 | `scripts/verify-journal-sales-sync-toggle.sh` | DEV-04 |
+| `scripts/wait-for-edge-deploy.mjs` | DEV-04 |
 | `src/db.js` | DEV-05 |
 | `src/server.js` | DEV-05 |
 
@@ -1055,6 +1057,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/pos-journals/product-cohort` | JAI-03 / DEV-02 |
 | `/pos-journals/product-index/rebuild` | JAI-03 / DEV-02 |
 | `/pos-journals/product-search` | JAI-03 / DEV-02 |
+| `/pos-journals/reparse` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/report-ai-history` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
 | `/pos-journals/report-ai-history/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
 | `/pos-journals/sales-forecasts` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |

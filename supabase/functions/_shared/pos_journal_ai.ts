@@ -7,6 +7,7 @@ import { GROQ_TEXT_PRIMARY_MODEL, resolveGroqTextModel } from "./groq_model.ts";
 import { buildStoreLocationPromptBlock } from "./marugo_group_stores.ts";
 import {
   buildPosJournalSummary,
+  isPosJournalAdjustmentItem,
   type PosJournalDay,
   type PosJournalReceipt,
   type PosJournalReceiptItem,
@@ -78,6 +79,8 @@ export type PosJournalAiFacts = {
     >;
     topFiveSharePctOfCapturedItemSales: number;
     capturedItemSales: number;
+    explicitAdjustments: number;
+    netCapturedSales: number;
     uncapturedSales: number;
     capturedPctOfGrossSales: number;
     uncapturedPctOfGrossSales: number;
@@ -136,6 +139,12 @@ function boundedInteger(value: unknown, max = MAX_MONEY): number {
   return Math.max(0, Math.min(max, Math.round(number)));
 }
 
+function boundedSignedInteger(value: unknown, max = MAX_MONEY): number {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(-max, Math.min(max, Math.round(number)));
+}
+
 function boundedText(value: unknown, maxLength: number): string {
   return String(value ?? "").normalize("NFKC").replace(
     /[\u0000-\u001f\u007f]/g,
@@ -172,8 +181,8 @@ function sanitizeReceiptItem(value: unknown): PosJournalReceiptItem | null {
     code: boundedText(value.code, 24),
     name,
     unit: boundedInteger(value.unit),
-    qty: boundedInteger(value.qty, MAX_COUNT),
-    amount: boundedInteger(value.amount),
+    qty: boundedSignedInteger(value.qty, MAX_COUNT),
+    amount: boundedSignedInteger(value.amount),
   };
 }
 
@@ -394,21 +403,34 @@ export function buildPosJournalAiFacts(
     ? [...activeDays].sort((a, b) => a.grossSales - b.grossSales)[0]
     : null;
   const totals = summary.totals ?? {};
-  const paymentPairs: Array<[string, number]> = [
-    ["現金", boundedInteger(totals.cash_amount)],
-    ["クレジット", boundedInteger(totals.credit_amount)],
-    ["食べログ", boundedInteger(totals.tabelog_amount)],
-    ["一休", boundedInteger(totals.ikyu_amount)],
-    ["ぐるなび", boundedInteger(totals.gurunavi_amount)],
-  ];
+  const paymentPairs: Array<[string, number]> = Object.entries(
+    summary.payment_breakdown ?? {},
+  ).map(([name, value]) => [
+    boundedText(name, 60) || "不明",
+    boundedInteger(value?.amount),
+  ]);
   const paymentTotal = paymentPairs.reduce(
     (sum, [, amount]) => sum + amount,
     0,
   );
+  const unattributedPaymentSales = Math.max(0, grossSales - paymentTotal);
   const itemSales = summary.item_ranking.reduce(
     (sum, item) => sum + boundedInteger(item.amount),
     0,
   );
+  const explicitAdjustments = summary.days.reduce(
+    (daySum, day) => daySum + (day.receipts || []).reduce(
+      (receiptSum, receipt) => receiptSum + (receipt.items || []).reduce(
+        (itemSum, item) => itemSum + (isPosJournalAdjustmentItem(item)
+          ? boundedSignedInteger(item.amount)
+          : 0),
+        0,
+      ),
+      0,
+    ),
+    0,
+  );
+  const netCapturedSales = Math.max(0, itemSales + explicitAdjustments);
   const topBySales = summary.item_ranking.slice(0, 15).map((item) => ({
     name: boundedText(item.name, 120),
     code: boundedText(item.code, 24),
@@ -427,15 +449,30 @@ export function buildPosJournalAiFacts(
   if (summary.days.some((day) => !boundedText(day.weather, 30))) {
     dataNotes.push("天候が未入力の日を含む。");
   }
-  if (itemSales < grossSales) {
+  if (unattributedPaymentSales > 0) {
+    dataNotes.push(
+      `総売上のうち支払方法未特定額は${unattributedPaymentSales}円。支払方法を推測しないこと。`,
+    );
+  }
+  if (netCapturedSales < grossSales) {
     // 「一部のみ」とだけ書くと、AI が未捕捉の量を勝手に見積もる。実額を添える。
-    const uncaptured = grossSales - itemSales;
+    const uncaptured = grossSales - netCapturedSales;
     const capturedPct = grossSales
-      ? Math.round((itemSales / grossSales) * 1000) / 10
+      ? Math.round((netCapturedSales / grossSales) * 1000) / 10
       : 0;
     dataNotes.push(
-      `商品明細売上は総売上の${capturedPct}%（${itemSales}円）を捕捉しており、` +
+      `値引調整後の商品明細売上は総売上の${capturedPct}%（${netCapturedSales}円）を捕捉しており、` +
         `未捕捉は${uncaptured}円。この2つ以外の数値を未捕捉として述べないこと。`,
+    );
+  }
+  if (explicitAdjustments !== 0) {
+    dataNotes.push(
+      `商品小計${itemSales}円に明示割引・値引調整${explicitAdjustments}円を反映した正味商品売上は${netCapturedSales}円。`,
+    );
+  }
+  if (netCapturedSales > grossSales) {
+    dataNotes.push(
+      `値引調整後の商品明細が総売上を${netCapturedSales - grossSales}円上回るため、捕捉率は100%を上限表示している。`,
     );
   }
   if (!activeDays.length) dataNotes.push("売上が1円以上の日がない。");
@@ -494,15 +531,26 @@ export function buildPosJournalAiFacts(
     },
     weekdays: aggregateGroups(activeDays, (day) => `${day.weekday}曜`),
     weather: aggregateGroups(activeDays, (day) => day.weather ?? "天候不明"),
-    payments: paymentPairs.filter(([, amount]) => amount > 0).map((
-      [name, amount],
-    ) => ({
-      name,
-      amount,
-      sharePct: paymentTotal
-        ? Math.round((amount / paymentTotal) * 1000) / 10
-        : 0,
-    })),
+    payments: [
+      ...paymentPairs.filter(([, amount]) => amount > 0).map((
+        [name, amount],
+      ) => ({
+        name,
+        amount,
+        sharePct: grossSales
+          ? Math.round((amount / grossSales) * 1000) / 10
+          : 0,
+      })),
+      ...(unattributedPaymentSales > 0
+        ? [{
+          name: "支払明細未捕捉",
+          amount: unattributedPaymentSales,
+          sharePct: grossSales
+            ? Math.round((unattributedPaymentSales / grossSales) * 1000) / 10
+            : 0,
+        }]
+        : []),
+    ],
     products: {
       topBySales,
       // 「上位5品が商品明細合計に占める割合」。総売上に対する割合ではない。
@@ -516,17 +564,32 @@ export function buildPosJournalAiFacts(
         ) / 10
         : 0,
       capturedItemSales: itemSales,
+      explicitAdjustments,
+      netCapturedSales,
       // 未捕捉ぶんは必ずここを読む。AI に総売上から逆算させない。
-      uncapturedSales: Math.max(0, grossSales - itemSales),
+      uncapturedSales: Math.max(0, grossSales - netCapturedSales),
       capturedPctOfGrossSales: grossSales
-        ? Math.round((itemSales / grossSales) * 1000) / 10
+        ? Math.min(
+          100,
+          Math.max(0, Math.round((netCapturedSales / grossSales) * 1000) / 10),
+        )
         : 0,
       uncapturedPctOfGrossSales: grossSales
-        ? Math.round(((grossSales - itemSales) / grossSales) * 1000) / 10
+        ? Math.min(
+          100,
+          Math.max(
+            0,
+            Math.round(
+              ((grossSales - netCapturedSales) / grossSales) * 1000,
+            ) / 10,
+          ),
+        )
         : 0,
       note:
         "sharePct と topFiveSharePctOfCapturedItemSales の分母は capturedItemSales。" +
-        "総売上に対する割合ではない。未捕捉の量は uncapturedSales と " +
+        "総売上に対する割合ではない。" +
+        "capturedItemSalesは値引前の商品小計で、正味値はnetCapturedSales。" +
+        "未捕捉の量は uncapturedSales と " +
         "uncapturedPctOfGrossSales だけを根拠にすること。",
     },
     dataNotes,

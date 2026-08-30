@@ -5,6 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import {
+  classifyWorkflowRun,
+  requiresEdgeDeployGate,
+  selectMatchingWorkflowRun,
+} from '../scripts/wait-for-edge-deploy.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -154,6 +159,91 @@ test('Pages workflow deploys only the public directory', async () => {
   // validate と deploy を分けず同一ジョブにし、runner 枯渇で二段目だけ落ちるのを防ぐ
   assert.match(workflow, /jobs:\s*\n\s*deploy:/);
   assert.doesNotMatch(workflow, /^\s*validate:\s*$/m);
+  assert.match(workflow, /^\s{2}actions:\s*read\s*$/m);
+  assert.match(workflow, /fetch-depth:\s*0/);
+  assert.match(workflow, /id:\s*edge_gate/);
+  assert.match(workflow, /empty_tree="\$\(git hash-object -t tree \/dev\/null\)"/);
+  assert.match(workflow, /git diff --name-only -z "\$empty_tree" "\$PUSH_HEAD"/);
+  assert.match(workflow, /wait-for-edge-deploy\.mjs detect/);
+  assert.match(workflow, /if:\s*steps\.edge_gate\.outputs\.required == 'true'/);
+  assert.match(workflow, /wait-for-edge-deploy\.mjs wait/);
+  assert.match(workflow, /--head-sha "\$GITHUB_SHA"/);
+  assert.match(workflow, /--workflow "deploy-edge-functions\.yml"/);
+  assert.match(workflow, /--appearance-timeout-ms 600000/);
+  assert.match(workflow, /--completion-timeout-ms 3600000/);
+  const waitIndex = workflow.indexOf('- name: Wait for matching Edge Functions deployment');
+  assert.ok(waitIndex >= 0);
+  assert.ok(waitIndex < workflow.indexOf('- name: Configure Pages'));
+  assert.ok(waitIndex < workflow.indexOf('- name: Upload public site'));
+  assert.ok(waitIndex < workflow.indexOf('- name: Deploy\n'));
+});
+
+test('Pages requires the Edge gate only when one push changes both surfaces', () => {
+  assert.deepEqual(requiresEdgeDeployGate(['public/jnm/jnl2txt.html']), {
+    publicChanged: true,
+    edgeChanged: false,
+    required: false,
+  });
+  assert.deepEqual(requiresEdgeDeployGate(['supabase/functions/admin-api/index.ts']), {
+    publicChanged: false,
+    edgeChanged: true,
+    required: false,
+  });
+  for (const edgePath of [
+    'supabase/functions/admin-api/index.ts',
+    'supabase/migrations/20260910080000_example.sql',
+    'supabase/config.toml',
+    '.github/workflows/deploy-edge-functions.yml',
+  ]) {
+    assert.equal(
+      requiresEdgeDeployGate(['public/jnm/jnl2txt.html', edgePath]).required,
+      true,
+      edgePath,
+    );
+  }
+  assert.equal(
+    requiresEdgeDeployGate(['public/jnm/jnl2txt.html', 'docs/supabase/functions/example.md']).required,
+    false,
+  );
+});
+
+test('Pages selects only the newest push Edge run for the exact commit SHA', () => {
+  const sha = 'a'.repeat(40);
+  const runs = [
+    { id: 1, event: 'push', head_sha: sha, created_at: '2026-08-30T10:00:00Z' },
+    { id: 2, event: 'workflow_dispatch', head_sha: sha, created_at: '2026-08-30T10:04:00Z' },
+    { id: 3, event: 'push', head_sha: 'b'.repeat(40), created_at: '2026-08-30T10:05:00Z' },
+    { id: 4, event: 'push', head_sha: sha.toUpperCase(), created_at: '2026-08-30T10:03:00Z' },
+  ];
+  assert.equal(selectMatchingWorkflowRun(runs, sha)?.id, 4);
+  assert.equal(selectMatchingWorkflowRun(runs, 'c'.repeat(40)), null);
+});
+
+test('Pages fails closed for every completed Edge conclusion except success', () => {
+  for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+    assert.equal(classifyWorkflowRun({ status }).state, 'pending');
+  }
+  assert.equal(
+    classifyWorkflowRun({ status: 'completed', conclusion: 'success' }).state,
+    'success',
+  );
+  for (const conclusion of [
+    'action_required',
+    'cancelled',
+    'failure',
+    'neutral',
+    'skipped',
+    'stale',
+    'startup_failure',
+    'timed_out',
+    null,
+  ]) {
+    assert.equal(
+      classifyWorkflowRun({ status: 'completed', conclusion }).state,
+      'failure',
+      String(conclusion),
+    );
+  }
 });
 
 test('Edge Functions workflow deploys from a single job on main push', async () => {
@@ -167,6 +257,10 @@ test('Edge Functions workflow deploys from a single job on main push', async () 
   assert.match(workflow, /jobs:\s*\n\s*deploy:/);
   assert.doesNotMatch(workflow, /^\s*validate:\s*$/m);
   assert.match(workflow, /supabase-db-push-reconcile\.sh/);
+  const jobHeader = workflow.slice(workflow.indexOf('jobs:'), workflow.indexOf('steps:'));
+  assert.doesNotMatch(jobHeader, /SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD/);
+  assert.match(workflow, /Link project and apply DB migrations[\s\S]*SUPABASE_DB_PASSWORD:\s*\$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/);
+  assert.match(workflow, /Deploy all functions[\s\S]*SUPABASE_ACCESS_TOKEN:\s*\$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/);
 });
 
 test('db push reconcile repairs remote-only migration history', async () => {

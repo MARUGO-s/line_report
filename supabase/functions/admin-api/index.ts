@@ -183,6 +183,7 @@ import {
   parsePosJournalLzh,
   mergePosJournalDaysPreferPrimary,
   pickBestJournalSavedReportDays,
+  POS_JOURNAL_REPORT_PARSER_VERSION,
   posJournalDayNeedsWeather,
   resolvePosJournalStore,
   type PosJournalDay,
@@ -202,9 +203,14 @@ import {
 } from "../_shared/paged_row_scan.ts"
 import {
   aggregateJournalProductMonthlyRows,
+  extractNetProductItemsFromReceipt,
   extractProductLinesFromParsedDay,
   indexRowMatchesProductFilter,
   normalizePosProductSearchText as normalizePosProductSearchTextShared,
+  reconcileParsedJournalDayDetail,
+  summarizeJournalProductDetailCoverage,
+  type JournalProductDayDetail,
+  type JournalProductDetailCoverage,
   type JournalProductLineItem,
 } from "../_shared/journal_product_index.ts"
 import {
@@ -559,6 +565,7 @@ const PETTY_CASH_RECEIPT_IMAGE_MAX_BYTES = GROQ_VISION_BASE64_MAX_BYTES
 const POS_JOURNAL_BUCKET = "pos-journals"
 const POS_JOURNAL_UPLOAD_MAX_BYTES = 8 * 1024 * 1024
 const POS_JOURNAL_UPLOAD_MAX_FILES = 62
+const POS_JOURNAL_REPARSE_MAX_FILES = 20
 const POS_JOURNAL_AUTO_REPORT_SOURCE = "pos_journal_upload"
 /** 売上レポート表示用HTML（PDF元）。数値正本ではない。 */
 const POS_REPORT_HTML_BUCKET = "pos-report-html"
@@ -1452,6 +1459,42 @@ Deno.serve(async (req, info) => {
     // 内部キーが無い/不一致の場合は通常の管理者認証へフォールスルー
   }
 
+  // デプロイ後の原本再解析・派生index再構築を、管理セッションの値を
+  // ターミナルへ取り出さずに実行するためのサーバー間メンテナンス経路。
+  // service_role と完全一致する内部キーだけを許可し、キー不一致時は
+  // 通常の本部管理者認証へフォールスルーする。店舗リンクには開放しない。
+  if (
+    req.method === "POST" && (
+      path === "/pos-journals/reparse" ||
+      path === "/pos-journals/product-index/rebuild"
+    )
+  ) {
+    const internalKey = req.headers.get("x-internal-key") ?? ""
+    const expectedInternalKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    if (
+      internalKey && expectedInternalKey &&
+      secureEqual(internalKey, expectedInternalKey)
+    ) {
+      try {
+        const body = await parseJson(req)
+        if (!isRecord(body)) {
+          throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+        }
+        if (path === "/pos-journals/reparse") {
+          return json(await reparseStoredPosJournalFiles(supabase, body, null), 200)
+        }
+        return json(
+          await rebuildJournalProductMonthlyIndex(supabase, body, null),
+          200,
+        )
+      } catch (e) {
+        const err = asAppError(e)
+        return json({ error: err.message }, err.status)
+      }
+    }
+    // 内部キーが無い/不一致の場合は通常の本部管理者認証へフォールスルー
+  }
+
   // M-talk のルーム完全削除。作成者のチャットJWTのみ。管理トークンは使わない。
   if (req.method === "POST" && path === "/chat-room-purge") {
     try {
@@ -2034,6 +2077,13 @@ Deno.serve(async (req, info) => {
         throw { status: 400, message: "Invalid JSON body." } satisfies AppError
       }
       return json(await rebuildJournalProductMonthlyIndex(supabase, body, storeScope), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/reparse") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await reparseStoredPosJournalFiles(supabase, body, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/product-cohort") {
       return json(await comparePosJournalProductCohorts(supabase, url), 200)
@@ -11215,7 +11265,7 @@ function normalizeYearMonth(value: unknown): string {
 }
 
 function normalizePosJournalStoreKey(value: unknown): string {
-  const key = String(value ?? "").trim()
+  const key = String(value ?? "").trim().toLowerCase()
   if (!key || key === "__all__") {
     throw {
       status: 400,
@@ -11459,7 +11509,13 @@ async function fillPosJournalDaysWeather(
 ): Promise<PosJournalDay[]> {
   const list = Array.isArray(days) ? days : []
   if (!list.length) return list
-  if (!list.some((day) => posJournalDayNeedsWeather(day))) return list
+  if (!list.some((day) =>
+    posJournalDayNeedsWeather(day as {
+      weather?: unknown
+      temp_c?: unknown
+      tempC?: unknown
+    })
+  )) return list
   const coords = STORE_COORDINATES[storeKey]
   if (!coords) return applyCachedWeatherToPosJournalDays(list, {})
   const { from, to } = posJournalMonthBounds(month)
@@ -11501,13 +11557,16 @@ async function fetchPosJournalState(
   const sharedOnlyDays = shared.days.filter((day) =>
     !storedDateSet.has(day.business_date)
   )
-  // 同じ営業日は原本LZH（pos_journal_files）を正本とし、
-  // 原本が無い日だけ Journal Report の保存済みレポートで補完する。
+  // 同じ営業日は原本LZHの日計を正本としつつ、原本側の会計明細が日計へ
+  // 一致しない場合は保存レポートの検証済み明細を維持する。
+  // 自前の配列結合だと不完全なraw receiptsがAI回復経路へ漏れるため、
+  // 自動月報生成と同じ共通マージ関数を必ず通す。
+  const mergedDays = mergePosJournalDaysPreferPrimary(storedDays, shared.days)
   const days = await fillPosJournalDaysWeather(
     supabase,
     storeKey,
     month,
-    [...sharedOnlyDays, ...storedDays],
+    mergedDays,
   )
   const storeCode = toSafeString(rows[0]?.store_code)
   const knownStore = resolvePosJournalStore(storeCode) ??
@@ -11520,6 +11579,19 @@ async function fetchPosJournalState(
     supabase,
     storeKey,
   )
+  // ブラウザの欠落月回復へはraw summary.daysを直接使わせず、自動月報と同じ
+  // 日計照合・会計値調整・不一致日のsummary退避を通した安全なデータを返す。
+  const recoveryReport = buildJournalSavedReportsFromPosDays({
+    storeKey,
+    storeName,
+    storeCode: resolvedStoreCode,
+    month,
+    days,
+    journalIds: rows.map((row) => Number(row.id)).filter((id) =>
+      Number.isSafeInteger(id) && id > 0
+    ),
+    categoryOverrides,
+  }).find((report) => /月間/.test(report.title)) ?? null
   const summary = buildPosJournalSummary({
     storeKey,
     storeName,
@@ -11554,6 +11626,14 @@ async function fetchPosJournalState(
       added_day_count: sharedOnlyDays.length,
       error: shared.error,
     },
+    recovery_report: recoveryReport
+      ? {
+        id: recoveryReport.id,
+        title: recoveryReport.title,
+        period: recoveryReport.period,
+        data: recoveryReport.data,
+      }
+      : null,
     summary,
   }
 }
@@ -11697,6 +11777,8 @@ type PosJournalParsedRow = {
   business_date: unknown
   year_month: unknown
   parsed_data: unknown
+  gross_sales: unknown
+  groups_count: unknown
 }
 
 async function scanPosJournalParsedRows(
@@ -11715,7 +11797,9 @@ async function scanPosJournalParsedRows(
       async (afterId, pageSize) => {
         let query = supabase
           .from("pos_journal_files")
-          .select("id, business_date, year_month, parsed_data")
+          .select(
+            "id, business_date, year_month, parsed_data, gross_sales, groups_count",
+          )
           .eq("store_partition_key", storeKey)
           .is("storage_deleted_at", null)
           .not("parsed_data", "is", null)
@@ -11756,16 +11840,132 @@ async function scanPosJournalParsedRows(
   }
 }
 
-async function rebuildJournalProductIndexMonth(
+function reconcilePosJournalParsedRow(
+  row: PosJournalParsedRow,
+): JournalProductDayDetail | null {
+  const businessDate = String(row.business_date ?? "").slice(0, 10)
+  const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+  return reconcileParsedJournalDayDetail(
+    row.parsed_data,
+    businessDate,
+    yearMonth,
+    {
+      grossSales: row.gross_sales,
+      groups: row.groups_count,
+    },
+  )
+}
+
+type JournalProductCoverageResponse = JournalProductDetailCoverage & {
+  by_month: Array<JournalProductDetailCoverage & { year_month: string }>
+}
+
+function combineJournalProductDetailCoverage(
+  rows: Array<JournalProductDetailCoverage & { year_month: string }>,
+): JournalProductCoverageResponse {
+  const sorted = [...rows].sort((a, b) =>
+    a.year_month.localeCompare(b.year_month)
+  )
+  const completeDays = sorted.reduce(
+    (sum, row) => sum + row.detail_complete_days,
+    0,
+  )
+  const incompleteDays = sorted.reduce(
+    (sum, row) => sum + row.detail_incomplete_days,
+    0,
+  )
+  return {
+    status: incompleteDays === 0
+      ? "complete"
+      : (completeDays === 0 ? "incomplete" : "partial"),
+    policy: "receipt_and_item_totals_match_gross_sales",
+    scanned_days: completeDays + incompleteDays,
+    detail_complete_days: completeDays,
+    detail_incomplete_days: incompleteDays,
+    gross_mismatch_days: sorted.reduce(
+      (sum, row) => sum + row.gross_mismatch_days,
+      0,
+    ),
+    item_mismatch_days: sorted.reduce(
+      (sum, row) => sum + row.item_mismatch_days,
+      0,
+    ),
+    item_mismatch_receipts: sorted.reduce(
+      (sum, row) => sum + row.item_mismatch_receipts,
+      0,
+    ),
+    complete_gross_sales: sorted.reduce(
+      (sum, row) => sum + row.complete_gross_sales,
+      0,
+    ),
+    excluded_gross_sales: sorted.reduce(
+      (sum, row) => sum + row.excluded_gross_sales,
+      0,
+    ),
+    incomplete_dates: sorted.flatMap((row) => row.incomplete_dates).sort(),
+    by_month: sorted,
+  }
+}
+
+async function loadJournalProductDetailCoverage(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
-  yearMonth: string,
-): Promise<{ year_month: string; rows: number }> {
-  const month = String(yearMonth || "").trim()
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-    throw { status: 400, message: "year_month must be YYYY-MM." } satisfies AppError
+): Promise<JournalProductCoverageResponse> {
+  const { data, error } = await supabase
+    .from("journal_product_detail_coverage")
+    .select(
+      "year_month, status, policy, scanned_days, detail_complete_days, detail_incomplete_days, gross_mismatch_days, item_mismatch_days, item_mismatch_receipts, complete_gross_sales, excluded_gross_sales, incomplete_dates",
+    )
+    .eq("store_partition_key", storeKey)
+    .order("year_month", { ascending: true })
+  if (error) {
+    throw {
+      status: 500,
+      message: `商品明細coverageの取得に失敗しました: ${error.message}`,
+    } satisfies AppError
   }
+  const rows = (Array.isArray(data) ? data : []).map((row) => {
+    const value: Record<string, unknown> = isRecord(row) ? row : {}
+    const completeDays = toNonNegativeInteger(value.detail_complete_days)
+    const incompleteDays = toNonNegativeInteger(value.detail_incomplete_days)
+    return {
+      year_month: String(value.year_month ?? ""),
+      status: incompleteDays === 0
+        ? "complete" as const
+        : (completeDays === 0 ? "incomplete" as const : "partial" as const),
+      policy: "receipt_and_item_totals_match_gross_sales" as const,
+      scanned_days: completeDays + incompleteDays,
+      detail_complete_days: completeDays,
+      detail_incomplete_days: incompleteDays,
+      gross_mismatch_days: toNonNegativeInteger(value.gross_mismatch_days),
+      item_mismatch_days: toNonNegativeInteger(value.item_mismatch_days),
+      item_mismatch_receipts: toNonNegativeInteger(
+        value.item_mismatch_receipts,
+      ),
+      complete_gross_sales: toNonNegativeInteger(value.complete_gross_sales),
+      excluded_gross_sales: toNonNegativeInteger(value.excluded_gross_sales),
+      incomplete_dates: Array.isArray(value.incomplete_dates)
+        ? value.incomplete_dates.map((date: unknown) =>
+          String(date).slice(0, 10)
+        ).filter(
+          (date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date),
+        )
+        : [],
+    }
+  }).filter((row) => /^\d{4}-(0[1-9]|1[0-2])$/.test(row.year_month))
+  return combineJournalProductDetailCoverage(rows)
+}
+
+async function buildJournalProductIndexMonthSnapshot(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  month: string,
+): Promise<{
+  aggregated: ReturnType<typeof aggregateJournalProductMonthlyRows>
+  coverage: JournalProductDetailCoverage
+}> {
   const lines: JournalProductLineItem[] = []
+  const dayDetails: JournalProductDayDetail[] = []
   await scanPosJournalParsedRows(
     supabase,
     {
@@ -11777,45 +11977,101 @@ async function rebuildJournalProductIndexMonth(
     (rows) => {
       for (const row of rows) {
         if (!isRecord(row)) continue
-        const businessDate = String(row.business_date ?? "").slice(0, 10)
-        const ym = String(row.year_month ?? businessDate.slice(0, 7))
+        const detail = reconcilePosJournalParsedRow(row)
+        if (!detail) continue
+        dayDetails.push(detail)
+        if (!detail.detail_complete) continue
         lines.push(
-          ...extractProductLinesFromParsedDay(row.parsed_data, businessDate, ym),
+          ...extractProductLinesFromParsedDay(
+            row.parsed_data,
+            detail.business_date,
+            detail.year_month,
+            { grossSales: row.gross_sales, groups: row.groups_count },
+          ),
         )
       }
     },
   )
-  const aggregated = aggregateJournalProductMonthlyRows(storeKey, lines)
-  const { error: deleteError } = await supabase
-    .from("journal_product_monthly_index")
-    .delete()
-    .eq("store_partition_key", storeKey)
-    .eq("year_month", month)
-  if (deleteError) {
-    throw {
-      status: 500,
-      message: `商品インデックスのクリアに失敗しました: ${deleteError.message}`,
-    } satisfies AppError
+  return {
+    aggregated: aggregateJournalProductMonthlyRows(storeKey, lines),
+    coverage: summarizeJournalProductDetailCoverage(dayDetails),
   }
-  if (aggregated.length) {
-    const { error: upsertError } = await supabase
-      .from("journal_product_monthly_index")
-      .upsert(aggregated, {
-        onConflict: "store_partition_key,year_month,product_name_norm,unit_price",
-      })
-    if (upsertError) {
-      throw {
-        status: 500,
-        message: `商品インデックスの保存に失敗しました: ${upsertError.message}`,
-      } satisfies AppError
+}
+
+async function rebuildJournalProductIndexMonth(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  yearMonth: string,
+  options: { dryRun?: boolean } = {},
+): Promise<{
+  year_month: string
+  rows: number
+  dry_run: boolean
+  dirty_cleared: boolean
+  stale_snapshot: boolean
+  detail_coverage: JournalProductDetailCoverage
+}> {
+  const month = String(yearMonth || "").trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw { status: 400, message: "year_month must be YYYY-MM." } satisfies AppError
+  }
+  let dirtyMarker: string | null = null
+  if (options.dryRun !== true) {
+    // clean月の手動force rebuildでも、DELETEやupsert失敗中に旧indexを
+    // 確定値として読ませない。全処理成功後にだけ末尾でdirtyを解除する。
+    dirtyMarker = await markJournalProductIndexMonthDirty(
+      supabase,
+      storeKey,
+      month,
+    )
+  }
+  const { aggregated, coverage } = await buildJournalProductIndexMonthSnapshot(
+    supabase,
+    storeKey,
+    month,
+  )
+  if (options.dryRun === true) {
+    return {
+      year_month: month,
+      rows: aggregated.length,
+      dry_run: true,
+      dirty_cleared: false,
+      stale_snapshot: false,
+      detail_coverage: coverage,
     }
   }
-  await supabase
-    .from("journal_product_index_dirty_months")
-    .delete()
-    .eq("store_partition_key", storeKey)
-    .eq("year_month", month)
-  return { year_month: month, rows: aggregated.length }
+  if (!dirtyMarker) {
+    throw {
+      status: 500,
+      message: "商品index月のdirty markerがないため安全に置換できません。",
+    } satisfies AppError
+  }
+  // snapshot作成後のupload/reparseと競合しても、古いsnapshotを新しいindexへ
+  // 上書きしない。DB側でmarker照合・index/coverage置換・dirty解除を
+  // advisory lock付きの1トランザクションとして実行する。
+  const { data: snapshotApplied, error: applySnapshotError } = await supabase
+    .rpc("apply_journal_product_index_snapshot", {
+      p_store_partition_key: storeKey,
+      p_year_month: month,
+      p_expected_touched_at: dirtyMarker,
+      p_index_rows: aggregated,
+      p_coverage: coverage,
+    })
+  if (applySnapshotError) {
+    throw {
+      status: 500,
+      message: `商品index月の原子的置換に失敗しました: ${applySnapshotError.message}`,
+    } satisfies AppError
+  }
+  const applied = snapshotApplied === true
+  return {
+    year_month: month,
+    rows: aggregated.length,
+    dry_run: false,
+    dirty_cleared: applied,
+    stale_snapshot: !applied,
+    detail_coverage: coverage,
+  }
 }
 
 async function rebuildJournalProductMonthlyIndex(
@@ -11839,6 +12095,7 @@ async function rebuildJournalProductMonthlyIndex(
   }
 
   const forceFull = body.force_full === true || body.force_full === "true"
+  const dryRun = body.dry_run === true || body.dry_run === "true"
   const months = new Set<string>()
   const explicitMonth = parseOptionalYearMonthParam(body.year_month || body.month, "year_month")
   if (explicitMonth) months.add(explicitMonth)
@@ -11879,15 +12136,37 @@ async function rebuildJournalProductMonthlyIndex(
     )
   }
 
-  const rebuilt: Array<{ year_month: string; rows: number }> = []
+  const rebuilt: Array<{
+    year_month: string
+    rows: number
+    dry_run: boolean
+    dirty_cleared: boolean
+    stale_snapshot: boolean
+    detail_coverage: JournalProductDetailCoverage
+  }> = []
   for (const month of [...months].sort()) {
-    rebuilt.push(await rebuildJournalProductIndexMonth(supabase, storeKey, month))
+    rebuilt.push(
+      await rebuildJournalProductIndexMonth(supabase, storeKey, month, {
+        dryRun,
+      }),
+    )
   }
   return {
     ok: true,
     store_key: storeKey,
     force_full: forceFull,
+    dry_run: dryRun,
     rebuilt_months: rebuilt.length,
+    source_months_found: months.size,
+    warning: months.size === 0
+      ? "対象店舗の電子ジャーナル月が見つかりませんでした。"
+      : null,
+    detail_coverage: combineJournalProductDetailCoverage(
+      rebuilt.map((row) => ({
+        year_month: row.year_month,
+        ...row.detail_coverage,
+      })),
+    ),
     results: rebuilt,
   }
 }
@@ -11902,6 +12181,12 @@ async function ensureJournalProductIndexMonths(
   )]
   for (const month of targets) {
     try {
+      await markJournalProductIndexMonthDirty(supabase, storeKey, month)
+      if (await journalProductMonthHasUnsafeParserRows(
+        supabase,
+        storeKey,
+        month,
+      )) continue
       await rebuildJournalProductIndexMonth(supabase, storeKey, month)
     } catch (err) {
       console.warn("journal product index rebuild failed:", storeKey, month, err)
@@ -11909,10 +12194,67 @@ async function ensureJournalProductIndexMonths(
   }
 }
 
+async function markJournalProductIndexMonthDirty(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  month: string,
+): Promise<string> {
+  const { data, error } = await supabase
+    .rpc("touch_journal_product_index_dirty_month", {
+      p_store_partition_key: storeKey,
+      p_year_month: month,
+    })
+  if (error) {
+    throw new Error(`商品index月をdirty化できませんでした: ${error.message}`)
+  }
+  const storedMarker = String(data ?? "").trim()
+  if (!storedMarker) {
+    throw new Error("商品index月のdirty markerを確認できませんでした。")
+  }
+  return storedMarker
+}
+
+async function journalProductMonthHasUnsafeParserRows(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  month: string,
+): Promise<boolean> {
+  let unsafeRowsRemain = false
+  await scanPosJournalParsedRows(
+    supabase,
+    {
+      storeKey,
+      monthFrom: month,
+      monthTo: month,
+      errorLabel: "商品index月の未完了確認に失敗しました",
+    },
+    (rows) => {
+      if (
+        rows.some((row) =>
+          isPosJournalStaleParserRow(row) ||
+          isPosJournalDetailMismatchRow(row)
+        )
+      ) unsafeRowsRemain = true
+    },
+  )
+  return unsafeRowsRemain
+}
+
 async function storeHasJournalProductIndex(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
 ): Promise<boolean> {
+  // dirty月が1件でも残る間は、古いderived indexを確定値として使わず
+  // 日計照合付きlive scanへフォールバックする。
+  const { count: dirtyCount, error: dirtyError } = await supabase
+    .from("journal_product_index_dirty_months")
+    .select("year_month", { count: "exact", head: true })
+    .eq("store_partition_key", storeKey)
+  if (dirtyError) {
+    console.warn("journal product dirty count failed:", dirtyError.message)
+    return false
+  }
+  if ((dirtyCount || 0) > 0) return false
   const { count, error } = await supabase
     .from("journal_product_monthly_index")
     .select("id", { count: "exact", head: true })
@@ -11929,6 +12271,10 @@ async function searchPosJournalProductsFromIndex(
   storeKey: string,
   filter: PosProductSearchFilter,
 ) {
+  const detailCoverage = await loadJournalProductDetailCoverage(
+    supabase,
+    storeKey,
+  )
   type IndexHit = {
     year_month: string
     display_name: string
@@ -12230,6 +12576,7 @@ async function searchPosJournalProductsFromIndex(
     ok: true,
     store_key: storeKey,
     source: "monthly_index" as const,
+    detail_coverage: detailCoverage,
     query: {
       q: filter.rawQ,
       code: filter.codeQ,
@@ -12302,6 +12649,7 @@ async function searchPosJournalProducts(
     amount: number
   }
   const hits: Hit[] = []
+  const dayDetails: JournalProductDayDetail[] = []
   let itemOrder = 0
   const scan = await scanPosJournalParsedRows(
     supabase,
@@ -12315,29 +12663,29 @@ async function searchPosJournalProducts(
         const fileId = toNonNegativeInteger(row.id)
         const businessDate = String(row.business_date ?? "").slice(0, 10)
         const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
-        const parsed = row.parsed_data
-        if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
-        for (const receipt of parsed.receipts) {
+        const detail = reconcilePosJournalParsedRow(row)
+        if (!detail) continue
+        dayDetails.push(detail)
+        if (!detail.detail_complete) continue
+        for (const receipt of detail.receipts) {
           if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
-          for (const item of receipt.items) {
-            if (!isRecord(item)) continue
-            const name = String(item.name ?? "").trim()
-            if (!name) continue
-            const code = String(item.code ?? "").trim()
-            const unit = toNonNegativeInteger(item.unit)
-            const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
-            const amount = toNonNegativeInteger(item.amount) || unit * qty
-            if (!itemMatchesPosProductFilter(name, code, unit, filter)) continue
+          for (const item of extractNetProductItemsFromReceipt(receipt)) {
+            if (!itemMatchesPosProductFilter(
+              item.name,
+              item.code,
+              item.unit,
+              filter,
+            )) continue
             hits.push({
               file_id: fileId,
               item_order: itemOrder++,
               business_date: businessDate,
               year_month: yearMonth,
-              name,
-              code,
-              unit,
-              qty,
-              amount,
+              name: item.name,
+              code: item.code,
+              unit: item.unit,
+              qty: item.qty,
+              amount: item.amount,
             })
           }
         }
@@ -12489,6 +12837,17 @@ async function searchPosJournalProducts(
     ok: true,
     store_key: storeKey,
     source: "live_scan" as const,
+    detail_coverage: combineJournalProductDetailCoverage(
+      [...new Map(dayDetails.map((day) => [
+        day.year_month,
+        day.year_month,
+      ])).keys()].map((month) => ({
+        year_month: month,
+        ...summarizeJournalProductDetailCoverage(
+          dayDetails.filter((day) => day.year_month === month),
+        ),
+      })),
+    ),
     query: {
       q: filter.rawQ,
       code: filter.codeQ,
@@ -12591,18 +12950,16 @@ function addReceiptToCohort(
     bucket.dinner_guests += guests
     bucket.dinner_sales += total
   }
-  for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
-    if (!isRecord(item)) continue
-    const name = String(item.name ?? "").trim()
-    if (!name) continue
-    const code = String(item.code ?? "").trim()
-    const unit = toNonNegativeInteger(item.unit)
-    const qty = Math.max(1, toNonNegativeInteger(item.qty) || 1)
-    const amount = toNonNegativeInteger(item.amount) || unit * qty
-    const key = `${code}|${name}`
-    const prev = bucket.items.get(key) || { name, code, qty: 0, amount: 0 }
-    prev.qty += qty
-    prev.amount += amount
+  for (const item of extractNetProductItemsFromReceipt(receipt)) {
+    const key = `${item.code}|${item.name}`
+    const prev = bucket.items.get(key) || {
+      name: item.name,
+      code: item.code,
+      qty: 0,
+      amount: 0,
+    }
+    prev.qty += item.qty
+    prev.amount += item.amount
     bucket.items.set(key, prev)
   }
   void businessDate
@@ -12692,13 +13049,10 @@ function receiptHasMatchingItem(
   receipt: Record<string, unknown>,
   filter: PosProductSearchFilter,
 ): boolean {
-  for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
-    if (!isRecord(item)) continue
-    const name = String(item.name ?? "").trim()
-    if (!name) continue
-    const code = String(item.code ?? "").trim()
-    const unit = toNonNegativeInteger(item.unit)
-    if (itemMatchesPosProductFilter(name, code, unit, filter)) return true
+  for (const item of extractNetProductItemsFromReceipt(receipt)) {
+    if (itemMatchesPosProductFilter(item.name, item.code, item.unit, filter)) {
+      return true
+    }
   }
   return false
 }
@@ -12708,11 +13062,8 @@ function receiptHasItemClass(
   itemClass: string,
 ): boolean {
   const cls = String(itemClass || "").trim().toLowerCase()
-  for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
-    if (!isRecord(item)) continue
-    const name = String(item.name ?? "").trim()
-    if (!name) continue
-    const n = normalizePosProductSearchText(name)
+  for (const item of extractNetProductItemsFromReceipt(receipt)) {
+    const n = normalizePosProductSearchText(item.name)
     if (cls === "course") {
       if (
         n.includes("コ-ス") || n.includes("course") ||
@@ -12972,14 +13323,14 @@ function normalizeCohortComparisonSpec(
       decide: (receipt) => {
         let low = false
         let high = false
-        for (const item of Array.isArray(receipt.items) ? receipt.items : []) {
-          if (!isRecord(item)) continue
-          const name = String(item.name ?? "").trim()
-          if (!name) continue
-          const code = String(item.code ?? "").trim()
-          const unit = toNonNegativeInteger(item.unit)
-          if (!itemMatchesPosProductFilter(name, code, unit, filter)) continue
-          if (unit < split) low = true
+        for (const item of extractNetProductItemsFromReceipt(receipt)) {
+          if (!itemMatchesPosProductFilter(
+            item.name,
+            item.code,
+            item.unit,
+            filter,
+          )) continue
+          if (item.unit < split) low = true
           else high = true
         }
         if (low && !high) return "left"
@@ -13051,6 +13402,7 @@ async function comparePosJournalCohortsGeneral(
     byMonth: new Map<string, { left: CohortBucket; right: CohortBucket }>(),
   }))
   let scannedReceipts = 0
+  const dayDetails: JournalProductDayDetail[] = []
 
   const scan = await scanPosJournalParsedRows(
     supabase,
@@ -13065,9 +13417,11 @@ async function comparePosJournalCohortsGeneral(
         if (!isRecord(row)) continue
         const businessDate = String(row.business_date ?? "").slice(0, 10)
         const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
-        const parsed = row.parsed_data
-        if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) continue
-        for (const receipt of parsed.receipts) {
+        const detail = reconcilePosJournalParsedRow(row)
+        if (!detail) continue
+        dayDetails.push(detail)
+        if (!detail.detail_complete) continue
+        for (const receipt of detail.receipts) {
           if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
           scannedReceipts += 1
           for (const state of states) {
@@ -13100,6 +13454,14 @@ async function comparePosJournalCohortsGeneral(
     month_to: monthTo,
     scanned_files: scan.scannedRows,
     scanned_receipts: scannedReceipts,
+    detail_coverage: combineJournalProductDetailCoverage(
+      [...new Set(dayDetails.map((day) => day.year_month))].map((month) => ({
+        year_month: month,
+        ...summarizeJournalProductDetailCoverage(
+          dayDetails.filter((day) => day.year_month === month),
+        ),
+      })),
+    ),
     comparisons: states.map((state) => ({
       id: state.spec.id,
       label: state.spec.label,
@@ -13169,6 +13531,7 @@ async function comparePosJournalProductCohorts(
     },
     scanned_files: general.scanned_files,
     scanned_receipts: general.scanned_receipts,
+    detail_coverage: general.detail_coverage,
     with_product: cmp?.left || serializeCohortBucket(emptyCohortBucket()),
     without_product: cmp?.right || serializeCohortBucket(emptyCohortBucket()),
     by_month: (cmp?.by_month || []).map((m: {
@@ -13213,6 +13576,26 @@ function isPosJournalPlaceholderRow(row: Record<string, unknown>): boolean {
   const receipts = Array.isArray(parsed.receipts) ? parsed.receipts : []
   const parsedComplete = parsed.parsed_complete === true
   return !parsedComplete && (receiptsCount <= 0 || receipts.length === 0)
+}
+
+function isPosJournalStaleParserRow(row: Record<string, unknown>): boolean {
+  const parsed = isRecord(row.parsed_data) ? row.parsed_data : {}
+  return toSafeString(parsed.parser_version) !== POS_JOURNAL_REPORT_PARSER_VERSION
+}
+
+function isPosJournalDetailMismatchRow(row: Record<string, unknown>): boolean {
+  const businessDate = toSafeString(row.business_date ||
+    (isRecord(row.parsed_data) ? row.parsed_data.business_date : ""))
+  const detail = reconcileParsedJournalDayDetail(
+    row.parsed_data,
+    businessDate,
+    toSafeString(row.year_month) || businessDate.slice(0, 7),
+    {
+      grossSales: row.gross_sales,
+      groups: row.groups_count,
+    },
+  )
+  return detail == null || !detail.detail_complete
 }
 
 function buildPosJournalRepairPayload(
@@ -13808,8 +14191,13 @@ async function uploadPosJournalFiles(
         throw new Error(`重複確認に失敗しました: ${existingHashError.message}`)
       }
       if (existingHash) {
-        // 同一ハッシュでもプレースホルダなら解析結果を修復（Storage未保管なら埋める）
-        if (isPosJournalPlaceholderRow(existingHash as Record<string, unknown>)) {
+        // 同一ハッシュでもプレースホルダ、または旧parserなら解析結果を更新する。
+        // 原本を再選択しただけで、旧版で欠落した支払区分も修復できる。
+        if (
+          isPosJournalPlaceholderRow(existingHash as Record<string, unknown>) ||
+          isPosJournalStaleParserRow(existingHash as Record<string, unknown>) ||
+          isPosJournalDetailMismatchRow(existingHash as Record<string, unknown>)
+        ) {
           const repairTargetId = Number(existingHash.id)
           if (!Number.isInteger(repairTargetId) || repairTargetId <= 0) {
             throw new Error("修復対象の電子ジャーナルIDが不正です。")
@@ -13845,7 +14233,7 @@ async function uploadPosJournalFiles(
               await supabase.storage.from(POS_JOURNAL_BUCKET).remove([storagePath])
               storagePath = ""
             }
-            throw new Error(`プレースホルダの修復に失敗しました: ${repairError.message}`)
+            throw new Error(`電子ジャーナル再解析の保存に失敗しました: ${repairError.message}`)
           }
           if (stored.previousPath) {
             try {
@@ -14056,6 +14444,211 @@ async function uploadPosJournalFiles(
   }
 }
 
+/**
+ * Storageに保管済みのLZH原本を、小さな管理者バッチで現行parserへ更新する。
+ * raw原本は変更せず、parsed_data更新後に同じ月の商品indexと保存月報を再生成する。
+ */
+async function reparseStoredPosJournalFiles(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key || body.store)
+  const storeKey = normalizePosJournalStoreKey(storeScope || requestedStore)
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw {
+      status: 403,
+      message: "他店舗のデータにはアクセスできません。",
+    } satisfies AppError
+  }
+  const yearMonth = parseOptionalYearMonthParam(
+    body.year_month || body.month,
+    "year_month",
+  )
+  const afterId = toNonNegativeInteger(body.after_id)
+  const requestedLimit = toNonNegativeInteger(body.limit) || 5
+  const limit = Math.min(POS_JOURNAL_REPARSE_MAX_FILES, requestedLimit)
+  const dryRun = body.dry_run === true || body.dry_run === "true"
+  const force = body.force === true || body.force === "true"
+
+  let query = supabase
+    .from("pos_journal_files")
+    .select(
+      "id, store_partition_key, store_code, business_date, year_month, original_file_name, storage_bucket, storage_path, file_size_bytes, sha256_hex, parsed_data, gross_sales, groups_count, storage_deleted_at",
+    )
+    .eq("store_partition_key", storeKey)
+    .is("storage_deleted_at", null)
+    .gt("id", afterId)
+    .order("id", { ascending: true })
+    .limit(limit + 1)
+  if (yearMonth) query = query.eq("year_month", yearMonth)
+  const { data, error } = await query
+  if (error) {
+    throw {
+      status: 500,
+      message: `再解析対象の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  const allRows = (Array.isArray(data) ? data : []).filter(isRecord)
+  const rows = allRows.slice(0, limit)
+  const reparsed: Array<{
+    id: number
+    business_date: string
+    year_month: string
+    detail_complete: boolean
+    receipt_total: number
+    gross_sales: number
+  }> = []
+  const skipped: Array<{ id: number; reason: string }> = []
+  const failures: Array<{ id: number; error: string }> = []
+  const changedMonths = new Set<string>()
+
+  for (const row of rows) {
+    const id = toNonNegativeInteger(row.id)
+    if (!id) continue
+    if (
+      !force &&
+      !isPosJournalStaleParserRow(row) &&
+      !isPosJournalDetailMismatchRow(row)
+    ) {
+      skipped.push({ id, reason: "現行parserで日計照合済みです。" })
+      continue
+    }
+    try {
+      const storagePath = toSafeString(row.storage_path)
+      if (!storagePath) throw new Error("Storage原本のパスがありません。")
+      const bucket = toSafeString(row.storage_bucket) || POS_JOURNAL_BUCKET
+      const { data: blob, error: downloadError } = await supabase.storage
+        .from(bucket)
+        .download(storagePath)
+      if (downloadError || !blob) {
+        throw new Error(
+          `Storage原本の取得に失敗しました: ${downloadError?.message || "empty"}`,
+        )
+      }
+      if (blob.size <= 0 || blob.size > POS_JOURNAL_UPLOAD_MAX_BYTES) {
+        throw new Error("Storage原本のサイズが再解析上限外です。")
+      }
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      const expectedSha = toSafeString(row.sha256_hex)
+      if (expectedSha && await sha256Hex(bytes) !== expectedSha) {
+        throw new Error("Storage原本のハッシュがDB記録と一致しません。")
+      }
+      const originalFileName = sanitizeUploadFileName(
+        toSafeString(row.original_file_name) || "journal.lzh",
+      )
+      const day = parsePosJournalLzh(bytes, originalFileName)
+      const businessDate = toSafeString(row.business_date)
+      if (day.business_date !== businessDate) {
+        throw new Error(
+          `原本の営業日${day.business_date}がDBの${businessDate}と一致しません。`,
+        )
+      }
+      const month = businessDate.slice(0, 7)
+      const detail = reconcileParsedJournalDayDetail(
+        day,
+        businessDate,
+        month,
+      )
+      if (!detail) throw new Error("再解析した営業日データが不正です。")
+      if (!dryRun) {
+        // parsed_data更新より先にdirtyを確立し、更新後・再構築前の窓でも
+        // 旧derived indexをlive検索が利用しないようにする。
+        await markJournalProductIndexMonthDirty(supabase, storeKey, month)
+        const payload = buildPosJournalRepairPayload(day, originalFileName)
+        // 再解析は原本の再アップロードではないため、初回取込時刻は維持する。
+        delete payload.uploaded_at
+        const { error: updateError } = await supabase
+          .from("pos_journal_files")
+          .update(payload)
+          .eq("id", id)
+          .eq("store_partition_key", storeKey)
+        if (updateError) {
+          throw new Error(`再解析結果の保存に失敗しました: ${updateError.message}`)
+        }
+        changedMonths.add(month)
+      }
+      reparsed.push({
+        id,
+        business_date: businessDate,
+        year_month: month,
+        detail_complete: detail.detail_complete,
+        receipt_total: detail.reconciled_receipt_total,
+        gross_sales: detail.gross_sales,
+      })
+    } catch (caught) {
+      failures.push({
+        id,
+        error: caught instanceof Error ? caught.message : String(caught),
+      })
+    }
+  }
+
+  const indexResults: Awaited<ReturnType<typeof rebuildJournalProductIndexMonth>>[] = []
+  let savedReports: PosJournalAutoReportResult | null = null
+  const pendingReparseMonths: string[] = []
+  const safeRebuildMonths: string[] = []
+  if (!dryRun && changedMonths.size) {
+    for (const month of [...changedMonths].sort()) {
+      await markJournalProductIndexMonthDirty(supabase, storeKey, month)
+      const unsafeRowsRemain = await journalProductMonthHasUnsafeParserRows(
+        supabase,
+        storeKey,
+        month,
+      )
+      if (unsafeRowsRemain) {
+        pendingReparseMonths.push(month)
+        continue
+      }
+      safeRebuildMonths.push(month)
+      indexResults.push(
+        await rebuildJournalProductIndexMonth(supabase, storeKey, month),
+      )
+    }
+    if (safeRebuildMonths.length) {
+      savedReports = await upsertPosJournalAutoReports(
+        supabase,
+        storeKey,
+        safeRebuildMonths,
+      )
+    }
+  }
+  const lastId = rows.length
+    ? toNonNegativeInteger(rows[rows.length - 1].id)
+    : afterId
+  const retryRequired = failures.length > 0
+  return {
+    ok: failures.length === 0 && (savedReports?.ok ?? true),
+    store_key: storeKey,
+    year_month: yearMonth,
+    parser_version: POS_JOURNAL_REPORT_PARSER_VERSION,
+    dry_run: dryRun,
+    force,
+    batch_limit: limit,
+    scanned_count: rows.length,
+    reparsed_count: reparsed.length,
+    skipped_count: skipped.length,
+    failed_count: failures.length,
+    reparsed,
+    skipped,
+    failures,
+    next_after_id: retryRequired ? afterId : lastId,
+    retry_after_id: retryRequired ? afterId : null,
+    has_more: retryRequired || allRows.length > limit,
+    not_found: rows.length === 0 && afterId === 0,
+    warning: rows.length === 0 && afterId === 0
+      ? "指定条件に一致するStorage原本が見つかりませんでした。"
+      : null,
+    pending_reparse_months: pendingReparseMonths,
+    safe_rebuild_months: safeRebuildMonths,
+    rebuilt_index: indexResults,
+    saved_reports: savedReports,
+  }
+}
+
 async function fetchPosJournalDownloadUrl(
   supabase: ReturnType<typeof createClient>,
   url: URL,
@@ -14183,15 +14776,11 @@ async function resolvePosJournalAiSummary(
     expected.storeKey,
     expected.month,
   )
-  const storedDateSet = new Set(storedDays.map((day) => day.business_date))
   const combinedDays = await fillPosJournalDaysWeather(
     supabase,
     expected.storeKey,
     expected.month,
-    [
-      ...shared.days.filter((day) => !storedDateSet.has(day.business_date)),
-      ...storedDays,
-    ],
+    mergePosJournalDaysPreferPrimary(storedDays, shared.days),
   )
   if (combinedDays.length) {
     const categoryOverrides = await fetchPosJournalCategoryOverrides(

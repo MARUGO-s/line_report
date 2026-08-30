@@ -77,7 +77,23 @@ const context = {
   AI_KNOWLEDGE_MAX_CHARS: knowledgeLimits.maxChars,
   AI_KNOWLEDGE_CATALOG_MAX_CHARS: knowledgeLimits.catalogMaxChars,
   AI_KNOWLEDGE_CHUNK_CHARS: knowledgeLimits.chunkChars,
+  DINNER_START_MINUTES: 16 * 60,
+  INVALID_SALE_STATUS_RE: /オーダーキャンセル|未会計オーダー取消|取引中止/,
+  PARSER_VERSION: '2026-08-30-v21',
+  VERIFICATION_VERSION: 'split-bill-reconcile-v3',
+  CATEGORY_VERSION: 'pos-food-drink-room-bycode-v3',
+  MEAL_PERIOD_VERSION: 'lunch-before-1600-v1',
+  isSale: (record) => /@\s*[\d,]+\s*x/.test(String(record).normalize('NFKC')),
+  productGroupKey: (code, name) => `${String(code || '')}\u0000${String(name || '').normalize('NFKC')}`,
   yen: (n) => `¥${Number(n || 0).toLocaleString('ja-JP')}`,
+  classifyProduct: (code, name) => ({
+    category: String(code || '').startsWith('2') || /ワイン/.test(String(name || '')) ? '飲料' : 'フード',
+    isCharge: false,
+    known: true,
+    byCode: true,
+  }),
+  weekdayFromIsoDate: (iso) => ['日', '月', '火', '水', '木', '金', '土'][new Date(`${iso}T00:00:00+09:00`).getDay()],
+  recoverReportFromPosJournalMonth: async () => null,
   isPosCategoryRollupName: () => false,
   readStoreOpsProfile: () => ({ wineMl: { glassMl: 100, bottleMl: 750, pairingMl: 300 } }),
   resolveProductsForQuery: (products) => (Array.isArray(products) ? products : []),
@@ -99,6 +115,29 @@ const privacyContext = { globalThis: {} };
 vm.createContext(privacyContext);
 vm.runInContext(privacyJs, privacyContext);
 for (const name of [
+  'hasInvalidSaleStatus',
+  'hasReceiptTotalEvidence',
+  'hasSettlementEvidence',
+  'isSaleCandidate',
+  'isCompleted',
+  'isUncertainSale',
+  'exactVoidReference',
+  'isVoid',
+  'recordNo',
+  'voidTargetNos',
+  'completedRecords',
+  'zen2han',
+  'numOf',
+  'amountOnLine',
+  'normalizeSalePaymentLabel',
+  'classifyMealPeriod',
+  'parseReceiptHeader',
+  'receiptCustomerCounts',
+  'parseReceiptPayments',
+  'parseReceiptTableMeta',
+  'parseReceipt',
+  'validateReceipt',
+  'isStaleReport',
   'extractAllMonthRefs',
   'maskProductCodesInQueryForPeriodParse',
   'extractAllYearRefs',
@@ -188,12 +227,20 @@ for (const name of [
   'rangeRefLabel',
   'reportMatchesRangeRef',
   'aggregateSalesRows',
+  'reviveSaleFromCloud',
+  'reviveSalesList',
+  'validateBlockedCanonicalUploadResult',
   'sortWeekdayRows',
   'mergeWeekdayBreakdowns',
   'mergeHourlyBreakdowns',
   'formatVerifiedDetailLines',
   'formatMonthlyMealFdTrendLines',
+  'reviveSalesFromSharedPosJournalDays',
+  'normalizeRecoveredMonthlyReportData',
+  'enumerateMonthKeysForRange',
   'summarizeCourseMonthlyFacts',
+  'formatJournalDetailCoverageForAi',
+  'journalDetailCoverageIsComplete',
   'formatCourseLineupFactsForAi',
   'monthEndIso',
   'knowledgePeriodLabel',
@@ -278,6 +325,257 @@ test('monthly report index excludes same-month daily rows and preserves every da
       .sort(),
     ['daily-20260601', 'daily-20260602'],
   );
+});
+
+test('browser POS parser v21 keeps no-payment sales, signed adjustments, and exact VOID semantics', () => {
+  assert.match(html, /const PARSER_VERSION='2026-08-30-v21'/);
+  assert.equal(context.isStaleReport({
+    parserVersion: '2026-08-30-v21',
+    verificationVersion: 'split-bill-reconcile-v3',
+    categoryVersion: 'pos-food-drink-room-bycode-v3',
+    mealPeriodVersion: 'lunch-before-1600-v1',
+  }), false, 'server v21 report is current in the browser');
+  assert.equal(context.isStaleReport({ parserVersion: '2026-07-31-v19' }), true);
+
+  const receipt = ({ no = 1, date = '2026年 8月30日(日)', time = '12時00分', body, total = 1000, payment = '' }) =>
+    `0001-01 No.${no} ${date} ${time}\n${body}\n合 計 \\${total.toLocaleString('en-US')}\n${payment ? `${payment}\n` : ''}控え番号 ${no}\n1名`;
+
+  const noPayment = receipt({
+    no: 1,
+    body: '0000000000101 支払行なし商品\n@1,000x 1 \\1,000',
+  });
+  assert.equal(context.isCompleted(noPayment), true);
+  const noPaymentParsed = context.parseReceipt(noPayment);
+  assert.equal(noPaymentParsed.method, '支払情報なし');
+  assert.equal(noPaymentParsed.payments.total, 1000);
+  assert.deepEqual([...context.validateReceipt(noPaymentParsed)], []);
+
+  const discounted = receipt({
+    no: 2,
+    total: 1500,
+    payment: '計2 クレジット \\1,500',
+    body: [
+      '0000000000101 純額商品',
+      '@1,000x 2 \\2,000',
+      '0000000000101 純額商品',
+      '@1,000x -1 -1,000',
+      '0000000000102 通貨記号なし商品',
+      '@500x 1 500',
+      '割引',
+      '10% -50',
+      '値引',
+      '@50x -1 \\50',
+    ].join('\n'),
+  });
+  const discountedParsed = context.parseReceipt(discounted);
+  assert.equal(discountedParsed.itemTotal, 1500);
+  assert.deepEqual(
+    [...discountedParsed.items]
+      .filter((item) => item.code === '__journal_adjustment__')
+      .map((item) => [item.name, item.amount]),
+    [['割引', -50], ['値引', 50]],
+  );
+  assert.deepEqual([...context.validateReceipt(discountedParsed)], []);
+
+  const olderSameNo = receipt({
+    no: 7,
+    date: '2026年 8月29日(土)',
+    body: '0000000000101 前日の同番号\n@1,000x 1 \\1,000',
+    payment: '計1 現計 \\1,000',
+  });
+  const voidTarget = receipt({
+    no: 7,
+    body: '0000000000101 取消対象\n@1,000x 1 \\1,000',
+    payment: '計1 現計 \\1,000',
+  });
+  const voidRecord = receipt({
+    no: 8,
+    body: '0000000000101 VOID控え\n@1,000x 1 \\1,000\n★ VOID No.7',
+    payment: '計1 現計 \\1,000',
+  });
+  assert.deepEqual(
+    [...context.completedRecords([olderSameNo, voidTarget, voidRecord])].map(context.recordNo),
+    ['7'],
+    'VOID自身と直前の同番号だけを除き、以前の同番号は残す',
+  );
+
+  for (const status of ['取引中止', '未会計オーダー取消', 'オーダーキャンセル']) {
+    assert.equal(context.isCompleted(`${noPayment}\n${status}`), false, status);
+  }
+});
+
+test('automatic import routes critical groups to server canonical reports and never saves a partial local report', () => {
+  const autoBuildSource = extractFunction(html, 'autoBuildAndSaveAfterLoad');
+  const localBuildSource = extractFunction(html, 'buildBothReports');
+  const uploadSource = extractFunction(html, 'uploadJournalsToCloud');
+  const criticalGuard = autoBuildSource.indexOf('if (audit.critical.length)');
+  const localBuild = autoBuildSource.indexOf('await buildBothReports(salesForGroup');
+  assert.ok(criticalGuard >= 0 && localBuild > criticalGuard, 'critical guard must run before local build');
+  assert.match(autoBuildSource, /blockedItems\.push\(\.\.\.groupItems\)[\s\S]*continue;/);
+  assert.match(autoBuildSource, /const blockedUploadItems = \[\.\.\.new Set\(blockedItems\)\]/);
+  assert.match(autoBuildSource, /validateBlockedCanonicalUploadResult\([\s\S]*blockedUploadItems\.length,[\s\S]*blockedTargetMonths/);
+  assert.match(autoBuildSource, /if \(!canonicalValidation\.ok\)[\s\S]*currentReport = null;/);
+  assert.match(autoBuildSource, /currentReport = null;/);
+  assert.match(uploadSource, /ok: \(failed === 0 \|\| journals\.length > 0\)/, '一般アップロードの部分成功契約は維持する');
+  assert.match(localBuildSource, /if \(audit\.critical\.length\)[\s\S]*return false;/);
+  assert.doesNotMatch(localBuildSource, /自動保存時は警告があっても月次分割を試行/);
+});
+
+test('blocked canonical upload fails closed on partial upload, JNL mix, or a missing monthly canonical report', () => {
+  const complete = {
+    ok: true,
+    sourceCount: 2,
+    uploadableCount: 2,
+    uploaded: 1,
+    repaired: 0,
+    duplicates: 1,
+    failed: 0,
+    journals: [{ id: 1 }, { id: 2 }],
+    canonicalSavedReportsOk: true,
+    canonicalReportFailedCount: 0,
+    canonicalReportFailures: [],
+    canonicalReportCount: 4,
+    canonicalReportMonths: ['2026-07', '2026-08'],
+    canonicalReports: [
+      { month: '2026-07', kind: 'daily' },
+      { month: '2026-07', kind: 'monthly' },
+      { month: '2026-08', kind: 'daily' },
+      { month: '2026-08', kind: 'monthly' },
+    ],
+  };
+  assert.equal(
+    context.validateBlockedCanonicalUploadResult(complete, 2, ['2026-07', '2026-08']).ok,
+    true,
+  );
+
+  const partial = {
+    ...complete,
+    uploaded: 1,
+    duplicates: 0,
+    failed: 1,
+    journals: [{ id: 1 }],
+  };
+  assert.equal(
+    context.validateBlockedCanonicalUploadResult(partial, 2, ['2026-07', '2026-08']).ok,
+    false,
+    '一般uploadが部分成功扱いでもblocked自動保存は拒否する',
+  );
+
+  const jnlMixed = { ...complete, uploadableCount: 1 };
+  const mixedResult = context.validateBlockedCanonicalUploadResult(jnlMixed, 2, ['2026-07', '2026-08']);
+  assert.equal(mixedResult.ok, false);
+  assert.match([...mixedResult.reasons].join(' / '), /LZH原本ではない/);
+
+  const missingMonthly = {
+    ...complete,
+    canonicalReportCount: 3,
+    canonicalReports: complete.canonicalReports.filter(
+      (report) => !(report.month === '2026-08' && report.kind === 'monthly'),
+    ),
+  };
+  const missingResult = context.validateBlockedCanonicalUploadResult(
+    missingMonthly,
+    2,
+    ['2026-07', '2026-08'],
+  );
+  assert.equal(missingResult.ok, false);
+  assert.ok([...missingResult.missingReports].includes('2026-08:monthly'));
+
+  const savedReportFailure = {
+    ...complete,
+    canonicalSavedReportsOk: false,
+    canonicalReportFailedCount: 1,
+    canonicalReportFailures: [{ month: '2026-08', error: 'write failed' }],
+  };
+  assert.equal(
+    context.validateBlockedCanonicalUploadResult(savedReportFailure, 2, ['2026-07', '2026-08']).ok,
+    false,
+  );
+});
+
+test('oversized report snapshots restore itemized sales without downloading every raw journal', () => {
+  const rows = context.reviveSalesFromSharedPosJournalDays([{
+    business_date: '2026-07-01',
+    groups: 1,
+    guests: 2,
+    tax: 100,
+    weather: '晴',
+    temp_c: 28,
+    receipts: [{
+      no: 'A-1',
+      time: '18:30',
+      pay: 'クレジット',
+      total: 12000,
+      guests: 2,
+      items: [
+        { code: '1001', name: '季節コース', qty: 2, amount: 10000 },
+        { code: '2001', name: 'グラスワイン', qty: 2, amount: 2000 },
+      ],
+    }],
+  }]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].mealPeriod, 'ディナー');
+  assert.equal(rows[0].items.length, 2);
+  assert.equal(rows[0].items[1].category, '飲料');
+  assert.equal(rows[0].payments.byMethod.get('クレジット'), 12000);
+  assert.equal(rows[0].weekday, '水');
+  assert.deepEqual(
+    [...context.enumerateMonthKeysForRange(2025, 12, 2026, 3)],
+    ['2025-12', '2026-01', '2026-02', '2026-03'],
+  );
+
+  const mismatchedRows = context.reviveSalesFromSharedPosJournalDays([{
+    business_date: '2026-08-01',
+    gross_sales: 12000,
+    groups: 1,
+    guests: 2,
+    receipts: [{
+      no: 'partial-1',
+      time: '18:30',
+      total: 12000,
+      guests: 2,
+      items: [{ code: '1001', name: '不完全明細', qty: 1, amount: 7000 }],
+    }],
+  }]);
+  assert.equal(mismatchedRows.length, 1);
+  assert.equal(mismatchedRows[0].total, 12000, '日計総売上を正本にする');
+  assert.equal(mismatchedRows[0].items.length, 0, '会計合計と商品純額が不一致の部分明細は採用しない');
+  assert.equal(mismatchedRows[0]._itemDetailReason, 'receipt_item_mismatch');
+  assert.doesNotMatch(JSON.stringify(mismatchedRows), /会計値調整/);
+  const safeMonth = context.normalizeRecoveredMonthlyReportData({
+    total: 12000,
+    totalCustomers: 2,
+    sales: mismatchedRows,
+  }, { period: '2026-08' });
+  assert.equal(safeMonth._itemDetailIncomplete, true);
+  assert.equal(safeMonth.totalSales, 12000);
+  assert.equal(safeMonth.foodTotal, 0);
+  assert.equal(safeMonth.drinkTotal, 0);
+  assert.equal(safeMonth.otherTotal, 12000);
+  assert.deepEqual([...safeMonth.topProducts], []);
+
+  const drilldown = extractFunction(html, 'loadMonthSalesForDrilldown');
+  assert.match(drilldown, /recoverReportFromPosJournalMonth/);
+  assert.match(drilldown, /allowRawDownloads:\s*options\.allowRawDownloads === true/);
+  assert.doesNotMatch(drilldown, /monthSalesDrilldownCache\.set\([\s\S]*source:\s*'none'/);
+  const monthRecovery = extractFunction(html, 'recoverReportFromPosJournalMonth');
+  assert.match(monthRecovery, /cached\.promise && cached\.signal === options\.signal/);
+  assert.match(monthRecovery, /posJournalMonthRecoveryCache\.get\(cacheKey\) !== pendingEntry/);
+  assert.match(monthRecovery, /posJournalMonthRecoveryCache\.delete\(cacheKey\)/);
+  const hydrate = extractFunction(html, 'hydrateSavedReport');
+  assert.match(hydrate, /_recoveredFromPosJournalState\) return r/);
+  const rawLoader = extractFunction(html, 'loadSalesFromCloudJournals');
+  assert.match(rawLoader, /options\.allowRawDownloads === false/);
+  assert.match(html, /AI_CHAT_PREFLIGHT_TOTAL_TIMEOUT_MS\s*=\s*60000/);
+  assert.match(html, /分析データを準備中/);
+  assert.match(html, /準備完了後に 数値AI・Web知見・X検索・統合 を開始します/);
+  assert.match(html, /cancelActiveAiChatRun\('reset'\)/);
+  assert.match(html, /signal:\s*runOptions\.signal/);
+  assert.match(html, /if \(err\?\.name === 'AbortError'\) throw err/);
+  assert.match(adminApiSource, /recovery_report:\s*recoveryReport/);
+  assert.match(adminApiSource, /buildJournalSavedReportsFromPosDays/);
+  assert.match(adminApiSource, /mergePosJournalDaysPreferPrimary\(storedDays, shared\.days\)/);
 });
 
 test('saved monthly reports outrank an active partial report and every supported monthly title is recognized', () => {
@@ -1095,7 +1393,7 @@ test('course lineup keeps the full journal monthly series on both sides of a pro
       lastMonth: '2025-12',
     },
   );
-  assert.match(html, /月次コース販売（ジャーナル原本の保存全期間・導入前を含む）/);
+  assert.match(html, /月次コース販売（保存された全対象日を日計照合済み・導入前を含む）/);
   assert.match(html, /固有商品の導入月 \$\{facts\.pivotMonth\} を境にしたコース全体比較/);
   assert.match(html, /固有商品の導入前0点を、既存コース全体の0点へ読み替えることは禁止/);
   assert.match(html, /facts\.byMonth\.forEach/);
@@ -1109,6 +1407,12 @@ test('course lineup keeps the full journal monthly series on both sides of a pro
     note: 'note',
     searchScope: 'q=コース',
     scannedFiles: 40,
+    detailCoverage: {
+      status: 'complete',
+      scanned_days: 40,
+      detail_complete_days: 40,
+      detail_incomplete_days: 0,
+    },
     totalQty: 150,
     totalAmount: 1200000,
     pivotMonth: '2026-01',
@@ -1714,8 +2018,24 @@ test('LINE knowledge registration reports failures and never acknowledges a miss
   const dbSave = quoted.indexOf('let saveRes = await postKnowledge(recordPayload)');
   assert.ok(uploadGuard >= 0 && uploadGuard < dbSave, 'Storage失敗はDB保存前に停止する');
   assert.match(quoted, /if \(!storagePath \|\| !storagePath\.toLowerCase\(\)\.startsWith/);
+  assert.match(quoted, /const sha256Hex = String\(uploadJson\.sha256_hex \|\| ''\)/);
+  assert.match(quoted, /sha256_hex:\s*sha256Hex/);
   assert.match(quoted, /await cleanupUploadedKnowledgeFile\(storagePath\)/);
   assert.match(quoted, /if \(uploadedStoragePath\) await cleanupUploadedKnowledgeFile/);
+
+  const memoFeedbackStart = lineWebhookSource.indexOf('const memoFeedback = async (message: string) =>');
+  const memoFeedbackEnd = lineWebhookSource.indexOf('// 画像・ファイルへの引用返信', memoFeedbackStart);
+  assert.notEqual(memoFeedbackStart, -1);
+  assert.notEqual(memoFeedbackEnd, -1);
+  const memoFeedback = lineWebhookSource.slice(memoFeedbackStart, memoFeedbackEnd);
+  assert.match(lineWebhookSource, /pushLineMessagesToTarget/);
+  assert.match(memoFeedback, /if \(!memoAccessToken\) return/);
+  assert.doesNotMatch(memoFeedback, /if \(!memoReplyToken \|\| !memoAccessToken\) return/);
+  assert.match(memoFeedback, /const pushTarget = eventRoomId \|\| eventUserId/);
+  assert.match(memoFeedback, /replied = await replyLineText/);
+  assert.match(memoFeedback, /if \(replied\?\.ok \|\| !pushTarget\) return/);
+  assert.match(memoFeedback, /pushLineMessagesToTarget\([\s\S]*?\[\{ type: 'text', text: String\(message\)\.slice\(0, 4900\) \}\]/);
+  assert.match(memoFeedback, /knowledge_memo_feedback_fallback/);
 
   assert.match(lineWebhookSource, /if \(!quotedImageHandled && !quotedMessageId\)/);
   assert.match(lineWebhookSource, /引用元のファイルを登録できませんでした。取得・解析・保存のいずれかで失敗/);
@@ -1883,7 +2203,7 @@ test('past chat records reach the AI as background only, with prompt-breaking to
 test('chat history block is wired into the strict system instruction after the knowledge block', () => {
   assert.match(html, /\$\{integrated\.knowledgeBlock\}\$\{chatPdfHistoryBlock\}`;/);
   assert.match(html, /let chatPdfHistoryBlock = ''/);
-  assert.match(html, /await fetchAiChatPdfHistoryForAi\(\)/);
+  assert.match(html, /preflight\.run\(\s*\(\) => fetchAiChatPdfHistoryForAi\(chatRun\.storeKey, runOptions\)/);
   // 撤回禁止の規約が規約本体に入っていること（サーバー側は deno テスト側で担保）
   assert.match(html, /14\. 【過去の自分の回答】/);
   assert.match(html, /撤回・謝罪してはいけません/);
@@ -2008,4 +2328,171 @@ test('trash purge is guarded on both server and client because it cannot be undo
   assert.match(html, /ids\.length > 500/, '画面側でも上限で止めること');
   assert.match(html, /prompt\(`確認のため delete と入力してください/, '文字入力の確認を求めること');
   assert.match(html, /この操作は取り消せません/, '取り消せない旨を明示すること');
+});
+
+test('normal AI analysis is pinned to its starting store and cancelled on store switch', () => {
+  const analyze = html.slice(
+    html.indexOf('async function aiAnalyze()'),
+    html.indexOf('function buildAiVisualDashboardHTML'),
+  );
+  assert.match(html, /function beginAiReportRun\(\)/);
+  assert.match(html, /cancelActiveAiReportRun\('store-switch'\)/);
+  assert.match(analyze, /const analysisRun = beginAiReportRun\(\)/);
+  assert.match(analyze, /reportData:\s*analysisRun\.reportData/);
+  assert.match(analyze, /storeKey:\s*analysisRun\.storeKey/);
+  assert.match(analyze, /signal:\s*runSignal/);
+  assert.match(analyze, /buildStoreLocationBlockForAi\(analysisRun\.storeKey\)/);
+  assert.match(analyze, /assertCurrentAiReportRun\(analysisRun\)/);
+  assert.match(analyze, /renderAiAnalysis\(replyText, true/);
+  assert.match(analyze, /saveAiAnalysisToSupabase\([\s\S]*run:\s*analysisRun,[\s\S]*reportData:\s*analysisRun\.reportData/);
+  const saveAnalysis = extractFunction(html, 'saveAiAnalysisToSupabase');
+  assert.match(saveAnalysis, /if \(analysisRun\) assertCurrentAiReportRun\(analysisRun\)/);
+  assert.match(saveAnalysis, /signal:\s*options\.signal/);
+});
+
+test('same-store report replacement invalidates report and chat runs and releases their UI locks', () => {
+  const reportA = { id: 'report-a' };
+  const reportB = { id: 'report-b' };
+  const elements = {
+    rAiAnalyze: { disabled: true },
+    aiChatMessages: { innerHTML: '考察中' },
+    aiChatInput: { value: 'old question', disabled: true },
+    aiChatSend: { disabled: true },
+  };
+  const runContext = {
+    STORE_KEY: 'marugos',
+    currentReport: reportA,
+    currentReportGeneration: 0,
+    aiReportRunGeneration: 0,
+    activeAiReportRun: null,
+    aiChatRunGeneration: 0,
+    activeAiChatRun: null,
+    aiChatHistory: [{ role: 'user', content: 'old question' }],
+    AbortController,
+    hideCount: 0,
+    hideAppLoading() { runContext.hideCount += 1; },
+    document: {
+      getElementById(id) { return elements[id] || null; },
+    },
+  };
+  vm.createContext(runContext);
+  for (const name of [
+    'cancelActiveAiReportRun',
+    'beginAiReportRun',
+    'isCurrentAiReportRun',
+    'cancelActiveAiChatRun',
+    'beginAiChatRun',
+    'isCurrentAiChatRun',
+    'abortAiRunsForReportChange',
+  ]) {
+    vm.runInContext(`${extractFunction(html, name)}; this.${name} = ${name};`, runContext);
+  }
+
+  const reportRun = runContext.beginAiReportRun();
+  const chatRun = runContext.beginAiChatRun();
+  assert.equal(runContext.isCurrentAiReportRun(reportRun), true);
+  assert.equal(runContext.isCurrentAiChatRun(chatRun), true);
+
+  runContext.currentReport = reportB;
+  assert.equal(runContext.isCurrentAiReportRun(reportRun), false, '同じ店舗でもreport identity差替で失効する');
+  assert.equal(runContext.isCurrentAiChatRun(chatRun), false, 'チャットも旧reportへ書き戻さない');
+  runContext.currentReport = reportA;
+
+  runContext.abortAiRunsForReportChange('same-store-report-switch');
+  assert.equal(reportRun.controller.signal.aborted, true);
+  assert.equal(chatRun.controller.signal.aborted, true);
+  assert.equal(runContext.activeAiReportRun, null);
+  assert.equal(runContext.activeAiChatRun, null);
+  assert.equal(runContext.currentReportGeneration, 1);
+  assert.equal(runContext.hideCount, 1);
+  assert.equal(elements.rAiAnalyze.disabled, false);
+  assert.equal(elements.aiChatInput.disabled, false);
+  assert.equal(elements.aiChatSend.disabled, false);
+  assert.equal(elements.aiChatMessages.innerHTML, '');
+  assert.equal(runContext.aiChatHistory.length, 0);
+
+  assert.match(extractFunction(html, 'renderReport'), /abortAiRunsForReportChange\('render-report'\)/);
+  assert.match(extractFunction(html, 'buildReport'), /abortAiRunsForReportChange\('build-report'\)/);
+  assert.match(extractFunction(html, 'openAiHistoryReportView'), /abortAiRunsForReportChange\('ai-history-report-open'\)/);
+});
+
+test('optional journal enrich APIs keep the captured store and shared abort signal', () => {
+  const helpers = html.slice(
+    html.indexOf('async function searchCloudJournalProducts'),
+    html.indexOf('function wantsReservationAiDetail'),
+  );
+  assert.match(helpers, /options\.storeKey \|\| STORE_KEY/);
+  assert.match(helpers, /timeoutMs:\s*options\.timeoutMs/);
+  assert.match(helpers, /maxAttempts:\s*options\.maxAttempts/);
+  assert.match(helpers, /signal:\s*options\.signal/);
+
+  const planner = html.slice(
+    html.indexOf('async function searchSavedReportsByQuery'),
+    html.indexOf('function buildMonthlyBreakdownForHistory'),
+  );
+  assert.match(planner, /const queryRequestOptions = \{[\s\S]*storeKey:\s*requestedStoreKey,[\s\S]*signal:\s*options\.signal/);
+  assert.match(planner, /enrichProductTimelineFacts\([\s\S]*detailRequestOptions/);
+  assert.match(planner, /enrichCourseLineupFacts\(q, productTimelineFacts, detailRequestOptions\)/);
+  assert.match(planner, /enrichJournalCohortComparisons\([\s\S]*detailRequestOptions/);
+  assert.match(planner, /enrichReservationFacts\(monthlyBreakdown, q, false, detailRequestOptions\)/);
+});
+
+test('every post-start chat failure releases the loading state and input lock', () => {
+  const send = html.slice(
+    html.indexOf('async function sendAiChat()'),
+    html.indexOf('function findLastAiChatQuestion'),
+  );
+  assert.match(send, /run開始後の全処理を必ず同じ後始末へ収束/);
+  assert.match(send, /AI Chat run failed before completion/);
+  assert.match(send, /finally \{\s*removeAiChatLoading\(loadingId\);\s*finishChatUi\(\);/);
+});
+
+test('abort never falls back to stale indexes or an empty month drilldown', () => {
+  const reportFetch = html.slice(
+    html.indexOf('async function fetchSupabaseReports'),
+    html.indexOf('async function fetchSupabaseReportById'),
+  );
+  assert.match(reportFetch, /if \(err\?\.name === 'AbortError' \|\| options\.signal\?\.aborted\) throw err/);
+  const drilldown = html.slice(
+    html.indexOf('async function loadMonthSalesForDrilldown'),
+    html.indexOf('async function enrichMonthlyMealCategorySplit'),
+  );
+  assert.match(drilldown, /if \(err\?\.name === 'AbortError' \|\| options\.signal\?\.aborted\) throw err/);
+});
+
+test('months with incomplete item detail are excluded from anomaly item claims', () => {
+  const anomaly = html.slice(
+    html.indexOf('async function enrichMonthlyAnomalyItemFacts'),
+    html.indexOf('async function searchCloudJournalProducts'),
+  );
+  assert.match(anomaly, /detailEligibleMonths = [\s\S]*\.filter\(\(row\) => row\?\._itemDetailIncomplete !== true\)/);
+  assert.match(anomaly, /detectAnomalousSalesMonths\(detailEligibleMonths\)/);
+});
+
+test('product and cohort evidence carries daily gross reconciliation coverage into the AI prompt', () => {
+  assert.match(html, /function formatJournalDetailCoverageForAi\(coverage, indent = ''\)/);
+  assert.match(html, /不一致\$\{incomplete\}日は商品・カテゴリ・昼夜・コホートから除外/);
+  assert.match(html, /全期間の確定値とは表現しないこと/);
+  assert.match(html, /最古検出を完全な初出・導入月へ置き換えない/);
+  assert.match(html, /採用日の0点を月全体の0点・コースなしへ読み替えない/);
+
+  const timeline = html.slice(
+    html.indexOf('async function enrichProductTimelineFacts'),
+    html.indexOf('function formatProductTimelineFactsForAi'),
+  );
+  assert.match(timeline, /detailCoverage:\s*timeline\?\.detail_coverage \|\| null/);
+  assert.match(timeline, /detailCoverage:\s*primary\.detailCoverage \|\| null/);
+
+  const course = html.slice(
+    html.indexOf('async function enrichCourseLineupFacts'),
+    html.indexOf('function formatCourseLineupFactsForAi'),
+  );
+  assert.match(course, /detailCoverage:\s*raw\?\.detail_coverage \|\| null/);
+
+  const cohort = html.slice(
+    html.indexOf('async function enrichJournalCohortComparisons'),
+    html.indexOf('async function enrichProductCohortFacts'),
+  );
+  assert.match(cohort, /detailCoverage:\s*raw\?\.detail_coverage \|\| null/);
+  assert.match(cohort, /detailCoverage:\s*meta\.detailCoverage/);
 });

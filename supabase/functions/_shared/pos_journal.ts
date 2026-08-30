@@ -24,6 +24,16 @@ export type PosJournalReceiptItem = {
   isCharge?: boolean;
 };
 
+export const POS_JOURNAL_ADJUSTMENT_ITEM_CODE = "__journal_adjustment__";
+
+export function isPosJournalAdjustmentItem(
+  item: unknown,
+): boolean {
+  return !!item && typeof item === "object" &&
+    String((item as { code?: unknown }).code ?? "") ===
+      POS_JOURNAL_ADJUSTMENT_ITEM_CODE;
+}
+
 export type PosJournalReceipt = {
   no: string;
   time: string;
@@ -31,6 +41,8 @@ export type PosJournalReceipt = {
   total: number | null;
   guests: number | null;
   table_no?: string;
+  /** 取引変更で取り消す元会計No.。VOIDレコード自身と参照先を日計明細から除外する。 */
+  void_ref?: string;
   items: PosJournalReceiptItem[];
 };
 
@@ -191,8 +203,8 @@ const HEADER_RE =
   /^\s*(\d{4}-\d{2})\s+No\.(\d+)\s+(\d{4})年\s*(\d+)月\s*(\d+)日\((.)\)\s*(\d+)時(\d+)分/;
 const ITEM_CODE_RE = /^\s{2}(\d{13})\s+(\S.*?)\s*$/;
 const ITEM_PRICE_RE =
-  /@\s*([\d,]+)\s*x\s*(-?[\d,]+)\s+\\\s*(-?[\d,]+)/;
-export const POS_JOURNAL_REPORT_PARSER_VERSION = "2026-07-31-v19";
+  /@\s*([\d,]+)\s*x\s*(-?[\d,]+)\s+[\\¥]?\s*(-?[\d,]+)/;
+export const POS_JOURNAL_REPORT_PARSER_VERSION = "2026-08-30-v21";
 export const POS_JOURNAL_REPORT_VERIFICATION_VERSION =
   "split-bill-reconcile-v3";
 export const POS_JOURNAL_REPORT_CATEGORY_VERSION =
@@ -610,18 +622,41 @@ function parseWeather(record: JournalRecord): Record<string, unknown> {
   return output;
 }
 
+function normalizeSalePaymentLabel(value: unknown): string {
+  const label = String(value ?? "").normalize("NFKC").trim();
+  if (!label) return "";
+  if (/^現計/.test(label)) return "現金";
+  if (/クレジット/.test(label)) return "クレジット";
+  if (/食べログ/.test(label)) return "食べログ";
+  if (/一休/.test(label)) return "一休";
+  if (/ぐるなび/.test(label)) return "ぐるなび";
+  if (/QR\s*コード/i.test(label)) return "QRコード";
+  if (/電子\s*マネ/.test(label)) return "電子マネー";
+  if (/東京\s*ドーム\s*利/.test(label)) return "東京ドーム利用券";
+  if (/ドーム\s*シティ\s*食事/.test(label)) return "ドームシティ食事券";
+  return label.replace(/[\s　]+/g, " ").slice(0, 30);
+}
+
 function parseSale(record: JournalRecord): PosJournalReceipt | null {
   const text = record.lines.join("\n");
-  if (text.includes("オーダーキャンセル")) return null;
-  let pay = "";
-  for (const line of record.lines) {
-    if (/計[0-9０-９]+\s+現計/.test(normalizeWide(line))) pay = "現金";
-    else if (/計[0-9０-９]+\s+クレジット/.test(line)) pay = "クレジット";
-    else if (/計[0-9０-９]+\s+食べログ/.test(line)) pay = "食べログ";
-    else if (/計[0-9０-９]+\s+一休/.test(line)) pay = "一休";
-    else if (/計[0-9０-９]+\s+ぐるなび/.test(line)) pay = "ぐるなび";
+  const normalizedText = normalizeWide(text).normalize("NFKC");
+  if (/オーダーキャンセル|未会計オーダー取消|取引中止/.test(normalizedText)) {
+    return null;
   }
-  if (!pay) return null;
+  const paymentMethods = new Set<string>();
+  for (const line of record.lines) {
+    // 実POSは店舗ごとの任意支払区分（QR・電子マネー・商品券等）を
+    // 「計N 支払名 \\金額」で出す。既知5種だけに限定すると会計全体が欠落する。
+    const paymentLine = normalizeWide(line).normalize("NFKC").match(
+      /^\s*計\d+\s+(.+?)\s+\\\s*-?[\d,]+\s*$/,
+    );
+    if (!paymentLine) continue;
+    const method = normalizeSalePaymentLabel(paymentLine[1]);
+    if (method) paymentMethods.add(method);
+  }
+  const detectedPay = paymentMethods.size === 1
+    ? [...paymentMethods][0]
+    : (paymentMethods.size > 1 ? "複数" : "");
   const items: PosJournalReceiptItem[] = [];
   for (let index = 0; index < record.lines.length; index += 1) {
     const item = record.lines[index].match(ITEM_CODE_RE);
@@ -636,6 +671,31 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
       amount: Number(price[3].replace(/,/g, "")),
     });
     index += 1;
+  }
+  for (let index = 0; index < record.lines.length; index += 1) {
+    const label = normalizeWide(record.lines[index]).normalize("NFKC").trim();
+    if (label !== "割引" && label !== "値引") continue;
+    for (let next = index + 1; next < record.lines.length; next += 1) {
+      const adjustmentLine = normalizeWide(record.lines[next]).normalize("NFKC")
+        .trim();
+      if (!adjustmentLine) continue;
+      const adjustment = adjustmentLine.match(/[\\¥]?\s*(-?[\d,]+)\s*$/);
+      if (adjustment) {
+        const adjustmentAmount = Number(adjustment[1].replace(/,/g, ""));
+        if (Number.isFinite(adjustmentAmount) && adjustmentAmount !== 0) {
+          items.push({
+            code: POS_JOURNAL_ADJUSTMENT_ITEM_CODE,
+            name: label,
+            unit: adjustmentAmount,
+            qty: 1,
+            amount: adjustmentAmount,
+            category: "その他",
+            isCharge: false,
+          });
+        }
+      }
+      break;
+    }
   }
   if (!items.length) return null;
   let total: number | null = null;
@@ -653,6 +713,11 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
       if (tbl && !/^保留/.test(tbl) && tbl !== ".") tableNo = tbl;
     }
   }
+  if (!detectedPay && total == null) return null;
+  const pay = detectedPay || "支払情報なし";
+  const voidRef = text.normalize("NFKC").match(
+    /★\s*VOID\s+No\.?\s*(\d+)/i,
+  )?.[1] ?? "";
   return {
     no: record.no,
     time: `${String(record.hh).padStart(2, "0")}:${
@@ -662,8 +727,29 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
     total,
     guests,
     ...(tableNo ? { table_no: tableNo } : {}),
+    ...(voidRef ? { void_ref: voidRef } : {}),
     items,
   };
+}
+
+/** 取引変更のVOID控え自身と、参照された直前の元会計だけを除外する。 */
+export function removeVoidedPosJournalReceipts(
+  receipts: readonly PosJournalReceipt[],
+): PosJournalReceipt[] {
+  const list = Array.isArray(receipts) ? [...receipts] : [];
+  const active = list.map(() => true);
+  for (let index = 0; index < list.length; index += 1) {
+    const voidRef = safeText(list[index]?.void_ref, 30);
+    if (!voidRef) continue;
+    active[index] = false;
+    for (let prior = index - 1; prior >= 0; prior -= 1) {
+      if (!active[prior]) continue;
+      if (safeText(list[prior]?.no, 30) !== voidRef) continue;
+      active[prior] = false;
+      break;
+    }
+  }
+  return list.filter((_receipt, index) => active[index]);
 }
 
 export function parsePosJournalLzh(
@@ -704,9 +790,10 @@ function parsePosJournalTexts(
     ...settlement,
     ...weather,
     business_date: String(settlement.business_date),
-    receipts,
+    receipts: removeVoidedPosJournalReceipts(receipts),
     source: sourceFileName,
     parsed_complete: true,
+    parser_version: POS_JOURNAL_REPORT_PARSER_VERSION,
   };
 }
 
@@ -790,145 +877,106 @@ function paymentMethodRecord(
   return out;
 }
 
-function posReceiptSignature(receipt: PosJournalReceipt): string {
-  const items = (receipt.items || []).map((item) =>
-    [
-      safeText(item.code, 24),
-      safeText(item.name, 120),
-      safeNumber(item.unit),
-      safeNumber(item.qty),
-      safeNumber(item.amount),
-    ].join(":")
-  ).sort();
-  return [
-    receipt.total == null ? 0 : safeNumber(receipt.total),
-    receipt.guests == null ? 0 : safeNumber(receipt.guests),
-    safeText(receipt.table_no, 50),
-    items.join("|"),
-  ].join(";");
-}
-
-function receiptMinuteOfDay(receipt: PosJournalReceipt): number | null {
-  const match = String(receipt.time ?? "").match(
-    /^([01]?\d|2[0-3]):([0-5]\d)$/,
-  );
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-}
-
 function reconcilePosJournalReceipts(
   day: PosJournalDay,
 ): PosJournalReceipt[] {
-  const receipts = Array.isArray(day.receipts) ? day.receipts : [];
-  const targetTotal = safeNumber(day.gross_sales);
-  const targetGroups = Math.max(0, Math.round(safeNumber(day.groups)));
+  const receipts = removeVoidedPosJournalReceipts(
+    Array.isArray(day.receipts) ? day.receipts : [],
+  );
   if (!receipts.length) return []
-  const sorted = [...receipts].sort((a, b) =>
-      safeText(a.time, 8).localeCompare(safeText(b.time, 8)) ||
-      safeText(a.no, 30).localeCompare(safeText(b.no, 30))
+  // VOIDの明示参照以外の近接・同内容heuristicは使わない。
+  // 正常な別会計を誤って落とさず、合計不一致は上位の共通gateで日全体を除外する。
+  return [...receipts].sort((a, b) =>
+    safeText(a.time, 8).localeCompare(safeText(b.time, 8)) ||
+    safeText(a.no, 30).localeCompare(safeText(b.no, 30))
+  );
+}
+
+export type PosJournalDetailReconciliation = {
+  /** 日計総売上・会計合計・各会計の商品合計が一致し、明細分析へ利用できる。 */
+  detailComplete: boolean;
+  reason:
+    | "matched"
+    | "gross_mismatch"
+    | "item_mismatch"
+    | "gross_and_item_mismatch";
+  grossSales: number;
+  rawReceiptCount: number;
+  rawReceiptTotal: number;
+  rawItemTotal: number;
+  reconciledReceiptCount: number;
+  reconciledReceiptTotal: number;
+  reconciledItemTotal: number;
+  itemMismatchReceiptCount: number;
+  receipts: PosJournalReceipt[];
+};
+
+/**
+ * 1営業日の会計明細を日計総売上へ照合する共通の安全境界。
+ * 保存月報・商品インデックス・live商品検索・cohort比較は必ずこの結果だけを使う。
+ * 一致できない元明細は監査用parsed_dataに残すが、確定明細としては返さない。
+ */
+export function reconcilePosJournalDayDetail(
+  day: PosJournalDay,
+): PosJournalDetailReconciliation {
+  const rawReceipts = Array.isArray(day.receipts) ? day.receipts : [];
+  const rawReceiptTotal = rawReceipts.reduce(
+    (sum, receipt) => sum + safeNumber(receipt.total),
+    0,
+  );
+  const rawItemTotal = rawReceipts.reduce(
+    (sum, receipt) => sum + (Array.isArray(receipt.items)
+      ? receipt.items.reduce(
+        (itemSum, item) => itemSum + safeNumber(item.amount),
+        0,
+      )
+      : 0),
+    0,
+  );
+  const grossSales = safeNumber(day.gross_sales);
+  const reconciled = reconcilePosJournalReceipts(day);
+  const reconciledReceiptTotal = reconciled.reduce(
+    (sum, receipt) => sum + safeNumber(receipt.total),
+    0,
+  );
+  const reconciledItemTotal = reconciled.reduce(
+    (sum, receipt) => sum + (Array.isArray(receipt.items)
+      ? receipt.items.reduce(
+        (itemSum, item) => itemSum + safeNumber(item.amount),
+        0,
+      )
+      : 0),
+    0,
+  );
+  const grossMatched = reconciledReceiptTotal === grossSales;
+  const itemMismatchReceiptCount = reconciled.reduce((count, receipt) => {
+    const items = Array.isArray(receipt.items) ? receipt.items : [];
+    const itemTotal = items.reduce(
+      (sum, item) => sum + safeNumber(item.amount),
+      0,
     );
-  const originalTotal = sorted.reduce(
-    (total, receipt) => total + safeNumber(receipt.total),
-    0,
-  );
-  // 日計総売上と元明細合計が既に一致する日は、同時刻・同額・同商品でも
-  // 正常な別会計として扱う。割勘では明細行数と組数が異なることもあるため、
-  // 支払変更控えの除外は総売上が不一致のときだけ行う。
-  if (originalTotal === targetTotal) {
-    return sorted;
-  }
-  // 不一致がある小規模日は、元明細を先に消さず総売上へ一致する部分集合を探す。
-  // 組数との差が小さいもの、明細を多く保持するもの、同内容なら新しい控えを優先。
-  if (sorted.length <= 12) {
-    let best: {
-      receipts: PosJournalReceipt[];
-      groupDistance: number;
-      duplicatePairs: number;
-      count: number;
-      recency: number;
-    } | null = null;
-    const combinations = 1 << sorted.length;
-    for (let mask = 1; mask < combinations; mask += 1) {
-      const picked: PosJournalReceipt[] = [];
-      let pickedTotal = 0;
-      let recency = 0;
-      for (let index = 0; index < sorted.length; index += 1) {
-        if (!(mask & (1 << index))) continue;
-        picked.push(sorted[index]);
-        pickedTotal += safeNumber(sorted[index].total);
-        recency += index;
-      }
-      if (pickedTotal !== targetTotal) continue;
-      let duplicatePairs = 0;
-      for (let left = 0; left < picked.length; left += 1) {
-        for (let right = left + 1; right < picked.length; right += 1) {
-          if (posReceiptSignature(picked[left]) !== posReceiptSignature(picked[right])) {
-            continue;
-          }
-          const leftMinute = receiptMinuteOfDay(picked[left]);
-          const rightMinute = receiptMinuteOfDay(picked[right]);
-          if (
-            leftMinute != null &&
-            rightMinute != null &&
-            Math.abs(rightMinute - leftMinute) <= 15
-          ) {
-            duplicatePairs += 1;
-          }
-        }
-      }
-      const candidate = {
-        receipts: picked,
-        groupDistance: targetGroups > 0
-          ? Math.abs(picked.length - targetGroups)
-          : 0,
-        duplicatePairs,
-        count: picked.length,
-        recency,
-      };
-      if (
-        !best ||
-        candidate.groupDistance < best.groupDistance ||
-        (candidate.groupDistance === best.groupDistance &&
-          candidate.duplicatePairs < best.duplicatePairs) ||
-        (candidate.groupDistance === best.groupDistance &&
-          candidate.duplicatePairs === best.duplicatePairs &&
-          candidate.count > best.count) ||
-        (candidate.groupDistance === best.groupDistance &&
-          candidate.duplicatePairs === best.duplicatePairs &&
-          candidate.count === best.count &&
-          candidate.recency > best.recency)
-      ) {
-        best = candidate;
-      }
-    }
-    if (best) return best.receipts;
-  }
-  const deduped = sorted.filter((receipt, index, all) => {
-      const sig = posReceiptSignature(receipt);
-      // 同一内容が支払変更・個別割勘等で複数控えとして残る場合、
-      // 既存Journal Reportと同じく最後（最新時刻）の控えを正本にする。
-      const minute = receiptMinuteOfDay(receipt);
-      return !all.slice(index + 1).some((later) => {
-        if (posReceiptSignature(later) !== sig) return false;
-        const laterMinute = receiptMinuteOfDay(later);
-        // 同一料理・同額の正規会計は別時間帯に発生し得る。
-        // 支払変更控えとして扱うのは15分以内の連続複製だけ。
-        return minute != null &&
-          laterMinute != null &&
-          laterMinute >= minute &&
-          laterMinute - minute <= 15;
-      });
-    });
-  const sum = deduped.reduce(
-    (total, receipt) => total + safeNumber(receipt.total),
-    0,
-  );
-  if (
-    (!targetTotal || sum === targetTotal) &&
-    (!targetGroups || deduped.length === targetGroups)
-  ) {
-    return deduped;
-  }
-  return deduped;
+    return count + (items.length > 0 && itemTotal === safeNumber(receipt.total)
+      ? 0
+      : 1);
+  }, 0);
+  const itemsMatched = itemMismatchReceiptCount === 0;
+  const detailComplete = grossMatched && itemsMatched;
+  const reason = grossMatched
+    ? (itemsMatched ? "matched" : "item_mismatch")
+    : (itemsMatched ? "gross_mismatch" : "gross_and_item_mismatch");
+  return {
+    detailComplete,
+    reason,
+    grossSales,
+    rawReceiptCount: rawReceipts.length,
+    rawReceiptTotal,
+    rawItemTotal,
+    reconciledReceiptCount: detailComplete ? reconciled.length : 0,
+    reconciledReceiptTotal,
+    reconciledItemTotal,
+    itemMismatchReceiptCount,
+    receipts: detailComplete ? reconciled : [],
+  };
 }
 
 function allocateDayPaymentsToSales(
@@ -1048,17 +1096,11 @@ export function buildJournalSavedReportsFromPosDays(params: {
       };
     }
     const dayPayments = paymentMethodRecord(day);
-    let reconciledReceipts = reconcilePosJournalReceipts(day);
-    const targetDayTotal = safeNumber(day.gross_sales);
-    const reconciledTotal = reconciledReceipts.reduce(
-      (sum, receipt) => sum + safeNumber(receipt.total),
-      0,
-    );
+    const detail = reconcilePosJournalDayDetail(day);
+    const reconciledReceipts = detail.receipts;
+    const targetDayTotal = detail.grossSales;
     // 日計と会計合計を一致させられない日は、誤った明細を確定値として保存しない。
     // 日計サマリー1件へ安全に退避し、元の生解析はpos_journal_filesに保持する。
-    if (targetDayTotal > 0 && reconciledTotal !== targetDayTotal) {
-      reconciledReceipts = [];
-    }
     for (let index = 0; index < reconciledReceipts.length; index += 1) {
       const receipt = reconciledReceipts[index];
       const timeMatch = String(receipt.time ?? "").match(
@@ -1348,11 +1390,13 @@ export function buildJournalSavedReportsFromPosDays(params: {
       if (item.category === "フード") daily.food += item.amount;
       if (item.category === "飲料") daily.drink += item.amount;
       if (item.isCharge) chargeTotal += item.amount;
-      const product = productMap.get(item.name) ??
-        { name: item.name, qty: 0, amt: 0, category: item.category };
-      product.qty += item.qty;
-      product.amt += item.amount;
-      productMap.set(item.name, product);
+      if (!isPosJournalAdjustmentItem(item)) {
+        const product = productMap.get(item.name) ??
+          { name: item.name, qty: 0, amt: 0, category: item.category };
+        product.qty += item.qty;
+        product.amt += item.amount;
+        productMap.set(item.name, product);
+      }
       if (sale.mealPeriod === "ランチ") {
         if (item.category === "フード") {
           mealCategoryTotals.lunchFoodTotal += item.amount;
@@ -1407,9 +1451,11 @@ export function buildJournalSavedReportsFromPosDays(params: {
       Number.isSafeInteger(id) && id > 0
     ),
   )];
-  const topProducts = [...productMap.values()].sort((a, b) =>
-    b.amt - a.amt || b.qty - a.qty || a.name.localeCompare(b.name, "ja")
-  ).slice(0, 30);
+  const topProducts = [...productMap.values()]
+    .filter((item) => item.qty > 0 && item.amt >= 0)
+    .sort((a, b) =>
+      b.amt - a.amt || b.qty - a.qty || a.name.localeCompare(b.name, "ja")
+    ).slice(0, 30);
   const weekdayBreakdown = [...weekdayMap.entries()]
     .map(([weekday, value]) => ({
       weekday,
@@ -1784,25 +1830,14 @@ export function mergePosJournalDaysPreferPrimary(
   for (const day of Array.isArray(primary) ? primary : []) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(day.business_date)) {
       const existing = byDate.get(day.business_date);
-      const reconciled = reconcilePosJournalReceipts(day);
-      const receiptsReliable = reconciled.length > 0 &&
-        reconciled.reduce(
-            (sum, receipt) => sum + safeNumber(receipt.total),
-            0,
-          ) === safeNumber(day.gross_sales) &&
-        reconciled.every((receipt) =>
-          (receipt.items || []).reduce(
-            (sum, item) => sum + safeNumber(item.amount),
-            0,
-          ) === safeNumber(receipt.total)
-        );
+      const detail = reconcilePosJournalDayDetail(day);
       // 古いサーバー解析で取消行を落として商品明細だけ過大な場合、
       // 日計・決済・天候は原本を正とし、明細だけ既存保存レポートを維持する。
       byDate.set(
         day.business_date,
-        existing && !receiptsReliable
+        existing && !detail.detailComplete
           ? { ...existing, ...day, receipts: existing.receipts }
-          : { ...day, receipts: reconciled.length ? reconciled : day.receipts },
+          : { ...day, receipts: detail.receipts },
       );
     }
   }
@@ -1876,6 +1911,10 @@ export function buildPosJournalSummary(params: {
     ),
     params.categoryOverrides ?? {},
   );
+  const detailDays = days.map((day) => ({
+    ...day,
+    receipts: reconcilePosJournalDayDetail(day).receipts,
+  }));
   const itemMap = new Map<
     string,
     {
@@ -1888,13 +1927,14 @@ export function buildPosJournalSummary(params: {
   >();
   const paymentBreakdown: Record<string, { count: number; amount: number }> =
     {};
-  for (const day of days) {
+  for (const day of detailDays) {
     for (const receipt of day.receipts || []) {
       const payment = paymentBreakdown[receipt.pay] ?? { count: 0, amount: 0 };
       payment.count += 1;
       payment.amount += Number(receipt.total) || 0;
       paymentBreakdown[receipt.pay] = payment;
       for (const item of receipt.items || []) {
+        if (isPosJournalAdjustmentItem(item)) continue;
         const key = `${item.code}\u0000${item.name}`;
         const current = itemMap.get(key) ?? {
           code: item.code,
@@ -1917,7 +1957,7 @@ export function buildPosJournalSummary(params: {
   let roomAmount = 0;
   let otherAmount = 0;
   let chargeAmount = 0;
-  for (const day of days) {
+  for (const day of detailDays) {
     for (const receipt of day.receipts || []) {
       for (const item of receipt.items || []) {
         const amount = Number(item.amount) || 0;
@@ -1991,9 +2031,12 @@ export function buildPosJournalSummary(params: {
       charge_amount: chargeAmount,
     },
     payment_breakdown: paymentBreakdown,
-    item_ranking: Array.from(itemMap.values()).sort((a, b) =>
-      b.amount - a.amount || b.qty - a.qty || a.name.localeCompare(b.name, "ja")
-    ),
-    days,
+    item_ranking: Array.from(itemMap.values())
+      .filter((item) => item.qty > 0 && item.amount >= 0)
+      .sort((a, b) =>
+        b.amount - a.amount || b.qty - a.qty ||
+        a.name.localeCompare(b.name, "ja")
+      ),
+    days: detailDays,
   };
 }
