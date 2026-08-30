@@ -2597,6 +2597,18 @@ function listJournalStores() {
   return Object.keys(names).sort((a, b) => String(names[a]).localeCompare(String(names[b]), 'ja'))
     .map((k) => ({ store_key: k, store_name: names[k] }));
 }
+// Journal Reportの保存先キーは小文字で扱う（例: marugos）が、共通店舗マスターには
+// marugoS / marugoD のように大文字を含む正式キーがある。selectには正式キーを渡す。
+// 保存先を変更せず、表示だけを既存のoptionへ正しく対応付けるためのヘルパー。
+function resolveJournalStoreOptionKey(rawKey, stores = listJournalStores()) {
+  const key = String(rawKey || '').trim();
+  if (!key) return '';
+  const direct = stores.find((store) => store.store_key === key);
+  if (direct) return direct.store_key;
+  const normalized = key.toLowerCase();
+  const matched = stores.find((store) => store.store_key.toLowerCase() === normalized);
+  return matched ? matched.store_key : key;
+}
 function readPersistedStoreKey() {
   try {
     const v = sessionStorage.getItem(JOURNAL_STORE_STORAGE_KEY) || localStorage.getItem(JOURNAL_STORE_STORAGE_KEY) || '';
@@ -2678,7 +2690,7 @@ function fillStoreSelectOptions(selectedKey) {
   const sel = document.getElementById('storeSelect');
   if (!sel) return;
   const stores = listJournalStores();
-  const prev = selectedKey || sel.value || STORE_KEY;
+  const prev = resolveJournalStoreOptionKey(selectedKey || sel.value || STORE_KEY, stores);
   sel.innerHTML = '';
   for (const s of stores) {
     const opt = document.createElement('option');
@@ -2687,7 +2699,8 @@ function fillStoreSelectOptions(selectedKey) {
     sel.appendChild(opt);
   }
   const keys = stores.map((s) => s.store_key);
-  const want = authStoreScope || (keys.includes(prev) ? prev : (keys.includes('bistrocavacava') ? 'bistrocavacava' : keys[0] || ''));
+  const scopedKey = resolveJournalStoreOptionKey(authStoreScope, stores);
+  const want = scopedKey || (keys.includes(prev) ? prev : (keys.includes('bistrocavacava') ? 'bistrocavacava' : keys[0] || ''));
   if (want) sel.value = want;
   if (authStoreScope) {
     sel.disabled = true;
@@ -2712,7 +2725,10 @@ async function applySelectedStore(nextKey, opts) {
   STORE_KEY = key;
   persistStoreKey(key);
   const sel = document.getElementById('storeSelect');
-  if (sel && sel.value !== key) sel.value = key;
+  // STORE_KEYは既存クラウド保存先に合わせて小文字のまま維持する。一方selectには
+  // optionで使う正式キー（marugoS等）を入れ、選択中の店名が空にならないようにする。
+  const selectedOptionKey = resolveJournalStoreOptionKey(key);
+  if (sel && sel.value !== selectedOptionKey) sel.value = selectedOptionKey;
   if (changed || options.forceReload) {
     purgeLocalCloudDataCaches();
     invalidateSavedReportsCache();

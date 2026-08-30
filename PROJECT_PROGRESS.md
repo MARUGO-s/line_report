@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-08-30 - マルゴエス選択時に店名が空になる不具合を修正
+
+- Cause: Journal Reportの保存先キーは`marugos`へ小文字化する一方、店舗選択肢は共通マスターの正式キー`marugoS`を使っていた。`select.value = 'marugos'`は一致するoptionが無いため、選択欄だけ空表示になっていた。
+- Fix: 保存先キー`marugos`はそのまま維持し、選択欄へ設定する時だけ大小文字を吸収して既存optionの正式キー`marugoS`へ対応付ける。これにより既存のPOS原本・保存済みレポートの保存先は変わらない。
+- Scope: GitHub Pagesの正本`public/jnm/jnl2txt.html`と、表示確認用の`解凍変換ソフト/jnl2txt.html`へ同じ修正を反映。
+- Verification: 新規の店舗選択回帰テスト、`npm run test:journal-ai`（85件）、`git diff --check`を成功させた。
+
 ### 2026-08-30 - マルゴエスのPOS電子ジャーナル店舗コードを登録
 
 - Finding: KIOXIA上の実LZH 260件（2025-12-09〜2026-08-25）は、すべてファイル名先頭が`1022`で、共通パーサーでも260/260件を解析できた。一方、本番の`pos_journal_store_codes`には`1022`が無く、マルゴエス（`marugos`）の原本・保存済みレポートはいずれも0件だった。
