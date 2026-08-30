@@ -6,6 +6,7 @@ import { readChatPageSourceSync } from './helpers/chat-page-source.mjs';
 const chat = readChatPageSourceSync();
 const catalog = JSON.parse(readFileSync(new URL('../public/profile-icons/catalog.json', import.meta.url), 'utf8'));
 const files = readdirSync(new URL('../public/profile-icons/', import.meta.url)).filter((name) => name.endsWith('.png'));
+const serviceWorker = readFileSync(new URL('../public/chat-sw.js', import.meta.url), 'utf8');
 
 test('profile icon catalog exposes every optimized bundled icon', () => {
   assert.equal(catalog.length, 93);
@@ -25,6 +26,17 @@ test('store logos are offered from the store registry, not duplicated into the c
   assert.match(chat, /\.profile-icon-group-label \{[\s\S]*?grid-column: 1 \/ -1/);
 });
 
+// catalog.json は追加のたびに中身が変わる。cache-first と force-cache を重ねると
+// アイコンを増やしても古い一覧が返り続け、新しい絵が誰にも届かない。
+test('the icon catalog can be refreshed after new icons ship', () => {
+  // Service Worker が cache-first にするのは画像そのものだけ。
+  assert.match(serviceWorker, /\/\\\.\(png\|jpe\?g\|webp\|gif\|svg\)\$\/i\.test\(url\.pathname\)/);
+  assert.match(serviceWorker, /&& \(url\.pathname\.includes\('\/profile-icons\/'\)/);
+  // ページ側も、常に検証してから使う取り方にする。
+  assert.doesNotMatch(chat, /catalog\.json', \{ cache: 'force-cache' \}/);
+  assert.match(chat, /catalog\.json', \{ cache: 'no-cache' \}/);
+});
+
 test('new and existing users can select bundled icons while uploads remain available', () => {
   assert.match(chat, /function pickUploadedIcon\(\)/);
   assert.match(chat, /function choosePresetIcon\(url\)/);
@@ -33,7 +45,7 @@ test('new and existing users can select bundled icons while uploads remain avail
   assert.match(chat, /p_icon_url: iconUrl/);
   assert.match(chat, /canvas\.toBlob\(resolve, 'image\/webp', 0\.82\)/);
   assert.match(chat, /cacheControl: '31536000'/);
-  assert.match(chat, /profile-icons\/catalog\.json', \{ cache: 'force-cache' \}/);
+  assert.match(chat, /profile-icons\/catalog\.json', \{ cache: 'no-cache' \}/);
 });
 
 test('talk room icons can use the same presets or an uploaded image', () => {

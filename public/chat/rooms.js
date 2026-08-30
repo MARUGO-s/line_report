@@ -1034,7 +1034,7 @@ async function openPresetIconPicker(target = 'user') {
   grid.innerHTML = '<p class="login-note">読み込み中…</p>';
   try {
     if (!profileIconCatalog) {
-      const response = await fetch('profile-icons/catalog.json', { cache: 'force-cache' });
+      const response = await fetch('profile-icons/catalog.json', { cache: 'no-cache' });
       if (!response.ok) throw new Error('アイコン一覧を読み込めませんでした');
       profileIconCatalog = await response.json();
     }

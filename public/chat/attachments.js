@@ -63,7 +63,7 @@ function warmImageAssets() {
   const run = async () => {
     try {
       if (!profileIconCatalog) {
-        const response = await fetch('profile-icons/catalog.json', { cache: 'force-cache' });
+        const response = await fetch('profile-icons/catalog.json', { cache: 'no-cache' });
         if (response.ok) profileIconCatalog = await response.json();
       }
       const stickers = await loadStickerCatalog();

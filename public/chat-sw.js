@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v61';
+const CHAT_CACHE = 'line-report-chat-v62';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css',
@@ -142,7 +142,10 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   const isChatNavigation = event.request.mode === 'navigate' && url.pathname.endsWith('/chat.html');
-  const isRuntimeImageAsset = url.pathname.includes('/profile-icons/') || url.pathname.includes('/stickers/face/');
+  // 画像そのものだけを cache-first にする。catalog.json のような一覧ファイルまで
+  // 含めると、アイコンを追加しても古い一覧が返り続けて新しい絵が出せなくなる。
+  const isRuntimeImageAsset = /\.(png|jpe?g|webp|gif|svg)$/i.test(url.pathname)
+    && (url.pathname.includes('/profile-icons/') || url.pathname.includes('/stickers/face/'));
   if (!isChatNavigation && !CHAT_ASSET_URLS.has(url.href) && !isRuntimeImageAsset) return;
 
   if (isChatNavigation) {
