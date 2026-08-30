@@ -8,6 +8,7 @@ import { buildStoreLocationPromptBlock } from "./marugo_group_stores.ts";
 import {
   buildPosJournalSummary,
   isPosJournalAdjustmentItem,
+  resolvePosJournalReceiptPayments,
   type PosJournalDay,
   type PosJournalReceipt,
   type PosJournalReceiptItem,
@@ -197,14 +198,26 @@ function sanitizeReceipt(value: unknown): PosJournalReceipt | null {
   const items = rawItems
     .map(sanitizeReceiptItem)
     .filter((item): item is PosJournalReceiptItem => item !== null);
+  const pay = boundedText(value.pay, 30) || "不明";
+  const total = value.total == null ? null : boundedInteger(value.total);
+  const paymentBreakdown = resolvePosJournalReceiptPayments({
+    pay,
+    total,
+    payment_breakdown: isRecord(value.payment_breakdown)
+      ? value.payment_breakdown as Record<string, number>
+      : undefined,
+  });
   return {
     no: boundedText(value.no, 30),
     time: boundedText(value.time, 8),
-    pay: boundedText(value.pay, 30) || "不明",
-    total: value.total == null ? null : boundedInteger(value.total),
+    pay,
+    total,
     guests: value.guests == null
       ? null
       : boundedInteger(value.guests, MAX_COUNT),
+    ...(Object.keys(paymentBreakdown).length
+      ? { payment_breakdown: paymentBreakdown }
+      : {}),
     items,
   };
 }

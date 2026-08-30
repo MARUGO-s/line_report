@@ -3922,7 +3922,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-08-30-v21';
+const PARSER_VERSION='2026-08-30-v22';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -3960,22 +3960,30 @@ function summaryMetric(text,labelRe){
   const money=part.match(/[\\¥￥]\s*(-?[\d０-９,，]+)/);
   return {points:points?numOf(points):0,amount:money?numOf(money[1]):0};
 }
-const SUMMARY_PAYMENT_LABELS=[
-  [/商品券[（(]釣有[)）]/,'その他'],[/商品券[（(]釣無[)）]/,'その他'],
-  [/金券釣り▲/,'その他'],[/金券差額/,'その他'],
-  [/現計/,'現金'],[/クレジット計/,'クレジット'],[/掛計/,'その他'],
-  [/オフラインクレジット/,'クレジット'],[/食べログ/,'その他'],[/一休/,'その他'],
-  [/ぐるなび/,'その他'],[/プレミアム[（(]券[)）]/,'その他'],
-  [/プレミアム[（(]デジタル[)）]/,'その他']
-];
 function extractSummaryPayments(block){
   const normalized=String(block).normalize('NFKC');
   const byMethod=new Map(), details=[];
-  for(const [labelRe,method] of SUMMARY_PAYMENT_LABELS){
-    const amount=amountAtSummaryLabel(normalized,labelRe);
-    if(!amount) continue;
+  const lines=normalized.split('\n');
+  const endIndex=lines.findIndex(line=>/★?\s*支払合計(?:[（(]金券込[)）])?/.test(line));
+  const startIndex=lines.findIndex((line,index)=>index<endIndex&&(
+    /(?:商品|金)券[（(]釣有[)）]|金券釣り|東京ドーム利用券|現計|クレジット計/.test(line)
+  ));
+  if(startIndex<0||endIndex<=startIndex) return {byMethod,details,total:0};
+  for(let index=startIndex;index<endIndex;index++){
+    const label=lines[index].trim();
+    if(!label) continue;
+    const nextIndex=lines.findIndex((line,next)=>next>index&&next<endIndex&&line.trim());
+    if(nextIndex<0) continue;
+    const field=lines[nextIndex];
+    const countMatch=field.match(/([\d,]+)\s*回/);
+    const amountMatch=field.match(/[\\¥￥]\s*(-?[\d,]+)/);
+    if(!countMatch||!amountMatch) continue;
+    const method=normalizeSalePaymentLabel(label);
+    const count=numOf(countMatch[1]);
+    const amount=numOf(amountMatch[1]);
+    if(!method||!amount) continue;
     byMethod.set(method,(byMethod.get(method)||0)+amount);
-    details.push({label:labelRe.source,method,amount});
+    details.push({label,method,count,amount});
   }
   const total=[...byMethod.values()].reduce((sum,v)=>sum+v,0);
   return {byMethod,details,total};
@@ -4063,7 +4071,10 @@ function normalizeSalePaymentLabel(value){
   if(/電子\s*マネ/.test(label)) return '電子マネー';
   if(/東京\s*ドーム\s*利/.test(label)) return '東京ドーム利用券';
   if(/ドーム\s*シティ\s*食事/.test(label)) return 'ドームシティ食事券';
-  return label.replace(/[\s　]+/g,' ').slice(0,30);
+  if(/FOOD\s*STADIUM/i.test(label)) return 'FOODSTADIUM利用券';
+  if(/TD\s*ポイント/i.test(label)) return 'TDポイントチケット';
+  if(/^掛(?:計|支払|売)/.test(label)) return '掛売';
+  return label.replace(/[\s　]+/g,' ').replace(/計$/,'').slice(0,30);
 }
 function parseReceiptPayments(rec,change=0,receiptTotal=null){
   const tenderedByMethod=new Map(), details=[];

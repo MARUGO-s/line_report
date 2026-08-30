@@ -937,7 +937,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `ocr-bridge/app.py` | SAL-02 / DEV-05 |
 | `ocr-bridge/requirements.txt` | SAL-02 / DEV-05 |
 | `schema.sql` | DEV-05 |
-| `scripts/backfill-pos-journal-v21.mjs` | DEV-04 |
+| `scripts/backfill-pos-journal-v22.mjs` | DEV-04 |
 | `scripts/check-graphify-sql-coverage.mjs` | DEV-04 |
 | `scripts/check-knowledge-system.mjs` | DEV-04 |
 | `scripts/check-line-report-help-coverage.ts` | DEV-04 |

@@ -21,7 +21,7 @@ const productIndexSource = await readFile(
   "utf8",
 );
 const backfillSource = await readFile(
-  new URL("../scripts/backfill-pos-journal-v21.mjs", import.meta.url),
+  new URL("../scripts/backfill-pos-journal-v22.mjs", import.meta.url),
   "utf8",
 );
 const storeLinkPolicy = source.slice(
@@ -242,7 +242,7 @@ test("product index rebuild applies only its own dirty snapshot transaction", ()
   );
 });
 
-test("v21 backfill dry-runs only reparse before applying in the safe order", () => {
+test("v22 backfill dry-runs only reparse before applying in the safe order", () => {
   assert.match(
     backfillSource,
     /name === "default" && row\?\.type === "secret"[\s\S]*?name === "service_role" && row\?\.type === "legacy"/,

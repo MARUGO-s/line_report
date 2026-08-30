@@ -43,6 +43,8 @@ export type PosJournalReceipt = {
   table_no?: string;
   /** 取引変更で取り消す元会計No.。VOIDレコード自身と参照先を日計明細から除外する。 */
   void_ref?: string;
+  /** 会計内の支払方法別純額。複数決済を「複数」1件へ潰さず保持する。 */
+  payment_breakdown?: Record<string, number>;
   items: PosJournalReceiptItem[];
 };
 
@@ -204,7 +206,7 @@ const HEADER_RE =
 const ITEM_CODE_RE = /^\s{2}(\d{13})\s+(\S.*?)\s*$/;
 const ITEM_PRICE_RE =
   /@\s*([\d,]+)\s*x\s*(-?[\d,]+)\s+[\\¥]?\s*(-?[\d,]+)/;
-export const POS_JOURNAL_REPORT_PARSER_VERSION = "2026-08-30-v21";
+export const POS_JOURNAL_REPORT_PARSER_VERSION = "2026-08-30-v22";
 export const POS_JOURNAL_REPORT_VERIFICATION_VERSION =
   "split-bill-reconcile-v3";
 export const POS_JOURNAL_REPORT_CATEGORY_VERSION =
@@ -634,7 +636,10 @@ function normalizeSalePaymentLabel(value: unknown): string {
   if (/電子\s*マネ/.test(label)) return "電子マネー";
   if (/東京\s*ドーム\s*利/.test(label)) return "東京ドーム利用券";
   if (/ドーム\s*シティ\s*食事/.test(label)) return "ドームシティ食事券";
-  return label.replace(/[\s　]+/g, " ").slice(0, 30);
+  if (/FOOD\s*STADIUM/i.test(label)) return "FOODSTADIUM利用券";
+  if (/TD\s*ポイント/i.test(label)) return "TDポイントチケット";
+  if (/^掛(?:計|支払|売)/.test(label)) return "掛売";
+  return label.replace(/[\s　]+/g, " ").replace(/計$/, "").slice(0, 30);
 }
 
 function parseSale(record: JournalRecord): PosJournalReceipt | null {
@@ -643,20 +648,27 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
   if (/オーダーキャンセル|未会計オーダー取消|取引中止/.test(normalizedText)) {
     return null;
   }
-  const paymentMethods = new Set<string>();
+  const paymentBreakdown: Record<string, number> = {};
   for (const line of record.lines) {
     // 実POSは店舗ごとの任意支払区分（QR・電子マネー・商品券等）を
     // 「計N 支払名 \\金額」で出す。既知5種だけに限定すると会計全体が欠落する。
     const paymentLine = normalizeWide(line).normalize("NFKC").match(
-      /^\s*計\d+\s+(.+?)\s+\\\s*-?[\d,]+\s*$/,
+      /^\s*計\d+\s+(.+?)\s+[\\¥￥]\s*(-?[\d,]+)\s*$/,
     );
     if (!paymentLine) continue;
     const method = normalizeSalePaymentLabel(paymentLine[1]);
-    if (method) paymentMethods.add(method);
+    const paymentAmount = Number(paymentLine[2].replace(/,/g, ""));
+    if (method && Number.isFinite(paymentAmount)) {
+      paymentBreakdown[method] =
+        (paymentBreakdown[method] || 0) + paymentAmount;
+    }
   }
-  const detectedPay = paymentMethods.size === 1
-    ? [...paymentMethods][0]
-    : (paymentMethods.size > 1 ? "複数" : "");
+  const paymentMethods = Object.keys(paymentBreakdown).filter((method) =>
+    paymentBreakdown[method] !== 0
+  );
+  const detectedPay = paymentMethods.length === 1
+    ? paymentMethods[0]
+    : (paymentMethods.length > 1 ? "複数" : "");
   const items: PosJournalReceiptItem[] = [];
   for (let index = 0; index < record.lines.length; index += 1) {
     const item = record.lines[index].match(ITEM_CODE_RE);
@@ -701,9 +713,11 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
   let total: number | null = null;
   let guests: number | null = null;
   let tableNo = "";
+  let change = 0;
   for (const line of record.lines) {
     const normalized = String(line || "").normalize("NFKC");
     if (/合\s*計\s/.test(line)) total = amount(line) ?? total;
+    if (/お[\s　]*釣/.test(normalized)) change = amount(line) ?? change;
     guests = firstInt(line, "名") ?? guests;
     const table = normalized.match(
       /(?:伝票\s*No\.?\s*[^\s]+\s+)?テーブル\s*No\.?\s*([^\s]+)/,
@@ -715,6 +729,12 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
   }
   if (!detectedPay && total == null) return null;
   const pay = detectedPay || "支払情報なし";
+  if (change && paymentBreakdown["現金"] != null) {
+    paymentBreakdown["現金"] -= change;
+  }
+  if (!Object.keys(paymentBreakdown).length && total != null && total > 0) {
+    paymentBreakdown["支払情報なし"] = total;
+  }
   const voidRef = text.normalize("NFKC").match(
     /★\s*VOID\s+No\.?\s*(\d+)/i,
   )?.[1] ?? "";
@@ -728,6 +748,7 @@ function parseSale(record: JournalRecord): PosJournalReceipt | null {
     guests,
     ...(tableNo ? { table_no: tableNo } : {}),
     ...(voidRef ? { void_ref: voidRef } : {}),
+    payment_breakdown: paymentBreakdown,
     items,
   };
 }
@@ -786,11 +807,13 @@ function parsePosJournalTexts(
   if (!settlement || typeof settlement.business_date !== "string") {
     throw new Error("日計精算レポートまたは営業日付を読み取れませんでした。");
   }
+  const activeReceipts = removeVoidedPosJournalReceipts(receipts);
   return {
     ...settlement,
     ...weather,
     business_date: String(settlement.business_date),
-    receipts: removeVoidedPosJournalReceipts(receipts),
+    payment_breakdown: aggregatePosJournalReceiptPayments(activeReceipts),
+    receipts: activeReceipts,
     source: sourceFileName,
     parsed_complete: true,
     parser_version: POS_JOURNAL_REPORT_PARSER_VERSION,
@@ -862,6 +885,16 @@ function paymentMethodRecord(
   day: PosJournalDay,
 ): Record<string, number> {
   const out: Record<string, number> = {};
+  if (isRecord(day.payment_breakdown)) {
+    for (const [rawLabel, rawBlock] of Object.entries(day.payment_breakdown)) {
+      const label = normalizeSalePaymentLabel(rawLabel) || safeText(rawLabel, 30);
+      const block = isRecord(rawBlock) ? rawBlock : {};
+      const amount = safeNumber(block.amount);
+      if (!label || !amount) continue;
+      out[label] = (out[label] || 0) + amount;
+    }
+    if (Object.keys(out).length) return out;
+  }
   const blocks: Array<[string, unknown]> = [
     ["現金", day.pay_cash],
     ["クレジット", day.pay_credit],
@@ -984,6 +1017,17 @@ function allocateDayPaymentsToSales(
   sales: JournalSavedReportSale[],
 ): void {
   if (!sales.length) return;
+  const alreadyComplete = sales.every((sale) => {
+    const byMethod = isRecord(sale.payments?.byMethod)
+      ? sale.payments.byMethod
+      : {};
+    const allocated = Object.values(byMethod).reduce(
+      (sum, amount) => sum + safeNumber(amount),
+      0,
+    );
+    return Object.keys(byMethod).length > 0 && allocated === sale.total;
+  });
+  if (alreadyComplete) return;
   const targets = paymentMethodRecord(day);
   const targetEntries = Object.entries(targets).filter(([, amount]) =>
     amount !== 0
@@ -1149,9 +1193,13 @@ export function buildJournalSavedReportsFromPosDays(params: {
         });
       }
       const guests = receipt.guests == null ? 0 : safeNumber(receipt.guests);
-      const pay = safeText(receipt.pay, 30) || "その他";
-      const paymentAmount = total;
-      const byMethod = { [pay]: paymentAmount };
+      const byMethod = resolvePosJournalReceiptPayments(receipt);
+      const methods = Object.keys(byMethod);
+      const pay = methods.length === 1 ? methods[0] : "併用";
+      const paymentAmount = Object.values(byMethod).reduce(
+        (sum, amount) => sum + amount,
+        0,
+      );
       sales.push({
         no: safeText(receipt.no, 30) ||
           `${day.business_date.replace(/-/g, "")}-${index + 1}`,
@@ -1182,7 +1230,11 @@ export function buildJournalSavedReportsFromPosDays(params: {
           byMethod,
           total: paymentAmount,
           change: 0,
-          details: [{ label: pay, method: pay, amount: paymentAmount }],
+          details: methods.map((method) => ({
+            label: method,
+            method,
+            amount: byMethod[method],
+          })),
         },
         items,
         itemTotal: items.reduce((sum, item) => sum + item.amount, 0),
@@ -1314,6 +1366,17 @@ export function buildJournalSavedReportsFromPosDays(params: {
           amount: safeNumber(day.pay_gurunavi.amount),
         }
         : { count: 0, amount: 0 },
+      payment_breakdown: aggregatePosJournalReceiptPayments(
+        daySales.map((sale) => ({
+          no: sale.no,
+          time: sale.time,
+          pay: sale.method,
+          total: sale.total,
+          guests: sale.customers,
+          payment_breakdown: sale.payments.byMethod,
+          items: [],
+        })),
+      ),
       weather: safeText(day.weather, 30),
       temp_c: Number.isFinite(Number(day.temp_c)) ? Number(day.temp_c) : null,
       receipts: daySales.map((sale) => ({
@@ -1322,6 +1385,7 @@ export function buildJournalSavedReportsFromPosDays(params: {
         pay: sale.method,
         total: sale.total,
         guests: sale.customers,
+        payment_breakdown: { ...sale.payments.byMethod },
         ...(sale.tableNo ? { table_no: sale.tableNo } : {}),
         items: sale.items.map((item) => ({
           code: item.code,
@@ -1545,6 +1609,61 @@ function safeText(value: unknown, maxLength = 180): string {
   ).replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
 
+/**
+ * 会計内の支払方法別純額を検算して返す。
+ * 旧解析版で「複数」へ潰れている場合は推測で配分せず、未捕捉として保持する。
+ */
+export function resolvePosJournalReceiptPayments(
+  receipt: Pick<PosJournalReceipt, "pay" | "total" | "payment_breakdown">,
+): Record<string, number> {
+  const total = safeNumber(receipt.total);
+  if (total <= 0) return {};
+  const normalized: Record<string, number> = {};
+  if (isRecord(receipt.payment_breakdown)) {
+    for (const [rawLabel, rawAmount] of Object.entries(
+      receipt.payment_breakdown,
+    )) {
+      const label = normalizeSalePaymentLabel(rawLabel) || safeText(rawLabel, 30);
+      const amount = safeNumber(rawAmount);
+      if (!label || amount <= 0) continue;
+      normalized[label] = (normalized[label] || 0) + amount;
+    }
+  }
+  const normalizedTotal = Object.values(normalized).reduce(
+    (sum, amount) => sum + amount,
+    0,
+  );
+  if (Object.keys(normalized).length && normalizedTotal === total) {
+    return normalized;
+  }
+  const fallback = normalizeSalePaymentLabel(receipt.pay) ||
+    safeText(receipt.pay, 30);
+  if (
+    fallback &&
+    !/^(?:複数|併用|その他|不明)$/.test(fallback)
+  ) {
+    return { [fallback]: total };
+  }
+  return { "支払明細未捕捉": total };
+}
+
+function aggregatePosJournalReceiptPayments(
+  receipts: readonly PosJournalReceipt[],
+): Record<string, { count: number; amount: number }> {
+  const output: Record<string, { count: number; amount: number }> = {};
+  for (const receipt of receipts) {
+    for (const [method, amount] of Object.entries(
+      resolvePosJournalReceiptPayments(receipt),
+    )) {
+      const current = output[method] ?? { count: 0, amount: 0 };
+      current.count += 1;
+      current.amount += amount;
+      output[method] = current;
+    }
+  }
+  return output;
+}
+
 function paymentNameFromJournalReportSale(sale: JournalReportSaleLike): string {
   const byMethod = isRecord(sale.payments) && isRecord(sale.payments.byMethod)
     ? sale.payments.byMethod
@@ -1590,6 +1709,20 @@ function journalReportReceipt(
   const rawTotal = Number(sale.total);
   const rawGuests = Number(sale.customers ?? sale.guests);
   const tableNo = safeText(sale.tableNo ?? sale.table_no, 50);
+  const rawByMethod = isRecord(sale.payments) &&
+      isRecord(sale.payments.byMethod)
+    ? sale.payments.byMethod
+    : isRecord(sale.payment_breakdown)
+    ? sale.payment_breakdown
+    : {};
+  const paymentBreakdown: Record<string, number> = {};
+  for (const [rawLabel, rawAmount] of Object.entries(rawByMethod)) {
+    const label = normalizeSalePaymentLabel(rawLabel) || safeText(rawLabel, 30);
+    const amount = safeNumber(rawAmount);
+    if (label && amount > 0) {
+      paymentBreakdown[label] = (paymentBreakdown[label] || 0) + amount;
+    }
+  }
   return {
     no: safeText(sale.no, 30) || `shared-${index + 1}`,
     time: safeText(sale.time, 8),
@@ -1597,6 +1730,9 @@ function journalReportReceipt(
     total: Number.isFinite(rawTotal) ? rawTotal : null,
     guests: Number.isFinite(rawGuests) ? rawGuests : null,
     ...(tableNo ? { table_no: tableNo } : {}),
+    ...(Object.keys(paymentBreakdown).length
+      ? { payment_breakdown: paymentBreakdown }
+      : {}),
     items,
   };
 }
@@ -1660,6 +1796,9 @@ export function buildPosJournalDaysFromSavedReports(
         pay_tabelog: paymentBlock("pay_tabelog"),
         pay_ikyu: paymentBlock("pay_ikyu"),
         pay_gurunavi: paymentBlock("pay_gurunavi"),
+        payment_breakdown: isRecord(value.payment_breakdown)
+          ? value.payment_breakdown
+          : aggregatePosJournalReceiptPayments(receipts),
         weather: safeText(value.weather, 30),
         temp_c: parsePosJournalTempC(
           value.temp_c ?? value.tempC,
@@ -1744,6 +1883,7 @@ export function buildPosJournalDaysFromSavedReports(
         pay_tabelog: paymentTotals.get("食べログ") ?? { count: 0, amount: 0 },
         pay_ikyu: paymentTotals.get("一休") ?? { count: 0, amount: 0 },
         pay_gurunavi: paymentTotals.get("ぐるなび") ?? { count: 0, amount: 0 },
+        payment_breakdown: Object.fromEntries(paymentTotals),
         weather: safeText(weatherRow.weather ?? saleWeather?.weather, 30),
         temp_c: parsePosJournalTempC(
           weatherRow.tempC ?? weatherRow.temp_c,
@@ -1929,10 +2069,14 @@ export function buildPosJournalSummary(params: {
     {};
   for (const day of detailDays) {
     for (const receipt of day.receipts || []) {
-      const payment = paymentBreakdown[receipt.pay] ?? { count: 0, amount: 0 };
-      payment.count += 1;
-      payment.amount += Number(receipt.total) || 0;
-      paymentBreakdown[receipt.pay] = payment;
+      for (const [method, amount] of Object.entries(
+        resolvePosJournalReceiptPayments(receipt),
+      )) {
+        const payment = paymentBreakdown[method] ?? { count: 0, amount: 0 };
+        payment.count += 1;
+        payment.amount += amount;
+        paymentBreakdown[method] = payment;
+      }
       for (const item of receipt.items || []) {
         if (isPosJournalAdjustmentItem(item)) continue;
         const key = `${item.code}\u0000${item.name}`;
@@ -1951,6 +2095,10 @@ export function buildPosJournalSummary(params: {
     }
   }
   const gross = sumDays(days, "gross_sales");
+  const paymentTotal = Object.values(paymentBreakdown).reduce(
+    (sum, payment) => sum + payment.amount,
+    0,
+  );
   const guests = sumDays(days, "guests");
   let foodAmount = 0;
   let drinkAmount = 0;
@@ -1986,44 +2134,13 @@ export function buildPosJournalSummary(params: {
       groups: sumDays(days, "groups"),
       guests,
       avg_spend: guests ? Math.round(gross / guests) : 0,
-      cash_amount: days.reduce(
-        (sum, day) =>
-          sum +
-          (Number((day.pay_cash as { amount?: unknown } | undefined)?.amount) ||
-            0),
-        0,
-      ),
-      credit_amount: days.reduce(
-        (sum, day) =>
-          sum +
-          (Number(
-            (day.pay_credit as { amount?: unknown } | undefined)?.amount,
-          ) || 0),
-        0,
-      ),
-      tabelog_amount: days.reduce(
-        (sum, day) =>
-          sum +
-          (Number(
-            (day.pay_tabelog as { amount?: unknown } | undefined)?.amount,
-          ) || 0),
-        0,
-      ),
-      ikyu_amount: days.reduce(
-        (sum, day) =>
-          sum +
-          (Number((day.pay_ikyu as { amount?: unknown } | undefined)?.amount) ||
-            0),
-        0,
-      ),
-      gurunavi_amount: days.reduce(
-        (sum, day) =>
-          sum +
-          (Number(
-            (day.pay_gurunavi as { amount?: unknown } | undefined)?.amount,
-          ) || 0),
-        0,
-      ),
+      cash_amount: paymentBreakdown["現金"]?.amount || 0,
+      credit_amount: paymentBreakdown["クレジット"]?.amount || 0,
+      tabelog_amount: paymentBreakdown["食べログ"]?.amount || 0,
+      ikyu_amount: paymentBreakdown["一休"]?.amount || 0,
+      gurunavi_amount: paymentBreakdown["ぐるなび"]?.amount || 0,
+      payment_total: paymentTotal,
+      unattributed_payment_amount: Math.max(0, gross - paymentTotal),
       food_amount: foodAmount,
       drink_amount: drinkAmount,
       room_amount: roomAmount,

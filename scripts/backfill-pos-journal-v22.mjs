@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 const PROJECT_REF = "hocbnifuactbvmyjraxy";
 const SUPABASE_URL = `https://${PROJECT_REF}.supabase.co`;
 const ADMIN_API_URL = `${SUPABASE_URL}/functions/v1/admin-api`;
-const PARSER_VERSION = "2026-08-30-v21";
+const PARSER_VERSION = "2026-08-30-v22";
 const BATCH_LIMIT = 20;
 const REQUEST_TIMEOUT_MS = 145_000;
 const MAX_BATCHES = 80;
@@ -290,7 +290,7 @@ async function verifyProduction(serviceRoleKey) {
     summary.push({
       store_key: target.storeKey,
       files: storeFiles.length,
-      parser_v21: parserFiles,
+      parser_v22: parserFiles,
       months_complete: storeCoverage.length,
       coverage_scanned_days: coverageScannedDays,
       gross,

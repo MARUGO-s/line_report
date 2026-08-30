@@ -79,7 +79,7 @@ const context = {
   AI_KNOWLEDGE_CHUNK_CHARS: knowledgeLimits.chunkChars,
   DINNER_START_MINUTES: 16 * 60,
   INVALID_SALE_STATUS_RE: /オーダーキャンセル|未会計オーダー取消|取引中止/,
-  PARSER_VERSION: '2026-08-30-v21',
+  PARSER_VERSION: '2026-08-30-v22',
   VERIFICATION_VERSION: 'split-bill-reconcile-v3',
   CATEGORY_VERSION: 'pos-food-drink-room-bycode-v3',
   MEAL_PERIOD_VERSION: 'lunch-before-1600-v1',
@@ -332,14 +332,14 @@ test('monthly report index excludes same-month daily rows and preserves every da
   );
 });
 
-test('browser POS parser v21 keeps no-payment sales, signed adjustments, and exact VOID semantics', () => {
-  assert.match(html, /const PARSER_VERSION='2026-08-30-v21'/);
+test('browser POS parser v22 keeps no-payment sales, signed adjustments, and exact VOID semantics', () => {
+  assert.match(html, /const PARSER_VERSION='2026-08-30-v22'/);
   assert.equal(context.isStaleReport({
-    parserVersion: '2026-08-30-v21',
+    parserVersion: '2026-08-30-v22',
     verificationVersion: 'split-bill-reconcile-v3',
     categoryVersion: 'pos-food-drink-room-bycode-v3',
     mealPeriodVersion: 'lunch-before-1600-v1',
-  }), false, 'server v21 report is current in the browser');
+  }), false, 'server v22 report is current in the browser');
   assert.equal(context.isStaleReport({ parserVersion: '2026-07-31-v19' }), true);
 
   const receipt = ({ no = 1, date = '2026年 8月30日(日)', time = '12時00分', body, total = 1000, payment = '' }) =>

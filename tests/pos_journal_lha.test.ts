@@ -234,11 +234,34 @@ Deno.test("MARUGO-s generic and mixed payment rows keep receipts until gross rec
     1000,
     1000,
   ]);
+  assertEquals(day.receipts.map((receipt) => receipt.payment_breakdown), [
+    { "QRコード": 1000 },
+    { "電子マネー": 1000 },
+    { "東京ドーム利用券": 1000 },
+    { "ドームシティ食事券": 1000 },
+    { "現金": 500, "QRコード": 500 },
+  ]);
   const reconciled = reconcilePosJournalDayDetail(day);
   assertEquals(reconciled.detailComplete, true);
   assertEquals(reconciled.grossSales, 5000);
   assertEquals(reconciled.reconciledReceiptTotal, 5000);
   assertEquals(reconciled.receipts.length, 5);
+  const summary = buildPosJournalSummary({
+    storeKey: "marugos",
+    storeName: "マルゴエス",
+    storeCode: "1022",
+    month: "2026-08",
+    fileCount: 1,
+    days: [day],
+  });
+  assertEquals(summary.payment_breakdown, {
+    "QRコード": { count: 2, amount: 1500 },
+    "電子マネー": { count: 1, amount: 1000 },
+    "東京ドーム利用券": { count: 1, amount: 1000 },
+    "ドームシティ食事券": { count: 1, amount: 1000 },
+    "現金": { count: 1, amount: 500 },
+  });
+  assertEquals(summary.totals.payment_total, 5000);
 });
 
 Deno.test("MARUGO-s keeps no-currency cancellations, explicit discounts, and completed no-pay sales", async () => {
@@ -249,7 +272,7 @@ Deno.test("MARUGO-s keeps no-currency cancellations, explicit discounts, and com
     ),
   );
   const day = parsePosJournalText(text, "102220260711230000000001.lzh");
-  assertEquals(POS_JOURNAL_REPORT_PARSER_VERSION, "2026-08-30-v21");
+  assertEquals(POS_JOURNAL_REPORT_PARSER_VERSION, "2026-08-30-v22");
   assertEquals(day.receipts.map((receipt) => receipt.no), [
     "1001",
     "1002",
