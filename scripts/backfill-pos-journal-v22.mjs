@@ -2,6 +2,20 @@
 
 import { execFileSync } from "node:child_process";
 
+const CLI_TIMEOUT_MS = 60_000;
+const START_AT = Date.now();
+
+/**
+ * 進捗は stderr に出す。stdout は最終JSONだけに保ち、
+ * `node ... | jq` のようなパイプ利用を壊さない。
+ */
+function progress(message) {
+  const elapsed = Math.round((Date.now() - START_AT) / 1000);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  process.stderr.write(`[${mm}:${ss}] ${message}\n`);
+}
+
 const PROJECT_REF = "hocbnifuactbvmyjraxy";
 const SUPABASE_URL = `https://${PROJECT_REF}.supabase.co`;
 const ADMIN_API_URL = `${SUPABASE_URL}/functions/v1/admin-api`;
@@ -28,25 +42,72 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const SUPABASE_CLI_ARGS = Object.freeze([
+  "projects",
+  "api-keys",
+  "--project-ref",
+  PROJECT_REF,
+  "--output",
+  "json",
+  "--reveal",
+]);
+
+/**
+ * 解決済みの supabase バイナリを探す。
+ *
+ * `npx supabase` は CLI 未導入だと確認プロンプトを出して応答を待つ。旧実装は
+ * stdin を ignore、stdout/stderr を pipe にしていたため、その問いが画面に出ない
+ * まま永久に止まっていた（--no-install を付けても止まることを実測で確認済み）。
+ * まず PATH と node_modules を探し、npx へ落ちる前に確実な経路を使う。
+ */
+function resolveSupabaseBinary() {
+  const candidates = ["supabase", new URL("../node_modules/.bin/supabase", import.meta.url).pathname];
+  for (const candidate of candidates) {
+    try {
+      execFileSync(candidate, ["--version"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 15_000,
+      });
+      return candidate;
+    } catch {
+      // 次の候補へ
+    }
+  }
+  return null;
+}
+
 function loadServiceRoleKey() {
+  progress("Supabase CLI から service_role キーを取得しています...");
+  const binary = resolveSupabaseBinary();
+  // 解決できたバイナリは非対話で呼ぶ。npx へ落ちる場合だけ、プロンプトが
+  // 見えて答えられるように stdin と stderr を端末へつなぐ。
+  const command = binary ?? "npx";
+  const args = binary ? SUPABASE_CLI_ARGS : ["supabase", ...SUPABASE_CLI_ARGS];
+  if (!binary) {
+    progress(
+      "supabase バイナリが見つかりません。npx 経由で起動します" +
+        "（未導入の場合は npx が導入の可否を尋ねます。応答してください）",
+    );
+  }
   let raw;
   try {
-    raw = execFileSync(
-      "npx",
-      [
-        "supabase",
-        "projects",
-        "api-keys",
-        "--project-ref",
-        PROJECT_REF,
-        "--output",
-        "json",
-        "--reveal",
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    raw = execFileSync(command, args, {
+      encoding: "utf8",
+      // stdout は JSON を取るため必ず pipe。npx 経路では stdin/stderr を端末に渡す。
+      stdio: binary ? ["ignore", "pipe", "pipe"] : ["inherit", "pipe", "inherit"],
+      timeout: CLI_TIMEOUT_MS,
+    });
+  } catch (error) {
+    const timedOut = error?.killed === true || error?.signal != null;
+    const detail = String(error?.stderr || error?.message || "").trim().split("\n").slice(0, 3).join(" / ");
+    throw new Error(
+      (timedOut
+        ? `Supabase CLI が ${CLI_TIMEOUT_MS / 1000} 秒で応答しませんでした。`
+        : "Supabase CLI の実行に失敗しました。") +
+        "\n  `npx supabase --version` で CLI を導入し、`npx supabase login` でログインしてから再実行してください。" +
+        (detail ? `\n  詳細: ${detail}` : ""),
     );
-  } catch {
-    throw new Error("Supabase API keys could not be loaded. Check CLI login and project access.");
   }
   let rows;
   try {
@@ -118,7 +179,10 @@ async function loadReparseBatch(serviceRoleKey, body) {
       return payload;
     } catch (error) {
       lastError = error;
-      if (attempt < MAX_BATCH_ATTEMPTS) await sleep(attempt * 1500);
+      if (attempt < MAX_BATCH_ATTEMPTS) {
+        progress(`  batch 失敗 (${attempt}/${MAX_BATCH_ATTEMPTS}) — 再試行します: ${error?.message || error}`);
+        await sleep(attempt * 1500);
+      }
     }
   }
   throw lastError;
@@ -132,6 +196,8 @@ async function reparseStore(serviceRoleKey, target, dryRun) {
   let reparsedCount = 0;
   let skippedCount = 0;
 
+  const label = dryRun ? "dry-run" : "apply";
+  progress(`${target.storeKey}: 再解析 ${label} を開始 (全 ${target.files} 件 / ${BATCH_LIMIT} 件ずつ)`);
   for (let batch = 1; batch <= MAX_BATCHES; batch += 1) {
     const payload = await loadReparseBatch(serviceRoleKey, {
       store_key: target.storeKey,
@@ -160,6 +226,10 @@ async function reparseStore(serviceRoleKey, target, dryRun) {
       ? payload.safe_rebuild_months
       : []) pendingMonths.delete(String(month));
 
+    progress(
+      `${target.storeKey}: batch ${batch} 完了 — ${seenIds.size}/${target.files} 件` +
+        ` (再解析 ${reparsedCount} / スキップ ${skippedCount})`,
+    );
     if (payload.has_more !== true) break;
     const nextAfterId = Number(payload.next_after_id);
     if (!Number.isSafeInteger(nextAfterId) || nextAfterId <= afterId) {
@@ -206,6 +276,7 @@ function validateCoverage(target, payload) {
 }
 
 async function rebuildStore(serviceRoleKey, target, dryRun) {
+  progress(`${target.storeKey}: 商品インデックス再構築 ${dryRun ? "dry-run" : "apply"} を実行中...`);
   const payload = await callAdmin(serviceRoleKey, "/pos-journals/product-index/rebuild", {
     store_key: target.storeKey,
     force_full: true,
@@ -236,6 +307,7 @@ async function fetchRest(serviceRoleKey, table, params) {
 }
 
 async function verifyProduction(serviceRoleKey) {
+  progress("本番データの最終検証を実行中...");
   const storesFilter = `in.(${TARGETS.map((target) => target.storeKey).join(",")})`;
   const files = await fetchRest(serviceRoleKey, "pos_journal_files", {
     select:
@@ -301,6 +373,10 @@ async function verifyProduction(serviceRoleKey) {
   return summary;
 }
 
+progress(
+  `POS電子ジャーナル バックフィル ${apply ? "--apply (本番データを書き換えます)" : "--dry-run (DBは変更しません)"}` +
+    ` / parser ${PARSER_VERSION}`,
+);
 const serviceRoleKey = loadServiceRoleKey();
 const dryRunResults = [];
 for (const target of TARGETS) {
@@ -311,6 +387,7 @@ for (const target of TARGETS) {
 // coverageはapply後の新しいparsed_dataに対して検証する。
 
 if (!apply) {
+  progress("dry-run 完了。DBは変更していません。適用するには --apply を付けて再実行してください。");
   console.log(JSON.stringify({ ok: true, mode: "dry-run", parser_version: PARSER_VERSION, stores: dryRunResults }, null, 2));
   process.exit(0);
 }
@@ -322,6 +399,7 @@ for (const target of TARGETS) {
   await rebuildStore(serviceRoleKey, target, false);
 }
 const verified = await verifyProduction(serviceRoleKey);
+progress("apply 完了。全店舗で検証を通過しました。");
 console.log(JSON.stringify({
   ok: true,
   mode: "apply",

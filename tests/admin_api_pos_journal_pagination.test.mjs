@@ -242,6 +242,47 @@ test("product index rebuild applies only its own dirty snapshot transaction", ()
   );
 });
 
+test("v22 backfill cannot hang silently while loading credentials", () => {
+  // 旧実装は `npx supabase ...` を stdin=ignore / stdout+stderr=pipe で起動していた。
+  // CLI 未導入だと npx の確認プロンプトが画面に出ないまま応答も返せず、無言で
+  // 永久に停止した(--no-install を付けても止まることを実測で確認済み)。
+  const loaderStart = backfillSource.indexOf("function resolveSupabaseBinary(");
+  const loaderEnd = backfillSource.indexOf("function parseServiceRoleRows(") >= 0
+    ? backfillSource.indexOf("function parseServiceRoleRows(")
+    : backfillSource.indexOf("async function callAdmin(");
+  assert.ok(loaderStart >= 0, "resolveSupabaseBinary must exist");
+  const loader = backfillSource.slice(loaderStart, loaderEnd);
+
+  // どの execFileSync にも timeout を付け、無限待ちを構造的に不可能にする。
+  const calls = loader.match(/execFileSync\([\s\S]*?\}\s*\)/g) ?? [];
+  assert.ok(calls.length >= 2, "expected the probe and the real CLI invocation");
+  for (const call of calls) {
+    assert.match(call, /timeout:/, `execFileSync must set a timeout: ${call.slice(0, 60)}`);
+  }
+
+  // npx へ落ちる経路では、プロンプトが見えて答えられるよう stdin/stderr を端末へ渡す。
+  assert.match(loader, /stdio: binary \? \["ignore", "pipe", "pipe"\] : \["inherit", "pipe", "inherit"\]/);
+  // PATH と node_modules を先に探し、npx を最後の手段にする。
+  assert.match(loader, /const command = binary \?\? "npx"/);
+});
+
+test("v22 backfill reports progress during the long run", () => {
+  // 430ファイルの処理は数十分かかる。旧実装は完了までstdoutに何も出さず、
+  // 停止しているのか進行中なのか判別できなかった。
+  const progressStart = backfillSource.indexOf("function progress(message) {");
+  assert.ok(progressStart >= 0, "progress() must exist");
+  const progressBody = backfillSource.slice(
+    progressStart,
+    backfillSource.indexOf("\n}", progressStart),
+  );
+  // 進捗は stderr。stdout は最終JSON専用に保ち、パイプ利用を壊さない。
+  assert.match(progressBody, /process\.stderr\.write\(/);
+  assert.doesNotMatch(progressBody, /console\.log\(/, "progress must not write to stdout");
+  // バッチ完了と再試行の両方が見えること。再試行の沈黙が最も紛らわしい。
+  assert.match(backfillSource, /progress\(\s*`\$\{target\.storeKey\}: batch \$\{batch\} 完了/);
+  assert.match(backfillSource, /progress\(`  batch 失敗 \(\$\{attempt\}\/\$\{MAX_BATCH_ATTEMPTS\}\)/);
+});
+
 test("v22 backfill dry-runs only reparse before applying in the safe order", () => {
   assert.match(
     backfillSource,
