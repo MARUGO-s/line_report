@@ -108,7 +108,11 @@ Deno.test("AI facts cover trend, weekday, weather, payments, and products", () =
   assertEquals(facts.coverage.activeDays, 2);
   assertEquals(
     facts.payments.find((x) => x.name === "クレジット")?.amount,
-    135000,
+    105000,
+  );
+  assertEquals(
+    facts.payments.find((x) => x.name === "支払明細未捕捉")?.amount,
+    42000,
   );
   assertEquals(facts.products.topBySales[0].name, "コース");
   assertEquals(facts.weather.some((x) => x.name === "雨"), true);
@@ -119,6 +123,57 @@ Deno.test("AI facts cover trend, weekday, weather, payments, and products", () =
     buildDeterministicPosJournalAnswer(facts, "一番売れた日は？"),
     "2026-06-02",
   );
+});
+
+Deno.test("AI facts keep all payment labels and explain explicit discounts", () => {
+  const summary = {
+    meta: {
+      store_key: "marugos",
+      store_name: "マルゴエス",
+      store_code: "1022",
+      month: "2026-08",
+    },
+    totals: { gross_sales: 900, groups: 1, guests: 1 },
+    payment_breakdown: { QRコード: { count: 1, amount: 900 } },
+    item_ranking: [{
+      code: "1001",
+      name: "商品",
+      qty: 1,
+      amount: 1000,
+    }],
+    days: [{
+      business_date: "2026-08-01",
+      gross_sales: 900,
+      groups: 1,
+      guests: 1,
+      receipts: [{
+        no: "1",
+        time: "12:00",
+        pay: "QRコード",
+        total: 900,
+        guests: 1,
+        items: [
+          { code: "1001", name: "商品", unit: 1000, qty: 1, amount: 1000 },
+          {
+            code: "__journal_adjustment__",
+            name: "割引",
+            unit: -100,
+            qty: 1,
+            amount: -100,
+          },
+        ],
+      }],
+    }],
+  };
+  // deno-lint-ignore no-explicit-any
+  const facts = buildPosJournalAiFacts(summary as any);
+  assertEquals(facts.payments.find((row) => row.name === "QRコード")?.amount, 900);
+  assertEquals(facts.products.capturedItemSales, 1000);
+  assertEquals(facts.products.explicitAdjustments, -100);
+  assertEquals(facts.products.netCapturedSales, 900);
+  assertEquals(facts.products.capturedPctOfGrossSales, 100);
+  assertEquals(facts.products.uncapturedSales, 0);
+  assertEquals(facts.products.uncapturedPctOfGrossSales, 0);
 });
 
 Deno.test("question and history enforce empty, length, role, and count boundaries", () => {

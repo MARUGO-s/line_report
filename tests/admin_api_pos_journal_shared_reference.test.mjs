@@ -23,13 +23,21 @@ test("POS journal state shares Journal Report saved reports without double count
   assert.match(adminApi, /storage_mode = rows\.length && sharedOnlyDays\.length/);
 });
 
+test("Journal Report month recovery reuses the reconciled server report builder", () => {
+  assert.match(adminApi, /mergePosJournalDaysPreferPrimary\(storedDays, shared\.days\)/);
+  assert.match(adminApi, /const recoveryReport = buildJournalSavedReportsFromPosDays\(/);
+  assert.match(adminApi, /recovery_report: recoveryReport/);
+  assert.match(journalReport, /normalizeRecoveredMonthlyReportData/);
+  assert.match(journalReport, /_itemDetailIncomplete/);
+});
+
 test("POS journal AI uses the same shared report merge as the screen", () => {
   const start = adminApi.indexOf("async function resolvePosJournalAiSummary(");
   assert.notEqual(start, -1);
   const body = adminApi.slice(start, start + 2500);
   assert.match(body, /fetchSharedJournalReportState/);
   assert.match(body, /const combinedDays = await fillPosJournalDaysWeather\(/);
-  assert.match(body, /!storedDateSet\.has\(day\.business_date\)/);
+  assert.match(body, /mergePosJournalDaysPreferPrimary\(storedDays, shared\.days\)/);
   assert.match(body, /days: combinedDays/);
 });
 

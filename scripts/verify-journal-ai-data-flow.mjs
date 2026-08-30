@@ -103,12 +103,35 @@ conditional(
   "商品・異常月・初出・会計比較",
   containsAll(html, [
     "loadMonthSalesForDrilldown",
+    "recoverReportFromPosJournalMonth",
     "enrichMonthlyAnomalyItemFacts",
     "enrichProductTimelineFacts",
     "enrichJournalCohortComparisons",
   ]),
-  "保存伝票 → 不足時は原本ジャーナル → 質問別の確定事実",
-  "全質問で全原本を読むのではなく、商品明細や異常月など必要な質問で再読します。",
+  "保存伝票 → DB解析済み月状態 → 質問別の確定事実（明示操作時だけ原本）",
+  "AIチャットはDB解析済みの日次状態を月単位で復元し、日別LZH原本の大量再取得を行いません。",
+);
+
+core(
+  "large_report_recovery",
+  "大容量レポート・欠落月の一括復元",
+  containsAll(html, [
+    "buildSharedPosJournalDays",
+    "reviveSalesFromSharedPosJournalDays",
+    "normalizeRecoveredMonthlyReportData",
+    "_itemDetailIncomplete",
+    "recoverReportFromPosJournalMonth",
+    "enumerateMonthKeysForRange",
+    "allowRawDownloads: false",
+    "missingPeriods",
+    "monthSalesDrilldownCache",
+  ]) && containsAll(adminApi, [
+    "mergePosJournalDaysPreferPrimary(storedDays, shared.days)",
+    "buildJournalSavedReportsFromPosDays",
+    "recovery_report: recoveryReport",
+  ]) && /if \(options\.allowRawDownloads === false\)[\s\S]*rawDownloadSkipped: true/.test(html),
+  "大容量sales → posJournalDays / pos_journal_files.parsed_data → 月次明細を1回で復元",
+  "保存時にsalesを省略した月、商品明細だけ薄い月、保存月報が欠けた月をDB内の解析済み状態から復元します。日計と一致しない部分明細は商品・F/D・昼夜の根拠にせず、数百原本の逐次取得と誤集計を同時に防ぎます。",
 );
 
 core(
@@ -214,10 +237,12 @@ core(
 core(
   "store_location",
   "店舗立地マスター",
-  /buildStoreLocationPromptBlock\(\s*effectiveStoreKey,\s*storeName,\s*\)/.test(aiAnalyze) &&
+  aiAnalyze.includes("resolveCanonicalStoreKey(effectiveStoreKey)") &&
+    /buildStoreLocationPromptBlock\(canonicalStoreKey\)/.test(aiAnalyze) &&
+    !/buildStoreLocationPromptBlock\([^)]*storeName/.test(aiAnalyze) &&
     aiAnalyze.includes("店舗スコープ検証後のサーバー側マスター"),
-  "認証済みstoreKey → サーバー側店舗住所/エリア → AI",
-  "全店舗を新宿三丁目扱いせず、サーバー側マスターを立地の正本にします。",
+  "認証済みstoreKey → canonical店舗キー → サーバー側店舗住所/エリア → AI",
+  "大小文字を吸収したサーバーマスターだけを立地の正本にし、クライアント表示名の命令混入を防ぎます。",
 );
 
 core(
@@ -256,6 +281,26 @@ core(
   ]),
   "質問の期間/意図 → 月次・日別・原本補完 → 営業情報＋資料 → ai-analyze",
   "必要範囲を検索・検算してからAIへ渡す、最も広い統合経路です。",
+);
+
+core(
+  "ai_chat_preflight_guard",
+  "AIチャット前処理の時間上限と段階表示",
+  containsAll(html, [
+    "const AI_CHAT_PREFLIGHT_TOTAL_TIMEOUT_MS = 60000",
+    "const AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS = 12000",
+    "createAiChatPreflightBudget",
+    "AI_CHAT_PREFLIGHT_TIMEOUT",
+    "beginAiChatRun",
+    "cancelActiveAiChatRun",
+    "assertCurrentAiChatRun",
+    "signal: runOptions.signal",
+    "分析データを準備中",
+    "準備完了後に 数値AI・Web知見・X検索・統合 を開始します",
+    "setAiChatLoadingMode(loadingId",
+  ]) && /preflight\.run\([\s\S]*searchSavedReportsByQuery/.test(html),
+  "保存売上・店舗情報・資料・履歴（最大60秒）→ 複数AI開始 → AI応答上限",
+  "複数AI開始前の全処理にも安全上限を設け、準備中と複数AI実行中を正確に分けます。タイムアウト・リセット・店舗切替では一覧、詳細、資料、履歴、AI本体を同じsignalで中止します。",
 );
 
 core(

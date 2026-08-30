@@ -2731,6 +2731,9 @@ async function applySelectedStore(nextKey, opts) {
   const selectedOptionKey = resolveJournalStoreOptionKey(key);
   if (sel && sel.value !== selectedOptionKey) sel.value = selectedOptionKey;
   if (changed || options.forceReload) {
+    // 通常AI分析も開始時の店舗に固定する。切替後に旧店舗の分析結果を
+    // 新店舗へ表示・送信しないよう、チャットと同様に通信ごと中止する。
+    if (typeof cancelActiveAiReportRun === 'function') cancelActiveAiReportRun('store-switch');
     purgeLocalCloudDataCaches();
     invalidateSavedReportsCache();
     productCategoryOverridesCache = {};
@@ -2884,9 +2887,15 @@ async function adminApiFetch(path, options) {
   // 既定は45秒。ページ数の多いPDF/WordのAI解析など、45秒では終わらない処理は
   // 呼び出し側が opts.timeoutMs で個別に延長する。
   const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 45000;
+  const externalSignal = opts.signal;
+  const makeAbortError = () => Object.assign(new Error('処理は中止されました'), { name: 'AbortError' });
+  if (externalSignal?.aborted) throw makeAbortError();
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (externalSignal?.aborted) throw makeAbortError();
     const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const abortFromExternal = () => { if (controller) controller.abort(); };
+    if (externalSignal?.addEventListener) externalSignal.addEventListener('abort', abortFromExternal, { once: true });
     let timedOut = false;
     const timer = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs) : null;
     let retriable = false;
@@ -2895,6 +2904,10 @@ async function adminApiFetch(path, options) {
       try {
         response = await fetch(url, Object.assign({}, opts, { headers, signal: controller ? controller.signal : undefined }));
       } catch (_) {
+        if (externalSignal?.aborted) {
+          retriable = false;
+          throw makeAbortError();
+        }
         retriable = true;
         // タイムアウトと本当の通信断は原因も対処も別。同じ文言にすると
         // 「ネットワークを確認」しても直らず原因追跡ができないので分ける。
@@ -2910,9 +2923,32 @@ async function adminApiFetch(path, options) {
     } catch (err) {
       lastError = err;
       if (!retriable || attempt === maxAttempts) throw err;
-      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      await new Promise((resolve, reject) => {
+        let retryTimer = null;
+        const abortRetry = () => {
+          if (retryTimer) clearTimeout(retryTimer);
+          if (externalSignal?.removeEventListener) {
+            externalSignal.removeEventListener('abort', abortRetry);
+          }
+          reject(makeAbortError());
+        };
+        if (externalSignal?.aborted) {
+          abortRetry();
+          return;
+        }
+        if (externalSignal?.addEventListener) {
+          externalSignal.addEventListener('abort', abortRetry, { once: true });
+        }
+        retryTimer = setTimeout(() => {
+          if (externalSignal?.removeEventListener) {
+            externalSignal.removeEventListener('abort', abortRetry);
+          }
+          resolve();
+        }, 500 * attempt);
+      });
     } finally {
       if (timer) clearTimeout(timer);
+      if (externalSignal?.removeEventListener) externalSignal.removeEventListener('abort', abortFromExternal);
     }
   }
   throw lastError;
@@ -3112,7 +3148,7 @@ function splitRecords(text){
   const joined=recs.map(r=>r.join('\n').replace(/\s+$/,'')).filter(r=>r.length);
   return joined.length?joined:(text.trim()?[text.trim()]:[]);
 }
-const isSale=r=>/@[\d,]+x/.test(r);           // 商品明細行を含む＝売上レシート
+const isSale=r=>/@\s*[\d,]+\s*x/.test(String(r).normalize('NFKC')); // 商品明細行を含む＝売上レシート
 // ジャーナルには注文取消の控えや、VOID/取引変更の途中レコードも残る。
 // これらは売上日報の確定売上ではないため、通常の売上集計から除外する。
 // 表記揺れ（半角/全角、空白、制御記号）を吸収してから判定する。
@@ -3122,46 +3158,57 @@ const isSale=r=>/@[\d,]+x/.test(r);           // 商品明細行を含む＝売�
 // 単独で挿入される（実データ全件を調査した結果、開始バナーが同一レコード内で
 // VOID語と同居したことは一度もなく、常に別の完了済み会計の末尾に紛れ込むだけ
 // だった）。そのため開始/終了バナー自体はVOID判定に使わない。実際の取消対象は
-// 「★VOID No.XXXX」という明示的な取消宣言（下記VOID_REのVOID語＋voidTargetNos
-// による対象番号の突き合わせ）だけで正しく特定できる。
-const VOID_RE=/返品|エラー|訂正|中止|オーダーキャンセル|VOID|会計取消|取引取消/;
+// 「★VOID No.XXXX」という明示的な取消宣言（下記exactVoidReferenceによる
+// 直前の対象番号との突き合わせ）だけで正しく特定できる。
+const INVALID_SALE_STATUS_RE=/オーダーキャンセル|未会計オーダー取消|取引中止/;
 function hasInvalidSaleStatus(r){
   const normalized=String(r).normalize('NFKC');
-  // 商品明細の「取消」行（数量マイナス）は純額集計に必要なので、単独の「取消」だけでは
-  // レコード全体を除外しない。商品コード＋商品名の行は状態表示ではないため、商品名に
-  // 「VOID」などが含まれていても伝票全体を誤除外しないよう、状態行だけを調べる。
-  return normalized.split('\n').some(line=>{
-    const compact=line.replace(/\s+/g,'');
-    if(/^\d{10,}/.test(compact)) return false;
-    return VOID_RE.test(compact);
+  // 商品名や数量マイナスの「取消」を状態語として誤認しない。POSが会計を破棄したと
+  // 明示する3種類だけをレコード全体の除外条件にする。VOIDは下の参照照合で扱う。
+  return INVALID_SALE_STATUS_RE.test(normalized);
+}
+function hasReceiptTotalEvidence(r){
+  return String(r).normalize('NFKC').split('\n').some(line=>{
+    const compact=line.replace(/[\s　]+/g,'');
+    return /^合計(?!点数)[\\¥￥]?[-\d,]+$/.test(compact);
   });
 }
 function hasSettlementEvidence(r){
-  return String(r).normalize('NFKC').split('\n').some(line=>/^計[1-9]/.test(line.replace(/\s+/g,'')));
+  const normalized=String(r).normalize('NFKC');
+  return hasReceiptTotalEvidence(normalized) || normalized.split('\n').some(line=>/^計\d+/.test(line.replace(/\s+/g,'')));
 }
 function isSaleCandidate(r){ return isSale(r) && !hasInvalidSaleStatus(r); }
 function isCompleted(r){ return isSaleCandidate(r) && hasSettlementEvidence(r); }
 function isUncertainSale(r){ return isSaleCandidate(r) && !hasSettlementEvidence(r); }
-function isVoid(r){ return isSale(r) && hasInvalidSaleStatus(r); }
+function exactVoidReference(r){
+  return (String(r).normalize('NFKC').match(/★\s*VOID\s+No\.?\s*(\d+)/i)||[])[1]||'';
+}
+function isVoid(r){ return isSale(r) && (hasInvalidSaleStatus(r)||Boolean(exactVoidReference(r))); }
 function recordNo(r){ return (String(r).match(/No\.(\d+)/)||[])[1]||''; }
 function voidTargetNos(recs){
   const targets=new Set();
   for(const rec of recs){
-    const lines=String(rec).normalize('NFKC').split('\n');
-    lines.forEach((line,index)=>{
-      if(!/VOID/.test(line)) return;
-      // 対象番号の直後で行を区切る。空白を全削除すると、次の行の
-      // 商品コードまで番号として連結される旧JNL形式がある。
-      const scope=lines.slice(index,index+2).join('\n');
-      const m=scope.match(/VOID[\s\S]*?No\.?\s*(\d+)(?=\s|$)/);
-      if(m) targets.add(m[1]);
-    });
+    const target=exactVoidReference(rec);
+    if(target) targets.add(target);
   }
   return targets;
 }
 function completedRecords(recs){
-  const targets=voidTargetNos(recs);
-  return recs.filter(rec=>isCompleted(rec)&&!targets.has(recordNo(rec)));
+  const records=Array.isArray(recs)?recs:[];
+  const active=records.map(rec=>isCompleted(rec));
+  // VOID控え自身と、そこから見て直前にある同じNo.の有効な元会計だけを除く。
+  // Setで番号を一括除外すると、別日・別取引で再利用されたNo.まで失うため不可。
+  records.forEach((rec,index)=>{
+    const target=exactVoidReference(rec);
+    if(!target) return;
+    active[index]=false;
+    for(let prior=index-1;prior>=0;prior--){
+      if(!active[prior]||recordNo(records[prior])!==target) continue;
+      active[prior]=false;
+      break;
+    }
+  });
+  return records.filter((_rec,index)=>active[index]);
 }
 
 // POSの商品グループ「料理 / ドリンク」に合わせた明示マスタ。
@@ -3759,18 +3806,19 @@ function parserSelfCheck(){
     ['確定会計',paid,true],
     ['商品名にVOID',paid.replace('チャージ料','VOIDビール'),true],
     ['注文取消',paid+'\nオーダーキャンセル',false],
-    ['VOID',paid+'\nＶＯＩＤ',false],
+    ['取引中止',paid+'\n取引中止',false],
+    ['未会計オーダー取消',paid+'\n未会計オーダー取消',false],
     // 「取引変更開始」バナーは別の会計の末尾に紛れ込むだけで、自身の取消を意味しない
     // （実データ確認済み・2024-05-22 No.2156等）。よってこの完結した会計は採用する。
     ['取引変更開始バナーが末尾にあるだけの完結会計',paid+'\n取引変更開始',true],
     ['取引変更後',paid+'\n取引変更終了',true],
     ['取引変更ブロック内包',paid+'\n▼▼▼ 取引変更開始 ▼▼▼\n▲▲▲ 取引変更終了 ▲▲▲',true],
     ['取引変更ブロックでも注文取消は除外',paid+'\nオーダーキャンセル\n取引変更終了',false],
-    ['支払未確定',paid.replace('計1 現計 \\1,000',''),false]
+    ['支払行なしでも合計・商品が一致する完了会計',paid.replace('計1 現計 \\1,000',''),true]
   ];
   const failed=checks.filter(([,record,expected])=>isCompleted(record)!==expected).map(([name])=>name);
   const voidRecord=paid.replace('No.1','No.2')+
-    '\nＶＯＩＤ 対象No.1\n0000000000102 次の商品';
+    '\n★ ＶＯＩＤ No.1\n0000000000102 次の商品';
   if(completedRecords([paid,voidRecord]).length!==0) failed.push('VOID元伝票の除外');
   const cashChange=`0001-01 No.9 2023年 8月 1日(火) 20時00分
 0000000000001 チャージ料
@@ -3826,6 +3874,16 @@ function parserSelfCheck(){
      categoryTotals.get('フード')!==500||categoryTotals.get('飲料')!==1600){
     failed.push('分類別純額と取消相殺');
   }
+  const discounted=parseReceipt(paid
+    .replace('合 計 \\1,000','割引\n10% -100\n合 計 \\900')
+    .replace('計1 現計 \\1,000','計1 現計 \\900'));
+  if(!discounted||discounted.itemTotal!==900||discounted.items.find(item=>item.name==='割引')?.amount!==-100||validateReceipt(discounted).length){
+    failed.push('割引の明示純額');
+  }
+  const noPayment=parseReceipt(paid.replace('計1 現計 \\1,000',''));
+  if(!noPayment||noPayment.method!=='支払情報なし'||noPayment.payments.total!==1000||validateReceipt(noPayment).length){
+    failed.push('支払情報なし会計');
+  }
   const lunch=parseReceipt(paid.replace('20時00分','15時59分'));
   const dinner=parseReceipt(paid.replace('20時00分','16時00分'));
   if(lunch?.mealPeriod!=='ランチ'||dinner?.mealPeriod!=='ディナー') failed.push('16時のランチ・ディナー境界');
@@ -3864,7 +3922,7 @@ function parserSelfCheck(){
   if(parseReceipt(withSeat)?.tableNo!=='S') failed.push('半角カタカナテーブルNoの抽出');
   return {ok:failed.length===0,failed};
 }
-const PARSER_VERSION='2026-07-31-v19';
+const PARSER_VERSION='2026-08-30-v21';
 const VERIFICATION_VERSION='split-bill-reconcile-v3';
 const CATEGORY_VERSION='pos-food-drink-room-bycode-v3';
 const MEAL_PERIOD_VERSION='lunch-before-1600-v1';
@@ -3993,19 +4051,39 @@ function amountOnLine(text,labelRe){
   const nums=[...line.matchAll(/-?[\d０-９][\d０-９,，]*/g)];
   return nums.length?numOf(nums[nums.length-1][0]):0;
 }
-function parseReceiptPayments(rec,change=0){
+function normalizeSalePaymentLabel(value){
+  const label=String(value??'').normalize('NFKC').trim();
+  if(!label) return '';
+  if(/^現計/.test(label)) return '現金';
+  if(/クレジット/.test(label)) return 'クレジット';
+  if(/食べログ/.test(label)) return '食べログ';
+  if(/一休/.test(label)) return '一休';
+  if(/ぐるなび/.test(label)) return 'ぐるなび';
+  if(/QR\s*コード/i.test(label)) return 'QRコード';
+  if(/電子\s*マネ/.test(label)) return '電子マネー';
+  if(/東京\s*ドーム\s*利/.test(label)) return '東京ドーム利用券';
+  if(/ドーム\s*シティ\s*食事/.test(label)) return 'ドームシティ食事券';
+  return label.replace(/[\s　]+/g,' ').slice(0,30);
+}
+function parseReceiptPayments(rec,change=0,receiptTotal=null){
   const tenderedByMethod=new Map(), details=[];
   for(const line of String(rec).normalize('NFKC').split('\n')){
-    const m=line.match(/^\s*計([1-9])\s+(.+?)\s+[\\¥￥]\s*(-?[\d,]+)\s*$/);
+    const m=line.match(/^\s*計(\d+)\s+(.+?)\s+[\\¥￥]\s*(-?[\d,]+)\s*$/);
     if(!m) continue;
     const label=m[2].trim();
-    const method=/現計|現金/.test(label)?'現金':/クレジット/.test(label)?'クレジット':'その他';
+    const method=normalizeSalePaymentLabel(label)||'その他';
     const amount=numOf(m[3]);
     tenderedByMethod.set(method,(tenderedByMethod.get(method)||0)+amount);
     details.push({number:+m[1],label,method,amount});
   }
   const byMethod=new Map(tenderedByMethod);
   if(change) byMethod.set('現金',(byMethod.get('現金')||0)-change);
+  // 商品券利用などで「計N」行を出さない完了会計も、合計と商品純額が照合できれば
+  // 売上から落とさない。支払方法を推測せず、明示的な欠損ラベルで保持する。
+  if(!details.length&&Number.isFinite(Number(receiptTotal))&&Number(receiptTotal)>0){
+    byMethod.set('支払情報なし',Number(receiptTotal));
+    details.push({number:0,label:'支払情報なし',method:'支払情報なし',amount:Number(receiptTotal),inferred:true});
+  }
   const tenderedTotal=[...tenderedByMethod.values()].reduce((sum,v)=>sum+v,0);
   const total=[...byMethod.values()].reduce((sum,v)=>sum+v,0);
   return {byMethod,tenderedByMethod,details,total,tenderedTotal,change};
@@ -4046,17 +4124,20 @@ function parseReceipt(rec){
   const isSplitFragment=/個別割勘/.test(String(rec).normalize('NFKC')) && customerCountCandidates.length===0;
   const customerCountReliable=isSplitFragment || customerCountCandidates.length===1;
   const customers=isSplitFragment?0:(customerCountReliable?customerCountCandidates[0]:0);
-  const payments=parseReceiptPayments(rec,change);
-  let method=payments.byMethod.size>1?'併用':([...payments.byMethod.keys()][0]||'その他');
+  const payments=parseReceiptPayments(rec,change,total);
+  let method=payments.byMethod.size>1?'併用':([...payments.byMethod.keys()][0]||'支払情報なし');
   const { tableNo }=parseReceiptTableMeta(rec);
   // 商品明細（レシート内で純額を集計＝取消を相殺）
-  const map=new Map(); let pend=null;
-  for(const ln of rec.split('\n')){
+  const map=new Map();
+  const normalizedLines=String(rec).normalize('NFKC').split('\n');
+  let pend=null;
+  for(const ln of normalizedLines){
     const mc=ln.match(/^\s*(\d{10,})\s+(.+?)\s*$/);
-    const mp=ln.match(/@([\d,]+)x\s*(-?\d+)\s+[\\¥]?\s*(-?[\d,]+)/);
+    // 通貨記号はPOS設定・取消行によって有無が変わる。数量・金額の符号をそのまま純額へ反映する。
+    const mp=ln.match(/@\s*([\d,]+)\s*x\s*(-?[\d,]+)\s+[\\¥￥]?\s*(-?[\d,]+)/);
     if(mc){ pend={code:mc[1],name:mc[2].trim()}; }
     else if(mp && pend!==null){
-      const q=parseInt(mp[2],10), a=parseInt(mp[3].replace(/,/g,''),10);
+      const q=numOf(mp[2]), a=numOf(mp[3]);
       const key=productGroupKey(pend.code,pend.name);
       const e=map.get(key)||{code:pend.code,name:pend.name,qty:0,amount:0};
       e.qty+=q; e.amount+=a; map.set(key,e);
@@ -4067,6 +4148,25 @@ function parseReceipt(rec){
     const classification=classifyProduct(v.code,v.name);
     return {...v,...classification};
   }).filter(x=>x.qty!==0||x.amount!==0);
+  // レシートの割引・値引は商品行ではないが、総売上との照合に必要な純額明細。
+  // 次の非空行の末尾金額（正負どちらも）を、推測せず明示調整として加える。
+  normalizedLines.forEach((line,index)=>{
+    const label=line.trim();
+    if(label!=='割引'&&label!=='値引') return;
+    for(let next=index+1;next<normalizedLines.length;next++){
+      const adjustmentLine=normalizedLines[next].trim();
+      if(!adjustmentLine) continue;
+      const match=adjustmentLine.match(/[\\¥￥]?\s*(-?[\d,]+)\s*$/);
+      const amount=match?numOf(match[1]):0;
+      if(amount){
+        items.push({
+          code:'__journal_adjustment__',name:label,unit:amount,qty:1,amount,
+          category:'その他',isCharge:false,known:true,byCode:false,needsReview:false
+        });
+      }
+      break;
+    }
+  });
   const itemTotal=items.reduce((sum,item)=>sum+item.amount,0);
   return {no,date,weekday:header?.weekday||'',hour,minute,
     hasAccountingTime,mealPeriod,
@@ -4086,12 +4186,13 @@ function validateReceipt(r){
   if(!r.isSplitFragment && (!r.customerCountReliable||r.customers<=0)) issues.push('レシート客数を一意に確認できません');
   if(r.total<=0) issues.push('売上合計が0円以下');
   if(r.tax<0||r.tax>r.total) issues.push('税額が不正');
+  if(!Array.isArray(r.items)||!r.items.length) issues.push('商品明細なし');
   if(r.itemTotal!==r.total) issues.push(`商品純額${yen(r.itemTotal)}と会計合計${yen(r.total)}が不一致`);
   // classifyProductは未知コードも「その他」＋needsReview:trueで仮分類するため、
   // ここで全商品は常にknown:trueになる。よって「未分類商品」チェックや、
   // known商品だけの合計と商品純額の比較は常に一致し意味を持たない（削除済み）。
   // 要確認商品の通知はcollectSalesAudit側でwarnings（非ブロッキング）として出す。
-  if(!r.payments.details.length) issues.push('支払明細なし');
+  if(!r.payments.details.length) issues.push('支払情報を確定できません');
   else if([...r.payments.byMethod.values()].some(amount=>amount<0)) issues.push('お釣りが現金預かり額を超えています');
   else if(r.payments.total!==r.total) issues.push(`支払純額${yen(r.payments.total)}と会計合計${yen(r.total)}が不一致`);
   return issues;
@@ -4599,14 +4700,21 @@ let savedReportsLoadError = null;
 // AI チャットが「最後に確認できた全データ」で回答を継続できるようにする。
 const savedReportsIndexCache = new Map();   // key: STORE_KEY|kind|limit -> { time, rows }
 const savedReportDetailCache = new Map();   // key: STORE_KEY|id -> { time, report }
+const monthSalesDrilldownCache = new Map(); // key: store|month|source revision -> { time, result }
+const posJournalMonthRecoveryCache = new Map(); // key: STORE_KEY|YYYY-MM -> { time, report|promise }
 const SAVED_REPORTS_INDEX_TTL_MS = 90 * 1000;
 const SAVED_REPORT_DETAIL_TTL_MS = 10 * 60 * 1000;
+const MONTH_SALES_DRILLDOWN_TTL_MS = 3 * 60 * 1000;
+const POS_JOURNAL_MONTH_RECOVERY_TTL_MS = 3 * 60 * 1000;
 function invalidateSavedReportsCache() {
   savedReportsIndexCache.clear();
   savedReportDetailCache.clear();
+  monthSalesDrilldownCache.clear();
+  posJournalMonthRecoveryCache.clear();
 }
 
 async function fetchSupabaseReports(options = {}) {
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
   try {
     // kind: 'monthly' | 'daily' | 'all'
     // AI・推移・予測はカテゴリ分け済みの月間レポートを正本にする。
@@ -4624,24 +4732,27 @@ async function fetchSupabaseReports(options = {}) {
     }).filter(r => r.id && !isCategoryOverridesReportId(r.id) && r.title !== '商品分類ルール');
 
     const fetchKind = async (k, lim) => {
-      const cacheKey = `${STORE_KEY}|${k}|${lim}`;
+      const cacheKey = `${requestedStoreKey}|${k}|${lim}`;
       const cached = savedReportsIndexCache.get(cacheKey);
       if (cached && (Date.now() - cached.time) < SAVED_REPORTS_INDEX_TTL_MS) return cached.rows;
       try {
         const qs = new URLSearchParams({
-          store_key: STORE_KEY,
+          store_key: requestedStoreKey,
           limit: String(lim),
           kind: k
         });
         const body = await adminApiFetch('/pos-journals/saved-reports?' + qs.toString(), {
           method: 'GET',
           timeoutMs: options.timeoutMs,
-          maxAttempts: options.maxAttempts
+          maxAttempts: options.maxAttempts,
+          signal: options.signal
         });
+        if (options.signal?.aborted) throw Object.assign(new Error('AIチャット処理は中止されました'), { name: 'AbortError' });
         const rows = mapRows(body.items);
         savedReportsIndexCache.set(cacheKey, { time: Date.now(), rows });
         return rows;
       } catch (err) {
+        if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
         // 取得失敗時は、期限切れでも直近に成功した一覧で回答を継続する。
         // （保存・削除時はキャッシュを無効化するため、古い一覧で上書きされる心配はない）
         if (cached) {
@@ -4668,25 +4779,33 @@ async function fetchSupabaseReports(options = {}) {
     const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Math.min(2000, Number(options.limit))) : defaultLimit;
     return await fetchKind(kind, limit);
   } catch (err) {
+    if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
     console.warn('admin-api fetch error:', err);
-    savedReportsLoadError = err instanceof Error ? err : new Error(String(err));
+    if (!options.signal?.aborted && requestedStoreKey === String(STORE_KEY || '').toLowerCase()) {
+      savedReportsLoadError = err instanceof Error ? err : new Error(String(err));
+    }
     return null;
   }
 }
 
 async function fetchSupabaseReportById(id, options = {}) {
-  const cacheKey = `${STORE_KEY}|${id}`;
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const cacheKey = `${requestedStoreKey}|${id}`;
   const cached = savedReportDetailCache.get(cacheKey);
   if (cached && (Date.now() - cached.time) < SAVED_REPORT_DETAIL_TTL_MS) return { ...cached.report };
   try {
-    const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id), {
+    const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(requestedStoreKey) + '&id=' + encodeURIComponent(id), {
       method: 'GET',
       timeoutMs: options.timeoutMs,
-      maxAttempts: options.maxAttempts
+      maxAttempts: options.maxAttempts,
+      signal: options.signal
     });
+    if (options.signal?.aborted) throw Object.assign(new Error('AIチャット処理は中止されました'), { name: 'AbortError' });
     const row = body.item;
     if (!row) {
-      savedReportsLoadError = new Error('保存レポート詳細を取得できませんでした。');
+      if (requestedStoreKey === String(STORE_KEY || '').toLowerCase()) {
+        savedReportsLoadError = new Error('保存レポート詳細を取得できませんでした。');
+      }
       return null;
     }
     const d = (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) || {};
@@ -4700,18 +4819,22 @@ async function fetchSupabaseReportById(id, options = {}) {
     savedReportDetailCache.set(cacheKey, { time: Date.now(), report });
     return { ...report };
   } catch (e) {
+    if (e?.name === 'AbortError' || options.signal?.aborted) throw e;
     // 詳細取得の一時失敗時も、直近に成功した内容があればそれで回答を継続する。
     if (cached) {
       console.warn('fetchSupabaseReportById failed; using cached detail:', e);
       return { ...cached.report };
     }
     console.error('fetchSupabaseReportById error:', e);
-    savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
+    if (!options.signal?.aborted && requestedStoreKey === String(STORE_KEY || '').toLowerCase()) {
+      savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
+    }
     return null;
   }
 }
 
 async function hydrateSavedReport(r, options = {}) {
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
   const hasMealFdSplit = (
     (Number(r?.lunchFoodTotal) || 0) +
     (Number(r?.lunchDrinkTotal) || 0) +
@@ -4728,10 +4851,23 @@ async function hydrateSavedReport(r, options = {}) {
   ) {
     return r;
   }
+  // 欠落月を pos_journal_files の解析済み月状態から復元した行は、すでに詳細を
+  // 内包する一時レポートであり saved_reports には同じIDが存在しない。
+  // 通常の詳細APIへ再照会すると「取得失敗」と誤判定するため、そのまま使う。
+  if (r?._recoveredFromPosJournalState) return r;
   if (!r?.id) return r;
   const full = await fetchSupabaseReportById(r.id, options);
   if (!full) return { ...r, _hydrateFailed: true };
   let merged = { ...r, ...full, id: r.id };
+  // 大容量レポートは保存時に sales を省略し、同じ会計明細を軽量な
+  // posJournalDays へ退避している。ここで復元しないと AI の異常月解析が
+  // 月内のLZH原本を1件ずつ再ダウンロードし、複数AI開始前で長時間止まる。
+  if ((!Array.isArray(merged.sales) || !merged.sales.length) && Array.isArray(merged.posJournalDays)) {
+    const restoredSales = reviveSalesFromSharedPosJournalDays(merged.posJournalDays);
+    if (restoredSales.length) {
+      merged = { ...merged, sales: restoredSales, _salesRestoredFrom: 'posJournalDays' };
+    }
+  }
   // 旧保存で昼夜別F/DがJSONBに無い場合は伝票から補完
   const stillMissingMealFd = (
     (Number(merged.lunchFoodTotal) || 0) +
@@ -4752,6 +4888,11 @@ async function hydrateSavedReport(r, options = {}) {
       lunchCustomers: Number(merged.lunchCustomers) || agg.lunchCustomers || 0,
       dinnerCustomers: Number(merged.dinnerCustomers) || agg.dinnerCustomers || 0
     };
+  }
+  // fetchSupabaseReportById の生キャッシュ（sales=[]）も復元済み内容へ置き換え、
+  // 同じチャット内の異常月・比較月解析で詳細取得を繰り返さない。
+  if (r?.id) {
+    savedReportDetailCache.set(`${requestedStoreKey}|${r.id}`, { time: Date.now(), report: merged });
   }
   return merged;
 }
@@ -4822,8 +4963,11 @@ function selectReportsForSavedMonthGroup(group, activeReport = currentReport) {
 }
 
 async function readSavedReports(options = {}) {
-  purgeLocalCloudDataCaches();
-  savedReportsLoadError = null;
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  if (requestedStoreKey === String(STORE_KEY || '').toLowerCase()) {
+    purgeLocalCloudDataCaches();
+    savedReportsLoadError = null;
+  }
   try {
     if (!getAdminToken()) return [];
     // 既定: 月間レポートを優先取得し、月間が無い月だけ日別で補完する。
@@ -4832,7 +4976,11 @@ async function readSavedReports(options = {}) {
     if (mode === 'raw' || options.kind) {
       const remoteReports = await fetchSupabaseReports({
         kind: options.kind || 'all',
-        limit: options.limit
+        limit: options.limit,
+        storeKey: requestedStoreKey,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+        maxAttempts: options.maxAttempts
       });
       if (remoteReports === null) return [];
       return remoteReports;
@@ -4840,7 +4988,9 @@ async function readSavedReports(options = {}) {
 
     const requestOptions = {
       timeoutMs: options.timeoutMs,
-      maxAttempts: options.maxAttempts
+      maxAttempts: options.maxAttempts,
+      storeKey: requestedStoreKey,
+      signal: options.signal
     };
     const needDailyFill = options.includeDailyFill !== false;
     // 一覧は独立した読み取りなので並列化する。通信不調時にAIチャットの待機表示を
@@ -4859,8 +5009,11 @@ async function readSavedReports(options = {}) {
     // AI検索は title/period でマッチするため、月間を全て含めた配列を返す
     return merged.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   } catch (e) {
+    if (e?.name === 'AbortError' || options.signal?.aborted) throw e;
     console.error('readSavedReports error:', e);
-    savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
+    if (!options.signal?.aborted && requestedStoreKey === String(STORE_KEY || '').toLowerCase()) {
+      savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
+    }
     return [];
   }
 }
@@ -5158,6 +5311,395 @@ function buildSharedPosJournalDays(report) {
   });
 }
 
+/**
+ * 大容量保存レポートの posJournalDays を、AI集計が扱う sales 形式へ戻す。
+ * Storage原本の再ダウンロードは行わず、DBに保存済みの会計・商品明細だけを使う。
+ */
+function reviveSalesFromSharedPosJournalDays(days) {
+  const sales = [];
+  for (const day of (Array.isArray(days) ? days : [])) {
+    const date = String(day?.business_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const receipts = Array.isArray(day?.receipts) ? day.receipts : [];
+    const dayGroups = Math.max(0, Math.round(Number(day?.groups) || 0));
+    const dayGuests = Math.max(0, Math.round(Number(day?.guests) || 0));
+    const dayTax = Number(day?.tax) || 0;
+    const hasDayGross = day?.gross_sales != null && day?.gross_sales !== '';
+    const dayGross = Number(day?.gross_sales) || 0;
+    const receiptGross = receipts.reduce((sum, receipt) => sum + (Number(receipt?.total) || 0), 0);
+    const daySaleStart = sales.length;
+    const receiptDetailMismatch = receipts.some((receipt) => {
+      const totalValue = receipt?.total == null || receipt?.total === ''
+        ? Number.NaN
+        : Number(receipt.total);
+      const receiptItems = (Array.isArray(receipt?.items) ? receipt.items : [])
+        .map(item => ({
+          name: String(item?.name || ''),
+          qty: Number(item?.qty) || 0,
+          amount: Number(item?.amount) || 0
+        }))
+        .filter(item => item.name && (item.qty !== 0 || item.amount !== 0));
+      const itemTotal = receiptItems.reduce((sum, item) => sum + item.amount, 0);
+      return !Number.isFinite(totalValue) || !receiptItems.length || itemTotal !== totalValue;
+    });
+    // raw receiptsの合計だけでなく、各会計の商品符号付き純額も日計正本と三段照合する。
+    // どこか1件でも空・不一致なら、不明差額を商品として捏造せず日計summaryだけへ退避する。
+    if ((hasDayGross && receiptGross !== dayGross) || receiptDetailMismatch) {
+      const authoritativeDayTotal = hasDayGross ? dayGross : receiptGross;
+      const paymentEntries = [
+        ['現金', Number(day?.pay_cash?.amount) || 0],
+        ['クレジット', Number(day?.pay_credit?.amount) || 0],
+        ['食べログ', Number(day?.pay_tabelog?.amount) || 0],
+        ['一休', Number(day?.pay_ikyu?.amount) || 0],
+        ['ぐるなび', Number(day?.pay_gurunavi?.amount) || 0]
+      ].filter(([, amount]) => amount !== 0);
+      const method = paymentEntries.length === 1 ? paymentEntries[0][0]
+        : (paymentEntries.length > 1 ? '併用' : 'その他');
+      sales.push({
+        no: `summary-${date}`,
+        date,
+        weekday: weekdayFromIsoDate(date),
+        hour: -1,
+        minute: -1,
+        hasAccountingTime: false,
+        mealPeriod: '',
+        time: '',
+        total: authoritativeDayTotal,
+        tax: dayTax,
+        points: 0,
+        groups: dayGroups,
+        customers: dayGuests,
+        customerCountReliable: dayGuests > 0,
+        isSplitFragment: false,
+        tableNo: '',
+        method,
+        change: 0,
+        weather: String(day?.weather || ''),
+        tempC: day?.temp_c != null && day?.temp_c !== '' && Number.isFinite(Number(day.temp_c))
+          ? Number(day.temp_c)
+          : null,
+        payments: {
+          byMethod: new Map(paymentEntries.length ? paymentEntries : [['その他', authoritativeDayTotal]]),
+          total: paymentEntries.length ? paymentEntries.reduce((sum, [, amount]) => sum + amount, 0) : authoritativeDayTotal,
+          change: 0,
+          details: paymentEntries.map(([label, amount]) => ({ label, method: label, amount }))
+        },
+        items: [],
+        itemTotal: 0,
+        _itemDetailUnavailable: true,
+        _itemDetailReason: receiptDetailMismatch ? 'receipt_item_mismatch' : 'day_gross_mismatch'
+      });
+      continue;
+    }
+    receipts.forEach((receipt, index) => {
+      const time = /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(receipt?.time || ''))
+        ? String(receipt.time).padStart(5, '0')
+        : '';
+      const timeParts = time ? time.split(':').map(Number) : [-1, -1];
+      const hour = timeParts[0];
+      const minute = timeParts[1];
+      const hasAccountingTime = hour >= 0 && minute >= 0;
+      const items = (Array.isArray(receipt?.items) ? receipt.items : []).map(item => {
+        const code = String(item?.code || '');
+        const name = String(item?.name || '');
+        return {
+          code,
+          name,
+          qty: Number(item?.qty) || 0,
+          amount: Number(item?.amount) || 0,
+          ...classifyProduct(code, name)
+        };
+      }).filter(item => item.name && (item.qty !== 0 || item.amount !== 0));
+      const itemTotal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      const totalValue = receipt?.total == null || receipt?.total === ''
+        ? Number.NaN
+        : Number(receipt.total);
+      const total = totalValue;
+      const method = String(receipt?.pay || 'その他') || 'その他';
+      let groups = index < Math.min(dayGroups, receipts.length) ? 1 : 0;
+      if (index === 0 && dayGroups > receipts.length) groups += dayGroups - receipts.length;
+      sales.push({
+        no: String(receipt?.no || `${date.replace(/-/g, '')}-${index + 1}`),
+        date,
+        weekday: weekdayFromIsoDate(date),
+        hour,
+        minute,
+        hasAccountingTime,
+        mealPeriod: hasAccountingTime ? (hour < 16 ? 'ランチ' : 'ディナー') : '',
+        time,
+        total,
+        tax: index === 0 ? dayTax : 0,
+        points: 0,
+        groups,
+        customers: Math.max(0, Number(receipt?.guests) || 0),
+        customerCountReliable: Number(receipt?.guests) > 0,
+        isSplitFragment: false,
+        tableNo: String(receipt?.table_no || ''),
+        method,
+        change: 0,
+        weather: String(day?.weather || ''),
+        tempC: day?.temp_c != null && day?.temp_c !== '' && Number.isFinite(Number(day.temp_c))
+          ? Number(day.temp_c)
+          : null,
+        payments: {
+          byMethod: new Map([[method, total]]),
+          total,
+          change: 0,
+          details: [{ label: method, method, amount: total }]
+        },
+        items,
+        itemTotal
+      });
+    });
+    // 日計の客数を正本として、会計側の不足・過剰を安全に調整する。
+    const daySales = sales.slice(daySaleStart);
+    if (daySales.length) {
+      let guestDiff = dayGuests - daySales.reduce((sum, sale) => sum + (Number(sale.customers) || 0), 0);
+      if (guestDiff > 0) {
+        daySales[0].customers += guestDiff;
+      } else if (guestDiff < 0) {
+        let remaining = -guestDiff;
+        for (const sale of daySales) {
+          const take = Math.min(Number(sale.customers) || 0, remaining);
+          sale.customers -= take;
+          remaining -= take;
+          if (!remaining) break;
+        }
+      }
+      daySales.forEach((sale) => { sale.customerCountReliable = sale.customers > 0; });
+    }
+  }
+  return sales;
+}
+
+/** 月内に日計不一致が1日でもあれば、月全体の商品・昼夜内訳を部分値として使わない。 */
+function normalizeRecoveredMonthlyReportData(data, identity = {}) {
+  const source = data && typeof data === 'object' ? data : {};
+  const revived = reviveSalesList(Array.isArray(source.sales) ? source.sales : []);
+  const detailIncomplete = revived.some((sale) => (
+    sale?._itemDetailUnavailable ||
+    /^summary-/.test(String(sale?.no || '')) ||
+    ((Number(sale?.total) || 0) > 0 && !(Array.isArray(sale?.items) && sale.items.length))
+  ));
+  const sales = detailIncomplete
+    ? revived.map((sale) => ({
+      ...sale,
+      hour: -1,
+      minute: -1,
+      hasAccountingTime: false,
+      mealPeriod: '',
+      time: '',
+      items: [],
+      itemTotal: 0,
+      _itemDetailUnavailable: true
+    }))
+    : revived;
+  const agg = aggregateSalesRows(sales);
+  const authoritativeTotal = Number(source.total ?? source.totalSales);
+  const totalSales = Number.isFinite(authoritativeTotal) ? authoritativeTotal : agg.totalSales;
+  const authoritativeCustomers = Number(source.totalCustomers);
+  const totalCustomers = Number.isFinite(authoritativeCustomers)
+    ? authoritativeCustomers
+    : agg.totalCustomers;
+  return {
+    ...source,
+    ...identity,
+    total: totalSales,
+    totalSales,
+    totalCustomers,
+    salesCount: sales.length,
+    foodTotal: detailIncomplete ? 0 : (Number(source.foodTotal) || agg.foodTotal || 0),
+    drinkTotal: detailIncomplete ? 0 : (Number(source.drinkTotal) || agg.drinkTotal || 0),
+    roomTotal: detailIncomplete ? 0 : (Number(source.roomTotal) || agg.roomTotal || 0),
+    otherTotal: detailIncomplete ? totalSales : (Number(source.otherTotal) || agg.otherTotal || 0),
+    chargeTotal: detailIncomplete ? 0 : (Number(source.chargeTotal) || agg.chargeTotal || 0),
+    lunchTotal: detailIncomplete ? 0 : (Number(source.lunchTotal) || agg.lunchTotal || 0),
+    dinnerTotal: detailIncomplete ? 0 : (Number(source.dinnerTotal) || agg.dinnerTotal || 0),
+    lunchCustomers: detailIncomplete ? 0 : (Number(source.lunchCustomers) || agg.lunchCustomers || 0),
+    dinnerCustomers: detailIncomplete ? 0 : (Number(source.dinnerCustomers) || agg.dinnerCustomers || 0),
+    lunchFoodTotal: detailIncomplete ? 0 : (Number(source.lunchFoodTotal) || agg.lunchFoodTotal || 0),
+    lunchDrinkTotal: detailIncomplete ? 0 : (Number(source.lunchDrinkTotal) || agg.lunchDrinkTotal || 0),
+    dinnerFoodTotal: detailIncomplete ? 0 : (Number(source.dinnerFoodTotal) || agg.dinnerFoodTotal || 0),
+    dinnerDrinkTotal: detailIncomplete ? 0 : (Number(source.dinnerDrinkTotal) || agg.dinnerDrinkTotal || 0),
+    topProducts: detailIncomplete ? [] : (Array.isArray(source.topProducts) ? source.topProducts : agg.topProducts),
+    weekdayBreakdown: Array.isArray(source.weekdayBreakdown) && source.weekdayBreakdown.length
+      ? source.weekdayBreakdown
+      : agg.weekdayBreakdown,
+    hourlyBreakdown: detailIncomplete
+      ? []
+      : (Array.isArray(source.hourlyBreakdown) && source.hourlyBreakdown.length
+        ? source.hourlyBreakdown
+        : agg.hourlyBreakdown),
+    dailyBreakdown: agg.dailyBreakdown,
+    sales,
+    _itemDetailIncomplete: detailIncomplete,
+    _itemDetailCoverage: detailIncomplete ? '日計一致を確認できないため月内訳を非採用' : 'complete',
+    _recoveredFromPosJournalState: true
+  };
+}
+
+/** 保存レポートが欠けた月を、既にDBへ解析保存済みのPOS日次状態から一時復元する。 */
+async function fetchReportFromPosJournalMonth(monthKey, options = {}) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || '')) || !getAdminToken()) return null;
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  try {
+    const body = await adminApiFetch(
+      '/pos-journals?store_key=' + encodeURIComponent(requestedStoreKey) + '&month=' + encodeURIComponent(monthKey),
+      {
+        method: 'GET',
+        timeoutMs: Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000,
+        maxAttempts: Number(options.maxAttempts) > 0 ? Number(options.maxAttempts) : 1,
+        signal: options.signal
+      }
+    );
+    const recoveryPack = body?.recovery_report && typeof body.recovery_report === 'object'
+      ? body.recovery_report
+      : null;
+    if (recoveryPack?.data && typeof recoveryPack.data === 'object') {
+      return normalizeRecoveredMonthlyReportData(recoveryPack.data, {
+        id: String(recoveryPack.id || `pos-journal-recovered-${requestedStoreKey}-${monthKey}`),
+        title: String(recoveryPack.title || `月間売上レポート（${monthKeyLabel(monthKey)} / DB解析済み月状態から復元）`),
+        period: String(recoveryPack.period || recoveryPack.data.period || ''),
+        _recoveryStoreKey: requestedStoreKey
+      });
+    }
+    // 新しいEdge Functionの公開直後など recovery_report が未提供の場合も、
+    // raw receiptsを日計照合してから安全なフォールバックを組み立てる。
+    const summary = body?.summary && typeof body.summary === 'object' ? body.summary : {};
+    const days = Array.isArray(summary.days) ? summary.days : [];
+    if (!days.length) return null;
+    const sales = reviveSalesFromSharedPosJournalDays(days);
+    const agg = aggregateSalesRows(sales);
+    const totals = summary.totals && typeof summary.totals === 'object' ? summary.totals : {};
+    const dates = days
+      .map(day => String(day?.business_date || '').slice(0, 10))
+      .filter(date => /^\d{4}-\d{2}-\d{2}$/.test(date))
+      .sort();
+    if (!dates.length) return null;
+    const totalSales = Number(totals.gross_sales);
+    const totalCustomers = Number(totals.guests);
+    return normalizeRecoveredMonthlyReportData({
+      period: `${dates[0]} 〜 ${dates[dates.length - 1]}`,
+      createdAt: String(summary?.meta?.generated_at || new Date().toISOString()),
+      sourceMonths: [monthKey],
+      total: Number.isFinite(totalSales) ? totalSales : agg.totalSales,
+      totalSales: Number.isFinite(totalSales) ? totalSales : agg.totalSales,
+      foodTotal: agg.foodTotal || 0,
+      drinkTotal: agg.drinkTotal || 0,
+      roomTotal: agg.roomTotal || 0,
+      otherTotal: agg.otherTotal || 0,
+      chargeTotal: agg.chargeTotal || 0,
+      lunchTotal: agg.lunchTotal || 0,
+      dinnerTotal: agg.dinnerTotal || 0,
+      lunchCustomers: agg.lunchCustomers || 0,
+      dinnerCustomers: agg.dinnerCustomers || 0,
+      lunchFoodTotal: agg.lunchFoodTotal || 0,
+      lunchDrinkTotal: agg.lunchDrinkTotal || 0,
+      dinnerFoodTotal: agg.dinnerFoodTotal || 0,
+      dinnerDrinkTotal: agg.dinnerDrinkTotal || 0,
+      totalCustomers: Number.isFinite(totalCustomers) ? totalCustomers : agg.totalCustomers,
+      salesCount: sales.length,
+      topProducts: Array.isArray(agg.topProducts) ? agg.topProducts : [],
+      weekdayBreakdown: Array.isArray(agg.weekdayBreakdown) ? agg.weekdayBreakdown : [],
+      hourlyBreakdown: Array.isArray(agg.hourlyBreakdown) ? agg.hourlyBreakdown : [],
+      dailyBreakdown: Array.isArray(agg.dailyBreakdown) ? agg.dailyBreakdown : [],
+      posJournalDays: days,
+      sales
+    }, {
+      id: `pos-journal-recovered-${requestedStoreKey}-${monthKey}`,
+      title: `月間売上レポート（${monthKeyLabel(monthKey)} / DB解析済み月状態から復元）`,
+      _recoveryStoreKey: requestedStoreKey
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    console.warn('欠落月の保存原本からの一時復元に失敗:', monthKey, err);
+    return null;
+  }
+}
+
+/** 同じ店舗・月の回復要求を共有し、gap補完と商品解析から二重取得しない。 */
+async function recoverReportFromPosJournalMonth(monthKey, options = {}) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || '')) || !getAdminToken()) return null;
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const overrideRevision = fingerprintProductCategoryOverrides(productCategoryOverridesCache || {});
+  const cacheKey = `${requestedStoreKey}|${monthKey}|${overrideRevision}`;
+  const cached = posJournalMonthRecoveryCache.get(cacheKey);
+  if (cached && (Date.now() - cached.time) < POS_JOURNAL_MONTH_RECOVERY_TTL_MS) {
+    if (cached.report) return cached.report;
+    // 同一run内だけPromiseを共有する。店舗切替・resetでabortされた旧runの
+    // Promiseを新しい質問が拾うと、再質問まで同じAbortErrorで失敗する。
+    if (cached.promise && cached.signal === options.signal) return cached.promise;
+  }
+  const promise = fetchReportFromPosJournalMonth(monthKey, { ...options, storeKey: requestedStoreKey });
+  const pendingEntry = { time: Date.now(), promise, signal: options.signal };
+  posJournalMonthRecoveryCache.set(cacheKey, pendingEntry);
+  try {
+    const report = await promise;
+    // 旧runの完了が、同じ月で既に始まった新runのcacheを上書きしない。
+    if (posJournalMonthRecoveryCache.get(cacheKey) !== pendingEntry) return report;
+    if (report) {
+      posJournalMonthRecoveryCache.set(cacheKey, { time: Date.now(), report });
+    } else {
+      // 通信失敗や未登録を成功キャッシュにしない。再質問時は必ず再確認できる。
+      posJournalMonthRecoveryCache.delete(cacheKey);
+    }
+    return report;
+  } catch (err) {
+    // reject済みPromiseを残すと、同一タブ内の再質問が数分間ずっと失敗する。
+    if (posJournalMonthRecoveryCache.get(cacheKey) === pendingEntry) {
+      posJournalMonthRecoveryCache.delete(cacheKey);
+    }
+    throw err;
+  }
+}
+
+function enumerateMonthKeysForRange(fromYear, fromMonth, toYear, toMonth, limit = 120) {
+  const from = Number(fromYear) * 12 + Number(fromMonth);
+  const to = Number(toYear) * 12 + Number(toMonth);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return [];
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+  const keys = [];
+  for (let value = lo; value <= hi && keys.length < limit; value++) {
+    const year = Math.floor((value - 1) / 12);
+    const month = ((value - 1) % 12) + 1;
+    keys.push(`${year}-${String(month).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+/**
+ * 保存月報の開始・途中・終了いずれに穴があっても、DB解析済み月状態から同じ方法で補完する。
+ * 1回の質問での回復数は制限し、残りは missingKeys として明示する。
+ */
+async function recoverMissingMonthlyReports(reports, expectedKeys, options = {}) {
+  const merged = Array.isArray(reports) ? [...reports] : [];
+  const keys = [...new Set((Array.isArray(expectedKeys) ? expectedKeys : [])
+    .map(key => String(key || ''))
+    .filter(key => /^\d{4}-\d{2}$/.test(key)))];
+  const present = new Set(merged.map(monthKeyFromReport).filter(Boolean));
+  const missing = keys.filter(key => !present.has(key));
+  const maxRecoveries = Math.max(0, Math.min(6, Number(options.maxRecoveries) || 3));
+  const recovered = await Promise.all(missing.slice(0, maxRecoveries).map(key =>
+    recoverReportFromPosJournalMonth(key, {
+      timeoutMs: Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000,
+      maxAttempts: Number(options.maxAttempts) > 0 ? Number(options.maxAttempts) : 1,
+      storeKey: options.storeKey,
+      signal: options.signal
+    })
+  ));
+  for (const report of recovered) {
+    const key = monthKeyFromReport(report);
+    if (!report || !key || present.has(key)) continue;
+    present.add(key);
+    merged.push(report);
+  }
+  return {
+    reports: merged,
+    missingKeys: keys.filter(key => !present.has(key))
+  };
+}
+
 /** 表示用レポートHTMLを Storage（pos-report-html）へ保存 */
 async function uploadSavedReportHtmlToCloud(reportId, html) {
   if (!getAdminToken() || !reportId || !html) return null;
@@ -5357,15 +5899,29 @@ function resolveLzhUploadPayload(it) {
 
 /** 読み込み済み LZH をクラウド（pos_journal_files）へ保管 */
 async function uploadJournalsToCloud(itemList) {
-  if (!getAdminToken()) return { ok: false, reason: 'auth', journals: [] };
-  const lzhItems = (itemList || []).map(it => {
+  const sourceItems = Array.isArray(itemList) ? itemList : [];
+  const sourceCount = sourceItems.length;
+  if (!getAdminToken()) return { ok: false, reason: 'auth', journals: [], sourceCount, uploadableCount: 0 };
+  const lzhItems = sourceItems.map(it => {
     const payload = resolveLzhUploadPayload(it);
     return payload ? { ...it, _upload: payload } : null;
   }).filter(Boolean);
-  if (!lzhItems.length) return { ok: true, uploaded: 0, repaired: 0, duplicates: 0, failed: 0, journals: [], skipped: true };
+  const uploadableCount = lzhItems.length;
+  if (!lzhItems.length) return {
+    ok: true, uploaded: 0, repaired: 0, duplicates: 0, failed: 0, journals: [], skipped: true,
+    sourceCount, uploadableCount, canonicalReportCount: 0, canonicalReportFailures: [],
+    canonicalReportFailedCount: 0, canonicalSavedReportsOk: true,
+    canonicalReports: [], canonicalReportMonths: []
+  };
 
   const journals = [];
   let uploaded = 0, repaired = 0, duplicates = 0, failed = 0;
+  let canonicalReportCount = 0;
+  let canonicalReportFailedCount = 0;
+  let canonicalSavedReportsOk = true;
+  const canonicalReportFailures = [];
+  const canonicalReports = [];
+  const canonicalReportMonths = [];
   const batchSize = 40;
   for (let i = 0; i < lzhItems.length; i += batchSize) {
     const batch = lzhItems.slice(i, i + batchSize);
@@ -5381,6 +5937,15 @@ async function uploadJournalsToCloud(itemList) {
       repaired += Number(result.repaired_count) || 0;
       duplicates += Number(result.duplicate_count) || 0;
       failed += Number(result.failed_count) || 0;
+      canonicalReportCount += Number(result?.saved_reports?.report_count) || 0;
+      canonicalReportFailedCount += Number(result?.saved_reports?.failed_count) || 0;
+      if (result?.saved_reports?.ok === false) canonicalSavedReportsOk = false;
+      (Array.isArray(result?.saved_reports?.reports) ? result.saved_reports.reports : [])
+        .forEach(report => canonicalReports.push(report));
+      (Array.isArray(result?.saved_reports?.months) ? result.saved_reports.months : [])
+        .forEach(month => canonicalReportMonths.push(String(month || '')));
+      (Array.isArray(result?.saved_reports?.failures) ? result.saved_reports.failures : [])
+        .forEach(failure => canonicalReportFailures.push(failure));
       (result.uploaded || []).forEach(row => {
         if (row?.id) journals.push({
           id: Number(row.id),
@@ -5409,27 +5974,97 @@ async function uploadJournalsToCloud(itemList) {
       failed += batch.length;
     }
   }
-  return { ok: failed === 0 || journals.length > 0, uploaded, repaired, duplicates, failed, journals };
+  return {
+    ok: (failed === 0 || journals.length > 0) && canonicalReportFailures.length === 0,
+    uploaded,repaired,duplicates,failed,journals,
+    sourceCount,uploadableCount,
+    canonicalReportCount,canonicalReportFailures,canonicalReportFailedCount,canonicalSavedReportsOk,
+    canonicalReports,canonicalReportMonths:[...new Set(canonicalReportMonths.filter(month => /^\d{4}-\d{2}$/.test(month)))]
+  };
 }
 
-async function fetchJournalFilesForMonth(month) {
+/**
+ * 検算未完了グループ専用の厳格な成功判定。
+ * uploadJournalsToCloud の一般用途では部分成功を許す既存契約を保ち、
+ * 自動レポートだけは「全LZH・全ファイル・全対象月の日別/月間正本」を必須にする。
+ */
+function validateBlockedCanonicalUploadResult(result, blockedItemCount, expectedMonths) {
+  const reasons = [];
+  const expectedCount = Number(blockedItemCount) || 0;
+  const targetMonths = [...new Set((Array.isArray(expectedMonths) ? expectedMonths : [])
+    .map(month => String(month || '').trim())
+    .filter(month => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)))].sort();
+  if (!result?.ok) reasons.push('LZH原本のアップロードが完了していません');
+  if (expectedCount <= 0) reasons.push('検算対象ファイルを特定できません');
+  if (Number(result?.sourceCount) !== expectedCount || Number(result?.uploadableCount) !== expectedCount) {
+    reasons.push('検算対象にLZH原本ではないファイルが含まれています');
+  }
+  const completedCount = (Number(result?.uploaded) || 0)
+    + (Number(result?.repaired) || 0)
+    + (Number(result?.duplicates) || 0);
+  if (Number(result?.failed) !== 0 || completedCount !== expectedCount || (result?.journals || []).length !== expectedCount) {
+    reasons.push('一部のLZH原本を保存・確認できませんでした');
+  }
+  if (result?.canonicalSavedReportsOk !== true
+      || Number(result?.canonicalReportFailedCount) !== 0
+      || (result?.canonicalReportFailures || []).length !== 0) {
+    reasons.push('サーバー正本の作成に失敗した月があります');
+  }
+  if (!targetMonths.length) reasons.push('正本を確認する対象月を特定できません');
+  const reportKeys = new Set((Array.isArray(result?.canonicalReports) ? result.canonicalReports : [])
+    .map(report => `${String(report?.month || '')}:${String(report?.kind || '')}`));
+  const reportedMonths = new Set(Array.isArray(result?.canonicalReportMonths) ? result.canonicalReportMonths : []);
+  const missingReports = [];
+  for (const month of targetMonths) {
+    if (!reportedMonths.has(month)) missingReports.push(`${month}:month`);
+    for (const kind of ['daily', 'monthly']) {
+      if (!reportKeys.has(`${month}:${kind}`)) missingReports.push(`${month}:${kind}`);
+    }
+  }
+  if (missingReports.length || Number(result?.canonicalReportCount) < targetMonths.length * 2) {
+    reasons.push(`対象全月の日別・月間正本を確認できません${missingReports.length ? `（${missingReports.join('、')}）` : ''}`);
+  }
+  return { ok: reasons.length === 0, reasons, targetMonths, missingReports };
+}
+
+async function fetchJournalFilesForMonth(month, options = {}) {
   const body = await adminApiFetch(
     '/pos-journals?store_key=' + encodeURIComponent(STORE_KEY) + '&month=' + encodeURIComponent(month),
-    { method: 'GET' }
+    {
+      method: 'GET',
+      timeoutMs: options.timeoutMs,
+      maxAttempts: options.maxAttempts
+    }
   );
   return Array.isArray(body.files) ? body.files : [];
 }
 
-async function downloadJournalBytesById(id) {
+async function downloadJournalBytesById(id, options = {}) {
   const body = await adminApiFetch(
     '/pos-journals/download?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id),
-    { method: 'GET' }
+    {
+      method: 'GET',
+      timeoutMs: options.timeoutMs,
+      maxAttempts: options.maxAttempts
+    }
   );
   const signed = body.signed_url || body.url;
   if (!signed) throw new Error('ダウンロードURLを取得できませんでした');
-  const res = await fetch(signed);
-  if (!res.ok) throw new Error('ジャーナル原本の取得に失敗しました (HTTP ' + res.status + ')');
-  return new Uint8Array(await res.arrayBuffer());
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 30000;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(signed, controller ? { signal: controller.signal } : undefined);
+    if (!res.ok) throw new Error('ジャーナル原本の取得に失敗しました (HTTP ' + res.status + ')');
+    return new Uint8Array(await res.arrayBuffer());
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`ジャーナル原本の取得が${Math.round(timeoutMs / 1000)}秒以内に終わりませんでした`);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function salesFromJournalBytes(fileName, bytes) {
@@ -5449,17 +6084,22 @@ function salesFromJournalBytes(fileName, bytes) {
   return collectSalesAudit([it]).sales || [];
 }
 
-async function loadSalesFromCloudJournals(months) {
+async function loadSalesFromCloudJournals(months, options = {}) {
   const monthList = [...new Set((months || []).filter(m => /^\d{4}-\d{2}$/.test(m)))];
+  // AIチャットの自動補完は、保存済みsales/posJournalDaysだけで進める。
+  // 原本を読むのは利用者が明示的に復元・再集計する画面操作だけに限定する。
+  if (options.allowRawDownloads === false) {
+    return { sales: [], fileCount: 0, months: monthList, rawDownloadSkipped: true };
+  }
   const merged = [];
   const seen = new Set();
   let fileCount = 0;
   for (const month of monthList) {
-    const files = await fetchJournalFilesForMonth(month);
+    const files = await fetchJournalFilesForMonth(month, options);
     for (const file of files) {
       fileCount++;
       try {
-        const bytes = await downloadJournalBytesById(file.id);
+        const bytes = await downloadJournalBytesById(file.id, options);
         const sales = salesFromJournalBytes(file.original_file_name || file.inner_file_name, bytes);
         sales.forEach(p => {
           const key = `${p.date}|${p.no}|${p.total}|${p.time || ''}`;
@@ -5584,7 +6224,7 @@ function currentMonthKey() {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
 }
 
-async function collectMonthlyHistoryForForecast() {
+async function collectMonthlyHistoryForForecast(options = {}) {
   // 分析・予測の主データは「保存済みレポート」（カテゴリ別済み）
   const unavailable = (message) => ({
     history: [],
@@ -5594,7 +6234,7 @@ async function collectMonthlyHistoryForForecast() {
     loadError: message || 'クラウドの保存レポートを完全に確認できませんでした。'
   });
   if (!getAdminToken()) return unavailable('クラウド接続が必要です。');
-  const reports = await readSavedReports();
+  const reports = await readSavedReports(options);
   if (savedReportsLoadError) return unavailable(savedReportsLoadError.message);
   const byMonth = new Map();
 
@@ -5610,7 +6250,11 @@ async function collectMonthlyHistoryForForecast() {
     const needsHydrate = !reportHasSalesSummary(r)
       || (isMonthly && !(Number.isFinite(Number(r.foodTotal)) && Number.isFinite(Number(r.drinkTotal))));
     if (needsHydrate) {
-      try { r = await hydrateSavedReport(r); } catch (_) {}
+      try {
+        r = await hydrateSavedReport(r, options);
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+      }
     }
     if (r?._hydrateFailed || savedReportsLoadError) {
       return unavailable(savedReportsLoadError?.message || '保存レポート詳細を取得できませんでした。');
@@ -6611,6 +7255,7 @@ function renderReport({
   lunchTotal=null,dinnerTotal=null,lunchCustomers=null,dinnerCustomers=null,
   id=null,sourceMonths=null,journalIds=null,relatedReports=null
 }){
+  abortAiRunsForReportChange('render-report');
   const view=document.getElementById('reportView');
   if(!saved){
     parserVersion=parserVersion||PARSER_VERSION;
@@ -6653,9 +7298,9 @@ function renderReport({
   view.querySelector('#rClose').onclick=()=>{
     if(pendingCategoryMoveCount() && !confirm('まだ「分類を更新」していない移動があります。閉じると破棄されます。よろしいですか？')) return;
     clearPendingCategoryMoves();
+    abortAiRunsForReportChange('report-close');
     view.hidden=true; document.body.classList.remove('report-open'); currentReport=null; activeReportTab='report';
   };
-  aiChatHistory = [];
   if (aiAnalysisText) {
     renderAiAnalysis(aiAnalysisText);
   }
@@ -6814,6 +7459,7 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     createdAt: reportStamp()
   };
 
+  abortAiRunsForReportChange('build-report');
   currentReport = reportObj;
   const computedAiData = buildSalesDataForAI();
   Object.assign(reportObj, computedAiData);
@@ -6872,7 +7518,10 @@ async function buildBothReports(salesOverride=null, options={}){
       if (!buildReport('monthly', start || null, end || null, null, salesOverride, { silent, skipRender, itemList, folderLabel: options.folderLabel })) return finish(false);
       pushCurrent();
     }
-    if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+    if (reports.length) {
+      abortAiRunsForReportChange('build-report-bundle');
+      currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+    }
     return finish(reports.length > 0);
   }
 
@@ -6881,7 +7530,10 @@ async function buildBothReports(salesOverride=null, options={}){
     pushCurrent();
     if (!buildReport('monthly', start, end, null, null, { silent, skipRender })) return finish(false);
     pushCurrent();
-    if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+    if (reports.length) {
+      abortAiRunsForReportChange('build-report-bundle');
+      currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+    }
     return finish(reports.length > 0);
   }
 
@@ -6890,8 +7542,9 @@ async function buildBothReports(salesOverride=null, options={}){
     if (!silent) {
       alert(`検算で問題が見つかったため、レポート作成を中止しました。\n\n${audit.critical.slice(0,8).join('\n')}${audit.critical.length>8?`\nほか${audit.critical.length-8}件`:''}`);
     }
-    // 自動保存時は警告があっても月次分割を試行する
-    if (!silent) return false;
+    // silentな自動作成でも不完全なローカル集計を保存しない。
+    // LZH原本はautoBuildAndSaveAfterLoadがサーバーへ送り、v21正本を生成する。
+    return false;
   }
   const months = [...new Set(audit.sales.map(s => s.date.slice(0, 7)))].sort();
   if (!months.length) {
@@ -6904,7 +7557,10 @@ async function buildBothReports(salesOverride=null, options={}){
     if (!buildReport('monthly', null, null, month, null, { silent, skipRender, itemList, folderLabel: options.folderLabel })) continue;
     pushCurrent();
   }
-  if (reports.length) currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+  if (reports.length) {
+    abortAiRunsForReportChange('build-report-bundle');
+    currentReport = { ...reports[reports.length - 1], relatedReports: reports };
+  }
   return finish(reports.length > 0);
 }
 
@@ -6941,10 +7597,7 @@ async function saveCurrentReport(options = {}){
   const reports = (await readSavedReports()).map(report => report);
   const bundle = currentReport.relatedReports?.length ? currentReport.relatedReports : [currentReport];
   const records = bundle.map((report, idx) => {
-    const prev = currentReport;
-    currentReport = report;
-    const aiSnap = buildSalesDataForAI();
-    currentReport = prev;
+    const aiSnap = buildSalesDataForAI(report);
     // 詳細HTML(body)と伝票(sales)は残す。以前は容量対策で捨てて要約だけになり詳細が消えていた
     const { relatedReports, ...withoutBundle } = report;
     const fullBody = withoutBundle.body || '';
@@ -7079,6 +7732,9 @@ async function autoBuildAndSaveAfterLoad() {
     });
 
     const allReports = [];
+    const blockedGroups = [];
+    const blockedItems = [];
+    const blockedTargetMonths = new Set();
     let gi = 0;
     for (const [key, groupItems] of groups) {
       gi++;
@@ -7088,6 +7744,22 @@ async function autoBuildAndSaveAfterLoad() {
       await yieldToUI();
 
       const audit = collectSalesAudit(groupItems);
+      if (audit.critical.length) {
+        const parsedMonths = [
+          ...audit.sales.map(sale => String(sale?.date || '').slice(0, 7)),
+          ...groupItems.map(item => String(item?.summary?.businessDate || '').slice(0, 7))
+        ].filter(month => /^\d{4}-(0[1-9]|1[0-2])$/.test(month));
+        const groupTargetMonths = parsedMonths.length
+          ? parsedMonths
+          : groupItems.map(item => String(item?.folderMonth || '')).filter(month => /^\d{4}-(0[1-9]|1[0-2])$/.test(month));
+        groupTargetMonths.forEach(month => blockedTargetMonths.add(month));
+        blockedGroups.push({
+          label: folderLabel || key,
+          issues: audit.critical.slice(0, 8)
+        });
+        blockedItems.push(...groupItems);
+        continue;
+      }
       if (!audit.sales.length) continue;
 
       // フォルダ名から月が分かる場合は、その月の売上を優先（フォルダ単位で分ける）
@@ -7111,12 +7783,59 @@ async function autoBuildAndSaveAfterLoad() {
       }
     }
 
+    // ローカル検算に失敗したグループは、salesOverrideで警告を迂回して保存しない。
+    // LZH原本だけを送信し、サーバーv21の三段照合済み・決定的IDの正本へ任せる。
+    let canonicalUpload = null;
+    let canonicalValidation = null;
+    if (blockedGroups.length) {
+      if (!getAdminToken()) {
+        abortAiRunsForReportChange('canonical-auth-blocked');
+        currentReport = null;
+        hideAppLoading();
+        finishSaveStatus('検算未完了のためローカル保存を中止しました', true);
+        alert('検算を完了できないデータが含まれるため、部分レポートは保存していません。\n管理トークンを接続し、LZH原本を再度読み込むとサーバーで安全に解析します。');
+        setAuthUiState(false);
+        return { ok: false, reason: 'auth-canonical', blockedGroups };
+      }
+      showAppLoading('サーバーで安全に再解析中...', `検算未完了 ${blockedGroups.length}グループ（部分レポートは保存しません）`);
+      await yieldToUI();
+      const blockedUploadItems = [...new Set(blockedItems)];
+      canonicalUpload = await uploadJournalsToCloud(blockedUploadItems);
+      canonicalValidation = validateBlockedCanonicalUploadResult(
+        canonicalUpload,
+        blockedUploadItems.length,
+        [...blockedTargetMonths]
+      );
+      if (!canonicalValidation.ok) {
+        abortAiRunsForReportChange('canonical-upload-blocked');
+        currentReport = null;
+        hideAppLoading();
+        const reason = canonicalValidation.reasons[0]
+          || canonicalUpload?.canonicalReportFailures?.[0]?.error
+          || 'サーバー正本の作成を確認できません';
+        finishSaveStatus(reason, true);
+        alert(`検算未完了の部分レポートは保存していません。\n${reason}\n元のLZHファイルを選び直してください。`);
+        return { ok: false, reason: 'canonical-upload', blockedGroups, canonicalUpload, canonicalValidation };
+      }
+      purgeLocalCloudDataCaches();
+      invalidateSavedReportsCache();
+    }
+
     if (!allReports.length) {
+      if (canonicalValidation?.ok) {
+        abortAiRunsForReportChange('canonical-server-report');
+        currentReport = null;
+        hideAppLoading();
+        finishSaveStatus(`サーバー正本を${canonicalUpload.canonicalReportCount}件更新しました（部分レポートなし）`);
+        await renderSavedReports();
+        return { ok: true, canonical: true, canonicalUpload, canonicalValidation, blockedGroups };
+      }
       hideAppLoading();
       finishSaveStatus('自動作成できる売上がありません', true);
       return { ok: false, reason: 'build' };
     }
 
+    abortAiRunsForReportChange('auto-report-built');
     currentReport = { ...allReports[allReports.length - 1], relatedReports: allReports };
     if (!getAdminToken()) {
       hideAppLoading();
@@ -7135,7 +7854,9 @@ async function autoBuildAndSaveAfterLoad() {
     const result = await saveCurrentReport({ silent: true, openList: true });
     hideAppLoading();
     if (result?.ok) {
-      finishSaveStatus(`クラウドに${allReports.length}件保存しました（ジャーナル原本も保管）`);
+      const canonicalNote = canonicalValidation?.ok
+        ? `、検算未完了分はサーバー正本${canonicalUpload.canonicalReportCount}件` : '';
+      finishSaveStatus(`クラウドに${allReports.length}件保存しました${canonicalNote}（ジャーナル原本も保管）`);
     } else if (!result?.ok) {
       finishSaveStatus(result?.error?.message || 'クラウド自動保存に失敗しました', true);
     }
@@ -7189,6 +7910,8 @@ function folderMetaFromFile(f) {
 }
 
 async function renderSavedReports(filter='all'){
+  abortAiRunsForReportChange('saved-reports-list');
+  currentReport = null;
   const view=document.getElementById('reportView');
   // 一覧も保存済みレポート（月間優先）を正本にする。フィルター時は API 側 kind で取りこぼしを防ぐ。
   let reports;
@@ -7276,6 +7999,7 @@ async function renderSavedReports(filter='all'){
       let sales = reviveSalesList(r.sales);
       if (!sales.length) {
         // 合算レポートなどで伝票が落ちている場合は月別から復元
+        abortAiRunsForReportChange('saved-report-revive');
         currentReport = r;
         sales = await resolveSalesForCurrentReport();
       } else {
@@ -7762,7 +8486,9 @@ async function collectDroppedFiles(dataTransfer){
   for (const entry of entries) {
     try {
       files.push(...await collectDropEntry(entry));
-    } catch (_) {}
+    } catch (err) {
+      if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
+    }
   }
   return files.length ? files : fileSnapshot;
 }
@@ -7940,6 +8666,10 @@ drop.addEventListener('drop',async e=>{
 
 // print events
 const AI_ENDPOINT = `${SUPABASE_URL}/functions/v1/ai-analyze`;
+// AI本体だけでなく、その前の売上・店舗情報・資料取得にも共通上限を持たせる。
+// どの店舗でデータ量が増えても「考察中」のまま無期限に残さない。
+const AI_CHAT_PREFLIGHT_TOTAL_TIMEOUT_MS = 60000;
+const AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS = 12000;
 
 const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常に適用）】
 あなたは「マルゴグループ（MARUGO GROUP）」専用の店舗売上アナリスト兼ワインバー／ワインビストロ経営アドバイザーです。運営会社は株式会社ワルツ。
@@ -8026,13 +8756,16 @@ const STORE_AI_LOCATIONS = {
   marugoD: { name: 'マルゴ D', area: '愛知県刈谷（地方店）', address: '愛知県刈谷市中山町2-38', notes: '都外・刈谷。東京/新宿三丁目前提は完全禁止。地方需要で分析。' }
 };
 
-function buildStoreLocationBlockForAi() {
-  const loc = STORE_AI_LOCATIONS[STORE_KEY];
+function buildStoreLocationBlockForAi(storeKey = STORE_KEY) {
+  const requestedStoreKey = String(storeKey || '').trim();
+  const canonicalStoreKey = Object.keys(STORE_AI_LOCATIONS)
+    .find(key => key.toLowerCase() === requestedStoreKey.toLowerCase()) || requestedStoreKey;
+  const loc = STORE_AI_LOCATIONS[canonicalStoreKey];
   if (!loc) {
-    return `【分析対象店舗の立地】\n店舗キー: ${STORE_KEY}\n注意: 新宿三丁目をデフォルト前提にしてはいけません。`;
+    return `【分析対象店舗の立地】\n店舗キー: ${requestedStoreKey}\n注意: 新宿三丁目をデフォルト前提にしてはいけません。`;
   }
   return `【分析対象店舗の立地（必須・この店舗基準）】
-店舗キー: ${STORE_KEY}
+店舗キー: ${canonicalStoreKey}
 店舗名: ${loc.name}
 エリア: ${loc.area}
 住所: ${loc.address}
@@ -8477,12 +9210,12 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
  * AI分析の直前に店舗営業情報を必ずクラウド→ローカル→初期値の順で確定する。
  * タブを開いていなくても、分析時に最新の店舗情報を読む。
  */
-async function ensureStoreOpsProfileForAi(storeKey = STORE_KEY) {
+async function ensureStoreOpsProfileForAi(storeKey = STORE_KEY, options = {}) {
   if (MTALK_EMBED) {
     return normalizeStoreOpsProfile(defaultStoreOpsProfile(storeKey));
   }
   let profile = readStoreOpsProfile(storeKey);
-  const cloud = await loadStoreOpsProfileFromCloud(storeKey);
+  const cloud = await loadStoreOpsProfileFromCloud(storeKey, options);
   if (cloud) {
     profile = writeStoreOpsProfileLocal(cloud, storeKey);
   } else if (!localStorage.getItem(storeOpsStorageKey(storeKey))) {
@@ -8500,9 +9233,17 @@ async function buildIntegratedAnalysisContext({
   verifiedData = null,
   queryText = '',
   periodRange = null,
-  forReport = false
+  forReport = false,
+  reportData = currentReport,
+  storeKey = STORE_KEY,
+  signal = null
 } = {}) {
-  const profile = await ensureStoreOpsProfileForAi();
+  const requestedStoreKey = String(storeKey || STORE_KEY || '').trim().toLowerCase();
+  const profile = await ensureStoreOpsProfileForAi(requestedStoreKey, {
+    timeoutMs: AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+    maxAttempts: 1,
+    signal
+  });
   const storeOpsBlock = formatStoreOpsBlockForAi(profile, verifiedData);
 
   let knowledgeBlock = '';
@@ -8514,25 +9255,39 @@ async function buildIntegratedAnalysisContext({
     : { status: 'idle', truncated: false, error: '' };
   if (!MTALK_EMBED) try {
     // LINEから直前に登録されたメモも取り込むため、AI実行時は一覧を再検証する。
-    const items = await loadStoreKnowledgeForAi({ forceRefresh: true });
+    const items = await loadStoreKnowledgeForAi({
+      forceRefresh: true,
+      timeoutMs: AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+      maxAttempts: 1,
+      totalTimeoutMs: AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+      storeKey: requestedStoreKey,
+      signal
+    });
     knowledgeState = { ...knowledgeLoadState };
     knowledgeCount = items.filter(item => item && item.is_active !== false).length;
     let range = periodRange || resolveKnowledgePeriodRange(verifiedData);
     let query = queryText || '売上分析 施策 メニュー';
     if (forReport) {
-      const period = String(currentReport?.period || '');
+      const period = String(reportData?.period || '');
       // 確定集計が持つ区間配列を優先する。タイトル由来の外接範囲で、
       // 離れた比較期間の谷間を再び含めない。
-      range = range || resolveKnowledgeRangeFromText(`${period} ${currentReport?.title || ''}`);
-      query = `${currentReport?.title || ''} ${period} 売上分析 施策 メニュー`;
+      range = range || resolveKnowledgeRangeFromText(`${period} ${reportData?.title || ''}`);
+      query = `${reportData?.title || ''} ${period} 売上分析 施策 メニュー`;
     }
     const selected = await hydrateKnowledgeItemsForAi(
-      selectStoreKnowledgeForQuery(query, range, items)
+      selectStoreKnowledgeForQuery(query, range, items),
+      {
+        timeoutMs: AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+        maxAttempts: 1,
+        storeKey: requestedStoreKey,
+        signal
+      }
     );
     knowledgeSelectedCount = selected.length;
     knowledgePartialCount = selected.filter(item => item?._hydrateFailed).length;
     knowledgeBlock = formatStoreKnowledgeBlock(selected, query, items);
   } catch (err) {
+    if (err?.name === 'AbortError') throw err;
     knowledgeState = { status: 'error', truncated: false, error: String(err?.message || err || 'unknown') };
     console.warn('店舗ナレッジの付与をスキップしました:', err);
   }
@@ -8540,11 +9295,11 @@ async function buildIntegratedAnalysisContext({
   const journalSales = Number(verifiedData?.totalSales) || 0;
   const journalMonths = Array.isArray(verifiedData?.monthlyBreakdown) ? verifiedData.monthlyBreakdown.length : 0;
   const journalMulti = !!(verifiedData?.multiPeriod && Array.isArray(verifiedData?.periods) && verifiedData.periods.length);
-  const reportSales = Number(currentReport?.total || currentReport?.totalSales) || 0;
+  const reportSales = Number(reportData?.total || reportData?.totalSales) || 0;
   const hasJournal = journalMulti
     || journalSales > 0
     || journalMonths > 0
-    || (forReport && (reportSales > 0 || Number(currentReport?.salesCount) > 0));
+    || (forReport && (reportSales > 0 || Number(reportData?.salesCount) > 0));
   const hasKnowledge = knowledgeSelectedCount > 0
     && /【今回の分析で参照する店舗資料・根拠/.test(knowledgeBlock);
   const hasCatalog = knowledgeCount > 0
@@ -9016,17 +9771,23 @@ function fillStoreOpsForm(profile) {
   if (preview) preview.textContent = formatStoreOpsBlockForAi(p).trim() || '（未設定）';
 }
 
-async function loadStoreOpsProfileFromCloud(storeKey = STORE_KEY) {
+async function loadStoreOpsProfileFromCloud(storeKey = STORE_KEY, options = {}) {
   if (!getAdminToken()) return null;
   try {
     const body = await adminApiFetch(
       '/pos-journals/store-ops?store_key=' + encodeURIComponent(storeKey),
-      { method: 'GET' }
+      {
+        method: 'GET',
+        timeoutMs: options.timeoutMs,
+        maxAttempts: options.maxAttempts,
+        signal: options.signal
+      }
     );
     if (body?.profile && typeof body.profile === 'object') {
       return normalizeStoreOpsProfile(body.profile);
     }
   } catch (err) {
+    if (err?.name === 'AbortError') throw err;
     console.warn('店舗営業情報のクラウド取得をスキップ:', err);
   }
   return null;
@@ -9134,6 +9895,119 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 let aiChatHistory = [];
+let aiChatRunGeneration = 0;
+let activeAiChatRun = null;
+let aiReportRunGeneration = 0;
+let activeAiReportRun = null;
+let currentReportGeneration = 0;
+
+function cancelActiveAiReportRun(reason = 'cancelled') {
+  aiReportRunGeneration += 1;
+  const run = activeAiReportRun;
+  activeAiReportRun = null;
+  if (run?.controller && !run.controller.signal.aborted) {
+    try { run.controller.abort(reason); } catch (_) { run.controller.abort(); }
+  }
+}
+
+function beginAiReportRun() {
+  cancelActiveAiReportRun('superseded');
+  const run = {
+    generation: aiReportRunGeneration,
+    storeKey: String(STORE_KEY || '').trim().toLowerCase(),
+    reportGeneration: currentReportGeneration,
+    reportData: currentReport,
+    controller: typeof AbortController !== 'undefined' ? new AbortController() : null
+  };
+  activeAiReportRun = run;
+  return run;
+}
+
+function isCurrentAiReportRun(run) {
+  return !!run && activeAiReportRun === run && run.generation === aiReportRunGeneration &&
+    run.storeKey === String(STORE_KEY || '').trim().toLowerCase() &&
+    run.reportGeneration === currentReportGeneration && run.reportData === currentReport;
+}
+
+function assertCurrentAiReportRun(run) {
+  if (!isCurrentAiReportRun(run) || run?.controller?.signal?.aborted) {
+    const error = new Error('AI分析処理は中止されました');
+    error.name = 'AbortError';
+    error.code = 'AI_REPORT_CANCELLED';
+    throw error;
+  }
+}
+
+function finishAiReportRun(run) {
+  if (activeAiReportRun === run) activeAiReportRun = null;
+}
+
+function cancelActiveAiChatRun(reason = 'cancelled') {
+  aiChatRunGeneration += 1;
+  const run = activeAiChatRun;
+  activeAiChatRun = null;
+  if (run?.controller && !run.controller.signal.aborted) {
+    try { run.controller.abort(reason); } catch (_) { run.controller.abort(); }
+  }
+}
+
+function beginAiChatRun() {
+  cancelActiveAiChatRun('superseded');
+  const run = {
+    generation: aiChatRunGeneration,
+    storeKey: String(STORE_KEY || '').trim().toLowerCase(),
+    reportGeneration: currentReportGeneration,
+    reportData: currentReport,
+    controller: typeof AbortController !== 'undefined' ? new AbortController() : null
+  };
+  activeAiChatRun = run;
+  return run;
+}
+
+function isCurrentAiChatRun(run) {
+  return !!run && activeAiChatRun === run && run.generation === aiChatRunGeneration &&
+    run.storeKey === String(STORE_KEY || '').trim().toLowerCase() &&
+    run.reportGeneration === currentReportGeneration && run.reportData === currentReport;
+}
+
+function assertCurrentAiChatRun(run) {
+  if (!isCurrentAiChatRun(run) || run?.controller?.signal?.aborted) {
+    const error = new Error('AIチャット処理は中止されました');
+    error.name = 'AbortError';
+    error.code = 'AI_CHAT_CANCELLED';
+    throw error;
+  }
+}
+
+function finishAiChatRun(run) {
+  if (activeAiChatRun === run) activeAiChatRun = null;
+}
+
+/**
+ * 同一店舗内のレポート差替でも、旧レポート向けAI処理を確実に失効させる。
+ * report generationを先に進め、通信中ならAbortし、残った入力ロックと待機表示を解除する。
+ */
+function abortAiRunsForReportChange(reason = 'report-change') {
+  currentReportGeneration += 1;
+  const hadReportRun = !!activeAiReportRun;
+  cancelActiveAiReportRun(reason);
+  cancelActiveAiChatRun(reason);
+  if (hadReportRun) {
+    hideAppLoading();
+    const analyzeBtn = document.getElementById('rAiAnalyze');
+    if (analyzeBtn) analyzeBtn.disabled = false;
+  }
+  aiChatHistory = [];
+  const chat = document.getElementById('aiChatMessages');
+  if (chat) chat.innerHTML = '';
+  const input = document.getElementById('aiChatInput');
+  if (input) {
+    input.value = '';
+    input.disabled = false;
+  }
+  const sendBtn = document.getElementById('aiChatSend');
+  if (sendBtn) sendBtn.disabled = false;
+}
 
 function isMarkdownTableSeparator(line) {
   const trimmed = String(line || '').trim();
@@ -9230,9 +10104,9 @@ function mealCategoryTotalsFromSales(sales) {
   return out;
 }
 
-function buildSalesDataForAI() {
-  if (!currentReport) return {};
-  const d = currentReport;
+function buildSalesDataForAI(reportData = currentReport) {
+  if (!reportData) return {};
+  const d = reportData;
   const sales = d.sales || [];
   
   // sales配列（明細データ）が無い保存レポート・履歴ビューの場合でも、既存のサマリープロパティから売上データを即座に復元・返却
@@ -9398,6 +10272,8 @@ function buildSalesDataForAI() {
 async function aiAnalyze() {
   const btn = document.getElementById('rAiAnalyze');
   const area = document.getElementById('aiAnalysisArea');
+  const analysisRun = beginAiReportRun();
+  const runSignal = analysisRun.controller?.signal || null;
   
   if (btn) btn.disabled = true;
   
@@ -9413,22 +10289,28 @@ async function aiAnalyze() {
   ];
   
   const stepInterval = setInterval(() => {
+    if (!isCurrentAiReportRun(analysisRun)) return;
     step = (step + 1) % messages.length;
     showAppLoading('🤖 AIが売上データを高度分析中...', messages[step]);
   }, 2500);
   
   try {
+    assertCurrentAiReportRun(analysisRun);
     const data = buildSalesDataForAI();
     showAppLoading('🤖 AIが売上データを高度分析中...', 'ジャーナル・店舗情報・資料を統合しています');
     // ①ジャーナル数値 ②店舗営業情報（クラウド必須読込） ③資料 を必ず揃えてからAIへ渡す
     const integrated = await buildIntegratedAnalysisContext({
       verifiedData: data,
       forReport: true,
-      queryText: `${data.title || ''} ${data.period || ''} 売上分析`
+      reportData: analysisRun.reportData,
+      queryText: `${data.title || ''} ${data.period || ''} 売上分析`,
+      storeKey: analysisRun.storeKey,
+      signal: runSignal
     });
+    assertCurrentAiReportRun(analysisRun);
     let systemInstruction = MARUGO_AI_ANALYZE_INSTRUCTION
-      + '\n\n' + buildStoreLocationBlockForAi()
-      + '\n\n' + formatReservationImportCoverageForAi()
+      + '\n\n' + buildStoreLocationBlockForAi(analysisRun.storeKey)
+      + '\n\n' + formatReservationImportCoverageForAi(analysisRun.storeKey)
       + integrated.checklist
       + integrated.storeOpsBlock
       + integrated.knowledgeBlock
@@ -9439,30 +10321,50 @@ async function aiAnalyze() {
         action: 'analyze',
         salesData: data,
         systemInstruction,
-        storeKey: STORE_KEY,
-        storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
-        storeLocationBlock: buildStoreLocationBlockForAi()
+        storeKey: analysisRun.storeKey,
+        storeName: resolveStoreDisplayName(analysisRun.storeKey),
+        storeLocationBlock: buildStoreLocationBlockForAi(analysisRun.storeKey)
       }, {
-        anonKey: SUPABASE_ANON_KEY
+        anonKey: SUPABASE_ANON_KEY,
+        signal: runSignal
     });
+    assertCurrentAiReportRun(analysisRun);
     const res = aiResponse.response;
     const result = aiResponse.body;
     if (!res.ok) throw new Error(result.error || ('AI analysis failed: ' + res.status));
     
     const replyText = result.reply || result.text || result.message || '結果がありません';
-    renderAiAnalysis(replyText, false, data.title, data.period);
+    assertCurrentAiReportRun(analysisRun);
+    renderAiAnalysis(replyText, true, data.title, data.period);
+    assertCurrentAiReportRun(analysisRun);
+    await saveAiAnalysisToSupabase(replyText, data.title, data.period, {
+      run: analysisRun,
+      reportData: analysisRun.reportData,
+      salesData: data,
+      storeKey: analysisRun.storeKey,
+      signal: runSignal
+    });
+    assertCurrentAiReportRun(analysisRun);
     
     setTimeout(() => {
       area.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 300);
   } catch (err) {
+    if (err?.name === 'AbortError' || err?.code === 'AI_REPORT_CANCELLED' || !isCurrentAiReportRun(analysisRun)) {
+      return;
+    }
     area.hidden = false;
     area.innerHTML = `<button class="ai-analysis-close" onclick="document.getElementById('aiAnalysisArea').hidden=true">✕</button>
                       <p style="color:#a33a2b;text-align:center;">エラーが発生しました: ${err.message}</p>`;
   } finally {
     clearInterval(stepInterval);
-    hideAppLoading();
-    if (btn) btn.disabled = false;
+    if (isCurrentAiReportRun(analysisRun)) {
+      finishAiReportRun(analysisRun);
+      hideAppLoading();
+      if (btn) btn.disabled = false;
+    } else if (btn) {
+      btn.disabled = false;
+    }
   }
 }
 
@@ -9632,25 +10534,29 @@ function renderAiAnalysis(text, skipAutoSave = false, title = null, period = nul
   }
 }
 
-async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, reportPeriod = null) {
+async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, reportPeriod = null, options = {}) {
   try {
     if (!analysisText) return;
-    const title = reportTitle || currentReport?.title || '売上分析レポート';
-    const period = reportPeriod || currentReport?.period || '';
+    const analysisRun = options.run || null;
+    if (analysisRun) assertCurrentAiReportRun(analysisRun);
+    const reportData = options.reportData || currentReport;
+    const targetStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+    const title = reportTitle || reportData?.title || '売上分析レポート';
+    const period = reportPeriod || reportData?.period || '';
     
     // ダッシュボード再現に必要な売上データの完全スナップショットを抽出
-    const baseSales = buildSalesDataForAI();
-    const salesSnapshot = currentReport ? {
-      total: currentReport.total || baseSales.totalSales || 0,
-      totalSales: currentReport.total || baseSales.totalSales || 0,
-      salesCount: currentReport.salesCount || baseSales.salesCount || 0,
-      foodTotal: currentReport.foodTotal || baseSales.foodTotal || 0,
-      drinkTotal: currentReport.drinkTotal || baseSales.drinkTotal || 0,
-      lunchTotal: currentReport.lunchTotal || baseSales.lunchTotal || 0,
-      dinnerTotal: currentReport.dinnerTotal || baseSales.dinnerTotal || 0,
-      lunchCustomers: currentReport.lunchCustomers || baseSales.lunchCustomers || 0,
-      dinnerCustomers: currentReport.dinnerCustomers || baseSales.dinnerCustomers || 0,
-      totalCustomers: baseSales.totalCustomers || ((currentReport.lunchCustomers || 0) + (currentReport.dinnerCustomers || 0)) || 0,
+    const baseSales = options.salesData || buildSalesDataForAI();
+    const salesSnapshot = reportData ? {
+      total: reportData.total || baseSales.totalSales || 0,
+      totalSales: reportData.total || baseSales.totalSales || 0,
+      salesCount: reportData.salesCount || baseSales.salesCount || 0,
+      foodTotal: reportData.foodTotal || baseSales.foodTotal || 0,
+      drinkTotal: reportData.drinkTotal || baseSales.drinkTotal || 0,
+      lunchTotal: reportData.lunchTotal || baseSales.lunchTotal || 0,
+      dinnerTotal: reportData.dinnerTotal || baseSales.dinnerTotal || 0,
+      lunchCustomers: reportData.lunchCustomers || baseSales.lunchCustomers || 0,
+      dinnerCustomers: reportData.dinnerCustomers || baseSales.dinnerCustomers || 0,
+      totalCustomers: baseSales.totalCustomers || ((reportData.lunchCustomers || 0) + (reportData.dinnerCustomers || 0)) || 0,
       overallAvgSpendPerCustomer: baseSales.overallAvgSpendPerCustomer || 0,
       weekdayBreakdown: baseSales.weekdayBreakdown || [],
       hourlyBreakdown: baseSales.hourlyBreakdown || [],
@@ -9669,6 +10575,7 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
 
     showSaveStatus('AI分析結果を自動保存中…');
 
+    if (analysisRun) assertCurrentAiReportRun(analysisRun);
     await adminApiFetch('/pos-journals/report-ai-history', {
       method: 'POST',
       body: JSON.stringify({
@@ -9677,12 +10584,15 @@ async function saveAiAnalysisToSupabase(analysisText, reportTitle = null, report
         report_period: record.report_period,
         analysis_result: record.analysis_result,
         sales_data: record.sales_data,
-        store_key: STORE_KEY
-      })
+        store_key: targetStoreKey
+      }),
+      signal: options.signal
     });
+    if (analysisRun) assertCurrentAiReportRun(analysisRun);
     purgeLocalCloudDataCaches();
     finishSaveStatus('AI分析を自動保存しました');
   } catch (err) {
+    if (err?.name === 'AbortError' || err?.code === 'AI_REPORT_CANCELLED' || options.signal?.aborted) throw err;
     console.error('saveAiAnalysisToSupabase error:', err);
     finishSaveStatus('AI分析のクラウド保存に失敗しました', true);
   }
@@ -9714,6 +10624,7 @@ async function deleteAiHistory(id) {
 }
 
 function openAiHistoryReportView(item) {
+  abortAiRunsForReportChange('ai-history-report-open');
   const view = document.getElementById('reportView');
   const snap = item.sales_data || {};
   
@@ -9775,6 +10686,8 @@ function openAiHistoryReportView(item) {
   document.body.classList.add('report-open');
   
   view.querySelector('#rClose').onclick = () => {
+    abortAiRunsForReportChange('ai-history-report-close');
+    currentReport = null;
     view.hidden = true;
     document.body.classList.remove('report-open');
   };
@@ -9783,6 +10696,8 @@ function openAiHistoryReportView(item) {
 }
 
 async function renderAiHistory() {
+  abortAiRunsForReportChange('ai-history-list');
+  currentReport = null;
   const view = document.getElementById('reportView');
   showAppLoading('AI分析履歴を読み込み中...', 'クラウドデータと同期しています');
   
@@ -9893,6 +10808,7 @@ function toggleAiChat() {
 
 /** 会話履歴と表示をクリア（パネルは開いたまま） */
 function resetAiChat() {
+  cancelActiveAiChatRun('reset');
   aiChatHistory = [];
   const chat = document.getElementById('aiChatMessages');
   if (chat) chat.innerHTML = '';
@@ -10096,6 +11012,12 @@ function wantsTrend(msg) {
 function formatMonthlyBreakdownLines(monthlyBreakdown, indent = '') {
   if (!Array.isArray(monthlyBreakdown) || monthlyBreakdown.length === 0) return '';
   return monthlyBreakdown.map(m => {
+    if (m?._itemDetailIncomplete === true) {
+      const xmas = (Number(m.month) === 12)
+        ? ' ※12月要因は商品明細で確定できないため、資料証拠が無ければ仮説に留める'
+        : '';
+      return `${indent}- ${m.label}: 総売上 ${yen(m.totalSales)}（客数 ${m.totalCustomers}名、客単価 ${yen(m.avgSpend)}）／日計は確認済み、商品・カテゴリ・昼夜内訳は日計不一致のため非採用${xmas}`;
+    }
     const lunch = Number(m.lunchTotal) || 0;
     const dinner = Number(m.dinnerTotal) || 0;
     const lunchCust = Number(m.lunchCustomers) || 0;
@@ -10143,13 +11065,19 @@ function resolveChargeCategoryFromSales(sales) {
 
 function formatVerifiedDetailLines(p, indent = '') {
   const lines = [];
+  const incompleteMonths = Array.isArray(p?.itemDetailIncompleteMonths)
+    ? p.itemDetailIncompleteMonths.filter(Boolean)
+    : [];
+  if (incompleteMonths.length) {
+    lines.push(`${indent}- 明細精度: ${incompleteMonths.join('・')}は日計売上・客数のみ確定。商品・カテゴリ・昼夜・時間帯の部分明細は日計と一致しないため、原因分析やランキングには使用していません`);
+  }
   const total = Number(p?.totalSales) || 0;
   const food = Number(p?.foodTotal) || 0;
   const drink = Number(p?.drinkTotal) || 0;
   const room = Number(p?.roomTotal) || 0;
   const other = Number(p?.otherTotal) || 0;
   const charge = Number(p?.chargeTotal) || 0;
-  if (total > 0 && (food > 0 || drink > 0)) {
+  if (total > 0 && (food > 0 || drink > 0) && incompleteMonths.length === 0) {
     // チャージは4カテゴリのいずれかの内数。所属をマスタ定義で決め打ちすると実データと食い違うため、
     // 判明している場合だけそのカテゴリへ注記し、不明なら別行で「いずれかの内数」と明示する。
     const chargeCat = String(p?.chargeCategory || '');
@@ -11128,41 +12056,86 @@ function compareAnomalyMonthToPeers(targetStats, peerStatsList, meta) {
   };
 }
 
-async function loadMonthSalesForDrilldown(monthKey, sources) {
+async function loadMonthSalesForDrilldown(monthKey, sources, options = {}) {
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const sourceRevision = (Array.isArray(sources) ? sources : []).map((report) => [
+    String(report?.id || ''),
+    String(report?.updatedAt || report?.updated_at || report?.createdAt || ''),
+    Number(report?.salesCount) || 0,
+    Number(report?.total ?? report?.totalSales) || 0
+  ].join(':')).sort().join('|');
+  const overrideRevision = fingerprintProductCategoryOverrides(productCategoryOverridesCache || {});
+  const cacheKey = `${requestedStoreKey}|${monthKey}|${sourceRevision}|${overrideRevision}`;
+  const cached = monthSalesDrilldownCache.get(cacheKey);
+  if (cached && (Date.now() - cached.time) < MONTH_SALES_DRILLDOWN_TTL_MS) {
+    return cached.result;
+  }
   let sales = [];
   let source = 'none';
+  const requestOptions = {
+    timeoutMs: Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000,
+    maxAttempts: Number(options.maxAttempts) > 0 ? Number(options.maxAttempts) : 1,
+    storeKey: requestedStoreKey,
+    signal: options.signal
+  };
   for (const r of (Array.isArray(sources) ? sources : [])) {
     try {
-      const full = await hydrateSavedReport(r);
+      const full = await hydrateSavedReport(r, requestOptions);
       const rows = reviveSalesList(full?.sales);
       if (rows.length && rows.some((s) => Array.isArray(s.items) && s.items.length)) {
         sales = applyAllCategoryOverridesToSales(rows).sales;
-        source = 'saved-report';
+        source = full?._salesRestoredFrom === 'posJournalDays'
+          ? 'saved-report-snapshot'
+          : 'saved-report';
         break;
       }
-    } catch (_) {}
+    } catch (err) {
+      if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
+    }
   }
-  // レポートに明細が薄い／無い場合はジャーナル原本を読む（店舗共通）
+  // sales が存在しても商品明細が省略された月（大容量月・日計退避など）は、
+  // 25〜31個の原本を再取得せず、admin-apiがDB parsed_dataからまとめた月状態を1回だけ読む。
+  if ((!sales.length || !sales.some((s) => Array.isArray(s.items) && s.items.length)) && /^\d{4}-\d{2}$/.test(monthKey)) {
+    const recovered = await recoverReportFromPosJournalMonth(monthKey, requestOptions);
+    const recoveredRows = reviveSalesList(recovered?.sales);
+    if (recoveredRows.length && recoveredRows.some((s) => Array.isArray(s.items) && s.items.length)) {
+      sales = applyAllCategoryOverridesToSales(recoveredRows).sales;
+      source = 'pos-journal-state';
+    }
+  }
+  // レポートにも軽量スナップショットにも明細が無い場合だけ原本へ進む。
+  // AIの自動前処理では allowRawDownloads=false とし、数百原本の逐次取得で
+  // オーケストレーション開始前に止まらないようにする。明示操作時だけ許可する。
   if ((!sales.length || !sales.some((s) => Array.isArray(s.items) && s.items.length)) && /^\d{4}-\d{2}$/.test(monthKey)) {
     try {
-      const loaded = await loadSalesFromCloudJournals([monthKey]);
+      const loaded = await loadSalesFromCloudJournals([monthKey], {
+        ...requestOptions,
+        allowRawDownloads: options.allowRawDownloads === true
+      });
       const fromJ = applyAllCategoryOverridesToSales(loaded.sales || []).sales;
       if (fromJ.length) {
         sales = fromJ;
         source = source === 'saved-report' ? 'saved-report+journal' : 'journal';
       }
     } catch (err) {
+      if (err?.name === 'AbortError') throw err;
       console.warn('month journal drilldown failed:', monthKey, err);
     }
   }
-  return { sales, source };
+  const result = { sales, source };
+  // 一時的な通信失敗・不完全明細を空の成功結果として固定しない。
+  // 商品明細を確認できた成功だけ短時間キャッシュする。
+  if (sales.length && sales.some((sale) => Array.isArray(sale?.items) && sale.items.length)) {
+    monthSalesDrilldownCache.set(cacheKey, { time: Date.now(), result });
+  }
+  return result;
 }
 
 /**
  * 月次のランチ／ディナー別フード・ドリンクが欠けている月を、
  * 保存レポート伝票→ジャーナルから補完する（全店共通）。
  */
-async function enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey) {
+async function enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey, options = {}) {
   const rows = Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [];
   if (!rows.length) return rows;
   // 通信量上限: 直近18か月を優先して補完
@@ -11177,7 +12150,17 @@ async function enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKe
     if (hasSplit) continue;
     if (!m.key) continue;
     try {
-      const loaded = await loadMonthSalesForDrilldown(m.key, monthSourcesByKey?.get?.(m.key) || []);
+      const loaded = await loadMonthSalesForDrilldown(
+        m.key,
+        monthSourcesByKey?.get?.(m.key) || [],
+        {
+          timeoutMs: 15000,
+          maxAttempts: 1,
+          allowRawDownloads: false,
+          storeKey: options.storeKey,
+          signal: options.signal
+        }
+      );
       if (!loaded.sales.length) continue;
       const agg = aggregateSalesRows(loaded.sales);
       m.lunchFoodTotal = agg.lunchFoodTotal || 0;
@@ -11190,6 +12173,7 @@ async function enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKe
       if (!(Number(m.dinnerCustomers) > 0)) m.dinnerCustomers = agg.dinnerCustomers || 0;
       m.mealFdSource = loaded.source;
     } catch (err) {
+      if (err?.name === 'AbortError') throw err;
       console.warn('enrichMonthlyMealCategorySplit failed:', m.key, err);
     }
   }
@@ -11226,22 +12210,49 @@ function formatMonthlyMealFdTrendLines(monthlyBreakdown, indent = '') {
  * 売上／客単価が突出した月について、保存レポート→ジャーナルで商品構成を解析する。
  * 「不明」「表示されていません」で止めず、高単価コース寄与などの確定事実を作る。
  */
-async function enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey) {
-  const outliers = detectAnomalousSalesMonths(monthlyBreakdown).slice(0, 4);
+async function enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey, options = {}) {
+  // 日計と伝票明細が一致しない月は総売上・客数だけが確定値。
+  // その月を「異常月の詳細解析」に入れると、0件の空節を根拠扱いさせるため除外する。
+  const detailEligibleMonths = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
+    .filter((row) => row?._itemDetailIncomplete !== true);
+  const outliers = detectAnomalousSalesMonths(detailEligibleMonths).slice(0, 4);
   if (!outliers.length) return [];
 
-  const peerKeys = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
+  const peerKeys = detailEligibleMonths
     .map((m) => m.key)
     .filter((k) => k && !outliers.some((o) => o.key === k))
     .slice(-4);
 
+  // 異常月と比較月を最大3件ずつ並列で復元する。大容量月もDB内の
+  // posJournalDaysから復元し、LZH原本の一括再ダウンロードは行わない。
+  const loadedByKey = new Map();
+  const requiredKeys = [...new Set([
+    ...outliers.map((row) => row.key),
+    ...peerKeys.slice(0, 2)
+  ].filter(Boolean))];
+  for (let i = 0; i < requiredKeys.length; i += 3) {
+    const chunk = requiredKeys.slice(i, i + 3);
+    const loadedRows = await Promise.all(chunk.map((key) => loadMonthSalesForDrilldown(
+      key,
+      monthSourcesByKey?.get?.(key) || [],
+      {
+        timeoutMs: 15000,
+        maxAttempts: 1,
+        allowRawDownloads: false,
+        storeKey: options.storeKey,
+        signal: options.signal
+      }
+    )));
+    chunk.forEach((key, index) => loadedByKey.set(key, loadedRows[index]));
+  }
+
   const peerCache = new Map();
-  async function peerStatsFor(meal) {
+  function peerStatsFor(meal) {
     const cacheKey = meal || '_all';
     if (peerCache.has(cacheKey)) return peerCache.get(cacheKey);
     const list = [];
     for (const key of peerKeys.slice(0, 2)) {
-      const loaded = await loadMonthSalesForDrilldown(key, monthSourcesByKey?.get?.(key) || []);
+      const loaded = loadedByKey.get(key) || { sales: [] };
       if (!loaded.sales.length) continue;
       list.push(collectProductStatsFromSales(loaded.sales, meal || ''));
     }
@@ -11252,9 +12263,9 @@ async function enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey
   const facts = [];
   for (const o of outliers) {
     const meal = o.meal || (o.kind === 'total_sales' ? '' : 'ディナー');
-    const loaded = await loadMonthSalesForDrilldown(o.key, monthSourcesByKey?.get?.(o.key) || []);
+    const loaded = loadedByKey.get(o.key) || { sales: [], source: 'none' };
     const detail = collectProductStatsFromSales(loaded.sales, meal);
-    const peerStats = await peerStatsFor(meal || 'ディナー');
+    const peerStats = peerStatsFor(meal || 'ディナー');
     const comparison = compareAnomalyMonthToPeers(detail, peerStats, o);
     facts.push({
       ...o,
@@ -11271,9 +12282,10 @@ async function enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey
   return facts;
 }
 
-async function searchCloudJournalProducts(hints) {
+async function searchCloudJournalProducts(hints, options = {}) {
   const h = hints || {};
-  const params = new URLSearchParams({ store_key: STORE_KEY });
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const params = new URLSearchParams({ store_key: requestedStoreKey });
   if (h.q) params.set('q', h.q);
   if (h.code) params.set('code', h.code);
   if (h.unitMin != null && h.unitMax != null && h.unitMin === h.unitMax) {
@@ -11282,12 +12294,18 @@ async function searchCloudJournalProducts(hints) {
     if (h.unitMin != null) params.set('unit_min', String(h.unitMin));
     if (h.unitMax != null) params.set('unit_max', String(h.unitMax));
   }
-  return await adminApiFetch('/pos-journals/product-search?' + params.toString(), { method: 'GET' });
+  return await adminApiFetch('/pos-journals/product-search?' + params.toString(), {
+    method: 'GET',
+    timeoutMs: options.timeoutMs,
+    maxAttempts: options.maxAttempts,
+    signal: options.signal
+  });
 }
 
-async function searchCloudJournalProductCohort(hints) {
+async function searchCloudJournalProductCohort(hints, options = {}) {
   const h = hints || {};
-  const params = new URLSearchParams({ store_key: STORE_KEY });
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const params = new URLSearchParams({ store_key: requestedStoreKey });
   if (h.q) params.set('q', h.q);
   if (h.code) params.set('code', h.code);
   if (h.unitMin != null && h.unitMax != null && h.unitMin === h.unitMax) {
@@ -11298,14 +12316,23 @@ async function searchCloudJournalProductCohort(hints) {
   }
   if (h.monthFrom) params.set('month_from', h.monthFrom);
   if (h.monthTo) params.set('month_to', h.monthTo);
-  return await adminApiFetch('/pos-journals/product-cohort?' + params.toString(), { method: 'GET' });
+  return await adminApiFetch('/pos-journals/product-cohort?' + params.toString(), {
+    method: 'GET',
+    timeoutMs: options.timeoutMs,
+    maxAttempts: options.maxAttempts,
+    signal: options.signal
+  });
 }
 
-async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo) {
+async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo, options = {}) {
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
   return await adminApiFetch('/pos-journals/cohort-compare', {
     method: 'POST',
+    timeoutMs: options.timeoutMs,
+    maxAttempts: options.maxAttempts,
+    signal: options.signal,
     body: JSON.stringify({
-      store_key: STORE_KEY,
+      store_key: requestedStoreKey,
       month_from: monthFrom || undefined,
       month_to: monthTo || undefined,
       comparisons: Array.isArray(comparisons) ? comparisons.slice(0, 6) : []
@@ -11314,13 +12341,19 @@ async function searchCloudJournalCohortCompare(comparisons, monthFrom, monthTo) 
 }
 
 /** 予約確定事実 API。通常は軽量集計のみ、予約者・顧客質問だけ明細を取得し、AI送信時は仮名化する。 */
-async function fetchReservationAiFacts(monthFrom, monthTo, includeItems = false) {
+async function fetchReservationAiFacts(monthFrom, monthTo, includeItems = false, options = {}) {
   if (MTALK_EMBED) throw new Error('M-talk埋め込みでは予約データを利用できません');
-  const params = new URLSearchParams({ store_key: STORE_KEY });
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const params = new URLSearchParams({ store_key: requestedStoreKey });
   if (monthFrom) params.set('month_from', monthFrom);
   if (monthTo) params.set('month_to', monthTo);
   params.set('include_items', includeItems ? '1' : '0');
-  return await adminApiFetch('/reservations/ai-facts?' + params.toString(), { method: 'GET' });
+  return await adminApiFetch('/reservations/ai-facts?' + params.toString(), {
+    method: 'GET',
+    timeoutMs: options.timeoutMs,
+    maxAttempts: options.maxAttempts,
+    signal: options.signal
+  });
 }
 
 function wantsReservationAiDetail(query) {
@@ -11489,8 +12522,9 @@ function buildReservationOnlyQueryResult(reservationFacts, label) {
  * 食べログ／一休／手入力の予約・顧客リピートを AI 確定集計へ追加する。
  * monthlyBreakdown の期間に合わせる。失敗時・予約0件時は null（他レイヤは壊さない）。
  */
-async function enrichReservationFacts(monthlyBreakdown, query, forceItems = false) {
-  const coverage = getReservationImportCoverage();
+async function enrichReservationFacts(monthlyBreakdown, query, forceItems = false, options = {}) {
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const coverage = getReservationImportCoverage(requestedStoreKey);
   // 現時点で予約取り込み未開始の店舗は、予約0件や飛び込み100%を作らない。
   if (!coverage) return null;
   const coveredMonthlyBreakdown = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
@@ -11504,7 +12538,7 @@ async function enrichReservationFacts(monthlyBreakdown, query, forceItems = fals
   const monthTo = months[months.length - 1];
   try {
     const includeItems = forceItems || wantsReservationAiDetail(query);
-    const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems);
+    const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems, options);
     if (!raw || typeof raw !== 'object') return null;
     // 予約取り込みが無い店舗／期間内0件は節を出さない（飛込=POS全体のような誤解を防ぐ）
     if (!hasUsableReservationAiFacts(raw)) return null;
@@ -11524,6 +12558,7 @@ async function enrichReservationFacts(monthlyBreakdown, query, forceItems = fals
       coverage
     };
   } catch (err) {
+    if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
     // 取得できなかったときに節を出すと、プロンプト規約「本節があれば止めるな」と
     // 噛み合わず、AIが存在しない予約データを語る恐れがある。黙って落とす。
     console.warn('enrichReservationFacts failed:', err);
@@ -11880,9 +12915,42 @@ function hydrateJournalComparisonResult(rawCmp) {
 }
 
 /**
+ * 商品・昼夜・コホート明細が日計総売上と一致した範囲をAIへ明示する。
+ * partial/incomplete の数値を全期間の確定値へ読み替えさせないための共通境界。
+ */
+function formatJournalDetailCoverageForAi(coverage, indent = '') {
+  if (!coverage || typeof coverage !== 'object') return '';
+  const scanned = Number(coverage.scanned_days) || 0;
+  const complete = Number(coverage.detail_complete_days) || 0;
+  const incomplete = Number(coverage.detail_incomplete_days) || Math.max(0, scanned - complete);
+  if (!(scanned > 0)) return '';
+  const excludedSales = Number(coverage.excluded_gross_sales) || 0;
+  const dates = Array.isArray(coverage.incomplete_dates)
+    ? coverage.incomplete_dates.filter(Boolean)
+    : [];
+  if (incomplete === 0 && complete === scanned) {
+    return `${indent}- 明細整合性: ${complete}/${scanned}営業日で会計明細合計＝日計総売上（全対象日を商品・昼夜・コホート分析に採用）`;
+  }
+  const dateText = dates.length
+    ? `／除外日 ${dates.slice(0, 12).join('・')}${dates.length > 12 ? `ほか${dates.length - 12}日` : ''}`
+    : '';
+  return `${indent}- 明細整合性: ${complete}/${scanned}営業日のみ採用。` +
+    `不一致${incomplete}日は商品・カテゴリ・昼夜・コホートから除外` +
+    `${excludedSales > 0 ? `（除外日の総売上 ${yen(excludedSales)}。日計売上自体は別の確定集計に保持）` : ''}${dateText}。` +
+    `以下の明細数値は採用日の範囲だけであり、全期間の確定値とは表現しないこと`;
+}
+
+function journalDetailCoverageIsComplete(coverage) {
+  const scanned = Number(coverage?.scanned_days) || 0;
+  const complete = Number(coverage?.detail_complete_days) || 0;
+  const incomplete = Number(coverage?.detail_incomplete_days) || 0;
+  return scanned > 0 && incomplete === 0 && complete === scanned;
+}
+
+/**
  * 汎用ジャーナル比較（複数軸）。商品利用/非利用は従来の productCohortFacts にも投影する。
  */
-async function enrichJournalCohortComparisons(query, productTimelineFacts, monthlyBreakdown) {
+async function enrichJournalCohortComparisons(query, productTimelineFacts, monthlyBreakdown, options = {}) {
   if (!wantsJournalAxisCompare(query)) {
     return { comparisons: [], productCohortFacts: null };
   }
@@ -11894,8 +12962,9 @@ async function enrichJournalCohortComparisons(query, productTimelineFacts, month
   const { monthFrom, monthTo } = resolveCohortMonthRange(productTimelineFacts, monthlyBreakdown);
   let raw;
   try {
-    raw = await searchCloudJournalCohortCompare(specs, monthFrom || undefined, monthTo || undefined);
+    raw = await searchCloudJournalCohortCompare(specs, monthFrom || undefined, monthTo || undefined, options);
   } catch (err) {
+    if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
     console.warn('journal cohort-compare failed:', err);
     return {
       comparisons: [{ error: err?.message || String(err), label: 'ジャーナル比較' }],
@@ -11908,7 +12977,8 @@ async function enrichJournalCohortComparisons(query, productTimelineFacts, month
     monthFrom: raw?.month_from || monthFrom,
     monthTo: raw?.month_to || monthTo,
     scannedFiles: raw?.scanned_files || 0,
-    scannedReceipts: raw?.scanned_receipts || 0
+    scannedReceipts: raw?.scanned_receipts || 0,
+    detailCoverage: raw?.detail_coverage || null
   };
   const comparisonsWithMeta = comparisons.map((c) => ({ ...c, ...meta }));
 
@@ -11922,6 +12992,7 @@ async function enrichJournalCohortComparisons(query, productTimelineFacts, month
       monthTo: meta.monthTo,
       scannedFiles: meta.scannedFiles,
       scannedReceipts: meta.scannedReceipts,
+      detailCoverage: meta.detailCoverage,
       withProduct: productCmp.left,
       withoutProduct: productCmp.right,
       avgSpendDiff: productCmp.avgSpendDiff,
@@ -11939,15 +13010,19 @@ async function enrichJournalCohortComparisons(query, productTimelineFacts, month
 }
 
 /** @deprecated 汎用 enrichJournalCohortComparisons へ委譲（既存呼び出し互換） */
-async function enrichProductCohortFacts(query, productTimelineFacts, monthlyBreakdown) {
-  const packed = await enrichJournalCohortComparisons(query, productTimelineFacts, monthlyBreakdown);
+async function enrichProductCohortFacts(query, productTimelineFacts, monthlyBreakdown, options = {}) {
+  const packed = await enrichJournalCohortComparisons(query, productTimelineFacts, monthlyBreakdown, options);
   return packed.productCohortFacts;
 }
 
-function formatCohortSideLines(indent, label, side) {
+function formatCohortSideLines(indent, label, side, coverage = null) {
   const lines = [];
   if (!side || !(side.receiptCount > 0)) {
-    lines.push(`${indent}  - ${label}: 該当会計なし`);
+    lines.push(
+      journalDetailCoverageIsComplete(coverage)
+        ? `${indent}  - ${label}: 該当会計なし`
+        : `${indent}  - ${label}: 日計照合済みの採用日では該当会計なし（除外日は未確認）`
+    );
     return lines;
   }
   lines.push(
@@ -11987,15 +13062,19 @@ function formatProductCohortFactsForAi(facts, indent = '') {
   lines.push(
     `${indent}  - 条件: ${hintBits.join(' / ') || '（条件なし）'}／期間 ${period}／走査 ${facts.scannedFiles || 0}ファイル・${facts.scannedReceipts || 0}会計`
   );
-  lines.push(...formatCohortSideLines(indent, '利用あり（対象商品を含む会計）', facts.withProduct));
-  lines.push(...formatCohortSideLines(indent, '利用なし（対象商品を含まない会計）', facts.withoutProduct));
+  const coverageLine = formatJournalDetailCoverageForAi(facts.detailCoverage, `${indent}  `);
+  if (coverageLine) lines.push(coverageLine);
+  lines.push(...formatCohortSideLines(indent, '利用あり（対象商品を含む会計）', facts.withProduct, facts.detailCoverage));
+  lines.push(...formatCohortSideLines(indent, '利用なし（対象商品を含まない会計）', facts.withoutProduct, facts.detailCoverage));
   if (facts.withProduct?.receiptCount && facts.withoutProduct?.receiptCount) {
     const sign = (n) => (n > 0 ? '+' : '') + yen(n);
     lines.push(
       `${indent}  - 差分（利用あり − 利用なし）: 客単価 ${sign(facts.avgSpendDiff || 0)} / 客あたりドリンク ${sign(facts.drinkPerGuestDiff || 0)}`
     );
     lines.push(
-      `${indent}  - ※これはジャーナル会計明細に基づく確定集計。追加の比較が必要とは言わず、この数値を根拠に述べること`
+      facts.detailCoverage?.status === 'complete'
+        ? `${indent}  - ※これは日計照合済みの全対象日ジャーナル会計明細に基づく確定集計。この数値を根拠に述べること`
+        : `${indent}  - ※これは日計照合に成功した採用日の集計。除外日を含む全期間値とは断定しないこと`
     );
   }
   if ((facts.byMonth || []).length) {
@@ -12015,6 +13094,8 @@ function formatJournalCohortComparisonsForAi(comparisons, indent = '') {
   const list = Array.isArray(comparisons) ? comparisons : [];
   if (!list.length) return '';
   const lines = [`${indent}- ジャーナル会計比較（汎用コホート・複数軸可）:`];
+  const coverageLine = formatJournalDetailCoverageForAi(list[0]?.detailCoverage, `${indent}  `);
+  if (coverageLine) lines.push(coverageLine);
   for (const cmp of list) {
     if (cmp.error) {
       lines.push(`${indent}  - エラー: ${cmp.error}`);
@@ -12031,8 +13112,8 @@ function formatJournalCohortComparisonsForAi(comparisons, indent = '') {
     lines.push(
       `${indent}  - ${cmp.label || cmp.id}（軸:${cmp.axis}${period ? `／${period}` : ''}／走査 ${cmp.scannedFiles || 0}ファイル）`
     );
-    lines.push(...formatCohortSideLines(indent + '  ', cmp.leftLabel || '左', cmp.left));
-    lines.push(...formatCohortSideLines(indent + '  ', cmp.rightLabel || '右', cmp.right));
+    lines.push(...formatCohortSideLines(indent + '  ', cmp.leftLabel || '左', cmp.left, cmp.detailCoverage));
+    lines.push(...formatCohortSideLines(indent + '  ', cmp.rightLabel || '右', cmp.right, cmp.detailCoverage));
     if (cmp.left?.receiptCount && cmp.right?.receiptCount) {
       const sign = (n) => (n > 0 ? '+' : '') + yen(n);
       lines.push(
@@ -12048,7 +13129,11 @@ function formatJournalCohortComparisonsForAi(comparisons, indent = '') {
       });
     }
   }
-  lines.push(`${indent}  - ※上記はジャーナル会計明細の確定集計。「比較できない／追加比較が必要」で止めないこと`);
+  lines.push(
+    list[0]?.detailCoverage?.status === 'complete'
+      ? `${indent}  - ※上記は全対象日で日計照合済みのジャーナル会計明細集計。「比較できない／追加比較が必要」で止めないこと`
+      : `${indent}  - ※上記は日計照合に成功した採用日のジャーナル会計明細集計。除外日を含む全期間値とは断定しないこと`
+  );
   return lines.join('\n');
 }
 
@@ -12115,7 +13200,7 @@ function summarizeCourseMonthlyFacts(rows) {
 }
 
 /** 月次内訳に足りない月を allReports から補完する（商品初出の「前」期間用） */
-async function appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKey, allReports, needKeys) {
+async function appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKey, allReports, needKeys, options = {}) {
   const rows = Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [];
   const have = new Set(rows.map((r) => r.key));
   for (const key of (needKeys || [])) {
@@ -12131,7 +13216,7 @@ async function appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKe
     let lunchFood = 0, lunchDrink = 0, dinnerFood = 0, dinnerDrink = 0;
     const used = [];
     for (const r of sources) {
-      const full = await hydrateSavedReport(r);
+      const full = await hydrateSavedReport(r, options);
       if (full?._hydrateFailed) continue;
       used.push(full);
       let s = reportSummaryTotal(full);
@@ -12202,7 +13287,7 @@ async function appendMissingMonthsToBreakdown(monthlyBreakdown, monthSourcesByKe
  * 注意: 質問対象の月次推移（monthlyBreakdown）本体は変更しない。
  * 複数ターゲットを並列検索し、ファミリー広域の初出で固有商品の開始月を潰さない。
  */
-async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesByKey, allReports) {
+async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesByKey, allReports, options = {}) {
   if (!wantsProductTimelineSearch(query)) return null;
   const hints = extractProductSearchHints(query);
   const searchTargets = listTimelineSearchTargets(hints);
@@ -12220,10 +13305,10 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
       return { target, error: '検索条件なし', firstSeen: null };
     }
     try {
-      let timeline = await searchCloudJournalProducts(searchHints);
+      let timeline = await searchCloudJournalProducts(searchHints, options);
       if (searchHints.unit != null && searchHints.q) {
         try {
-          const broad = await searchCloudJournalProducts({ q: searchHints.q, code: searchHints.code });
+          const broad = await searchCloudJournalProducts({ q: searchHints.q, code: searchHints.code }, options);
           if (broad?.unit_bands?.length) {
             timeline = {
               ...timeline,
@@ -12231,7 +13316,9 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
               name_variants: broad.name_variants || timeline.name_variants
             };
           }
-        } catch (_) {}
+        } catch (err) {
+          if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
+        }
       }
       return {
         target,
@@ -12241,6 +13328,7 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
         matchCount: timeline?.match_count || 0,
         totalQty: timeline?.total_qty || 0,
         totalAmount: timeline?.total_amount || 0,
+        detailCoverage: timeline?.detail_coverage || null,
         firstSeen: timeline?.first_seen || null,
         lastSeen: timeline?.last_seen || null,
         nameVariants: timeline?.name_variants || [],
@@ -12251,6 +13339,7 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
           : []
       };
     } catch (err) {
+      if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
       return { target, searchHints, error: err?.message || String(err), firstSeen: null };
     }
   };
@@ -12274,7 +13363,11 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
   }
 
   const first = primary.firstSeen || null;
-  const pivot = first?.year_month || '';
+  // 不一致日がある期間の「最古検出」は完全な導入月正本ではないため、
+  // 導入前後の因果比較に使わない。
+  const pivot = journalDetailCoverageIsComplete(primary.detailCoverage)
+    ? (first?.year_month || '')
+    : '';
   const compareRows = (Array.isArray(monthlyBreakdown) ? monthlyBreakdown : [])
     .map((r) => ({ ...r }));
   const compareSources = new Map(monthSourcesByKey instanceof Map ? monthSourcesByKey : []);
@@ -12284,7 +13377,7 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
       const k = shiftYearMonth(pivot, -i);
       if (k) needKeys.push(k);
     }
-    await appendMissingMonthsToBreakdown(compareRows, compareSources, allReports, needKeys);
+    await appendMissingMonthsToBreakdown(compareRows, compareSources, allReports, needKeys, options);
   }
 
   const beforeRows = pivot ? compareRows.filter((r) => r.key && r.key < pivot) : [];
@@ -12309,6 +13402,7 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
     matchCount: primary.matchCount || 0,
     totalQty: primary.totalQty || 0,
     totalAmount: primary.totalAmount || 0,
+    detailCoverage: primary.detailCoverage || null,
     firstSeen: first,
     lastSeen: primary.lastSeen || null,
     nameVariants: primary.nameVariants || [],
@@ -12327,7 +13421,7 @@ async function enrichProductTimelineFacts(query, monthlyBreakdown, monthSourcesB
 
 function formatProductTimelineFactsForAi(facts, indent = '') {
   if (!facts) return '';
-  const lines = [`${indent}- 商品初出・導入月（店舗ジャーナル全件横断・ターゲット別）:`];
+  const lines = [`${indent}- 商品検出・導入月（日計照合済みジャーナル・ターゲット別）:`];
   if (facts.error && !(facts.targets || []).some((t) => t.firstSeen)) {
     lines.push(`${indent}  - 検索エラー: ${facts.error}`);
     return lines.join('\n');
@@ -12335,8 +13429,16 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
   if (facts.timelineScope) {
     lines.push(`${indent}  - 検索スコープ: ${facts.timelineScope}`);
   }
-  lines.push(`${indent}  - ※複数ターゲットがあるとき、各ターゲットの初出を個別に使う。ファミリー最古で固有商品の開始月を置き換えない`);
-  lines.push(`${indent}  - ※本節があるときは「ジャーナルを再読できない／該当商品が集計に無い」と書かない`);
+  lines.push(
+    journalDetailCoverageIsComplete(facts.detailCoverage)
+      ? `${indent}  - ※複数ターゲットがあるとき、各ターゲットの初出を個別に使う。ファミリー最古で固有商品の開始月を置き換えない`
+      : `${indent}  - ※複数ターゲットは個別に扱うが、除外日があるため最古検出を完全な初出・導入月へ置き換えない`
+  );
+  lines.push(
+    journalDetailCoverageIsComplete(facts.detailCoverage)
+      ? `${indent}  - ※本節があるときは「ジャーナルを再読できない／該当商品が集計に無い」と書かない`
+      : `${indent}  - ※採用日の結果は使えるが、除外日については「日計不一致のため明細未確認」と明示する`
+  );
 
   const targetList = Array.isArray(facts.targets) && facts.targets.length
     ? facts.targets
@@ -12350,6 +13452,7 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
         matchCount: facts.matchCount,
         totalQty: facts.totalQty,
         totalAmount: facts.totalAmount,
+        detailCoverage: facts.detailCoverage,
         scannedFiles: facts.scannedFiles,
         error: facts.error
       }];
@@ -12370,13 +13473,20 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
       hintBits.push(`単価帯 ${yen(tf.searchHints?.unit ?? tf.target.unit)}`);
     }
     lines.push(`${indent}    - 条件: ${hintBits.join(' / ') || '（条件なし）'}／走査 ${tf.scannedFiles || 0}件／一致 ${tf.matchCount || 0}`);
+    const coverageLine = formatJournalDetailCoverageForAi(tf.detailCoverage, `${indent}    `);
+    if (coverageLine) lines.push(coverageLine);
     if (!tf.firstSeen) {
-      lines.push(`${indent}    - ジャーナル明細: 0件（未検出）`);
+      lines.push(
+        journalDetailCoverageIsComplete(tf.detailCoverage)
+          ? `${indent}    - ジャーナル明細: 0件（全対象日で未検出）`
+          : `${indent}    - ジャーナル明細: 日計照合済みの採用日では未検出（除外日は未確認）`
+      );
       return;
     }
     const fs = tf.firstSeen;
     lines.push(
-      `${indent}    - 初出: ${fs.year_month}（${fs.business_date}）「${fs.name}」コード ${fs.code || '—'} 単価 ${yen(fs.unit)}`
+      `${indent}    - ${journalDetailCoverageIsComplete(tf.detailCoverage) ? '初出' : '採用日範囲で確認できた最古'}: ` +
+      `${fs.year_month}（${fs.business_date}）「${fs.name}」コード ${fs.code || '—'} 単価 ${yen(fs.unit)}`
     );
     if (tf.lastSeen) {
       lines.push(`${indent}    - 最終検出: ${tf.lastSeen.year_month}（${tf.lastSeen.business_date}）`);
@@ -12393,7 +13503,7 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
       });
     }
     if ((tf.byMonth || []).length) {
-      lines.push(`${indent}    - 月次（質問名称に一致した行のみ）:`);
+      lines.push(`${indent}    - 月次（質問名称に一致し、日計照合に成功した行のみ）:`);
       tf.byMonth.slice(-12).forEach((m) => {
         const units = (m.units || []).map((u) => `${yen(u.unit)}×${u.qty}`).join('、');
         lines.push(`${indent}      - ${m.year_month}: ${m.qty}点 / ${yen(m.amount)}${units ? `（${units}）` : ''}`);
@@ -12431,7 +13541,11 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
     fmtSide('導入月', facts.introMonth, null, null);
     fmtSide('導入月以降', facts.onAndAfter, facts.productQtyOnAfter, facts.productAmtOnAfter);
   }
-  lines.push(`${indent}  - ※開始月は保存レポートの有無ではなく、各ターゲットのジャーナル初出月。兄弟商品の一覧は「コースラインナップ」節`);
+  lines.push(
+    journalDetailCoverageIsComplete(facts.detailCoverage)
+      ? `${indent}  - ※開始月は保存レポートの有無ではなく、全対象日を照合した各ターゲットのジャーナル初出月。兄弟商品の一覧は「コースラインナップ」節`
+      : `${indent}  - ※除外日があるため、上記の最古検出を完全な導入月とは断定しない。兄弟商品の一覧も日計照合済み採用日の範囲で扱うこと`
+  );
   return lines.join('\n');
 }
 
@@ -12440,7 +13554,7 @@ function formatProductTimelineFactsForAi(facts, indent = '') {
  * 再発防止: 一部の別名に閉じず、必ず「コース」で広く引き、単価帯×名称の主力を点数で決める。
  * 単発特別単価は例外に分離。質問の単価帯が主軸に無い場合は coverageGaps で警告する。
  */
-async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
+async function enrichCourseLineupFacts(query, productTimelineFacts = null, options = {}) {
   const hints = extractProductSearchHints(query);
   const forceByNamedOrFamily = !!(
     hints.needsFamilyInventory ||
@@ -12453,8 +13567,9 @@ async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
   let raw;
   try {
     // 常に広義「コース」で検索（固有別名に閉じないのが再発防止の核心）
-    raw = await searchCloudJournalProducts({ q: 'コース' });
+    raw = await searchCloudJournalProducts({ q: 'コース' }, options);
   } catch (err) {
+    if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
     console.warn('course lineup search failed:', err);
     return { error: err?.message || String(err) };
   }
@@ -12501,7 +13616,9 @@ async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
   const byMonth = Array.isArray(raw?.by_month)
     ? raw.by_month.slice().sort((a, b) => String(a?.year_month || '').localeCompare(String(b?.year_month || '')))
     : [];
-  const pivotMonth = String(productTimelineFacts?.firstSeen?.year_month || '');
+  const pivotMonth = journalDetailCoverageIsComplete(productTimelineFacts?.detailCoverage)
+    ? String(productTimelineFacts?.firstSeen?.year_month || '')
+    : '';
   const beforePivot = pivotMonth
     ? summarizeCourseMonthlyFacts(byMonth.filter((row) => String(row?.year_month || '') < pivotMonth))
     : null;
@@ -12531,6 +13648,7 @@ async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
 
   return {
     scannedFiles: raw?.scanned_files || 0,
+    detailCoverage: raw?.detail_coverage || null,
     totalQty,
     totalAmount,
     core,
@@ -12545,13 +13663,15 @@ async function enrichCourseLineupFacts(query, productTimelineFacts = null) {
     searchScope: 'q=コース（ファミリー広域・店舗共通。固有別名に閉じない）',
     rootCauseGuard:
       '過去の不具合: 固有別名だけを検索すると他コースが落ちる／逆にファミリー検索の初出で固有商品開始月が潰れる。本節は在庫一覧、初出はターゲット別節。',
-    note: '主軸は店舗ジャーナル上で点数の多いコース名称×単価。別名トークン群は別メニューとして併記。単日・極少は例外。月次は保存レポート詳細の36か月上限とは別に、ジャーナル原本の全件横断結果を使う。'
+    note: journalDetailCoverageIsComplete(raw?.detail_coverage)
+      ? '主軸は全対象日で日計照合済みの店舗ジャーナル上で点数の多いコース名称×単価。別名トークン群は別メニューとして併記。単日・極少は例外。'
+      : '主軸・月次・合計は日計照合に成功した採用日の範囲。除外日を含む全期間のコース構成・導入前0点・合計とは断定しない。'
   };
 }
 
 function formatCourseLineupFactsForAi(facts, indent = '') {
   if (!facts) return '';
-  const lines = [`${indent}- コースラインナップ（ジャーナル全件・名称×単価／店舗共通・全兄弟商品）:`];
+  const lines = [`${indent}- コースラインナップ（日計照合済みジャーナル・名称×単価／店舗共通）:`];
   if (facts.error) {
     lines.push(`${indent}  - 検索エラー: ${facts.error}`);
     return lines.join('\n');
@@ -12559,6 +13679,8 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
   lines.push(`${indent}  - ${facts.rootCauseGuard}`);
   lines.push(`${indent}  - ${facts.note}`);
   lines.push(`${indent}  - 検索範囲: ${facts.searchScope}／走査 ${facts.scannedFiles || 0}ファイル／合計 ${facts.totalQty || 0}点 / ${yen(facts.totalAmount || 0)}`);
+  const coverageLine = formatJournalDetailCoverageForAi(facts.detailCoverage, `${indent}  `);
+  if (coverageLine) lines.push(coverageLine);
   if (facts.pivotMonth) {
     const before = facts.beforePivot || {};
     const after = facts.onAfterPivot || {};
@@ -12567,7 +13689,11 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
     lines.push(`${indent}    - 導入月以降: ${after.monthCount || 0}か月 / コース全体 ${after.qty || 0}点 / ${yen(after.amount || 0)}（${after.firstMonth || '—'}〜${after.lastMonth || '—'}）`);
   }
   if ((facts.byMonth || []).length) {
-    lines.push(`${indent}  - 月次コース販売（ジャーナル原本の保存全期間・導入前を含む）:`);
+    lines.push(
+      journalDetailCoverageIsComplete(facts.detailCoverage)
+        ? `${indent}  - 月次コース販売（保存された全対象日を日計照合済み・導入前を含む）:`
+        : `${indent}  - 月次コース販売（日計照合済み採用日のみ。除外日は未確認）:`
+    );
     facts.byMonth.forEach((m) => {
       const names = (m.names || []).slice(0, 4)
         .map((row) => `「${row.name}」${row.qty}点`)
@@ -12580,7 +13706,11 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
         + `${names ? `／主な名称 ${names}` : ''}${units ? `／単価別 ${units}` : ''}`
       );
     });
-    lines.push(`${indent}    - ※「SPコース導入前のSPコースは0点」は固有商品の事実にすぎない。上記に既存コースがある月を「対象コース0点」「コースなし」と要約しない`);
+    lines.push(
+      journalDetailCoverageIsComplete(facts.detailCoverage)
+        ? `${indent}    - ※「SPコース導入前のSPコースは0点」は固有商品の事実にすぎない。上記に既存コースがある月を「対象コース0点」「コースなし」と要約しない`
+        : `${indent}    - ※除外日がある月は、採用日の0点を月全体の0点・コースなしへ読み替えない`
+    );
   }
   const coreQty = (facts.core || []).reduce((s, r) => s + (Number(r.qty) || 0), 0);
   const coreAmt = (facts.core || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
@@ -12628,7 +13758,7 @@ function formatCourseLineupFactsForAi(facts, indent = '') {
     });
   }
   if ((facts.coverageGaps || []).length) {
-    lines.push(`${indent}  - 漏れ検知（質問の単価帯が主軸に無い）:`);
+    lines.push(`${indent}  - 漏れ検知（日計照合済み採用日の主軸に質問の単価帯が無い）:`);
     facts.coverageGaps.forEach((g) => {
       const near = g.nearest
         ? `最寄り主軸「${g.nearest.name}」${yen(g.nearest.unit)}（${g.nearest.qty}点）`
@@ -13928,12 +15058,23 @@ async function downloadKnowledgeAttachment(id) {
  * AI用の資料一覧をページング取得する。
  * 失敗時は「0件」へ潰さず状態を保持し、直前の成功キャッシュがあれば stale として使う。
  */
-async function loadStoreKnowledgeForAi({ forceRefresh = false } = {}) {
+async function loadStoreKnowledgeForAi({
+  forceRefresh = false,
+  timeoutMs = AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+  maxAttempts = 1,
+  totalTimeoutMs = AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+  storeKey = STORE_KEY,
+  signal = null
+} = {}) {
+  const requestedStoreKey = String(storeKey || STORE_KEY || '').trim().toLowerCase();
+  if (signal?.aborted) throw Object.assign(new Error('処理は中止されました'), { name: 'AbortError' });
   if (!getAdminToken()) {
-    knowledgeLoadState = { status: 'auth_missing', truncated: false, error: '' };
+    if (requestedStoreKey === String(STORE_KEY || '').trim().toLowerCase()) {
+      knowledgeLoadState = { status: 'auth_missing', truncated: false, error: '' };
+    }
     return [];
   }
-  const fresh = knowledgeCache.storeKey === STORE_KEY
+  const fresh = knowledgeCache.storeKey === requestedStoreKey
     && (Date.now() - knowledgeCache.loadedAt) < KNOWLEDGE_CACHE_TTL_MS;
   if (fresh && !forceRefresh) {
     knowledgeLoadState = {
@@ -13947,20 +15088,29 @@ async function loadStoreKnowledgeForAi({ forceRefresh = false } = {}) {
     const items = [];
     let offset = 0;
     let hasMore = true;
+    const startedAt = Date.now();
     while (hasMore && items.length < AI_KNOWLEDGE_LIST_MAX_ITEMS) {
+      const remaining = Math.max(0, Number(totalTimeoutMs) - (Date.now() - startedAt));
+      if (remaining <= 0) throw new Error('店舗資料一覧の取得が時間上限を超えました');
       const params = new URLSearchParams({
-        store_key: STORE_KEY,
+        store_key: requestedStoreKey,
         limit: String(AI_KNOWLEDGE_LIST_PAGE_SIZE),
         offset: String(offset)
       });
-      const body = await adminApiFetch(`${KNOWLEDGE_API}?${params.toString()}`, { method: 'GET' });
+      const body = await adminApiFetch(`${KNOWLEDGE_API}?${params.toString()}`, {
+        method: 'GET',
+        timeoutMs: Math.max(1000, Math.min(Number(timeoutMs) || remaining, remaining)),
+        maxAttempts,
+        signal
+      });
       const page = Array.isArray(body.items) ? body.items : [];
       items.push(...page);
       offset += page.length;
       hasMore = body.has_more === true && page.length > 0;
     }
     const truncated = hasMore && items.length >= AI_KNOWLEDGE_LIST_MAX_ITEMS;
-    const previous = knowledgeCache.storeKey === STORE_KEY
+    if (signal?.aborted) throw Object.assign(new Error('処理は中止されました'), { name: 'AbortError' });
+    const previous = knowledgeCache.storeKey === requestedStoreKey
       ? new Map((knowledgeCache.items || []).map(item => [String(item?.id || ''), item]))
       : new Map();
     const merged = items.slice(0, AI_KNOWLEDGE_LIST_MAX_ITEMS).map(item => {
@@ -13972,15 +15122,16 @@ async function loadStoreKnowledgeForAi({ forceRefresh = false } = {}) {
       return item;
     });
     knowledgeCache = {
-      storeKey: STORE_KEY,
+      storeKey: requestedStoreKey,
       loadedAt: Date.now(),
       items: merged
     };
     knowledgeLoadState = { status: 'ok', truncated, error: '' };
     return knowledgeCache.items;
   } catch (err) {
+    if (err?.name === 'AbortError') throw err;
     console.warn('店舗ナレッジの取得に失敗しました（分析は継続します）:', err);
-    const staleItems = knowledgeCache.storeKey === STORE_KEY
+    const staleItems = knowledgeCache.storeKey === requestedStoreKey
       ? (knowledgeCache.items || [])
       : [];
     knowledgeLoadState = {
@@ -14155,15 +15306,21 @@ function selectStoreKnowledgeForQuery(query, range, items) {
 }
 
 /** 一覧は要約中心。AI添付前に選択資料だけ詳細（チャンク含む）を取り直す */
-async function hydrateKnowledgeItemsForAi(items) {
+async function hydrateKnowledgeItemsForAi(items, options = {}) {
   const list = Array.isArray(items) ? items : [];
   if (!list.length || !getAdminToken()) return list;
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  if (options.signal?.aborted) {
+    throw Object.assign(new Error('処理は中止されました'), { name: 'AbortError' });
+  }
   const hydratedById = new Map();
   const unresolvedIds = [];
   for (const item of list) {
     const id = String(item?.id || '');
     if (!id) continue;
-    const cached = (knowledgeCache.items || []).find(row => String(row?.id || '') === id);
+    const cached = knowledgeCache.storeKey === requestedStoreKey
+      ? (knowledgeCache.items || []).find(row => String(row?.id || '') === id)
+      : null;
     if (cached?._hydrated && Array.isArray(cached.chunks)) {
       hydratedById.set(id, cached);
     } else if (item?._hydrated && Array.isArray(item.chunks)) {
@@ -14176,7 +15333,10 @@ async function hydrateKnowledgeItemsForAi(items) {
     try {
       const body = await adminApiFetch(`${KNOWLEDGE_API}/items`, {
         method: 'POST',
-        body: JSON.stringify({ store_key: STORE_KEY, ids: unresolvedIds.slice(0, AI_KNOWLEDGE_MAX_ITEMS) })
+        body: JSON.stringify({ store_key: requestedStoreKey, ids: unresolvedIds.slice(0, AI_KNOWLEDGE_MAX_ITEMS) }),
+        timeoutMs: options.timeoutMs,
+        maxAttempts: options.maxAttempts,
+        signal: options.signal
       });
       for (const full of (Array.isArray(body.items) ? body.items : [])) {
         const id = String(full?.id || '');
@@ -14194,6 +15354,7 @@ async function hydrateKnowledgeItemsForAi(items) {
         });
       }
     } catch (err) {
+      if (err?.name === 'AbortError') throw err;
       console.warn('資料詳細の一括取得に失敗（一覧抜粋で分析を継続）:', err);
     }
   }
@@ -14202,7 +15363,7 @@ async function hydrateKnowledgeItemsForAi(items) {
     return hydratedById.get(id) || { ...item, _hydrateFailed: !!id };
   });
   const refreshed = new Map(out.filter(item => item?._hydrated).map(item => [String(item.id), item]));
-  if (refreshed.size && knowledgeCache.storeKey === STORE_KEY) {
+  if (refreshed.size && knowledgeCache.storeKey === requestedStoreKey && !options.signal?.aborted) {
     knowledgeCache.items = knowledgeCache.items.map(item => refreshed.get(String(item?.id || '')) || item);
   }
   return out;
@@ -15084,7 +16245,7 @@ function normalizeAiClarificationText(text) {
   return value;
 }
 
-async function requestNaturalIntentClarification(userMsg, chatHistory, coverage, missingKind = 'intent') {
+async function requestNaturalIntentClarification(userMsg, chatHistory, coverage, missingKind = 'intent', options = {}) {
   const fallback = missingKind === 'period'
     ? buildSavedDataNaturalClarificationReply(userMsg, coverage)
     : buildAiIntentClarificationReply(userMsg);
@@ -15104,7 +16265,13 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
       role: item && item.role === 'user' ? 'user' : 'assistant',
       content: String(item?.content || '').slice(0, 600)
     }));
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
   const controller = new AbortController();
+  const abortFromExternal = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else if (options.signal?.addEventListener) {
+    options.signal.addEventListener('abort', abortFromExternal, { once: true });
+  }
   const timer = setTimeout(() => controller.abort(), 12500);
   try {
     if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
@@ -15120,7 +16287,7 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
             ? String(currentReport?.period || currentReport?.title || '').slice(0, 80)
             : ''
         },
-        storeKey: STORE_KEY
+        storeKey: requestedStoreKey
       }, {
       anonKey: SUPABASE_ANON_KEY,
       signal: controller.signal,
@@ -15182,6 +16349,9 @@ async function requestNaturalIntentClarification(userMsg, chatHistory, coverage,
     console.warn('Natural intent clarification failed; using contextual fallback:', err);
   } finally {
     clearTimeout(timer);
+    if (options.signal?.removeEventListener) {
+      options.signal.removeEventListener('abort', abortFromExternal);
+    }
   }
   return {
     status: 'clarify',
@@ -15268,7 +16438,14 @@ function currentReportHasUsableSales() {
     || (Array.isArray(currentReport.sales) && currentReport.sales.length > 0);
 }
 
-async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedReports = null) {
+async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedReports = null, options = {}) {
+  const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  const queryRequestOptions = {
+    timeoutMs: 15000,
+    maxAttempts: 1,
+    storeKey: requestedStoreKey,
+    signal: options.signal
+  };
   let q = resolveAiChatQuery(query, chatHistory).toLowerCase();
   q = resolveRelativeTimeRefs(q);
   const hasCloudSession = !!getAdminToken();
@@ -15331,7 +16508,12 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   // 既に得たキャッシュは fetchSupabaseReports 側でそのまま使用される。
   const reports = Array.isArray(prefetchedReports)
     ? prefetchedReports
-    : await readSavedReports({ timeoutMs: 15000, maxAttempts: 1 });
+    : await readSavedReports({
+      timeoutMs: 15000,
+      maxAttempts: 1,
+      storeKey: requestedStoreKey,
+      signal: options.signal
+    });
   const allReports = currentReport ? [currentReport, ...reports] : reports;
   const cloudLookupUnavailable = Array.isArray(prefetchedReports)
     ? false
@@ -15384,7 +16566,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       const reservationFacts = await enrichReservationFacts(
         [{ key: monthKeyFromIsoDate(dayScope.from.iso) }, { key: monthKeyFromIsoDate(dayScope.to.iso) }],
         q,
-        true
+        true,
+        queryRequestOptions
       );
       if (reservationFacts) {
         const filteredItems = (reservationFacts.items || []).filter((item) => {
@@ -15408,9 +16591,9 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     if (daily) {
       // 日次集計にも商品ジャーナル横断を追加（銘柄・コード照会が日スコープで落ちないように）
       if (wantsProductTimelineSearch(q)) {
-        const productTimelineFacts = await enrichProductTimelineFacts(q, [], new Map(), allReports);
+        const productTimelineFacts = await enrichProductTimelineFacts(q, [], new Map(), allReports, queryRequestOptions);
         if (productTimelineFacts) {
-          const courseLineupFacts = await enrichCourseLineupFacts(q, productTimelineFacts);
+          const courseLineupFacts = await enrichCourseLineupFacts(q, productTimelineFacts, queryRequestOptions);
           return { ...daily, productTimelineFacts, courseLineupFacts };
         }
       }
@@ -15447,14 +16630,15 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     if (!wantsProductTimelineSearch(q)) return null;
     if (cloudLookupUnavailable) return unavailableCloudResult();
     try {
-      const facts = await enrichProductTimelineFacts(q, [], new Map(), allReports);
+      const facts = await enrichProductTimelineFacts(q, [], new Map(), allReports, queryRequestOptions);
       if (!facts) return null;
       // ヒットあり、またはターゲット抽出済み（0件も「無い」と答えられる確定事実）
       if (hasUsableProductTimelineFacts(facts) || (Array.isArray(facts.targets) && facts.targets.length)) {
-        const courseLineupFacts = await enrichCourseLineupFacts(q, facts);
+        const courseLineupFacts = await enrichCourseLineupFacts(q, facts, queryRequestOptions);
         return buildProductSearchOnlyResult(label, facts, { courseLineupFacts });
       }
     } catch (err) {
+      if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
       console.warn('product timeline fallback failed:', err);
     }
     return null;
@@ -15464,7 +16648,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     if (!isReservationFocusedQuery(q)) return null;
     try {
       const includeItems = wantsReservationAiDetail(q);
-      const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems);
+      const raw = await fetchReservationAiFacts(monthFrom, monthTo, includeItems, queryRequestOptions);
       if (!hasUsableReservationAiFacts(raw)) return { notMatchedLabel: label };
       return buildReservationOnlyQueryResult({
         monthFrom: raw.period?.month_from || monthFrom,
@@ -15479,6 +16663,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         generatedAt: raw.generated_at || ''
       }, label);
     } catch (err) {
+      if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
       console.warn('reservation-only query failed:', err);
       return { loadError: '予約データを確認できませんでした。' };
     }
@@ -15494,11 +16679,24 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const missingPeriods = [];
     for (const ref of rangeRefs.slice(0, 4)) {
       const label = rangeRefLabel(ref);
-      const matched = allReports.filter((report) => reportMatchesRangeRef(report, ref));
+      let matched = allReports.filter((report) => reportMatchesRangeRef(report, ref));
+      const filled = await recoverMissingMonthlyReports(
+        matched,
+        enumerateMonthKeysForRange(ref.fromYear, ref.fromMonth, ref.toYear, ref.toMonth),
+        {
+          maxRecoveries: 3,
+          timeoutMs: 15000,
+          maxAttempts: 1,
+          storeKey: requestedStoreKey,
+          signal: options.signal
+        }
+      );
+      matched = filled.reports;
       if (matched.length) {
         const summary = await summarizeMatched(matched, `${label}の売上データ`);
         if (summary?.loadError) return summary;
         periods.push(summary);
+        missingPeriods.push(...filled.missingKeys.map(monthKeyLabel));
       } else {
         missingPeriods.push(label);
       }
@@ -15517,7 +16715,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const fromKey = rangeRef.fromYear * 12 + rangeRef.fromMonth;
     const toKey = rangeRef.toYear * 12 + rangeRef.toMonth;
     const [lo, hi] = fromKey <= toKey ? [fromKey, toKey] : [toKey, fromKey];
-    const matched = allReports.filter(r => {
+    let matched = allReports.filter(r => {
       // 合算は開始月だけにぶら下がり月次穴を作るため、範囲集計の候補から除外する
       if (isCrossMonthAggregateReport(r)) return false;
       const ym = extractYearMonthFromText(r.period || r.title || '');
@@ -15528,9 +16726,27 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const rangeLabel = (rangeRef.fromMonth === 1 && rangeRef.toMonth === 12 && rangeRef.wasYearOnly)
       ? `${rangeRef.fromYear}年〜${rangeRef.toYear}年`
       : `${rangeRef.fromYear}年${rangeRef.fromMonth}月〜${rangeRef.toYear}年${rangeRef.toMonth}月`;
+    if (cloudLookupUnavailable && matched.length > 0) return unavailableCloudResult();
+    const expectedKeys = enumerateMonthKeysForRange(
+      rangeRef.fromYear,
+      rangeRef.fromMonth,
+      rangeRef.toYear,
+      rangeRef.toMonth
+    );
+    // 保存レポートの開始月・途中月・終了月を区別せず、欠けた月は同じDB月状態から補完する。
+    // 最大3か月を1回ずつ並列取得し、それ以上または原本自体が無い月だけを欠落として残す。
+    const filledRange = await recoverMissingMonthlyReports(matched, expectedKeys, {
+      maxRecoveries: 3,
+      timeoutMs: 15000,
+      maxAttempts: 1,
+      storeKey: requestedStoreKey,
+      signal: options.signal
+    });
+    matched = filledRange.reports;
     if (matched.length > 0) {
-      if (cloudLookupUnavailable) return unavailableCloudResult();
-      return await summarizeMatched(matched, `${rangeLabel}の売上データ`);
+      const missingPeriods = filledRange.missingKeys.map(monthKeyLabel);
+      const summary = await summarizeMatched(matched, `${rangeLabel}の売上データ`);
+      return missingPeriods.length ? { ...summary, missingPeriods } : summary;
     }
     const reservationOnly = await tryReservationOnlyMonthRange(
       `${rangeRef.fromYear}-${String(rangeRef.fromMonth).padStart(2, '0')}`,
@@ -15595,7 +16811,13 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       if (!detailRangeLimited) detailReports.push(...withoutMonth);
     }
     const detailTargets = new Set(detailReports);
-    const detailRequestOptions = { timeoutMs: 15000, maxAttempts: 1, concurrency: 3 };
+    const detailRequestOptions = {
+      timeoutMs: 15000,
+      maxAttempts: 1,
+      concurrency: 3,
+      storeKey: requestedStoreKey,
+      signal: options.signal
+    };
     const hydrationTargets = summaryReports.filter((r) => {
       const hasCoreSummary = Number.isFinite(Number(r?.total ?? r?.totalSales))
         && Number.isFinite(Number(r?.foodTotal))
@@ -15708,6 +16930,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         totalCustomers: customers,
         salesCount,
         sourceCount: 1,
+        _itemDetailIncomplete: r?._itemDetailIncomplete === true,
         _isMonthlyTitle: isMonthlyTitle,
         _sources: [r]
       };
@@ -15737,6 +16960,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         prev.totalCustomers += row.totalCustomers;
         prev.salesCount += row.salesCount;
         prev.sourceCount += 1;
+        prev._itemDetailIncomplete = prev._itemDetailIncomplete || row._itemDetailIncomplete;
         prev._sources.push(r);
       } else if (sales > prev.totalSales) {
         monthMap.set(key, row);
@@ -15776,23 +17000,25 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     //    （食べログ／一休／手入力。POS月次と突合した予約vs飛び込み月次表も同梱）
     // プロンプト側も formatVerifiedDetailLines / formatJournalSpecificFactsForAi に
     // 各セクションを併記し、片方を消して他方に統合しないこと。
-    await enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey);
-    const anomalyItemFacts = await enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey);
+    await enrichMonthlyMealCategorySplit(monthlyBreakdown, monthSourcesByKey, detailRequestOptions);
+    const anomalyItemFacts = await enrichMonthlyAnomalyItemFacts(monthlyBreakdown, monthSourcesByKey, detailRequestOptions);
     const productTimelineFacts = await enrichProductTimelineFacts(
       q,
       monthlyBreakdown,
       monthSourcesByKey,
-      allReports
+      allReports,
+      detailRequestOptions
     );
-    const courseLineupFacts = await enrichCourseLineupFacts(q, productTimelineFacts);
+    const courseLineupFacts = await enrichCourseLineupFacts(q, productTimelineFacts, detailRequestOptions);
     const cohortPacked = await enrichJournalCohortComparisons(
       q,
       productTimelineFacts,
-      monthlyBreakdown
+      monthlyBreakdown,
+      detailRequestOptions
     );
     const productCohortFacts = cohortPacked?.productCohortFacts || null;
     const journalCohortComparisons = cohortPacked?.comparisons || [];
-    const reservationFacts = await enrichReservationFacts(monthlyBreakdown, q);
+    const reservationFacts = await enrichReservationFacts(monthlyBreakdown, q, false, detailRequestOptions);
 
     // 期間合計は月次代表値の合算を優先（二重計上を避ける）。月が取れない場合のみ従来の合算へフォールバック。
     let totSales = 0, fTot = 0, dTot = 0, cust = 0, count = 0;
@@ -15895,7 +17121,11 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const itemDetailComplete = needsItemDetails
       && !detailRangeLimited
       && productSources.length > 0
-      && productSources.every(report => Array.isArray(report?.sales));
+      && productSources.every(report => Array.isArray(report?.sales) && report?._itemDetailIncomplete !== true);
+    const itemDetailIncompleteMonths = monthlyBreakdown
+      .filter((row) => row?._itemDetailIncomplete === true)
+      .map((row) => String(row.label || row.key || ''))
+      .filter(Boolean);
     const courseTransactions = needsItemDetails
       ? summarizeCourseTransactionsFromReports(productSources)
       : { transactionCount: 0, groupCount: 0, customerCount: 0, hasDetailedSales: false };
@@ -15946,6 +17176,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       topProducts,
       detailRangeLimited,
       itemDetailComplete,
+      itemDetailIncompleteMonths,
       courseTransactions,
       anomalyItemFacts,
       productTimelineFacts,
@@ -15968,7 +17199,12 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     for (const [, group] of monthGroups) targets.push(...selectReportsForSavedMonthGroup(group));
     const rows = [];
     for (const r of targets) {
-      const full = await hydrateSavedReport(r);
+      const full = await hydrateSavedReport(r, {
+        timeoutMs: 15000,
+        maxAttempts: 1,
+        storeKey: requestedStoreKey,
+        signal: options.signal
+      });
       if (full?._hydrateFailed) return unavailableCloudResult();
       for (const s of (Array.isArray(full?.sales) ? full.sales : [])) {
         const date = String(s?.date || '').slice(0, 10);
@@ -16016,7 +17252,28 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   const indexedRange = resolveIndexedSavedRangeIntent(q, allReports);
   if (indexedRange) {
     if (cloudLookupUnavailable) return unavailableCloudResult();
-    return await summarizeMatched(indexedRange.matched, `${indexedRange.label}の売上データ`);
+    let indexedReports = indexedRange.matched;
+    let indexedMissingPeriods = [];
+    // 「保存済み全期間」は一覧に存在する月だけを並べるとgapを黙って飛ばす。
+    // 最古〜最新を連続範囲として確認し、端月を含む欠落を共通回復層へ通す。
+    if (hasAllSavedPeriodIntent(q) && indexedRange.coverage?.first && indexedRange.coverage?.last) {
+      const [firstYear, firstMonth] = indexedRange.coverage.first.split('-').map(Number);
+      const [lastYear, lastMonth] = indexedRange.coverage.last.split('-').map(Number);
+      const expectedKeys = enumerateMonthKeysForRange(firstYear, firstMonth, lastYear, lastMonth);
+      const filled = await recoverMissingMonthlyReports(indexedReports, expectedKeys, {
+        maxRecoveries: 3,
+        timeoutMs: 15000,
+        maxAttempts: 1,
+        storeKey: requestedStoreKey,
+        signal: options.signal
+      });
+      indexedReports = filled.reports;
+      indexedMissingPeriods = filled.missingKeys.map(monthKeyLabel);
+    }
+    const indexedSummary = await summarizeMatched(indexedReports, `${indexedRange.label}の売上データ`);
+    return indexedMissingPeriods.length
+      ? { ...indexedSummary, missingPeriods: indexedMissingPeriods }
+      : indexedSummary;
   }
 
   // 複数期間の比較依頼（例:「202606と202607の営業比較分析をして」）を検知。
@@ -16029,12 +17286,22 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const missingPeriods = [];
     for (const ref of allMonthRefs.slice(0, 4)) {
       const targetJa = `${ref.year}年${parseInt(ref.month, 10)}月`;
-      const matched = allReports.filter(r => {
+      let matched = allReports.filter(r => {
         // 範囲クエリと同様、合算は月指定比較の候補から除外する
         if (isCrossMonthAggregateReport(r)) return false;
         const p = String(r.period || r.title || '');
         return p.includes(ref.key) || p.includes(targetJa) || (p.includes(ref.year) && p.includes(`${parseInt(ref.month, 10)}月`));
       });
+      if (!matched.length) {
+        const filled = await recoverMissingMonthlyReports([], [ref.key], {
+          maxRecoveries: 1,
+          timeoutMs: 15000,
+          maxAttempts: 1,
+          storeKey: requestedStoreKey,
+          signal: options.signal
+        });
+        matched = filled.reports;
+      }
       if (matched.length > 0) {
         const summary = await summarizeMatched(matched, `${targetJa}の売上データ`);
         if (summary?.loadError) return summary;
@@ -16084,11 +17351,21 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     const month = String(parseInt(monthMatch[2], 10)).padStart(2, '0');
     const targetKey = `${year}-${month}`;
     const targetJa = `${year}年${parseInt(month, 10)}月`;
-    const matched = allReports.filter(r => {
+    let matched = allReports.filter(r => {
       if (isCrossMonthAggregateReport(r)) return false;
       const p = String(r.period || r.title || '');
       return p.includes(targetKey) || p.includes(targetJa) || (p.includes(year) && p.includes(`${parseInt(month, 10)}月`));
     });
+    if (!matched.length && !cloudLookupUnavailable) {
+      const filled = await recoverMissingMonthlyReports([], [targetKey], {
+        maxRecoveries: 1,
+        timeoutMs: 15000,
+        maxAttempts: 1,
+        storeKey: requestedStoreKey,
+        signal: options.signal
+      });
+      matched = filled.reports;
+    }
     if (cloudLookupUnavailable && matched.length > 0) {
       const currentMatches = currentReport && matched.includes(currentReport);
       return currentMatches
@@ -16161,11 +17438,11 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   return null;
 }
 
-async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []) {
+async function generateLocalConsultantReply(userMsg, salesData, chatHistory = [], options = {}) {
   const msg = userMsg.trim();
 
   if (wantsSalesForecast(msg)) {
-    const bundle = await collectMonthlyHistoryForForecast();
+    const bundle = await collectMonthlyHistoryForForecast(options);
     if (bundle.loadError) {
       return `### ⚠️ 保存データを確認できませんでした
 
@@ -16176,7 +17453,7 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
     return formatForecastChatReply(result);
   }
 
-  const queryResult = await searchSavedReportsByQuery(msg, chatHistory);
+  const queryResult = await searchSavedReportsByQuery(msg, chatHistory, null, options);
 
   if (queryResult) {
     if (queryResult.loadError) {
@@ -16194,7 +17471,7 @@ async function generateLocalConsultantReply(userMsg, salesData, chatHistory = []
     }
 
     if (queryResult.notMatchedLabel) {
-      const savedList = await readSavedReports();
+      const savedList = await readSavedReports(options);
       const periods = savedList.map(r => r.period || r.title).filter(Boolean).slice(0, 5).join('、');
       return `### 📊 データ検索結果
 
@@ -16286,7 +17563,7 @@ ${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋�
 
   const hasAnySales = Number(salesData.totalSales) > 0 || foodTot > 0 || drinkTot > 0;
   if (!hasAnySales) {
-    const savedList = await readSavedReports();
+    const savedList = await readSavedReports(options);
     const periods = savedList.map(r => r.period || r.title).filter(Boolean).slice(0, 8).join('、');
     return `### 📊 データ参照結果
 
@@ -16307,6 +17584,44 @@ ${(queryResult.topProducts && queryResult.topProducts.length) ? `\n**売れ筋�
 
 ご質問「${userMsg}」について:
 特定の年月や「アイテムの内訳」をご指定いただければ、保存済みの電子ジャーナルデータから正確な数値を抽出・回答いたします。`;
+}
+
+function createAiChatPreflightBudget(totalMs = AI_CHAT_PREFLIGHT_TOTAL_TIMEOUT_MS, run = activeAiChatRun) {
+  const startedAt = Date.now();
+  return {
+    remainingMs() {
+      return Math.max(0, totalMs - (Date.now() - startedAt));
+    },
+    async run(factory, label) {
+      assertCurrentAiChatRun(run);
+      const remaining = this.remainingMs();
+      if (remaining <= 0) {
+        const error = new Error(`${label}が制限時間内に完了しませんでした`);
+        error.code = 'AI_CHAT_PREFLIGHT_TIMEOUT';
+        throw error;
+      }
+      let timer = null;
+      try {
+        const result = await Promise.race([
+          Promise.resolve().then(factory),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              const error = new Error(`${label}が${Math.round(totalMs / 1000)}秒以内に完了しませんでした`);
+              error.code = 'AI_CHAT_PREFLIGHT_TIMEOUT';
+              if (run?.controller && !run.controller.signal.aborted) {
+                try { run.controller.abort('preflight-timeout'); } catch (_) { run.controller.abort(); }
+              }
+              reject(error);
+            }, remaining);
+          })
+        ]);
+        assertCurrentAiChatRun(run);
+        return result;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  };
 }
 
 async function sendAiChat() {
@@ -16332,14 +17647,57 @@ async function sendAiChat() {
     return;
   }
 
-  const loadingId = appendAiChatLoading();
+  // 1回の質問で使う店舗と通信を固定する。店舗切替・リセット・再送時は、
+  // 保存データ取得からAI本体まで同じAbortSignalで旧処理を中止する。
+  const chatRun = beginAiChatRun();
+  const runOptions = {
+    storeKey: chatRun.storeKey,
+    signal: chatRun.controller?.signal || null
+  };
+  const finishChatUi = () => {
+    if (!isCurrentAiChatRun(chatRun)) return false;
+    finishAiChatRun(chatRun);
+    input.disabled = false;
+    sendBtn.disabled = false;
+    try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
+    return true;
+  };
+  const initialChatIntent = classifyJournalChatIntentClient(msg);
+  const loadingId = appendAiChatLoading({
+    phase: 'preparing',
+    multiPlanned: initialChatIntent === 'strategy' || initialChatIntent === 'mixed'
+  });
+  const preflight = createAiChatPreflightBudget(AI_CHAT_PREFLIGHT_TOTAL_TIMEOUT_MS, chatRun);
+  const failPreflight = (err) => {
+    if (!isCurrentAiChatRun(chatRun)) return;
+    removeAiChatLoading(loadingId);
+    const isTimeout = err?.code === 'AI_CHAT_PREFLIGHT_TIMEOUT';
+    const reply = isTimeout
+      ? `### ⚠️ 分析データの準備を完了できませんでした\n\n前処理が${Math.round(AI_CHAT_PREFLIGHT_TOTAL_TIMEOUT_MS / 1000)}秒の安全上限を超えたため、誤った数値でAIを開始せず停止しました。保存データは失われていません。画面を再読み込みして、もう一度お試しください。`
+      : `### ⚠️ 分析データを確認できませんでした\n\n${String(err?.message || err || '不明なエラー')}\n\n保存データは失われていません。画面を再読み込みして、もう一度お試しください。`;
+    appendAiChatMessage('ai', reply, { question: msg, provider: 'preflight-guard' });
+    aiChatHistory.push({ role: 'assistant', content: reply });
+    finishChatUi();
+  };
+  // run開始後の全処理を必ず同じ後始末へ収束させる。前処理・プロンプト整形・
+  // ローカルフォールバックのどこで例外が起きても「考察中」と入力ロックを残さない。
+  try {
   const compactData = buildCompactSalesDataForAI();
 
   // 保存ジャーナルへの事実照会はまずローカル集計で正確な数値を確定する（一覧APIが金額を持たないため）。
   // ただし確定した数値を固定テンプレートでそのまま返すのではなく、AIへ「検算済みの正解」として
   // 渡し、AIに文章化させることで、数字の正確性と会話の自然さ・柔軟な追加指示への対応を両立する。
   let resolvedChatQuery = resolveAiChatQuery(msg, aiChatHistory);
-  let queryResult = await searchSavedReportsByQuery(msg, aiChatHistory);
+  let queryResult;
+  try {
+    queryResult = await preflight.run(
+      () => searchSavedReportsByQuery(msg, aiChatHistory, null, runOptions),
+      '保存売上データの集計'
+    );
+  } catch (err) {
+    failPreflight(err);
+    return;
+  }
   if (queryResult && queryResult.loadError) {
     removeAiChatLoading(loadingId);
     const reply = `### ⚠️ 保存データを確認できませんでした
@@ -16347,9 +17705,7 @@ async function sendAiChat() {
 クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
     appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
     aiChatHistory.push({ role: 'assistant', content: reply });
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    finishChatUi();
     return;
   }
 
@@ -16358,7 +17714,15 @@ async function sendAiChat() {
   if (queryResult && queryResult.needsClarification && countRecentClarificationsByKind(aiChatHistory, 'period') >= 2) {
     const reportIndex = queryResult.reportIndex;
     resolvedChatQuery = `${resolvedChatQuery} ${resolveExhaustedPeriodClarificationScope(resolvedChatQuery)}を対象に全体を分析`;
-    queryResult = await searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex);
+    try {
+      queryResult = await preflight.run(
+        () => searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex, runOptions),
+        '確認後の保存売上データ集計'
+      );
+    } catch (err) {
+      failPreflight(err);
+      return;
+    }
   }
   if (queryResult && queryResult.loadError) {
     removeAiChatLoading(loadingId);
@@ -16367,24 +17731,38 @@ async function sendAiChat() {
 クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
     appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
     aiChatHistory.push({ role: 'assistant', content: reply });
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    finishChatUi();
     return;
   }
 
   if (queryResult && (queryResult.needsIntentClarification || queryResult.needsClarification)) {
     const missingKind = queryResult.needsIntentClarification ? 'intent' : 'period';
-    const generated = await requestNaturalIntentClarification(
-      msg,
-      aiChatHistory,
-      queryResult.coverage,
-      missingKind
-    );
+    let generated;
+    try {
+      generated = await requestNaturalIntentClarification(
+        msg,
+        aiChatHistory,
+        queryResult.coverage,
+        missingKind,
+        runOptions
+      );
+      assertCurrentAiChatRun(chatRun);
+    } catch (err) {
+      failPreflight(err);
+      return;
+    }
     if (generated.status === 'ready' && generated.resolvedQuery) {
       const reportIndex = queryResult.reportIndex;
       resolvedChatQuery = generated.resolvedQuery;
-      queryResult = await searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex);
+      try {
+        queryResult = await preflight.run(
+          () => searchSavedReportsByQuery(resolvedChatQuery, [], reportIndex, runOptions),
+          '確認後の保存売上データ集計'
+        );
+      } catch (err) {
+        failPreflight(err);
+        return;
+      }
       if (queryResult && queryResult.loadError) {
         removeAiChatLoading(loadingId);
         const reply = `### ⚠️ 保存データを確認できませんでした
@@ -16392,9 +17770,7 @@ async function sendAiChat() {
 クラウドの保存レポート取得に失敗したため、**データが無いとは判断していません**。ログイン状態と通信を確認して、もう一度お試しください。`;
         appendAiChatMessage('ai', reply, { question: msg, provider: 'local-query-planner' });
         aiChatHistory.push({ role: 'assistant', content: reply });
-        input.disabled = false;
-        sendBtn.disabled = false;
-        input.focus();
+        finishChatUi();
         return;
       }
     } else {
@@ -16407,9 +17783,7 @@ async function sendAiChat() {
         originalQuery: resolvedChatQuery,
         clarificationChoices: generated.choices || []
       });
-      input.disabled = false;
-      sendBtn.disabled = false;
-      input.focus();
+      finishChatUi();
       return;
     }
   }
@@ -16434,20 +17808,17 @@ async function sendAiChat() {
       originalQuery: resolvedChatQuery,
       clarificationChoices
     });
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    finishChatUi();
     return;
   }
   if (queryResult && queryResult.notMatchedLabel) {
     // 期間は認識できたが該当データが無い、という結果は確定事実なのでローカルでそのまま返す
     removeAiChatLoading(loadingId);
-    const reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+    const reply = await generateLocalConsultantReply(msg, compactData, aiChatHistory, runOptions);
+    if (!isCurrentAiChatRun(chatRun)) return;
     appendAiChatMessage('ai', reply, { question: msg, provider: 'local' });
     aiChatHistory.push({ role: 'assistant', content: reply });
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    finishChatUi();
     return;
   }
 
@@ -16472,9 +17843,7 @@ async function sendAiChat() {
       originalQuery: resolvedChatQuery,
       clarificationChoices
     });
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    finishChatUi();
     return;
   }
 
@@ -16497,8 +17866,9 @@ async function sendAiChat() {
     const monthBlock = monthLines ? `\n  - 月次推移:\n${monthLines}` : '';
     return `- ${p.label}
   - 総売上高: ${yen(p.totalSales)}
-  - フード売上: ${yen(p.foodTotal)} (${p.foodPct}%)
-  - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)
+${Array.isArray(p.itemDetailIncompleteMonths) && p.itemDetailIncompleteMonths.length
+    ? `  - フード／ドリンク期間合計: 非表示（${p.itemDetailIncompleteMonths.join('・')}の明細が日計と不一致のため、部分合計を全期間値として扱わない）`
+    : `  - フード売上: ${yen(p.foodTotal)} (${p.foodPct}%)\n  - ドリンク売上: ${yen(p.drinkTotal)} (${p.drinkPct}%)`}
   - 総来店客数: ${p.totalCustomers}名 (平均客単価: ${yen(p.avgSpend)})
   - 対象月数: ${p.monthCount || 0}か月 (月間平均来客数: ${p.monthlyAvgCustomers || 0}名)
   - 対象レポート件数: ${p.sourceCount}件${monthBlock}${formatVerifiedDetailLines(p, '  ')}
@@ -16549,8 +17919,9 @@ ${formatJournalSpecificFactsForAi(verifiedData, resolvedChatQuery)}
 
 【確定済み集計データ（${verifiedData.label} / ローカル集計エンジンが保存済みレポートから検索・計算済み）】
 - 総売上高: ${yen(verifiedData.totalSales)}
-- フード売上: ${yen(verifiedData.foodTotal)} (${verifiedData.foodPct}%)
-- ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)
+${Array.isArray(verifiedData.itemDetailIncompleteMonths) && verifiedData.itemDetailIncompleteMonths.length
+    ? `- フード／ドリンク期間合計: 非表示（${verifiedData.itemDetailIncompleteMonths.join('・')}の明細が日計と不一致のため、部分合計を全期間値として扱わない）`
+    : `- フード売上: ${yen(verifiedData.foodTotal)} (${verifiedData.foodPct}%)\n- ドリンク売上: ${yen(verifiedData.drinkTotal)} (${verifiedData.drinkPct}%)`}
 - 総来店客数: ${verifiedData.totalCustomers}名 (平均客単価: ${yen(verifiedData.avgSpend)})
 - 対象月数: ${verifiedData.monthCount || 0}か月 (月間平均来客数: ${verifiedData.monthlyAvgCustomers || 0}名)
 - 対象レポート件数: ${verifiedData.sourceCount}件${monthBlock}${formatVerifiedDetailLines(verifiedData)}
@@ -16562,15 +17933,24 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
   // 店舗営業情報（クラウド）と店舗ナレッジを、確定集計と必ずセットで添付する。
   let integrated;
   try {
-    integrated = await buildIntegratedAnalysisContext({
-      verifiedData,
-      queryText: resolvedChatQuery,
-      periodRange: resolveKnowledgePeriodRange(verifiedData)
-    });
+    integrated = await preflight.run(
+      () => buildIntegratedAnalysisContext({
+        verifiedData,
+        queryText: resolvedChatQuery,
+        periodRange: resolveKnowledgePeriodRange(verifiedData),
+        storeKey: chatRun.storeKey,
+        signal: runOptions.signal
+      }),
+      '店舗情報と登録資料の準備'
+    );
   } catch (err) {
+    if (err?.name === 'AbortError' || err?.code === 'AI_CHAT_PREFLIGHT_TIMEOUT' || err?.code === 'AI_CHAT_CANCELLED') {
+      failPreflight(err);
+      return;
+    }
     console.warn('統合コンテキストの構築に失敗:', err);
     integrated = {
-      storeOpsBlock: formatStoreOpsBlockForAi(readStoreOpsProfile(), verifiedData),
+      storeOpsBlock: formatStoreOpsBlockForAi(readStoreOpsProfile(chatRun.storeKey), verifiedData),
       knowledgeBlock: '\n\n【店舗資料取得状態】取得に失敗したため登録状況は未確認です。「資料なし」と断定せず、店舗資料を根拠にした説明は行わないでください。',
       checklist: '\n\n【データ統合チェック】店舗情報／資料の取得でエラーが発生しました。資料件数は未確認です。数値は確定集計のみを使い、定休前提はローカル店舗情報があれば参照してください。'
     };
@@ -16580,19 +17960,26 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
   let chatPdfHistoryBlock = '';
   try {
     chatPdfHistoryBlock = buildChatPdfHistoryBlockForAi(
-      await fetchAiChatPdfHistoryForAi(),
+      await preflight.run(
+        () => fetchAiChatPdfHistoryForAi(chatRun.storeKey, runOptions),
+        '過去チャット記録の準備'
+      ),
       resolvedChatQuery
     );
   } catch (err) {
+    if (err?.name === 'AbortError' || err?.code === 'AI_CHAT_PREFLIGHT_TIMEOUT' || err?.code === 'AI_CHAT_CANCELLED') {
+      failPreflight(err);
+      return;
+    }
     console.warn('過去チャット記録の取得に失敗:', err);
     chatPdfHistoryBlock = '';
   }
 
   const strictSystemInstruction = `${MARUGO_AI_COMPANY_CONTEXT}
 
-${buildStoreLocationBlockForAi()}
+${buildStoreLocationBlockForAi(chatRun.storeKey)}
 
-${formatReservationImportCoverageForAi()}
+${formatReservationImportCoverageForAi(chatRun.storeKey)}
 
 【絶対遵守プロンプト規約】
 1. あなたはマルゴグループ各店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
@@ -16614,6 +18001,7 @@ ${formatReservationImportCoverageForAi()}
   const strictSystemInstructionClamped = clampAiSystemInstruction(strictSystemInstruction);
 
   try {
+    assertCurrentAiChatRun(chatRun);
     if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
     // 戦略・混合は Perplexity / Grok が並列で走るので、待ち表示も複数AI向けに切り替える。
     const chatIntent = classifyJournalChatIntentClient(resolvedChatQuery);
@@ -16629,13 +18017,15 @@ ${formatReservationImportCoverageForAi()}
           content: String(item.content || '').slice(0, 1600)
         })),
         orchestrationMode: 'auto',
-        storeKey: STORE_KEY,
-        storeName: (STORE_AI_LOCATIONS[STORE_KEY] || {}).name || STORE_KEY,
-        storeLocationBlock: buildStoreLocationBlockForAi()
+        storeKey: chatRun.storeKey,
+        storeName: resolveStoreDisplayName(chatRun.storeKey),
+        storeLocationBlock: buildStoreLocationBlockForAi(chatRun.storeKey)
       }, {
-        anonKey: SUPABASE_ANON_KEY
+        anonKey: SUPABASE_ANON_KEY,
+        signal: runOptions.signal
     });
 
+    assertCurrentAiChatRun(chatRun);
     removeAiChatLoading(loadingId);
 
     const res = aiResponse.response;
@@ -16655,22 +18045,36 @@ ${formatReservationImportCoverageForAi()}
     } else {
       // OpenAI呼び出し失敗。エラー内容を明記した上で、ローカル集計ロジックの回答にフォールバックする。
       const errDetail = result.error || `HTTP ${res.status}`;
-      const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+      const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory, runOptions);
+      assertCurrentAiChatRun(chatRun);
       const displayReply = `⚠️ **AI接続エラー**: ${errDetail}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
       appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
       aiChatHistory.push({ role: 'assistant', content: localReply });
     }
   } catch(err) {
+    if (!isCurrentAiChatRun(chatRun) || err?.name === 'AbortError' || err?.code === 'AI_CHAT_CANCELLED') {
+      return;
+    }
     console.warn('AI Chat remote error, fallback to local advisor:', err);
     removeAiChatLoading(loadingId);
-    const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory);
+    const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory, runOptions);
+    if (!isCurrentAiChatRun(chatRun)) return;
     const displayReply = `⚠️ **AI接続エラー**: ${err && err.message ? err.message : String(err)}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
     appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
     aiChatHistory.push({ role: 'assistant', content: localReply });
   } finally {
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    finishChatUi();
+  }
+  } catch (err) {
+    if (isCurrentAiChatRun(chatRun) && err?.name !== 'AbortError' && err?.code !== 'AI_CHAT_CANCELLED') {
+      console.warn('AI Chat run failed before completion:', err);
+      const reply = `### ⚠️ 分析処理を完了できませんでした\n\n${String(err?.message || err || '不明なエラー')}\n\n処理は安全に停止しました。保存データは失われていません。もう一度お試しください。`;
+      appendAiChatMessage('ai', reply, { question: msg, provider: 'run-guard' });
+      aiChatHistory.push({ role: 'assistant', content: reply });
+    }
+  } finally {
+    removeAiChatLoading(loadingId);
+    finishChatUi();
   }
 }
 
@@ -17059,16 +18463,23 @@ function openAiChatMessagePdfView(text, question) {
  * AIへ渡す用の過去チャット記録取得。表示用 fetchAiChatPdfHistory と違い、
  * 取得失敗と0件を区別する（混同すると「記録は存在しない」とAIが誤断定する）。
  */
-async function fetchAiChatPdfHistoryForAi() {
+async function fetchAiChatPdfHistoryForAi(storeKey = STORE_KEY, options = {}) {
   if (MTALK_EMBED) return { status: 'no-session', items: [] };
   if (!getAdminToken()) return { status: 'no-session', items: [] };
+  const requestedStoreKey = String(storeKey || STORE_KEY || '').trim().toLowerCase();
   try {
     const body = await adminApiFetch(
-      '/pos-journals/chat-pdf-history?store_key=' + encodeURIComponent(STORE_KEY) + '&limit=50',
-      { method: 'GET' }
+      '/pos-journals/chat-pdf-history?store_key=' + encodeURIComponent(requestedStoreKey) + '&limit=50',
+      {
+        method: 'GET',
+        timeoutMs: AI_CHAT_PREFLIGHT_REQUEST_TIMEOUT_MS,
+        maxAttempts: 1,
+        signal: options.signal
+      }
     );
     return { status: 'ok', items: Array.isArray(body.items) ? body.items : [] };
   } catch (err) {
+    if (err?.name === 'AbortError') throw err;
     console.warn('fetchAiChatPdfHistoryForAi error:', err);
     return { status: 'error', items: [] };
   }
@@ -17345,6 +18756,16 @@ function classifyJournalChatIntentClient(message) {
   return 'data';
 }
 
+function buildAiChatPreparingHtml(multiPlanned) {
+  const next = multiPlanned
+    ? '<div class="ai-loading-label" style="font-size:11px;opacity:.72;margin-top:7px;">準備完了後に 数値AI・Web知見・X検索・統合 を開始します</div>'
+    : '<div class="ai-loading-label" style="font-size:11px;opacity:.72;margin-top:7px;">保存データの確認後にAI分析を開始します</div>';
+  return '<div class="ai-loading-wrap" role="status" aria-live="polite" aria-label="分析データを準備中">' +
+    '<div class="ai-loading-mark"><span class="ai-loading-spinner" aria-hidden="true"></span></div>' +
+    '<div><div class="ai-loading-label">分析データを準備中<span class="ai-loading-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div>' + next + '</div>' +
+  '</div>';
+}
+
 function buildAiChatLoadingHtml(multi) {
   if (multi) {
     return '<div class="ai-loading-wrap is-multi" role="status" aria-live="polite" aria-label="複数AIで考察中">' +
@@ -17368,10 +18789,15 @@ function appendAiChatLoading(opts) {
   const div = document.createElement('div');
   const id = 'ai-loading-' + Date.now();
   const multi = !!(opts && opts.multi);
+  const preparing = opts?.phase === 'preparing';
   div.id = id;
   div.className = 'ai-msg-ai';
-  div.dataset.loadingMode = multi ? 'multi' : 'single';
-  div.innerHTML = buildAiChatLoadingHtml(multi);
+  div.dataset.loadingMode = preparing
+    ? (opts?.multiPlanned ? 'preparing-multi' : 'preparing-single')
+    : (multi ? 'multi' : 'single');
+  div.innerHTML = preparing
+    ? buildAiChatPreparingHtml(!!opts?.multiPlanned)
+    : buildAiChatLoadingHtml(multi);
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return id;

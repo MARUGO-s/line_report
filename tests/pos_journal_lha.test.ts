@@ -7,6 +7,8 @@ import {
   buildPosJournalSummary,
   detectPosJournalStoreCode,
   parsePosJournalText,
+  POS_JOURNAL_REPORT_PARSER_VERSION,
+  reconcilePosJournalDayDetail,
   resolvePosJournalStore,
 } from "../supabase/functions/_shared/pos_journal.ts";
 
@@ -211,6 +213,129 @@ Deno.test("journal parser reads completed sale with a fullwidth payment digit", 
   assertEquals(day.receipts.length, 1);
   assertEquals(day.receipts[0].pay, "クレジット");
   assertEquals(day.receipts[0].items[0].name, "コース６品");
+});
+
+Deno.test("MARUGO-s generic and mixed payment rows keep receipts until gross reconciliation", async () => {
+  const text = await Deno.readTextFile(
+    new URL("./fixtures/marugos-payment-methods.jnl.txt", import.meta.url),
+  );
+  const day = parsePosJournalText(text, "102220260829230000000001.lzh");
+  assertEquals(day.receipts.map((receipt) => receipt.pay), [
+    "QRコード",
+    "電子マネー",
+    "東京ドーム利用券",
+    "ドームシティ食事券",
+    "複数",
+  ]);
+  assertEquals(day.receipts.map((receipt) => receipt.total), [
+    1000,
+    1000,
+    1000,
+    1000,
+    1000,
+  ]);
+  const reconciled = reconcilePosJournalDayDetail(day);
+  assertEquals(reconciled.detailComplete, true);
+  assertEquals(reconciled.grossSales, 5000);
+  assertEquals(reconciled.reconciledReceiptTotal, 5000);
+  assertEquals(reconciled.receipts.length, 5);
+});
+
+Deno.test("MARUGO-s keeps no-currency cancellations, explicit discounts, and completed no-pay sales", async () => {
+  const text = await Deno.readTextFile(
+    new URL(
+      "./fixtures/marugos-cancel-discount-nopay.jnl.txt",
+      import.meta.url,
+    ),
+  );
+  const day = parsePosJournalText(text, "102220260711230000000001.lzh");
+  assertEquals(POS_JOURNAL_REPORT_PARSER_VERSION, "2026-08-30-v21");
+  assertEquals(day.receipts.map((receipt) => receipt.no), [
+    "1001",
+    "1002",
+    "1003",
+  ]);
+  assertEquals(day.receipts.map((receipt) => receipt.pay), [
+    "QRコード",
+    "クレジット",
+    "支払情報なし",
+  ]);
+  assertEquals(day.receipts[0].items.map((item) => item.amount), [
+    12800,
+    -12800,
+    6000,
+    600,
+  ]);
+  assertEquals(day.receipts[1].items.at(-1), {
+    code: "__journal_adjustment__",
+    name: "割引",
+    unit: -1470,
+    qty: 1,
+    amount: -1470,
+    category: "その他",
+    isCharge: false,
+  });
+  assertEquals(
+    day.receipts[2].items
+      .filter((item) => item.code === "__journal_adjustment__")
+      .map((item) => item.amount),
+    [-50, 50],
+  );
+  const reconciled = reconcilePosJournalDayDetail(day);
+  assertEquals(reconciled.detailComplete, true);
+  assertEquals(reconciled.reason, "matched");
+  assertEquals(reconciled.reconciledReceiptTotal, 20330);
+  assertEquals(reconciled.reconciledItemTotal, 20330);
+  assertEquals(reconciled.itemMismatchReceiptCount, 0);
+  const summary = buildPosJournalSummary({
+    storeKey: "marugos",
+    storeName: "マルゴエス",
+    storeCode: "1022",
+    month: "2026-07",
+    fileCount: 1,
+    days: [day],
+  });
+  assertEquals(
+    summary.item_ranking.some((item) =>
+      item.name === "割引" || item.name === "値引" ||
+      item.name === "変更前商品"
+    ),
+    false,
+  );
+  assertEquals(
+    summary.item_ranking.some((item) => item.name === "変更後商品"),
+    true,
+  );
+});
+
+Deno.test("MARUGO-s transaction change removes the referenced sale and VOID copy only", () => {
+  const sale = (no: string, time: string, total: string, extra = "") => [
+    `0001-01   No.${no}  2026年 7月 2日(木) ${time}`,
+    "  0000000000101   マンゴーラッシー",
+    `                      @${total}x   1     \\${total}`,
+    `合 計                           \\${total}`,
+    `        計２       クレジット           \\${total}`,
+    ...(extra ? [extra] : []),
+    "                               1名",
+  ];
+  const text = [
+    ...sale("4418", "20時41分", "900"),
+    ...sale("4419", "20時44分", "900", "★ＶＯＩＤ Ｎｏ．4418"),
+    ...sale("4420", "20時44分", "900"),
+    "0001-01   No.4499  2026年 7月 2日(木) 23時00分",
+    "★★   日計精算レポート   ★★",
+    "  営業日付：                    2026年 7月 2日",
+    "純 売 上                             \\818",
+    "消 費 税                              \\82",
+    "総 売 上                             \\900",
+    " 会計組数・客数",
+    "                  1組                    1名",
+  ].join("\r\n");
+  const day = parsePosJournalText(text, "102220260702223702060001.lzh");
+  assertEquals(day.receipts.map((receipt) => receipt.no), ["4420"]);
+  const reconciled = reconcilePosJournalDayDetail(day);
+  assertEquals(reconciled.detailComplete, true);
+  assertEquals(reconciled.reconciledReceiptTotal, 900);
 });
 
 Deno.test("zero-sales settlement is complete even without receipts", () => {

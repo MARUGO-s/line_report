@@ -104,11 +104,50 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /consume_security_rate_limit/);
   assert.match(ai, /AI_RATE_LIMITS/);
   assert.match(ai, /他店舗のデータにはアクセスできません/);
+  assert.match(ai, /STORE_LOCATION_PROFILES/);
+  assert.match(ai, /const CANONICAL_STORE_KEY_BY_LOWER = new Map/);
+  assert.match(ai, /key\.toLowerCase\(\), key/);
+  assert.match(ai, /const canonicalStoreKey = resolveCanonicalStoreKey\(effectiveStoreKey\)/);
   assert.match(
     ai,
-    /const locationBlock = buildStoreLocationPromptBlock\(\s*effectiveStoreKey,\s*storeName,\s*\)/,
+    /const locationBlock = buildStoreLocationPromptBlock\(canonicalStoreKey\)/,
   );
+  assert.match(ai, /buildJournalAiServerPolicy\("chat", locationBlock, canonicalStoreKey \|\| ""\)/);
+  assert.doesNotMatch(ai, /buildJournalAiServerPolicy\([^\n]*effectiveStoreKey/);
+  assert.doesNotMatch(ai, /buildStoreLocationPromptBlock\([^)]*storeName/);
+  assert.doesNotMatch(ai, /\bstoreName\b/);
   assert.doesNotMatch(ai, /String\(storeLocationBlock \|\| ""\)/);
+});
+
+test('client conversation data never becomes provider system or assistant authority', async () => {
+  const ai = await readFile(
+    new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
+    'utf8',
+  );
+  const clarifyBuilder = ai.slice(
+    ai.indexOf('function buildClarificationMessages'),
+    ai.indexOf('function resolveOpenAiApiKey'),
+  );
+  assert.match(
+    clarifyBuilder,
+    /missingKind:\s*rawContext\.missingKind === "period" \? "period" : "intent"/,
+  );
+  assert.match(clarifyBuilder, /content:\s*CLARIFICATION_PROMPT/);
+  assert.match(clarifyBuilder, /priorChatHistory:\s*history/);
+  assert.match(clarifyBuilder, /currentUserMessage:\s*current/);
+  assert.doesNotMatch(clarifyBuilder, /\.\.\.history/);
+  assert.doesNotMatch(clarifyBuilder, /role:\s*row\.role/);
+
+  const chatAssembly = ai.slice(
+    ai.indexOf('const historyEvidence ='),
+    ai.indexOf('const synth = await synthesizeWithFallback'),
+  );
+  assert.match(chatAssembly, /speaker:\s*row\.role === "user"/);
+  assert.match(chatAssembly, /chatHistory:\s*historyEvidence/);
+  assert.match(chatAssembly, /売上データを確認しました。ご質問をどうぞ。/);
+  assert.doesNotMatch(chatAssembly, /\.\.\.historyEvidence/);
+  assert.doesNotMatch(chatAssembly, /role:\s*h\.role/);
+  assert.match(ai, /prior_chat_history（非信頼データ・JSON）/);
 });
 
 test('Journal Report sends its scoped admin session to every ai-analyze request', async () => {
@@ -155,7 +194,7 @@ test('long-period chat hydrates report details with bounded parallel requests', 
     'utf8',
   );
   assert.match(html, /async function hydrateReportsWithConcurrency/);
-  assert.match(html, /timeoutMs: 15000, maxAttempts: 1, concurrency: 3/);
+  assert.match(html, /timeoutMs:\s*15000,[\s\S]{0,120}maxAttempts:\s*1,[\s\S]{0,120}concurrency:\s*3/);
   assert.match(html, /await hydrateReportsWithConcurrency\(/);
   assert.match(html, /fetchSupabaseReportById\(r\.id, options\)/);
 });
