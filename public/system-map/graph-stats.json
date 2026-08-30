@@ -2,9 +2,9 @@
   "nodes": 5969,
   "edges": 12275,
   "communities": 629,
-  "builtAtCommit": "86432e3b1bafce751c7cbd5ce897998e7c0e6683",
+  "builtAtCommit": "fff70ce46a2ee0f6358b6a584a2e749e54f6add2",
   "sqlNodes": 798,
   "sqlFiles": 296,
-  "generatedAt": "2026-08-30T22:20:45.464Z",
+  "generatedAt": "2026-08-30T22:27:41.522Z",
   "modelVersion": 1
 }
