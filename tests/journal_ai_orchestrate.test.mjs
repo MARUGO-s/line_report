@@ -122,7 +122,7 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
   );
   for (const source of [html]) {
     assert.match(source, /src="journal-ai-privacy\.js"/);
-    assert.match(source, /src="journal-ai-client\.js"/);
+    assert.match(source, /src="journal-ai-client\.js(?:\?v=[^"]+)?"/);
     assert.equal(
       [...source.matchAll(/AI_CLIENT\.request\(AI_ENDPOINT,/g)].length,
       3,
@@ -144,7 +144,18 @@ test('Journal AI privacy layer is loaded before the network client', async () =>
     'utf8',
   );
   const privacyIndex = appHtml.indexOf('src="journal-ai-privacy.js"');
-  const clientIndex = appHtml.indexOf('src="journal-ai-client.js"');
+  const clientIndex = appHtml.indexOf('src="journal-ai-client.js');
   assert.ok(privacyIndex >= 0);
   assert.ok(clientIndex > privacyIndex);
+});
+
+test('long-period chat hydrates report details with bounded parallel requests', async () => {
+  const html = await readFile(
+    new URL('../public/jnm/jnl2txt.html', import.meta.url),
+    'utf8',
+  );
+  assert.match(html, /async function hydrateReportsWithConcurrency/);
+  assert.match(html, /timeoutMs: 15000, maxAttempts: 1, concurrency: 3/);
+  assert.match(html, /await hydrateReportsWithConcurrency\(/);
+  assert.match(html, /fetchSupabaseReportById\(r\.id, options\)/);
 });

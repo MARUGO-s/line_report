@@ -41,7 +41,7 @@
 <script src="../access-log.js?v=20260817"></script>
 <script src="auth-session.js"></script>
 <script src="journal-ai-privacy.js"></script>
-<script src="journal-ai-client.js"></script>
+<script src="journal-ai-client.js?v=20260830-1552"></script>
 <style>
   :root {
     /* ===== Classical design system — light (default) ===== */
@@ -4674,12 +4674,16 @@ async function fetchSupabaseReports(options = {}) {
   }
 }
 
-async function fetchSupabaseReportById(id) {
+async function fetchSupabaseReportById(id, options = {}) {
   const cacheKey = `${STORE_KEY}|${id}`;
   const cached = savedReportDetailCache.get(cacheKey);
   if (cached && (Date.now() - cached.time) < SAVED_REPORT_DETAIL_TTL_MS) return { ...cached.report };
   try {
-    const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id), { method: 'GET' });
+    const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(STORE_KEY) + '&id=' + encodeURIComponent(id), {
+      method: 'GET',
+      timeoutMs: options.timeoutMs,
+      maxAttempts: options.maxAttempts
+    });
     const row = body.item;
     if (!row) {
       savedReportsLoadError = new Error('保存レポート詳細を取得できませんでした。');
@@ -4707,7 +4711,7 @@ async function fetchSupabaseReportById(id) {
   }
 }
 
-async function hydrateSavedReport(r) {
+async function hydrateSavedReport(r, options = {}) {
   const hasMealFdSplit = (
     (Number(r?.lunchFoodTotal) || 0) +
     (Number(r?.lunchDrinkTotal) || 0) +
@@ -4725,7 +4729,7 @@ async function hydrateSavedReport(r) {
     return r;
   }
   if (!r?.id) return r;
-  const full = await fetchSupabaseReportById(r.id);
+  const full = await fetchSupabaseReportById(r.id, options);
   if (!full) return { ...r, _hydrateFailed: true };
   let merged = { ...r, ...full, id: r.id };
   // 旧保存で昼夜別F/DがJSONBに無い場合は伝票から補完
@@ -4750,6 +4754,22 @@ async function hydrateSavedReport(r) {
     };
   }
   return merged;
+}
+
+/** AIチャット用の詳細補完。長期間で1件ずつ45秒待たないよう、少数並列で上限を守る。 */
+async function hydrateReportsWithConcurrency(reports, options = {}) {
+  const rows = Array.isArray(reports) ? reports : [];
+  if (!rows.length) return [];
+  const concurrency = Math.max(1, Math.min(3, Number(options.concurrency) || 3, rows.length));
+  const output = new Array(rows.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (nextIndex < rows.length) {
+      const index = nextIndex++;
+      output[index] = await hydrateSavedReport(rows[index], options);
+    }
+  }));
+  return output;
 }
 
 function mergeMonthlyAndDailyReportIndex(monthlyReports, dailyReports) {
@@ -15575,6 +15595,24 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       if (!detailRangeLimited) detailReports.push(...withoutMonth);
     }
     const detailTargets = new Set(detailReports);
+    const detailRequestOptions = { timeoutMs: 15000, maxAttempts: 1, concurrency: 3 };
+    const hydrationTargets = summaryReports.filter((r) => {
+      const hasCoreSummary = Number.isFinite(Number(r?.total ?? r?.totalSales))
+        && Number.isFinite(Number(r?.foodTotal))
+        && Number.isFinite(Number(r?.drinkTotal));
+      const hasMealFdSplit = (
+        (Number(r?.lunchFoodTotal) || 0) +
+        (Number(r?.lunchDrinkTotal) || 0) +
+        (Number(r?.dinnerFoodTotal) || 0) +
+        (Number(r?.dinnerDrinkTotal) || 0)
+      ) > 0;
+      return detailTargets.has(r) || !hasCoreSummary || !hasMealFdSplit;
+    });
+    const hydratedTargetRows = await hydrateReportsWithConcurrency(
+      hydrationTargets,
+      detailRequestOptions
+    );
+    const hydratedByReport = new Map(hydrationTargets.map((r, index) => [r, hydratedTargetRows[index]]));
     for (const r of summaryReports) {
       const hasCoreSummary = Number.isFinite(Number(r?.total ?? r?.totalSales))
         && Number.isFinite(Number(r?.foodTotal))
@@ -15586,9 +15624,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
         (Number(r?.dinnerDrinkTotal) || 0)
       ) > 0;
       // 一覧に昼夜別F/Dが無い旧行は詳細取得して伝票から補完する
-      const full = (detailTargets.has(r) || !hasCoreSummary || !hasMealFdSplit)
-        ? await hydrateSavedReport(r)
-        : r;
+      const full = hydratedByReport.get(r) || r;
       if (full?._hydrateFailed) hydrationFailed = true;
       hydrated.push(full);
       if (detailTargets.has(r)) detailHydrated.push(full);
