@@ -1029,13 +1029,7 @@ async function openPresetIconPicker(target = 'user') {
       if (!response.ok) throw new Error('アイコン一覧を読み込めませんでした');
       profileIconCatalog = await response.json();
     }
-    const filteredIcons = profileIconCatalog.filter((icon) => {
-      if (iconPickerTarget === 'user') {
-        return !icon.category || icon.category !== 'store';
-      }
-      return true;
-    });
-    grid.innerHTML = filteredIcons.map((icon) => `
+    grid.innerHTML = profileIconCatalog.map((icon) => `
       <button type="button" class="profile-icon-option" title="${escapeHtml(icon.label)}"
         aria-label="${escapeHtml(icon.label)}" data-icon-path="${escapeHtml(icon.path)}" onclick="choosePresetIcon(this.dataset.iconPath)">
         <img src="${escapeHtml(icon.path)}" alt="" loading="lazy" decoding="async">
