@@ -25,9 +25,16 @@ const REQUEST_TIMEOUT_MS = 145_000;
 const MAX_BATCHES = 80;
 const MAX_BATCH_ATTEMPTS = 3;
 
+// 再解析で総額が動かないことを確かめるための期待値。原本を追加取り込みしたら
+// ここも更新する。更新を忘れると、正しい再解析でもアサーションで落ちる。
+// 現在値の取り方:
+//   select store_partition_key, count(*), count(distinct year_month), sum(gross_sales)
+//   from public.pos_journal_files where storage_deleted_at is null
+//   group by store_partition_key;
 const TARGETS = Object.freeze([
   Object.freeze({ storeKey: "marugos", files: 260, months: 9, gross: 50_862_748 }),
-  Object.freeze({ storeKey: "bistrocavacava", files: 170, months: 9, gross: 10_548_410 }),
+  // 2026-08-31: 旧レジコード1020の 2025-12 と 2026-01 を追加取り込み (+44件)。
+  Object.freeze({ storeKey: "bistrocavacava", files: 214, months: 10, gross: 13_980_560 }),
 ]);
 
 const allowedArgs = new Set(["--apply", "--dry-run"]);

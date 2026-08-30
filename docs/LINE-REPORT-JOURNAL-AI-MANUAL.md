@@ -748,7 +748,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 公開コード入口: 41件
 - Edge Functions: 20件
 - 共有TypeScriptモジュール: 94件
-- 補助・運用・レガシーコード: 39件
+- 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 139件
 - SQL migrations: 294件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 83件
@@ -961,6 +961,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `scripts/setup-gas-sync-config.sh` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
 | `scripts/supabase-db-push-reconcile.sh` | DEV-04 |
 | `scripts/update-knowledge-vault.sh` | DEV-04 |
+| `scripts/upload-pos-journal-archive.mjs` | DEV-04 |
 | `scripts/verify-journal-ai-data-flow.mjs` | DEV-04 |
 | `scripts/verify-journal-sales-sync-toggle.sh` | DEV-04 |
 | `scripts/wait-for-edge-deploy.mjs` | DEV-04 |
