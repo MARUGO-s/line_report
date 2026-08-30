@@ -92,7 +92,12 @@ const context = {
     known: true,
     byCode: true,
   }),
-  weekdayFromIsoDate: (iso) => ['日', '月', '火', '水', '木', '金', '土'][new Date(`${iso}T00:00:00+09:00`).getDay()],
+  weekdayFromIsoDate: (iso) => {
+    const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const day = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return ['日', '月', '火', '水', '木', '金', '土'][day.getUTCDay()] || '';
+  },
   recoverReportFromPosJournalMonth: async () => null,
   isPosCategoryRollupName: () => false,
   readStoreOpsProfile: () => ({ wineMl: { glassMl: 100, bottleMl: 750, pairingMl: 300 } }),
