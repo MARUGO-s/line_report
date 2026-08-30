@@ -41,6 +41,7 @@ function loadServiceRoleKey() {
         PROJECT_REF,
         "--output",
         "json",
+        "--reveal",
       ],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -54,9 +55,17 @@ function loadServiceRoleKey() {
   } catch {
     throw new Error("Supabase API key response was not valid JSON.");
   }
-  const key = rows.find((row) => row?.name === "service_role" && row?.type === "legacy")?.api_key;
-  if (typeof key !== "string" || !key.startsWith("eyJ")) {
-    throw new Error("The legacy service_role key was not available.");
+  const key =
+    rows.find((row) => row?.name === "default" && row?.type === "secret")?.api_key ||
+    rows.find((row) => row?.name === "service_role" && row?.type === "legacy")?.api_key;
+  if (
+    typeof key !== "string" ||
+    !(
+      /^sb_secret_[A-Za-z0-9_-]+$/.test(key) ||
+      /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(key)
+    )
+  ) {
+    throw new Error("A server-only Supabase secret/service_role key was not available.");
   }
   return key;
 }
@@ -66,6 +75,7 @@ async function callAdmin(serviceRoleKey, path, body) {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      apikey: serviceRoleKey,
       "x-internal-key": serviceRoleKey,
     },
     body: JSON.stringify(body),
@@ -213,11 +223,12 @@ async function rebuildStore(serviceRoleKey, target, dryRun) {
 async function fetchRest(serviceRoleKey, table, params) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const headers = { apikey: serviceRoleKey };
+  if (serviceRoleKey.startsWith("eyJ")) {
+    headers.authorization = `Bearer ${serviceRoleKey}`;
+  }
   const response = await fetch(url, {
-    headers: {
-      apikey: serviceRoleKey,
-      authorization: `Bearer ${serviceRoleKey}`,
-    },
+    headers,
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`${table} verification failed with HTTP ${response.status}.`);

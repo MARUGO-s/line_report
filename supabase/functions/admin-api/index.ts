@@ -1387,12 +1387,12 @@ Deno.serve(async (req, info) => {
   }
 
   // line-webhook からの #メモ 自動転送ブリッジ（内部呼び出し）。
-  // 関数間で共有される service_role キーを x-internal-key として検証し、
+  // 関数間で共有される legacy service_role / 新 secret API キーを
+  // x-internal-key として検証し、
   // 管理セッションを介さずに「LINE投稿のナレッジ登録」だけを許可する。
   if (req.method === "POST" && path === "/pos-journals/knowledge/process-line-post") {
     const internalKey = req.headers.get("x-internal-key") ?? ""
-    const expectedInternalKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    if (internalKey && expectedInternalKey && secureEqual(internalKey, expectedInternalKey)) {
+    if (isInternalSupabaseServerKey(internalKey)) {
       try {
         const body = await parseJson(req)
         if (!isRecord(body)) {
@@ -1427,8 +1427,7 @@ Deno.serve(async (req, info) => {
     )
   ) {
     const internalKey = req.headers.get("x-internal-key") ?? ""
-    const expectedInternalKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    if (internalKey && expectedInternalKey && secureEqual(internalKey, expectedInternalKey)) {
+    if (isInternalSupabaseServerKey(internalKey)) {
       try {
         if (path === "/pos-journals/knowledge/analyze-image") {
           return json(await analyzeStoreKnowledgeImage(req), 200)
@@ -1461,7 +1460,8 @@ Deno.serve(async (req, info) => {
 
   // デプロイ後の原本再解析・派生index再構築を、管理セッションの値を
   // ターミナルへ取り出さずに実行するためのサーバー間メンテナンス経路。
-  // service_role と完全一致する内部キーだけを許可し、キー不一致時は
+  // legacy service_role または有効な新 secret API キーと完全一致する
+  // 内部キーだけを許可し、キー不一致時は
   // 通常の本部管理者認証へフォールスルーする。店舗リンクには開放しない。
   if (
     req.method === "POST" && (
@@ -1470,11 +1470,7 @@ Deno.serve(async (req, info) => {
     )
   ) {
     const internalKey = req.headers.get("x-internal-key") ?? ""
-    const expectedInternalKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    if (
-      internalKey && expectedInternalKey &&
-      secureEqual(internalKey, expectedInternalKey)
-    ) {
+    if (isInternalSupabaseServerKey(internalKey)) {
       try {
         const body = await parseJson(req)
         if (!isRecord(body)) {
@@ -20362,6 +20358,40 @@ function secureEqual(a: string, b: string): boolean {
     result |= aBytes[i] ^ bBytes[i]
   }
   return result === 0
+}
+
+/**
+ * Supabase のサーバー専用キーを一定時間比較で検証する。
+ *
+ * 既存プロジェクトの legacy service_role と、新APIキー移行後にEdgeへ
+ * JSONで注入される SUPABASE_SECRET_KEYS の両方を受ける。どちらも
+ * service_role相当の秘匿キーであり、ブラウザへ公開してはならない。
+ */
+function isInternalSupabaseServerKey(provided: string): boolean {
+  const candidate = String(provided || "").trim()
+  if (!candidate) return false
+
+  const expectedKeys = new Set<string>()
+  const legacyKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim()
+  if (legacyKey) expectedKeys.add(legacyKey)
+
+  const secretKeysJson = String(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "").trim()
+  if (secretKeysJson) {
+    try {
+      const parsed = JSON.parse(secretKeysJson)
+      if (isRecord(parsed)) {
+        const defaultKey = typeof parsed.default === "string" ? parsed.default.trim() : ""
+        if (defaultKey.startsWith("sb_secret_")) expectedKeys.add(defaultKey)
+      }
+    } catch {
+      // 不正な環境変数は認証失敗として扱い、legacyキー以外へは広げない。
+    }
+  }
+
+  for (const expected of expectedKeys) {
+    if (secureEqual(candidate, expected)) return true
+  }
+  return false
 }
 
 async function parseJson(req: Request): Promise<unknown> {

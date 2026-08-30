@@ -161,17 +161,28 @@ test("stored originals have an admin-only bounded reparse and derived rebuild ro
   assert.match(source, /safe_rebuild_months: safeRebuildMonths/);
 });
 
-test("server maintenance uses service-role equality without opening store-link access", () => {
+test("server maintenance accepts current server keys without opening store-link access", () => {
   const maintenanceBridge = sectionBetween(
     "デプロイ後の原本再解析・派生index再構築",
     "// M-talk のルーム完全削除",
   );
   assert.match(maintenanceBridge, /x-internal-key/);
-  assert.match(maintenanceBridge, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(maintenanceBridge, /secureEqual\(internalKey, expectedInternalKey\)/);
+  assert.match(maintenanceBridge, /isInternalSupabaseServerKey\(internalKey\)/);
   assert.match(maintenanceBridge, /reparseStoredPosJournalFiles\(supabase, body, null\)/);
   assert.match(maintenanceBridge, /rebuildJournalProductMonthlyIndex\(supabase, body, null\)/);
   assert.doesNotMatch(storeLinkPolicy, /\/pos-journals\/reparse/);
+
+  const internalKeyVerifier = sectionBetween(
+    "function isInternalSupabaseServerKey(",
+    "async function parseJson(",
+  );
+  assert.match(internalKeyVerifier, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(internalKeyVerifier, /SUPABASE_SECRET_KEYS/);
+  assert.match(internalKeyVerifier, /JSON\.parse\(secretKeysJson\)/);
+  assert.match(internalKeyVerifier, /parsed\.default/);
+  assert.match(internalKeyVerifier, /defaultKey\.startsWith\("sb_secret_"\)/);
+  assert.doesNotMatch(internalKeyVerifier, /Object\.values\(parsed\)/);
+  assert.match(internalKeyVerifier, /secureEqual\(candidate, expected\)/);
 });
 
 test("POS journal store keys are canonical lowercase", () => {
@@ -232,6 +243,18 @@ test("product index rebuild applies only its own dirty snapshot transaction", ()
 });
 
 test("v21 backfill dry-runs only reparse before applying in the safe order", () => {
+  assert.match(
+    backfillSource,
+    /name === "default" && row\?\.type === "secret"[\s\S]*?name === "service_role" && row\?\.type === "legacy"/,
+  );
+  assert.match(backfillSource, /"--reveal"/);
+  assert.match(backfillSource, /\^sb_secret_\[A-Za-z0-9_-\]\+\$/);
+  assert.match(backfillSource, /apikey: serviceRoleKey/);
+  assert.match(backfillSource, /"x-internal-key": serviceRoleKey/);
+  assert.match(
+    backfillSource,
+    /if \(serviceRoleKey\.startsWith\("eyJ"\)\)[\s\S]*?headers\.authorization = `Bearer \$\{serviceRoleKey\}`/,
+  );
   const mainStart = backfillSource.indexOf("const serviceRoleKey = loadServiceRoleKey()");
   const applyGuard = backfillSource.indexOf("if (!apply)", mainStart);
   assert.notEqual(mainStart, -1);
