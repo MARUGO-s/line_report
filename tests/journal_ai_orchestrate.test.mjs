@@ -87,9 +87,9 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /shouldRetryBudget/);
   assert.match(ai, /auth_error/);
   assert.match(ai, /recordJournalAiFallback/);
-  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 30_000/);
-  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 25_000/);
-  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 85_000/);
+  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 70_000/);
+  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 40_000/);
+  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 115_000/);
   assert.match(ai, /fetchTextWithTimeout\(OPENAI_ENDPOINT/);
   assert.match(ai, /fetchTextWithTimeout\(CLAUDE_ENDPOINT/);
   assert.match(ai, /providerTimeoutWithinDeadline\(deadlineAt/);
@@ -172,7 +172,7 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
   assert.match(client, /LINE_REPORT_AUTH/);
   assert.match(client, /ログインが必要です/);
   assert.match(client, /privacy\.sanitizePayload/);
-  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 110000/);
+  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 135000/);
   assert.match(client, /AIの応答が/);
   assert.match(client, /AbortController/);
 });
@@ -197,4 +197,45 @@ test('long-period chat hydrates report details with bounded parallel requests', 
   assert.match(html, /timeoutMs:\s*15000,[\s\S]{0,120}maxAttempts:\s*1,[\s\S]{0,120}concurrency:\s*3/);
   assert.match(html, /await hydrateReportsWithConcurrency\(/);
   assert.match(html, /fetchSupabaseReportById\(r\.id, options\)/);
+});
+
+test('Journal AI timeout budgets nest inside the Supabase gateway limit', async () => {
+  const ai = await readFile(
+    new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
+    'utf8',
+  );
+  const client = await readFile(
+    new URL('../public/jnm/journal-ai-client.js', import.meta.url),
+    'utf8',
+  );
+  const num = (source, name) => {
+    const hit = source.match(new RegExp(`${name}\\s*=\\s*([\\d_]+)`));
+    assert.ok(hit, `${name} not found`);
+    return Number(hit[1].replace(/_/g, ''));
+  };
+  const openai = num(ai, 'OPENAI_REQUEST_TIMEOUT_MS');
+  const claude = num(ai, 'CLAUDE_REQUEST_TIMEOUT_MS');
+  const deadline = num(ai, 'JOURNAL_AI_REQUEST_DEADLINE_MS');
+  const clientWait = num(client, 'DEFAULT_AI_REQUEST_TIMEOUT_MS');
+
+  // Supabase の request idle timeout。超えると 504 になり、AI接続エラーの
+  // 説明もローカル集計フォールバックも画面に出せない。
+  const GATEWAY_IDLE_TIMEOUT_MS = 150_000;
+
+  // 内側から外側へ、必ず余裕を持って収まること。
+  assert.ok(
+    openai + claude <= deadline,
+    `providers ${openai}+${claude} must fit in deadline ${deadline}`,
+  );
+  assert.ok(
+    deadline < clientWait,
+    `server deadline ${deadline} must expire before the client gives up at ${clientWait}, ` +
+      'so the server response explains the failure instead of the client aborting blind',
+  );
+  assert.ok(
+    clientWait < GATEWAY_IDLE_TIMEOUT_MS,
+    `client wait ${clientWait} must stay under the ${GATEWAY_IDLE_TIMEOUT_MS} gateway timeout`,
+  );
+  // 打ち切りが早すぎると、重い分析が毎回落ちる。実測で30秒では足りなかった。
+  assert.ok(openai >= 60_000, `OpenAI budget ${openai} is too small for heavy analyses`);
 });

@@ -71,11 +71,26 @@ type SynthesizerResult =
 const OPENAI_COMPLETION_BUDGET_PRIMARY = 5200;
 /** 文脈長など入力由来の失敗時だけ使う縮小再試行枠。 */
 const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
-/** 個々の外部AIが応答停止した場合の打ち切り。 */
-const OPENAI_REQUEST_TIMEOUT_MS = 30_000;
-const CLAUDE_REQUEST_TIMEOUT_MS = 25_000;
+/**
+ * 個々の外部AIが応答停止した場合の打ち切り。
+ *
+ * 上限の決め方（外側から順に決まる）:
+ *   Supabase の request idle timeout 150s ... 超えると 504 になり、
+ *     こちらのフォールバック文言もローカル集計も出せない。絶対に触れない。
+ *   クライアント journal-ai-client.js  135s ... 150s の内側。
+ *   このリクエスト全体 DEADLINE       115s ... クライアントより先に自分で
+ *     打ち切り、AI接続エラーの説明とローカル集計へ確実に切り替える。
+ *   OpenAI 70s + Claude 40s = 110s    ... DEADLINE の内側に収まる。
+ *
+ * 旧値は 30s/25s で、合計54秒しか使わないまま85秒の枠を31秒残して失敗して
+ * いた。gpt-5.6-luna は推論モデルで思考トークンも完了枠を食うため、7ヶ月分×
+ * 全観点のような重い分析は30秒に収まらない。実測では入力12-15kトークンの
+ * 分析が成功する一方、それより重い要求が毎回30秒ちょうどで打ち切られていた。
+ */
+const OPENAI_REQUEST_TIMEOUT_MS = 70_000;
+const CLAUDE_REQUEST_TIMEOUT_MS = 40_000;
 /** 外部ブリーフ取得を含む、1回の分析リクエスト全体の上限。 */
-const JOURNAL_AI_REQUEST_DEADLINE_MS = 85_000;
+const JOURNAL_AI_REQUEST_DEADLINE_MS = 115_000;
 const MIN_PROVIDER_REQUEST_TIMEOUT_MS = 4_000;
 
 /** HTTPステータスやエラー本文から、集計しやすい短い理由コードを作る。 */
