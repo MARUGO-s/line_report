@@ -576,19 +576,79 @@ export async function callGrokTrendBrief(
   }
 }
 
+/**
+ * 外部ブリーフの短期キャッシュ。呼び出し側が保管先を与える。
+ * ここで Supabase を直接触ると共有モジュールが実行環境に依存するため、
+ * 取得と保存だけを受け取る形にしている。
+ */
+export type ExternalBriefCache = {
+  get: (key: string) => Promise<ExternalBrief[] | null>;
+  set: (key: string, briefs: ExternalBrief[]) => Promise<void>;
+};
+
+/**
+ * キャッシュキー。同じ店舗・同じ意図・同じ趣旨の質問・同じ日なら一致させる。
+ * 質問文は表記ゆれで別物になりやすいので、空白と大小文字だけ正規化する。
+ * 日付を含めるのは、外部知見は日をまたぐと鮮度が落ちるため。
+ */
+export function externalBriefCacheKey(params: {
+  storeKey: string;
+  question: string;
+  intent: JournalChatIntent;
+  day: string;
+}): string {
+  const question = String(params.question || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+  return [
+    String(params.storeKey || "").toLowerCase(),
+    params.intent,
+    params.day,
+    question,
+  ].join("\u0000");
+}
+
 /** 戦略／混合モード用に外部ブリーフを並列取得（キーが無い provider はスキップ） */
 export async function gatherExternalBriefs(
   question: string,
   companyHint: string,
   intent: JournalChatIntent,
+  cache?: { store: ExternalBriefCache; key: string },
 ): Promise<ExternalBrief[]> {
   if (intent === "data") return [];
+  if (cache) {
+    try {
+      const cached = await cache.store.get(cache.key);
+      // 全滅した結果を配ると失敗が固定化するので、1件でも成功していれば使う。
+      if (cached && cached.some((brief) => brief.ok)) return cached;
+    } catch (error) {
+      // キャッシュはあくまで高速化と再現性のため。壊れていても本処理は続ける。
+      console.warn(
+        "external brief cache read failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
   const tasks: Promise<ExternalBrief>[] = [
     callPerplexityBrief(question, companyHint),
   ];
   // 戦略・混合では Grok も試す（キー無ければ missing_key で終わる）
   tasks.push(callGrokTrendBrief(question, companyHint));
-  return await Promise.all(tasks);
+  const briefs = await Promise.all(tasks);
+  if (cache && briefs.some((brief) => brief.ok)) {
+    try {
+      await cache.store.set(cache.key, briefs);
+    } catch (error) {
+      console.warn(
+        "external brief cache write failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+  return briefs;
 }
 
 export function formatExternalBriefsForPrompt(briefs: ExternalBrief[]): string {

@@ -4,6 +4,9 @@
 // 外部AIへ送る直前に、予約氏名・連絡先・アレルギー詳細を最小化する。
 
 import {
+  type ExternalBrief,
+  type ExternalBriefCache,
+  externalBriefCacheKey,
   formatExternalBriefsForPrompt,
   gatherExternalBriefs,
   type JournalChatIntent,
@@ -190,6 +193,54 @@ function extractClaudeUsage(
     outputTokens,
     thinkingTokens: null,
     totalTokens,
+  };
+}
+
+/** 外部知見ブリーフの保持期間。日をまたぐと鮮度が落ちるため既定は当日中。 */
+const BRIEF_CACHE_TTL_MS = (() => {
+  const raw = Number(Deno.env.get("JOURNAL_AI_BRIEF_CACHE_TTL_MS"));
+  const value = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 12 * 60 * 60 * 1000;
+  return Math.min(Math.max(value, 60_000), 7 * 24 * 60 * 60 * 1000);
+})();
+
+/**
+ * 外部ブリーフのキャッシュ。同じ日の同じ質問で同じ外部知見を使い、
+ * 出力のばらつきと外部待ちを減らす。売上数値の解析には関与しない。
+ *
+ * 読み書きの失敗は握りつぶす。キャッシュは高速化と再現性のためだけのもので、
+ * ここで分析全体を落とすほうが害が大きい。
+ */
+function createExternalBriefCache(
+  // createClient の戻り型は Deno check で呼び出し側と合わないため、
+  // recordJournalAiFallback と同じく必要な形だけを緩く受ける。
+  // deno-lint-ignore no-explicit-any
+  supabase: { from: (table: string) => any },
+  storeKey: string,
+): ExternalBriefCache {
+  return {
+    async get(key) {
+      const { data, error } = await supabase
+        .from("journal_ai_brief_cache")
+        .select("briefs")
+        .eq("cache_key", key)
+        .gt("expires_at", new Date().toISOString())
+        .maybeSingle();
+      if (error || !data) return null;
+      const briefs = (data as { briefs?: unknown }).briefs;
+      return Array.isArray(briefs) ? briefs as ExternalBrief[] : null;
+    },
+    async set(key, briefs) {
+      const { error } = await supabase
+        .from("journal_ai_brief_cache")
+        .upsert({
+          cache_key: key,
+          store_partition_key: storeKey,
+          briefs,
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + BRIEF_CACHE_TTL_MS).toISOString(),
+        }, { onConflict: "cache_key" });
+      if (error) throw new Error(error.message);
+    },
   };
 }
 
@@ -1619,6 +1670,15 @@ Deno.serve(async (req: Request, info) => {
           chatMessage,
           `MARUGO GROUP (23 stores, multi-area) / https://05-marugo-group.com / ${locHint}`,
           intent,
+          {
+            store: createExternalBriefCache(supabase, effectiveStoreKey),
+            key: externalBriefCacheKey({
+              storeKey: effectiveStoreKey,
+              question: chatMessage,
+              intent,
+              day: new Date().toISOString().slice(0, 10),
+            }),
+          },
         );
       }
 
