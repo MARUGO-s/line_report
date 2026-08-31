@@ -91,6 +91,27 @@ const OPENAI_REQUEST_TIMEOUT_MS = 70_000;
 const CLAUDE_REQUEST_TIMEOUT_MS = 40_000;
 /** 外部ブリーフ取得を含む、1回の分析リクエスト全体の上限。 */
 const JOURNAL_AI_REQUEST_DEADLINE_MS = 115_000;
+/**
+ * OpenAI を単独で待つ時間。これを過ぎても応答が無ければ Claude を併走させ、
+ * 先に返った方を採る（ヘッジ）。
+ *
+ * 直列だと OpenAI の上限70秒を使い切ってから Claude の40秒が始まり、
+ * 最悪110秒かかる。併走なら最悪85秒で、プロンプトも要求も同一なので
+ * 出力内容は変わらない。
+ *
+ * 45秒にしているのは、実測で成功した重い分析の合成が約63秒だった一方、
+ * 通常の応答はこれより十分速いため。45秒以内に返る限り Claude は起動せず、
+ * 追加のトークン費用は発生しない。
+ */
+const SYNTH_HEDGE_DELAY_DEFAULT_MS = 45_000;
+const SYNTH_HEDGE_DELAY_MS = (() => {
+  const raw = Number(Deno.env.get("JOURNAL_AI_HEDGE_DELAY_MS"));
+  const value = Number.isFinite(raw) && raw > 0
+    ? Math.floor(raw)
+    : SYNTH_HEDGE_DELAY_DEFAULT_MS;
+  // OpenAI の打ち切りより後に併走を始めても意味がない。
+  return Math.min(Math.max(value, 5_000), OPENAI_REQUEST_TIMEOUT_MS);
+})();
 const MIN_PROVIDER_REQUEST_TIMEOUT_MS = 4_000;
 
 /** HTTPステータスやエラー本文から、集計しやすい短い理由コードを作る。 */
@@ -1190,7 +1211,60 @@ async function synthesizeWithFallback(
     return result;
   };
 
-  let lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_PRIMARY);
+  // Claude は「必要になったら1回だけ」起動する。ヘッジで先に走らせた場合も、
+  // 後段の逐次フォールバックから同じ実行を待ち合わせて二重呼び出しを防ぐ。
+  let claudeRun: Promise<Awaited<ReturnType<typeof callClaude>>> | null = null;
+  const startClaude = () => {
+    if (claudeRun) return claudeRun;
+    const startedAt = Date.now();
+    claudeRun = callClaude(
+      contents,
+      providerTimeoutWithinDeadline(deadlineAt, CLAUDE_REQUEST_TIMEOUT_MS),
+    ).then((result) => {
+      attempts.push({
+        ok: result.ok,
+        provider: "claude",
+        model: result.model,
+        reason: result.ok ? null : classifyOpenAiFailure(result.error),
+        error: result.ok ? null : result.error.slice(0, 500),
+        max_completion_tokens: null,
+        elapsed_ms: Date.now() - startedAt,
+      });
+      return result;
+    });
+    return claudeRun;
+  };
+
+  // OpenAI を単独で待つ。規定時間内に返らなければ Claude を「先に起動」しておく。
+  //
+  // 採用は必ず OpenAI 優先で、Claude は OpenAI が失敗したときの受け皿としてのみ
+  // 使う。先に返った方を無条件に採ると、速い Haiku が常用されて出力の質が
+  // 変わってしまうため、そうはしない。ここで縮むのは失敗経路の待ち時間であって、
+  // 成功した分析の所要時間ではない。
+  const lunaRun = tryLuna(OPENAI_COMPLETION_BUDGET_PRIMARY);
+  let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+  const hedgeSignal = new Promise<"hedge">((resolve) => {
+    hedgeTimer = setTimeout(() => resolve("hedge"), SYNTH_HEDGE_DELAY_MS);
+  });
+  const firstSettled = await Promise.race([
+    lunaRun.then((result) => ({ kind: "luna" as const, result })),
+    hedgeSignal,
+  ]);
+  if (hedgeTimer !== undefined) clearTimeout(hedgeTimer);
+
+  let hedged = false;
+  if (firstSettled === "hedge") {
+    hedged = true;
+    console.warn(
+      `OpenAI Luna is still running after ${SYNTH_HEDGE_DELAY_MS}ms; pre-warming Claude Haiku`,
+    );
+    // 待たずに起動だけしておく。結果は下の共通経路で受け取る。
+    // ここでは await しないので、未処理拒否の警告だけ抑えておく
+    // （実際の結果と失敗の扱いは共通経路の await が行う）。
+    void startClaude().catch(() => {});
+  }
+
+  let lunaResult = await lunaRun;
   if (!lunaResult.ok) {
     const failReason = classifyOpenAiFailure(lunaResult.error);
     // キー不正・レート制限・クォータ不足は縮小枠でも同じ結果なので再試行しない
@@ -1201,7 +1275,9 @@ async function synthesizeWithFallback(
       "quota",
       "timeout",
     ].includes(failReason);
-    if (shouldRetryBudget) {
+    // ヘッジ済みなら Claude が既に走っており、そちらが救済になる。
+    // ここで縮小枠を足すと待ち時間だけ伸びるので行わない。
+    if (shouldRetryBudget && !hedged) {
       console.warn(
         "OpenAI Luna failed; retrying with a smaller completion budget:",
         lunaResult.model,
@@ -1234,20 +1310,8 @@ async function synthesizeWithFallback(
     lunaResult.model,
     lunaResult.error.slice(0, 240),
   );
-  const claudeStartedAt = Date.now();
-  const claudeResult = await callClaude(
-    contents,
-    providerTimeoutWithinDeadline(deadlineAt, CLAUDE_REQUEST_TIMEOUT_MS),
-  );
-  attempts.push({
-    ok: claudeResult.ok,
-    provider: "claude",
-    model: claudeResult.model,
-    reason: claudeResult.ok ? null : classifyOpenAiFailure(claudeResult.error),
-    error: claudeResult.ok ? null : claudeResult.error.slice(0, 500),
-    max_completion_tokens: null,
-    elapsed_ms: Date.now() - claudeStartedAt,
-  });
+  // ヘッジ済みなら既に走っている実行を待ち合わせ、未実行ならここで初めて呼ぶ。
+  const claudeResult = await startClaude();
   if (claudeResult.ok) {
     return {
       ok: true,

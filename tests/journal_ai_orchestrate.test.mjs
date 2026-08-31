@@ -238,4 +238,40 @@ test('Journal AI timeout budgets nest inside the Supabase gateway limit', async 
   );
   // 打ち切りが早すぎると、重い分析が毎回落ちる。実測で30秒では足りなかった。
   assert.ok(openai >= 60_000, `OpenAI budget ${openai} is too small for heavy analyses`);
+
+  // ヘッジ開始は OpenAI の打ち切りより前。後ろだと併走する意味がない。
+  const hedge = num(ai, 'SYNTH_HEDGE_DELAY_DEFAULT_MS');
+  assert.ok(hedge < openai, `hedge ${hedge} must start before OpenAI gives up at ${openai}`);
+  // ヘッジ後に Claude を走らせても全体期限に収まること。
+  assert.ok(
+    hedge + claude <= deadline,
+    `hedged Claude ${hedge}+${claude} must finish inside the deadline ${deadline}`,
+  );
+});
+
+test('Journal AI hedge keeps OpenAI as the adopted answer', async () => {
+  const ai = await readFile(
+    new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
+    'utf8',
+  );
+  const body = ai.slice(
+    ai.indexOf('async function synthesizeWithFallback('),
+    ai.indexOf('Deno.serve('),
+  );
+  // Claude は起動を1回に memo 化し、ヘッジと逐次フォールバックで二重に呼ばない。
+  assert.match(body, /if \(claudeRun\) return claudeRun;/);
+  assert.equal(
+    (body.match(/callClaude\(/g) || []).length,
+    1,
+    'Claude must be invoked from exactly one place',
+  );
+  // 採用は OpenAI 優先。先に返った方を無条件に採ると Haiku が常用され質が変わる。
+  assert.match(body, /let lunaResult = await lunaRun;/);
+  assert.doesNotMatch(
+    body,
+    /winner\.kind === "claude"/,
+    'must not adopt Claude just because it returned first',
+  );
+  // ヘッジ済みなら縮小枠の再試行は行わない（待ち時間だけ伸びるため）。
+  assert.match(body, /shouldRetryBudget && !hedged/);
 });
