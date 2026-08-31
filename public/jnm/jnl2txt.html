@@ -14149,7 +14149,7 @@ function normalizeQueryForPeriod(q) {
 /** 文中にある月範囲をすべて出現順に抽出する。
  * 「2025年3月〜7月と2026年3月〜7月」のような複数の連続期間比較を、
  * 最初の1期間だけで早期returnしないために使用する。 */
-function extractAllRangeRefs(q) {
+function extractAllRangeRefs(q, today) {
   const s = normalizeQueryForPeriod(q);
   const refs = [];
   // 左側の「月」は省略されることがある（「2026年1〜7月」）ため任意にする。
@@ -14175,7 +14175,9 @@ function extractAllRangeRefs(q) {
   if (chained.length) return chained;
   // 「今年と去年」「前年同月」のような相対表現どうしの比較。
   // 片方だけ解決して黙って狭めると、確定数値が欠けたまま回答されるため必ず両方返す。
-  return extractComparisonRefs(s);
+  // today を落とすと「先月」等が実行時の現在日で解決され、呼び出し側が
+  // 基準日を渡していても効かなくなる。必ず引き継ぐこと。
+  return extractComparisonRefs(s, today);
 }
 
 /**
@@ -14184,7 +14186,11 @@ function extractAllRangeRefs(q) {
  */
 function extractComparisonRefs(q, today) {
   const s = normalizeQueryForPeriod(q);
-  const now = today instanceof Date ? today : new Date();
+  // instanceof は使わない。テストは vm コンテキストで関数を評価するため
+  // 呼び出し側と実行側の Date が別レルムになり instanceof が false になる。
+  // 気づかず実行時の現在日へ落ちると、渡した基準日が黙って無視される。
+  const now = today && typeof today.getFullYear === 'function' &&
+    !Number.isNaN(Number(today)) ? today : new Date();
   const nowKey = periodKeyOf(now.getFullYear(), now.getMonth() + 1);
   const fyOf = (d) => ((d.getMonth() + 1) >= 4 ? d.getFullYear() : d.getFullYear() - 1);
   const fyRef = (y) => refFromKeys(periodKeyOf(y, 4), periodKeyOf(y + 1, 3));
@@ -14197,7 +14203,7 @@ function extractComparisonRefs(q, today) {
   // 前年同月／前年同期は「基準期間とその1年前」の組。
   if (/(前年|昨年|前期)?\s*同(月|期)/.test(s)) {
     const rest = s.replace(/(前年|昨年|前期)?\s*同(月|期)(?:比)?/g, ' ');
-    const explicitRange = extractAllRangeRefs(rest);
+    const explicitRange = extractAllRangeRefs(rest, today);
     let anchor = explicitRange.length ? explicitRange[0] : null;
     if (!anchor) {
       // 「2026年7月の前年同月比」のように基準が単月で書かれている場合を拾う
@@ -14292,7 +14298,11 @@ function refFromKeys(fromKey, toKey, extra) {
  */
 function extractLooseRangeRef(q, today) {
   const s = normalizeQueryForPeriod(q);
-  const now = today instanceof Date ? today : new Date();
+  // instanceof は使わない。テストは vm コンテキストで関数を評価するため
+  // 呼び出し側と実行側の Date が別レルムになり instanceof が false になる。
+  // 気づかず実行時の現在日へ落ちると、渡した基準日が黙って無視される。
+  const now = today && typeof today.getFullYear === 'function' &&
+    !Number.isNaN(Number(today)) ? today : new Date();
   const nowKey = periodKeyOf(now.getFullYear(), now.getMonth() + 1);
   const MIN = periodKeyOf(PERIOD_MIN_YEAR, 1);
   const MAX = periodKeyOf(PERIOD_MAX_YEAR, 12);
@@ -14401,7 +14411,7 @@ function extractLooseRangeRef(q, today) {
 /** 「2025年4月から2026年3月まで」「2026年1月〜7月」「2025年〜2026年」等の期間範囲指定を1件検出する。 */
 function extractRangeRef(q, today) {
   const s = normalizeQueryForPeriod(q);
-  const monthRanges = extractAllRangeRefs(s);
+  const monthRanges = extractAllRangeRefs(s, today);
   if (monthRanges.length) return monthRanges[0];
   const yearToYear = s.match(/(\d{4})\s*年\s*(?:から|〜|~|-|－|—|ー)\s*(\d{4})\s*年\s*(?:まで)?/);
   if (yearToYear) {
