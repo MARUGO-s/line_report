@@ -35,7 +35,10 @@ type JournalAiUsage = {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** 推論モデルの思考トークン。完了枠と実時間の両方を食うので所要時間の内訳に使う。 */
   thinkingTokens: number | null;
+  /** プロンプトのうちキャッシュから読まれた分。prefill 短縮量の指標。 */
+  cachedTokens: number | null;
   totalTokens: number;
 };
 
@@ -166,12 +169,26 @@ function extractOpenAiUsage(
   const totalTokens = Number(usage.total_tokens ?? 0) ||
     (inputTokens + outputTokens);
   if (!inputTokens && !outputTokens && !totalTokens) return null;
+  // 実測用。無い提供元もあるので、取れないときは null のままにする。
+  const promptDetails = isRecord(usage.prompt_tokens_details)
+    ? usage.prompt_tokens_details
+    : null;
+  const completionDetails = isRecord(usage.completion_tokens_details)
+    ? usage.completion_tokens_details
+    : null;
+  const cachedTokens = promptDetails
+    ? Number(promptDetails.cached_tokens ?? NaN)
+    : NaN;
+  const thinkingTokens = completionDetails
+    ? Number(completionDetails.reasoning_tokens ?? NaN)
+    : NaN;
   return {
     provider: "openai",
     model,
     inputTokens,
     outputTokens,
-    thinkingTokens: null,
+    thinkingTokens: Number.isFinite(thinkingTokens) ? thinkingTokens : null,
+    cachedTokens: Number.isFinite(cachedTokens) ? cachedTokens : null,
     totalTokens,
   };
 }
@@ -186,12 +203,15 @@ function extractClaudeUsage(
   const outputTokens = Number(usage.output_tokens ?? 0) || 0;
   const totalTokens = inputTokens + outputTokens;
   if (!inputTokens && !outputTokens) return null;
+  // Claude はキャッシュ読み出しを別項目で返す。
+  const cacheRead = Number(usage.cache_read_input_tokens ?? NaN);
   return {
     provider: "claude",
     model,
     inputTokens,
     outputTokens,
     thinkingTokens: null,
+    cachedTokens: Number.isFinite(cacheRead) ? cacheRead : null,
     totalTokens,
   };
 }
@@ -302,6 +322,7 @@ async function recordJournalAiUsage(
       input_tokens: usage.inputTokens,
       output_tokens: usage.outputTokens,
       thinking_tokens: usage.thinkingTokens,
+      cached_tokens: usage.cachedTokens,
       total_tokens: usage.totalTokens,
       line_message_id: null,
       surface: "journal",
