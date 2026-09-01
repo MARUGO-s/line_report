@@ -156,8 +156,9 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
   assert.match(html, /data-origin=/);
 
   // 元の分類へ戻したら移動扱いを解除すること。戻したのに印が残ると混乱する。
-  assert.match(html, /const back=origin===category;/);
-  assert.match(html, /el\.classList\.toggle\('pending-move',!back\);/);
+  // 同じ大分類への確定は back にせず、分類済みとしてキューに残す。
+  assert.match(html, /el\.classList\.toggle\('pending-move',!!moved\);/);
+  assert.match(html, /same&&wasQueued/);
 
   // 片付いた行を隠せると残りに集中できる。
   assert.match(html, /id="classifyHideMoved"/);
@@ -175,22 +176,22 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
   assert.equal((html.match(/applyCategoryToItem\(el,category\)/g) || []).length, 1);
   assert.match(html, /applyCategoryToItems\(picked,category\);/);
   assert.match(html, /applyCategoryToItems\(\[el\],category\);/);
-  assert.match(html, /markMoved\(el,category\)/);
+  assert.match(html, /markMoved\(el,category,/);
 
-  // 元からその分類の商品へ同じ分類を押すと、選択が外れるだけで何も起きない。
-  // 押せていないのか元からそうなのか分からず「消えない」と読めるので、
-  // 結果を必ず言葉にする。大分類は細分類の代わりにならないことも添える。
+  // 同じ大分類を押しても分類済みにする。残ると「終わっていない」と読める。
   assert.match(html, /id="classifyNotice"/);
-  assert.match(html, /return wasQueued\?'reverted':'unchanged';/);
-  assert.match(html, /もともと「\$\{category\}」なので変わりません/);
-  assert.match(html, /大分類なので細分類は未設定のままで、一覧にも残ります/);
+  assert.match(html, /return same\?'confirmed':'moved';/);
+  assert.match(html, /として分類済みにしました/);
+  assert.match(html, /data-overridden=/);
+  assert.match(html, /function classifyItemIsSaved\(el\)/);
+  assert.doesNotMatch(html, /一覧にも残ります/);
 
   // 間違えた移動は1件ずつ戻せる。隠したあともトレイから再配置できる。
   assert.match(html, /class="ci-undo"/);
   assert.match(html, /id="classifyMovedWrap"/);
   assert.match(html, /function unqueuePendingCategoryMove/);
   assert.match(html, /const undo=event\.target\.closest\('\.ci-undo'\)/);
-  assert.match(html, /origin===category\) unqueuePendingCategoryMove/);
+  assert.match(html, /unqueuePendingCategoryMove\(key\)/);
 
   // 再描画をまたいでも移動状態が残ること。classificationRows は未反映の移動を
   // row.category へ反映するため、元の分類を別に持たないと描画時に

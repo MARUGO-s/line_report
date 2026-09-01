@@ -7015,19 +7015,22 @@ const CLASSIFICATION_TARGET_GROUPS=[
 /** 一覧に出す商品行を作る。未確定の移動も反映する。 */
 function classificationRows(sales){
   const totals=new Map();
+  const overrides=readProductCategoryOverrides();
   (Array.isArray(sales)?sales:[]).forEach(s=>(s.items||[]).forEach(item=>{
     const key=productGroupKey(item.code,item.name);
-    const row=totals.get(key)||{key,code:item.code,name:item.name,category:item.category,qty:0,amount:0};
-    row.qty+=item.qty; row.amount+=item.amount; row.category=item.category; totals.set(key,row);
+    const row=totals.get(key)||{key,code:item.code,name:item.name,category:item.category,qty:0,amount:0,overridden:false};
+    row.qty+=item.qty; row.amount+=item.amount; row.category=item.category;
+    row.overridden=row.overridden||Object.prototype.hasOwnProperty.call(overrides,key);
+    totals.set(key,row);
   }));
   // 未反映の移動を反映するが、元の分類も残す。これが無いと再描画のたびに
   // 「どこから動かしたか」が失われ、移動済みの印も付け直せない。
+  // 同じ大分類への確定も origin を残し、分類済みとして隠せるようにする。
   Object.entries(pendingCategoryMoves||{}).forEach(([key,category])=>{
     const row=totals.get(key);
-    if(row&&SALES_CATEGORIES.includes(category)&&row.category!==category){
-      row.originCategory=row.category;
-      row.category=category;
-    }
+    if(!row||!SALES_CATEGORIES.includes(category)) return;
+    if(!Object.prototype.hasOwnProperty.call(row,'originCategory')) row.originCategory=row.category;
+    row.category=category;
   });
   return [...totals.values()].sort((a,b)=>b.amount-a.amount);
 }
@@ -7047,12 +7050,14 @@ function classificationEditorHtml(sales){
     // 再描画でも移動済みの見た目を復元する。origin は移動前の分類。
     const moved=Object.prototype.hasOwnProperty.call(row,'originCategory');
     const origin=moved?String(row.originCategory||''):String(row.category||'');
+    const showTrail=moved&&origin&&origin!==String(row.category||'');
     return `<div class="classification-item${moved?' pending-move':''}" draggable="true"`
       +` data-product-key="${esc(row.key)}" data-name="${esc(String(row.name||'').toLowerCase())}"`
-      +` data-refined="${refined?'1':'0'}" data-origin="${esc(origin)}" data-moved="${moved?'1':'0'}">`
+      +` data-refined="${refined?'1':'0'}" data-origin="${esc(origin)}" data-moved="${moved?'1':'0'}"`
+      +` data-overridden="${row.overridden?'1':'0'}">`
       +`<span class="ci-name">${esc(row.name)}</span>`
-      +`<span class="classification-from"${moved&&origin?'':' hidden'}>${esc(origin||'未分類')}</span>`
-      +`<span class="classification-arrow"${moved&&origin?'':' hidden'}>→</span>`
+      +`<span class="classification-from"${showTrail?'':' hidden'}>${esc(origin||'未分類')}</span>`
+      +`<span class="classification-arrow"${showTrail?'':' hidden'}>→</span>`
       +`<span class="classification-tag${refined?'':' is-unset'}${moved?' is-moved':''}">${esc(row.category||'未分類')}</span>`
       +`<span class="ci-amount">${yen(row.amount)}</span>`
       +`<button type="button" class="ci-undo"${moved?'':' hidden'} title="この移動を取り消す">戻す</button></div>`;
@@ -7108,6 +7113,10 @@ function classifyItemIsMoved(el){
   if(el.dataset.moved==='1'||el.classList.contains('pending-move')) return true;
   const key=el.dataset.productKey||'';
   return !!(key&&Object.prototype.hasOwnProperty.call(pendingCategoryMoves||{},key));
+}
+
+function classifyItemIsSaved(el){
+  return !!(el&&el.dataset.overridden==='1');
 }
 
 function updateClassifyCommitUi(){
@@ -7325,43 +7334,48 @@ function bindClassificationEditor(){
   if(unsetOnly) unsetOnly.checked=!!classifyFilterPrefs.unsetOnly;
   if(hideMovedBox) hideMovedBox.checked=!!classifyFilterPrefs.hideMoved;
 
-  /** 移動済みの行を「旧分類 → 新分類」で見せる。元に戻したかも判別できる。 */
-  const markMoved=(el,category)=>{
+  /** 移動済みの行を「旧分類 → 新分類」で見せる。同じ分類の確定も分類済みにする。 */
+  const markMoved=(el,category,moved)=>{
     const origin=String(el.dataset.origin||'');
-    const back=origin===category;
-    el.dataset.moved=back?'0':'1';
-    el.classList.toggle('pending-move',!back);
+    if(moved===undefined) moved=origin!==category;
+    el.dataset.moved=moved?'1':'0';
+    el.classList.toggle('pending-move',!!moved);
     el.dataset.refined=SUB_SALES_CATEGORY_PARENTS[category]?'1':'0';
+    const showTrail=moved&&origin&&origin!==category;
     const from=el.querySelector('.classification-from');
     const arrow=el.querySelector('.classification-arrow');
     const tag=el.querySelector('.classification-tag');
     const undoBtn=el.querySelector('.ci-undo');
-    if(from){ from.textContent=origin||'未分類'; from.hidden=back||!origin; }
-    if(arrow) arrow.hidden=back||!origin;
+    if(from){ from.textContent=origin||'未分類'; from.hidden=!showTrail; }
+    if(arrow) arrow.hidden=!showTrail;
     if(tag){
       tag.textContent=category;
       tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]);
-      tag.classList.toggle('is-moved',!back);
+      tag.classList.toggle('is-moved',!!moved);
     }
-    if(undoBtn) undoBtn.hidden=back;
+    if(undoBtn) undoBtn.hidden=!moved;
   };
 
   /**
-   * 1件へ分類を当てる。結果を返すのは、同じ分類を押したときに
-   * 「選択が外れるだけ」で終わり、押せていないのか元からそうなのかが
-   * 画面から分からなかったため。
+   * 1件へ分類を当てる。同じ大分類を押したときも「分類済み」としてキューに載せ、
+   * 作業一覧から外せるようにする。もう一度同じ分類を押すと取り消し。
    */
   const applyCategoryToItem=(el,category)=>{
     if(!el||!category) return 'skipped';
     const key=el.dataset.productKey||'';
     const origin=String(el.dataset.origin||'');
     const wasQueued=classifyItemIsMoved(el);
-    markMoved(el,category);
-    if(origin===category) unqueuePendingCategoryMove(key);
-    else queuePendingCategoryMove(key,category);
+    const same=origin===category;
+    if(same&&wasQueued){
+      markMoved(el,category,false);
+      unqueuePendingCategoryMove(key);
+      el.classList.remove('selected');
+      return 'reverted';
+    }
+    markMoved(el,category,true);
+    queuePendingCategoryMove(key,category);
     el.classList.remove('selected');
-    if(origin!==category) return 'moved';
-    return wasQueued?'reverted':'unchanged';
+    return same?'confirmed':'moved';
   };
 
   /** 押した結果を必ず言葉にする。無反応に見えたまま何度も押させない。 */
@@ -7369,22 +7383,17 @@ function bindClassificationEditor(){
     if(!notice) return;
     const parts=[];
     if(outcome.moved) parts.push(`${outcome.moved}件を「${category}」へ移動しました。`);
-    if(outcome.reverted) parts.push(`${outcome.reverted}件の移動を取り消しました。`);
-    if(outcome.unchanged){
-      parts.push(
-        `${outcome.unchanged}件はもともと「${category}」なので変わりません。` +
-        (SUB_SALES_CATEGORY_PARENTS[category]
-          ? ''
-          : `「${category}」は大分類なので細分類は未設定のままで、一覧にも残ります。`)
-      );
+    if(outcome.confirmed){
+      parts.push(`${outcome.confirmed}件を「${category}」として分類済みにしました。作業一覧から外します。`);
     }
+    if(outcome.reverted) parts.push(`${outcome.reverted}件の移動を取り消しました。`);
     notice.textContent=parts.join(' ');
     notice.hidden=!parts.length;
-    notice.classList.toggle('is-warn',!outcome.moved&&!outcome.reverted&&!!outcome.unchanged);
+    notice.classList.remove('is-warn');
   };
 
   const applyCategoryToItems=(els,category)=>{
-    const outcome={ moved:0, reverted:0, unchanged:0, skipped:0 };
+    const outcome={ moved:0, reverted:0, confirmed:0, skipped:0 };
     els.forEach(el=>{ outcome[applyCategoryToItem(el,category)]+=1; });
     refreshTargetCounts();
     applyFilter();
@@ -7438,6 +7447,13 @@ function bindClassificationEditor(){
     items().forEach(el=>{
       const matchText=!q||String(el.dataset.name||'').includes(q);
       const isMoved=classifyItemIsMoved(el);
+      const isSaved=classifyItemIsSaved(el);
+      if(hideMoved&&isSaved&&!isMoved){
+        if(list && el.parentElement!==list) list.appendChild(el);
+        el.hidden=true;
+        el.classList.remove('selected');
+        return;
+      }
       if(isMoved){
         // 細分類フィルタで消すと戻せなくなる。未反映の移動は常に触れる状態にする。
         if(hideMoved && movedList){
