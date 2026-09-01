@@ -20,7 +20,8 @@ export type PosJournalReceiptItem = {
   unit: number;
   qty: number;
   amount: number;
-  category?: "フード" | "飲料" | "室料" | "その他";
+  /** 大分類(コード由来)または細分類(手動割当)。集約は posJournalPrimaryCategory を通す。 */
+  category?: string;
   isCharge?: boolean;
 };
 
@@ -71,7 +72,8 @@ export type JournalSavedReportSaleItem = {
   name: string;
   qty: number;
   amount: number;
-  category: "フード" | "飲料" | "室料" | "その他";
+  /** 大分類(コード由来)または細分類(手動割当)。集約は posJournalPrimaryCategory を通す。 */
+  category: string;
   isCharge: boolean;
   known: boolean;
   byCode: boolean;
@@ -121,6 +123,8 @@ export type JournalSavedReportData = {
   drinkTotal: number;
   roomTotal: number;
   otherTotal: number;
+  /** 割り当てられた粒度ごとの内訳。細分類の切替表示に使う。合計は上の4項目が正。 */
+  categoryBreakdown?: Record<string, number>;
   chargeTotal: number;
   lunchTotal: number;
   dinnerTotal: number;
@@ -213,13 +217,56 @@ export const POS_JOURNAL_REPORT_CATEGORY_VERSION =
   "pos-food-drink-room-bycode-v3";
 export const POS_JOURNAL_REPORT_MEAL_PERIOD_VERSION =
   "lunch-before-1600-v1";
-const POS_JOURNAL_REPORT_CATEGORIES = [
+/**
+ * 商品コードから決まる大分類。ここは従来どおり4つのまま変えない。
+ * 集計・グラフ・AIの前提がこの4分類で組まれており、過去レポートとの比較も
+ * この粒度で行うため。
+ */
+export const POS_JOURNAL_PRIMARY_CATEGORIES = [
   "フード",
   "飲料",
   "室料",
   "その他",
 ] as const;
-type PosJournalReportCategory = typeof POS_JOURNAL_REPORT_CATEGORIES[number];
+type PosJournalPrimaryCategory = typeof POS_JOURNAL_PRIMARY_CATEGORIES[number];
+
+/**
+ * 手動分類でだけ使える細分類と、その集約先。
+ * コードからは自動で付かない。運用側が商品ごとに割り当てる。
+ */
+export const POS_JOURNAL_SUB_CATEGORY_PARENTS: Readonly<
+  Record<string, PosJournalPrimaryCategory>
+> = {
+  "アラカルト": "フード",
+  "コース": "フード",
+  "デザート": "フード",
+  "ワインボトル": "飲料",
+  "グラスワイン": "飲料",
+  "ソフトドリンク": "飲料",
+  "その他ドリンク": "飲料",
+};
+
+/** 手動分類で選べる全カテゴリ（大分類＋細分類）。 */
+export const POS_JOURNAL_REPORT_CATEGORIES = [
+  ...POS_JOURNAL_PRIMARY_CATEGORIES,
+  ...Object.keys(POS_JOURNAL_SUB_CATEGORY_PARENTS),
+] as const;
+type PosJournalReportCategory = string;
+
+/**
+ * どのカテゴリでも大分類へ寄せる。細分類が入っていても
+ * フード計・飲料計が従来どおりの意味を保つようにするための唯一の入口。
+ */
+export function posJournalPrimaryCategory(
+  value: unknown,
+): PosJournalPrimaryCategory {
+  const text = String(value ?? "").trim();
+  const parent = POS_JOURNAL_SUB_CATEGORY_PARENTS[text];
+  if (parent) return parent;
+  return (POS_JOURNAL_PRIMARY_CATEGORIES as readonly string[]).includes(text)
+    ? text as PosJournalPrimaryCategory
+    : "その他";
+}
 const POS_JOURNAL_FOOD_RANGES: ReadonlyArray<[number, number]> = [[100, 199]];
 const POS_JOURNAL_DRINK_RANGES: ReadonlyArray<[number, number]> = [
   [23, 29],
@@ -1410,12 +1457,15 @@ export function buildJournalSavedReportsFromPosDays(params: {
     0,
   );
   const totalGroups = days.reduce((sum, day) => sum + safeNumber(day.groups), 0);
-  const categoryTotals: Record<PosJournalReportCategory, number> = {
+  const categoryTotals: Record<PosJournalPrimaryCategory, number> = {
     "フード": 0,
     "飲料": 0,
     "室料": 0,
     "その他": 0,
   };
+  // 画面の切替表示用。実際に割り当てられた粒度(細分類が付いていれば細分類)で
+  // 積む。大分類の合計は上の categoryTotals が正で、こちらは内訳にすぎない。
+  const categoryBreakdown: Record<string, number> = {};
   const mealCategoryTotals = {
     lunchTotal: 0,
     dinnerTotal: 0,
@@ -1450,9 +1500,14 @@ export function buildJournalSavedReportsFromPosDays(params: {
     daily.groups += sale.groups;
     daily.customers += sale.customers;
     for (const item of sale.items) {
-      categoryTotals[item.category] += item.amount;
-      if (item.category === "フード") daily.food += item.amount;
-      if (item.category === "飲料") daily.drink += item.amount;
+      // 細分類が入っていても、合計は必ず大分類へ寄せる。
+      const primary = posJournalPrimaryCategory(item.category);
+      categoryTotals[primary] += item.amount;
+      const assigned = String(item.category ?? "").trim() || primary;
+      categoryBreakdown[assigned] = (categoryBreakdown[assigned] ?? 0) +
+        item.amount;
+      if (primary === "フード") daily.food += item.amount;
+      if (primary === "飲料") daily.drink += item.amount;
       if (item.isCharge) chargeTotal += item.amount;
       if (!isPosJournalAdjustmentItem(item)) {
         const product = productMap.get(item.name) ??
@@ -1462,15 +1517,15 @@ export function buildJournalSavedReportsFromPosDays(params: {
         productMap.set(item.name, product);
       }
       if (sale.mealPeriod === "ランチ") {
-        if (item.category === "フード") {
+        if (primary === "フード") {
           mealCategoryTotals.lunchFoodTotal += item.amount;
-        } else if (item.category === "飲料") {
+        } else if (primary === "飲料") {
           mealCategoryTotals.lunchDrinkTotal += item.amount;
         }
       } else if (sale.mealPeriod === "ディナー") {
-        if (item.category === "フード") {
+        if (primary === "フード") {
           mealCategoryTotals.dinnerFoodTotal += item.amount;
-        } else if (item.category === "飲料") {
+        } else if (primary === "飲料") {
           mealCategoryTotals.dinnerDrinkTotal += item.amount;
         }
       }
@@ -1551,6 +1606,7 @@ export function buildJournalSavedReportsFromPosDays(params: {
     salesCount: sales.length,
     total,
     totalSales: total,
+    categoryBreakdown,
     foodTotal: categoryTotals["フード"],
     drinkTotal: categoryTotals["飲料"],
     roomTotal: categoryTotals["室料"],
@@ -2109,10 +2165,11 @@ export function buildPosJournalSummary(params: {
     for (const receipt of day.receipts || []) {
       for (const item of receipt.items || []) {
         const amount = Number(item.amount) || 0;
-        if (item.category === "フード") foodAmount += amount;
-        else if (item.category === "飲料") drinkAmount += amount;
-        else if (item.category === "室料") roomAmount += amount;
-        else if (item.category === "その他") otherAmount += amount;
+        const primary = posJournalPrimaryCategory(item.category);
+        if (primary === "フード") foodAmount += amount;
+        else if (primary === "飲料") drinkAmount += amount;
+        else if (primary === "室料") roomAmount += amount;
+        else otherAmount += amount;
         if (item.isCharge) chargeAmount += amount;
       }
     }

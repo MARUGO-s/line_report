@@ -426,7 +426,9 @@
   .classification-editor .classify-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
   .classification-editor .classify-pending{font-size:12px;opacity:.75}
   .classification-editor .classify-pending.has-pending{opacity:1;font-weight:600;color:var(--rv-accent,#b68235)}
-  .classification-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  /* 大分類4つに細分類7つが加わり11レーンになる。列数を固定すると
+     カテゴリを足すたびに崩れるので、幅に合わせて自動で折り返す。 */
+  .classification-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
   .classification-lane{background:transparent;border:1px solid var(--rv-neutral-700,#dfe3ea);border-radius:var(--rv-radius-md,8px);min-height:90px;padding:8px}
   .classification-lane.over{background:color-mix(in srgb, var(--rv-accent,#5b8edb) 10%, transparent);border-color:var(--rv-accent,#5b8edb)}
   .classification-lane h5{font-size:11px;margin:0 0 7px;opacity:.7}
@@ -3677,7 +3679,31 @@ async function upsertMonthReportsFromSales(sales, { productKey=null } = {}){
 const DINNER_START_MINUTES=16*60;
 const MEAL_PERIODS=['ランチ','ディナー'];
 // 売上カテゴリ。フード・飲料に加え、個室料金（室料）を独立集計する。
-const SALES_CATEGORIES=['フード','飲料','室料','その他'];
+// 商品コードから決まるのはこの4分類だけ。集計・グラフ・AI・過去レポートとの
+// 比較はすべてこの粒度が前提なので、ここは増やさない。
+const PRIMARY_SALES_CATEGORIES=['フード','飲料','室料','その他'];
+// 手動分類でだけ使える細分類と、その集約先。コードからは自動で付かない。
+const SUB_SALES_CATEGORY_PARENTS={
+  'アラカルト':'フード','コース':'フード','デザート':'フード',
+  'ワインボトル':'飲料','グラスワイン':'飲料','ソフトドリンク':'飲料','その他ドリンク':'飲料'
+};
+// 手動分類で選べる全カテゴリ（大分類＋細分類）。分類レーンもこの順で並ぶ。
+const SALES_CATEGORIES=[...PRIMARY_SALES_CATEGORIES,...Object.keys(SUB_SALES_CATEGORY_PARENTS)];
+/** どのカテゴリでも大分類へ寄せる。細分類が入っても合計の意味を変えないための唯一の入口。 */
+function primarySalesCategory(category){
+  const key=String(category||'').trim();
+  return SUB_SALES_CATEGORY_PARENTS[key]
+    || (PRIMARY_SALES_CATEGORIES.includes(key)?key:'その他');
+}
+/** byCategory(割当粒度で積まれたMap)から、大分類の合計を取り出す。 */
+function catAmt(byCategory,primary){
+  if(!(byCategory instanceof Map)) return 0;
+  let sum=0;
+  byCategory.forEach((amount,category)=>{
+    if(primarySalesCategory(category)===primary) sum+=(Number(amount)||0);
+  });
+  return sum;
+}
 /** チャージ額をカテゴリ別に集めたMapから、内数として属するカテゴリを決める。
  *  マスタ定義（チャージ＝フード内数）と実データの分類は食い違うことがあるため、
  *  画面・AIとも「定義」ではなく「実データ」を正とする。特定できなければ ''。 */
@@ -4575,9 +4601,9 @@ function statCard(kicker,rows){ // rows: [[label,value],...]
 function mealPeriodKpis(periods){
   return MEAL_PERIODS.map(label=>{
     const period=periods.get(label);
-    const food=period.byCategory.get('フード')||0;
-    const drinks=period.byCategory.get('飲料')||0;
-    const room=period.byCategory.get('室料')||0;
+    const food=catAmt(period.byCategory,'フード');
+    const drinks=catAmt(period.byCategory,'飲料');
+    const room=catAmt(period.byCategory,'室料');
     return `${kpiTile(`${label}売上`,yen(period.total),`${period.groups}組・${period.customers}名`)}
       ${kpiTile(`${label}客単価`,averageCustomerPrice(period.total,period.customers),`フード ${yen(food)}・飲料 ${yen(drinks)}${room?`・室料 ${yen(room)}`:''}`)}`;
   }).join('');
@@ -4585,9 +4611,9 @@ function mealPeriodKpis(periods){
 function mealPeriodTable(periods){
   const rows=MEAL_PERIODS.map(label=>{
     const period=periods.get(label);
-    const food=period.byCategory.get('フード')||0;
-    const drinks=period.byCategory.get('飲料')||0;
-    const room=period.byCategory.get('室料')||0;
+    const food=catAmt(period.byCategory,'フード');
+    const drinks=catAmt(period.byCategory,'飲料');
+    const room=catAmt(period.byCategory,'室料');
     const drinkRatio=period.total&&food>=0&&drinks>=0?`売上比 ${Math.round(drinks/period.total*100)}%${room?`・室料 ${yen(room)}`:''}`:'取消相殺あり';
     const timeLabel=label==='ランチ'?'16:00未満':'16:00以降';
     const rowClass=label==='ランチ'?'lunch-row':'dinner-row';
@@ -4598,8 +4624,8 @@ function mealPeriodTable(periods){
 function mealCategoryChart(period){
   if(!period.total) return '<p class="empty">該当する会計はありません。</p>';
   return donutChart([
-    ['フード',period.byCategory.get('フード')||0],
-    ['飲料',period.byCategory.get('飲料')||0]
+    ['フード',catAmt(period.byCategory,'フード')],
+    ['飲料',catAmt(period.byCategory,'飲料')]
   ],140);
 }
 
@@ -4625,8 +4651,8 @@ function dayHtml(g){
     ? `　／　天候 ${g.weather||'—'}${Number.isFinite(g.tempC)?` ${g.tempC}℃`:''}`
     : '';
   const heading=`${+Y}年${+M}月${+D}日${g.weekday?'（'+g.weekday+'）':''} の売上${weatherNote}`;
-  const food=g.byCategory.get('フード')||0, drinks=g.byCategory.get('飲料')||0, room=g.byCategory.get('室料')||0;
-  const foodQty=g.byCategoryQty.get('フード')||0, drinkQty=g.byCategoryQty.get('飲料')||0, roomQty=g.byCategoryQty.get('室料')||0;
+  const food=catAmt(g.byCategory,'フード'), drinks=catAmt(g.byCategory,'飲料'), room=catAmt(g.byCategory,'室料');
+  const foodQty=catAmt(g.byCategoryQty,'フード'), drinkQty=catAmt(g.byCategoryQty,'飲料'), roomQty=catAmt(g.byCategoryQty,'室料');
   // チャージはフード固定ではない。所属カテゴリは実データから判定し、独立タイルで示す。
   const chargeCat=dominantChargeCategory(g.chargeByCategory);
   const foodSub=`${foodQty}点`;
@@ -7169,13 +7195,13 @@ function monthlyReportHtml(days,totalAll,totalTax,salesCount,sales=[]){
   const customers = (peopleComplete && customersFromSummary > 0) ? customersFromSummary : customersFromReceipts;
   const effectivePeopleComplete = peopleComplete || customersFromReceipts > 0;
 
-  const food=byCategory.get('フード')||0, drinks=byCategory.get('飲料')||0, room=byCategory.get('室料')||0;
-  const foodQty=byCategoryQty.get('フード')||0, drinkQty=byCategoryQty.get('飲料')||0, roomQty=byCategoryQty.get('室料')||0;
+  const food=catAmt(byCategory,'フード'), drinks=catAmt(byCategory,'飲料'), room=catAmt(byCategory,'室料');
+  const foodQty=catAmt(byCategoryQty,'フード'), drinkQty=catAmt(byCategoryQty,'飲料'), roomQty=catAmt(byCategoryQty,'室料');
   const roomCol=room>0;
   const monthChargeCat=dominantChargeCategory(monthChargeByCategory);
   const rows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${esc(formatDayWeather(d))}</td><td>${esc(formatDayTemp(d))}</td><td>${d.receipts.length}件</td><td>${d.peopleComplete?d.groups+'組':'—'}</td><td>${d.peopleComplete?d.customers+'名':'—'}</td><td>${yen(d.total)}</td><td>${yen(d.tax)}</td><td>${d.peopleComplete?averageCustomerPrice(d.total,d.customers):'—'}</td></tr>`).join('');
-  const other=byCategory.get('その他')||0;
-  const categoryRows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${yen(d.byCategory.get('フード')||0)}</td><td>${yen(d.byCategory.get('飲料')||0)}</td>${roomCol?`<td>${yen(d.byCategory.get('室料')||0)}</td>`:''}<td>${yen(d.byCategory.get('その他')||0)}</td><td>${yen(d.total)}</td></tr>`).join('');
+  const other=catAmt(byCategory,'その他');
+  const categoryRows=days.map(d=>`<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${yen(catAmt(d.byCategory,'フード'))}</td><td>${yen(catAmt(d.byCategory,'飲料'))}</td>${roomCol?`<td>${yen(catAmt(d.byCategory,'室料'))}</td>`:''}<td>${yen(catAmt(d.byCategory,'その他'))}</td><td>${yen(d.total)}</td></tr>`).join('');
   const dailyMealRows=days.map(d=>{
     const dayLunch=d.byMealPeriod.get('ランチ'), dayDinner=d.byMealPeriod.get('ディナー');
     return `<tr><td>${esc(d.date)}${d.weekday?`（${esc(d.weekday)}）`:''}</td><td>${yen(dayLunch.total)}</td><td>${dayLunch.customers}名</td><td>${averageCustomerPrice(dayLunch.total,dayLunch.customers)}</td><td>${yen(dayDinner.total)}</td><td>${dayDinner.customers}名</td><td>${averageCustomerPrice(dayDinner.total,dayDinner.customers)}</td></tr>`;
@@ -7417,10 +7443,10 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     return null;
   }
   const days=groupByDate(sales), total=days.reduce((s,d)=>s+d.total,0), tax=days.reduce((s,d)=>s+d.tax,0);
-  const foodTotal=days.reduce((sum,d)=>sum+(d.byCategory.get('フード')||0),0);
-  const drinkTotal=days.reduce((sum,d)=>sum+(d.byCategory.get('飲料')||0),0);
-  const roomTotal=days.reduce((sum,d)=>sum+(d.byCategory.get('室料')||0),0);
-  const otherTotal=days.reduce((sum,d)=>sum+(d.byCategory.get('その他')||0),0);
+  const foodTotal=days.reduce((sum,d)=>sum+(catAmt(d.byCategory,'フード')),0);
+  const drinkTotal=days.reduce((sum,d)=>sum+(catAmt(d.byCategory,'飲料')),0);
+  const roomTotal=days.reduce((sum,d)=>sum+(catAmt(d.byCategory,'室料')),0);
+  const otherTotal=days.reduce((sum,d)=>sum+(catAmt(d.byCategory,'その他')),0);
   const chargeTotal=days.reduce((sum,d)=>sum+d.chargeTotal,0);
   const mealPeriods=combineMealPeriods(days);
   const lunch=mealPeriods.get('ランチ'),dinner=mealPeriods.get('ディナー');
@@ -7473,10 +7499,10 @@ function buildReport(kind='daily',startFilter=null,endFilter=null,monthFilter=nu
     dinnerTotal: dinner.total,
     lunchCustomers: lunch.customers,
     dinnerCustomers: dinner.customers,
-    lunchFoodTotal: lunch.byCategory.get('フード') || 0,
-    lunchDrinkTotal: lunch.byCategory.get('飲料') || 0,
-    dinnerFoodTotal: dinner.byCategory.get('フード') || 0,
-    dinnerDrinkTotal: dinner.byCategory.get('飲料') || 0,
+    lunchFoodTotal: catAmt(lunch.byCategory,'フード'),
+    lunchDrinkTotal: catAmt(lunch.byCategory,'飲料'),
+    dinnerFoodTotal: catAmt(dinner.byCategory,'フード'),
+    dinnerDrinkTotal: catAmt(dinner.byCategory,'飲料'),
     weatherByDate,
     parserVersion: PARSER_VERSION,
     verificationVersion: VERIFICATION_VERSION,
@@ -14591,10 +14617,10 @@ function aggregateSalesRows(rows) {
     totalCustomers,
     groups,
     salesCount: list.length,
-    foodTotal: byCategory.get('フード') || 0,
-    drinkTotal: byCategory.get('飲料') || 0,
-    roomTotal: byCategory.get('室料') || 0,
-    otherTotal: byCategory.get('その他') || 0,
+    foodTotal: catAmt(byCategory,'フード'),
+    drinkTotal: catAmt(byCategory,'飲料'),
+    roomTotal: catAmt(byCategory,'室料'),
+    otherTotal: catAmt(byCategory,'その他'),
     chargeTotal,
     lunchTotal: lunch.totalSales || 0,
     dinnerTotal: dinner.totalSales || 0,

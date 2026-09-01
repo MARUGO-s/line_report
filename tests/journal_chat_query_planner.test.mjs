@@ -70,6 +70,12 @@ const context = {
   AI_INTENT_CLARIFICATION_MARKER: '知りたい内容を具体化してください',
   WEEKDAY_ORDER: ['月', '火', '水', '木', '金', '土', '日'],
   // 期間解決の番兵年（開区間の端点）。アプリ側の定数と一致させること。
+  // 分類の2階層モデル。アプリ側の定義と一致させること。
+  PRIMARY_SALES_CATEGORIES: ['フード','飲料','室料','その他'],
+  SUB_SALES_CATEGORY_PARENTS: {
+    'アラカルト':'フード','コース':'フード','デザート':'フード',
+    'ワインボトル':'飲料','グラスワイン':'飲料','ソフトドリンク':'飲料','その他ドリンク':'飲料'
+  },
   PERIOD_MIN_YEAR: 1900,
   PERIOD_MAX_YEAR: 2999,
   AI_KNOWLEDGE_MAX_ITEMS: knowledgeLimits.maxItems,
@@ -262,6 +268,9 @@ for (const name of [
   'formatStoreKnowledgeBlock',
   'resolveKnowledgePeriodRange',
   'clampAiSystemInstruction',
+  // 大分類への集約。byCategory を読む関数がすべて経由する。
+  'primarySalesCategory',
+  'catAmt',
   'isMarkdownTableSeparator',
   'simpleMarkdown',
 ]) {

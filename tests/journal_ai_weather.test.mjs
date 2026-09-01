@@ -59,6 +59,12 @@ vm.runInContext(
   + `const WEEKDAY_ORDER = ['月', '火', '水', '木', '金', '土', '日'];`,
   context,
 );
+// 大分類への集約。byCategory を読む関数がすべて経由するため先に入れる。
+vm.runInContext(`const PRIMARY_SALES_CATEGORIES=['フード','飲料','室料','その他'];
+const SUB_SALES_CATEGORY_PARENTS={'アラカルト':'フード','コース':'フード','デザート':'フード',
+  'ワインボトル':'飲料','グラスワイン':'飲料','ソフトドリンク':'飲料','その他ドリンク':'飲料'};`, context);
+vm.runInContext(extractFunction(html, 'primarySalesCategory'), context);
+vm.runInContext(extractFunction(html, 'catAmt'), context);
 vm.runInContext(extractFunction(html, 'sortWeekdayRows'), context);
 vm.runInContext(extractFunction(html, 'formatMonthlyMealFdTrendLines'), context);
 vm.runInContext(extractFunction(html, 'aggregateSalesRows'), context);

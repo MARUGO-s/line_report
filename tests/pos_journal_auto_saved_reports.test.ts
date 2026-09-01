@@ -681,3 +681,87 @@ Deno.test("empty or mismatched month data does not create empty reports", () => 
     [],
   );
 });
+
+Deno.test("manual sub-categories roll up into the existing four totals", () => {
+  const day = sampleDay("2026-08-20", 10_000);
+  day.groups = 1;
+  day.guests = 2;
+  day.receipts = [{
+    no: "sub",
+    time: "19:00",
+    pay: "現金",
+    total: 10_000,
+    guests: 2,
+    payment_breakdown: { "現金": 10_000 },
+    items: [
+      { code: "0000000000101", name: "コース8品", unit: 4_000, qty: 1, amount: 4_000 },
+      { code: "0000000000604", name: "パンナコッタ", unit: 1_000, qty: 1, amount: 1_000 },
+      { code: "0000000003000", name: "ボトルワイン", unit: 3_500, qty: 1, amount: 3_500 },
+      { code: "0000000002500", name: "コーラ", unit: 500, qty: 1, amount: 500 },
+      { code: "0000000000002", name: "個室料", unit: 1_000, qty: 1, amount: 1_000 },
+    ],
+  }];
+  const reports = buildJournalSavedReportsFromPosDays({
+    storeKey: "marugos",
+    storeName: "マルゴエス",
+    storeCode: "1022",
+    month: "2026-08",
+    days: [day],
+    // 細分類はコードからは付かない。運用側が商品ごとに割り当てる。
+    categoryOverrides: {
+      "0000000000101|コース8品": "コース",
+      "0000000000604|パンナコッタ": "デザート",
+      "0000000003000|ボトルワイン": "ワインボトル",
+      "0000000002500|コーラ": "ソフトドリンク",
+    },
+  });
+  const monthly = reports.find((report) => report.id.endsWith("_monthly"));
+  if (!monthly) throw new Error("monthly report missing");
+
+  // 既存の4分類の合計は、細分類が入っても意味が変わらないこと。
+  assertEquals(monthly.data.foodTotal, 5_000); // コース + デザート
+  assertEquals(monthly.data.drinkTotal, 4_000); // ワインボトル + ソフトドリンク
+  assertEquals(monthly.data.roomTotal, 1_000);
+
+  // 切替表示用の内訳は、割り当てた粒度のまま残ること。
+  assertEquals(monthly.data.categoryBreakdown, {
+    "コース": 4_000,
+    "デザート": 1_000,
+    "ワインボトル": 3_500,
+    "ソフトドリンク": 500,
+    "室料": 1_000,
+  });
+});
+
+Deno.test("sub-categories are accepted as manual overrides but never come from codes", () => {
+  // コード由来の分類は従来どおり4分類のまま。
+  assertEquals(
+    classifyPosJournalReportItem("0000000000101", {}, "コース8品").category,
+    "フード",
+  );
+  // 手動割当でだけ細分類になる。
+  assertEquals(
+    classifyPosJournalReportItem(
+      "0000000000101",
+      { "0000000000101|コース8品": "コース" },
+      "コース8品",
+    ),
+    {
+      category: "コース",
+      isCharge: false,
+      known: true,
+      byCode: false,
+      byOverride: true,
+      needsReview: false,
+    },
+  );
+  // 未知の値はオーバーライドとして通さない。
+  assertEquals(
+    classifyPosJournalReportItem(
+      "0000000000101",
+      { "0000000000101|コース8品": "ワイン" },
+      "コース8品",
+    ).category,
+    "フード",
+  );
+});
