@@ -1983,7 +1983,7 @@
         <tr><td>ボトルワイン</td><td>750ml／点（固定）</td></tr>
         <tr><td>ペアリング</td><td>既定 300ml／点（変更可）</td></tr>
       </tbody></table>
-      <div class="jr-warn"><strong>銘柄名だけのボトルは換算に入りません。</strong> 対象は「グラスワイン」「デキャンタ」「ボトルワイン」「ペアリング」に相当する商品、または分類で赤／白／ロゼ／オレンジデキャンタを付けた商品です。</div>
+      <div class="jr-warn"><strong>大分類「飲料」のままの銘柄は換算に入りません。</strong> グラス赤／白／ロゼ／泡／オレンジ、デキャンタ、ボトル赤／白／ロゼ／泡／オレンジへ振り分けた商品、または名称が Glass Wine / デキャンタ / Bottle Wine / ペアリング の商品が対象です。</div>
       <h4>過去売上への同期</h4>
       <p>ジャーナルを正として、過去売上（手入力の日次・月次）へ自動反映する設定です。<strong>既定はオフ</strong>で、店舗ごとに明示的に有効化します。</p>
       <div class="jr-note">初期値に戻しても、同期設定・カレンダー・ワインml設定は消えません。</div>
@@ -2133,7 +2133,7 @@
         <tr><td>「旧解析版」と出る</td><td>集計基準が更新されています。レポートを作り直してからAI分析・印刷してください</td></tr>
         <tr><td>#メモが登録されない</td><td>写真だけ送っていませんか。画像は<strong>引用返信で <code>#メモ</code></strong> が必要です。本文も引用も無い <code>#メモ</code> だけの場合は、使い方の案内が返信されます</td></tr>
         <tr><td>定休日を弱点と書かれる</td><td>店舗情報タブの定休日が未設定です。設定すると以後の分析に反映されます</td></tr>
-        <tr><td>ワインのmlが合わない</td><td>銘柄名だけのボトルは換算対象外です。グラス／ボトル／ペアリングに相当する商品のみ集計されます</td></tr>
+        <tr><td>ワインのmlが合わない</td><td>大分類「飲料」だけでは換算しません。グラス赤／ボトル赤などのワイン細分類へ振り分けてください</td></tr>
         <tr><td>同じファイルが取り込めない</td><td>重複防止が働いています。集計値が空だった行なら、同じファイルの再アップロードで修復されます</td></tr>
         <tr><td>AIが期間を聞き返す</td><td>対象年月が特定できていません。「2026年6月の」のように月を明示すると確認を省けます</td></tr>
       </tbody></table>
@@ -2385,7 +2385,7 @@
         <input id="opsWinePairingMl" type="number" min="1" max="5000" step="1" value="300">
       </label>
     </div>
-    <p class="kn-note">商品名に Glass Wine / デキャンタ / Bottle Wine / ペアリング を含む点数、または分類「赤／白／ロゼ／オレンジデキャンタ」の点数×上記 ml で合計します。保存後、プレビューとAI分析に反映されます。</p>
+    <p class="kn-note">分類のグラス（赤／白／ロゼ／泡／オレンジ）・デキャンタ・ボトル（赤／白／ロゼ／泡／オレンジ）の点数、または名称に Glass Wine / デキャンタ / Bottle Wine / ペアリング を含む点数×上記 ml で合計します。保存後、プレビューとAI分析に反映されます。</p>
   </div>
 
   <div class="card" style="margin-top:14px;">
@@ -9670,9 +9670,15 @@ function normalizeWineProductSearchText(name) {
     .replace(/\s+/g, '');
 }
 
+const WINE_ML_CATEGORY_KIND = {
+  'グラス赤': 'glass', 'グラス白': 'glass', 'グラスロゼ': 'glass', 'グラス泡': 'glass', 'グラスオレンジ': 'glass',
+  '赤デキャンタ': 'decanter', '白デキャンタ': 'decanter', 'ロゼデキャンタ': 'decanter', 'オレンジデキャンタ': 'decanter',
+  'ボトル赤': 'bottle', 'ボトル白': 'bottle', 'ボトルロゼ': 'bottle', 'ボトル泡': 'bottle', 'ボトルオレンジ': 'bottle'
+};
+
 function classifyWineProductForMl(name, category) {
   const cat = String(category || '').trim();
-  if (cat === '赤デキャンタ' || cat === '白デキャンタ' || cat === 'ロゼデキャンタ' || cat === 'オレンジデキャンタ') return 'decanter';
+  if (WINE_ML_CATEGORY_KIND[cat]) return WINE_ML_CATEGORY_KIND[cat];
   const n = normalizeWineProductSearchText(name);
   if (!n || isPosCategoryRollupName?.(name)) return '';
   // ペアリングを先に判定（「ペアリング＋ワイン」名でもペアリング扱い）
@@ -9754,7 +9760,7 @@ function formatWineMlAnalysisLines(profile, verifiedData = null) {
   const products = collectProductsForWineMl(verifiedData);
   const analysis = computeWineMlVolumeAnalysis(products, wineMl);
   if (!products.length || analysis.totalQty <= 0) {
-    lines.push('今回の確定集計: ワイン系商品点数が未取得、または0点（換算設定のみ有効。数値捏造禁止）');
+    lines.push('今回の確定集計: ワイン細分類（グラス赤／白／ロゼ／泡／オレンジ、デキャンタ、ボトル赤／白／ロゼ／泡／オレンジ）と、名称が Glass Wine / デキャンタ / Bottle Wine / ペアリング の点数が0。大分類「飲料」だけの商品はml換算しない。換算設定のみ有効。数値捏造禁止');
     return lines;
   }
   lines.push(`Glass Wine: ${analysis.glass.qty}点 × ${analysis.glass.mlPerUnit}ml = ${analysis.glass.ml}ml（売上 ${yen(analysis.glass.amt)}）`);

@@ -80,6 +80,11 @@ const context = {
     'カクテル':'飲料','アルコール':'飲料',
     'ソフトドリンク':'飲料','その他ドリンク':'飲料'
   },
+  WINE_ML_CATEGORY_KIND: {
+    'グラス赤': 'glass', 'グラス白': 'glass', 'グラスロゼ': 'glass', 'グラス泡': 'glass', 'グラスオレンジ': 'glass',
+    '赤デキャンタ': 'decanter', '白デキャンタ': 'decanter', 'ロゼデキャンタ': 'decanter', 'オレンジデキャンタ': 'decanter',
+    'ボトル赤': 'bottle', 'ボトル白': 'bottle', 'ボトルロゼ': 'bottle', 'ボトル泡': 'bottle', 'ボトルオレンジ': 'bottle'
+  },
   PERIOD_MIN_YEAR: 1900,
   PERIOD_MAX_YEAR: 2999,
   AI_KNOWLEDGE_MAX_ITEMS: knowledgeLimits.maxItems,
@@ -2119,6 +2124,22 @@ test('wine ml conversion uses store settings for chat facts', () => {
   assert.equal(analysis.bottle.ml, 48750);
   assert.equal(analysis.decanter.ml, 1500);
   assert.equal(analysis.totalMl, 198750);
+
+  assert.equal(context.classifyWineProductForMl('バローロ', 'グラス赤'), 'glass');
+  assert.equal(context.classifyWineProductForMl('カベルネ', 'ボトル白'), 'bottle');
+  assert.equal(context.classifyWineProductForMl('ロゼ', 'ロゼデキャンタ'), 'decanter');
+  assert.equal(context.classifyWineProductForMl('バローロ', '飲料'), '');
+  assert.equal(context.classifyWineProductForMl('スーパードライ 600ml', 'アルコール'), '');
+  const classified = context.computeWineMlVolumeAnalysis([
+    { name: 'バローロ', qty: 10, amt: 12000, category: 'グラス赤' },
+    { name: 'カベルネ', qty: 2, amt: 16000, category: 'ボトル赤' },
+    { name: 'スーパードライ 600ml', qty: 326, amt: 326000, category: 'アルコール' },
+  ], { glassMl: 100, decanterMl: 375, pairingMl: 300 });
+  assert.equal(classified.glass.qty, 10);
+  assert.equal(classified.glass.ml, 1000);
+  assert.equal(classified.bottle.qty, 2);
+  assert.equal(classified.bottle.ml, 1500);
+  assert.equal(classified.totalQty, 12);
 
   const facts = context.formatWineVolumeFactsForAi({
     multiPeriod: true,

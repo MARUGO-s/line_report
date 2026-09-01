@@ -5,6 +5,7 @@
 - 正本の続き: [docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md](./docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md)
 - 分類UI改善（移動済みを隠す、1件戻す、大分類確定、中身閲覧、未分類へ戻す、チャージ上書き禁止、赤／白デキャンタml）はすでに `main`（`70950dc`〜`8a034f3`）。
 - この続きで、ロゼ／オレンジデキャンタ、ハイボール→アルコール／有名カクテル→カクテルの名前自動分類、マルゴエス専用 `GET /foodcourt/journal-brief` を Journal AI へ要約注入した。
+- 追記: ワインmlはグラス赤／ボトル赤など細分類も数える。大分類「飲料」のままの銘柄は0点のまま。分類済みでも「ワイン判断不可」と出たら、細分類まで入っているか確認する。
 - **禁止:** `foodcourt.html` 全件・期間サマリーGroq再生成を Journal に載せない。コート売上をジャーナル正本にしない。他店へドーム要因を付けない。ハイボール判定でカタカナ `ー` を消さない。
 - 作業コピーは Dropbox の `line_report-main`。Codex の `line-report-mtalk-release` ではない。
 
