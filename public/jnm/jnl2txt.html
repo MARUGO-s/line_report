@@ -7073,9 +7073,18 @@ function classificationEditorHtml(sales){
 }
 
 let pendingCategoryMoves={};
+let classifyDraggingItem=null;
+let classifyFilterPrefs={ search:'', unsetOnly:false, hideMoved:false };
 
 function pendingCategoryMoveCount(){
   return Object.keys(pendingCategoryMoves||{}).length;
+}
+
+function classifyItemIsMoved(el){
+  if(!el) return false;
+  if(el.dataset.moved==='1'||el.classList.contains('pending-move')) return true;
+  const key=el.dataset.productKey||'';
+  return !!(key&&Object.prototype.hasOwnProperty.call(pendingCategoryMoves||{},key));
 }
 
 function updateClassifyCommitUi(){
@@ -7275,7 +7284,11 @@ function bindClassificationEditor(){
   const unsetOnly=view.querySelector('#classifyUnsetOnly');
   const hideMovedBox=view.querySelector('#classifyHideMoved');
   const countLabel=view.querySelector('#classifyListCount');
-  const items=()=>[...view.querySelectorAll('.classification-item')];
+  const items=()=>[...view.querySelectorAll('#classifyList .classification-item')];
+  classifyDraggingItem=null;
+  if(search) search.value=classifyFilterPrefs.search||'';
+  if(unsetOnly) unsetOnly.checked=!!classifyFilterPrefs.unsetOnly;
+  if(hideMovedBox) hideMovedBox.checked=!!classifyFilterPrefs.hideMoved;
 
   /** 移動済みの行を「旧分類 → 新分類」で見せる。元に戻したかも判別できる。 */
   const markMoved=(el,category)=>{
@@ -7294,6 +7307,18 @@ function bindClassificationEditor(){
       tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]);
       tag.classList.toggle('is-moved',!back);
     }
+  };
+
+  const refreshTargetCounts=()=>{
+    const counts=new Map(SALES_CATEGORIES.map(c=>[c,0]));
+    items().forEach(el=>{
+      const cat=el.querySelector('.classification-tag')?.textContent;
+      if(counts.has(cat)) counts.set(cat,(counts.get(cat)||0)+1);
+    });
+    view.querySelectorAll('.classification-target').forEach(target=>{
+      const count=target.querySelector('.ct-count');
+      if(count) count.textContent=String(counts.get(target.dataset.category)||0);
+    });
   };
 
   const refreshSelection=()=>{
@@ -7317,12 +7342,14 @@ function bindClassificationEditor(){
     const q=String(search?.value||'').trim().toLowerCase();
     const onlyUnset=!!unsetOnly?.checked;
     const hideMoved=!!hideMovedBox?.checked;
+    classifyFilterPrefs={ search:String(search?.value||''), unsetOnly:onlyUnset, hideMoved };
     let shown=0;
     items().forEach(el=>{
       const matchText=!q||String(el.dataset.name||'').includes(q);
       const matchUnset=!onlyUnset||el.dataset.refined!=='1';
       // 片付いた行を隠せると、残りに集中できる。
-      const matchMoved=!hideMoved||el.dataset.moved!=='1';
+      // data-moved だけ見ると、ドラッグで印が付かなかった行が残る。
+      const matchMoved=!hideMoved||!classifyItemIsMoved(el);
       const visible=matchText&&matchUnset&&matchMoved;
       el.hidden=!visible;
       // 隠れた行を選択したままにすると、見えないものが移動して事故になる。
@@ -7354,26 +7381,42 @@ function bindClassificationEditor(){
         el.classList.remove('selected');
         markMoved(el,category);
       });
-      const count=target.querySelector('.ct-count');
-      if(count) count.textContent=String((Number(count.textContent)||0)+picked.length);
+      refreshTargetCounts();
       applyFilter();
     });
     // ドラッグも従来どおり受ける。慣れた操作を奪わない。
-    target.addEventListener('dragover',event=>{event.preventDefault();target.classList.add('over');});
+    target.addEventListener('dragover',event=>{
+      event.preventDefault();
+      if(event.dataTransfer) event.dataTransfer.dropEffect='copy';
+      target.classList.add('over');
+    });
     target.addEventListener('dragleave',()=>target.classList.remove('over'));
     target.addEventListener('drop',event=>{
       event.preventDefault(); target.classList.remove('over');
-      const key=event.dataTransfer.getData('text/plain'), category=target.dataset.category;
-      if(!key||!category) return;
-      const el=items().find(node=>node.dataset.productKey===key);
-      if(el) markMoved(el,category);
+      const category=target.dataset.category;
+      const transferred=event.dataTransfer
+        ? (event.dataTransfer.getData('text/plain')||event.dataTransfer.getData('text'))
+        : '';
+      const el=classifyDraggingItem
+        || items().find(node=>node.dataset.productKey===transferred);
+      if(!el||!category) return;
+      const key=el.dataset.productKey||transferred;
+      markMoved(el,category);
       queuePendingCategoryMove(key,category);
+      el.classList.remove('selected');
+      refreshTargetCounts();
       applyFilter();
     });
   });
-  items().forEach(item=>item.addEventListener('dragstart',event=>{
-    event.dataTransfer.setData('text/plain',item.dataset.productKey||'');
-  }));
+  items().forEach(item=>{
+    item.addEventListener('dragstart',event=>{
+      classifyDraggingItem=item;
+      const key=item.dataset.productKey||'';
+      event.dataTransfer.setData('text/plain',key);
+      event.dataTransfer.effectAllowed='copyMove';
+    });
+    item.addEventListener('dragend',()=>{ classifyDraggingItem=null; });
+  });
 
   view.querySelectorAll('.report-tab').forEach(tab=>{
     tab.addEventListener('click',()=>{
@@ -7387,6 +7430,7 @@ function bindClassificationEditor(){
     });
   });
   updateClassifyCommitUi();
+  applyFilter();
 }
 
 let _monthlyTabCounter = 0;

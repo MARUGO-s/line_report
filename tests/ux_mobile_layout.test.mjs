@@ -161,7 +161,15 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
 
   // 片付いた行を隠せると残りに集中できる。
   assert.match(html, /id="classifyHideMoved"/);
-  assert.match(html, /const matchMoved=!hideMoved\|\|el\.dataset\.moved!=='1';/);
+  assert.match(html, /function classifyItemIsMoved\(el\)/);
+  assert.match(html, /const matchMoved=!hideMoved\|\|!classifyItemIsMoved\(el\);/);
+  // data-moved だけ見ると、ドラッグで印が付かなかった行が残る。
+  // 未反映キューと pending-move も「移動済み」とみなす。
+  assert.match(html, /el\.classList\.contains\('pending-move'\)/);
+  assert.match(html, /pendingCategoryMoves\|\|\{\},key\)/);
+  // ドロップは dataTransfer のキー照合に頼らず、ドラッグ中の行そのものを使う。
+  assert.match(html, /const el=classifyDraggingItem/);
+  assert.match(html, /classifyDraggingItem=item;/);
 
   // クリックとドラッグで表示が食い違わないよう、描画は1箇所に集約する。
   assert.equal((html.match(/markMoved\(el,category\)/g) || []).length, 2);
