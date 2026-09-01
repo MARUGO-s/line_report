@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
-const [html, adminApi, lineWebhook, aiAnalyze, reservationCacheCron, journalAiClient] = await Promise.all([
+const [html, adminApi, lineWebhook, aiAnalyze, reservationCacheCron, journalAiClient, foodcourtJournalCoverage] = await Promise.all([
   readFile(new URL("public/jnm/jnl2txt.html", root), "utf8"),
   readFile(new URL("supabase/functions/admin-api/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/line-webhook/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/ai-analyze/index.ts", root), "utf8"),
   readFile(new URL("supabase/functions/reservation-ai-cache-cron/index.ts", root), "utf8"),
   readFile(new URL("public/jnm/journal-ai-client.js", root), "utf8"),
+  readFile(new URL("supabase/functions/_shared/foodcourt_journal_coverage.ts", root), "utf8"),
 ]);
 const pagedRowScan = await readFile(
   new URL("supabase/functions/_shared/paged_row_scan.ts", root),
@@ -266,15 +267,21 @@ core(
     "needsFoodcourtBoostConfirmation",
     "requestFoodcourtJournalDeepAnalysis",
     "Promise.allSettled",
-    "includeFoodcourtBrief: !foodcourtBoostEnabled",
+    "includeFoodcourtBrief: true",
     "action: 'integrate_foodcourt'",
     "integrationReports",
+    "baseline:",
+    "integrated.foodcourtBlock",
     "row.dataset.consumed = 'true'",
+  ]) && containsAll(foodcourtJournalCoverage, [
+    "export function buildFoodcourtJournalCoverage",
+    "foodcourt_tenant_report_net_tax_excluded",
   ]) && containsAll(foodcourtDeepSnippet, [
     'storeKey.toLowerCase() !== "marugos"',
     "sanitizeJournalAiPayload",
     "requestedRanges",
-    "answerFoodCourtQuestion(analysisReports",
+    "answerFoodCourtQuestion(",
+    "buildFoodcourtJournalCoverage",
     "history_saved: false",
     "foodcourt_data_unavailable",
     "foodcourt_deep_analysis_failed",

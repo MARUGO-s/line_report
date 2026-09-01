@@ -131,10 +131,11 @@ HEAD 直前までの関連コミット:
 
 同意後の配線:
 
-1. Journal確定データ分析（`action: chat`, `orchestrationMode: data`）と `POST /foodcourt/journal-deep-analysis` を `Promise.allSettled` で同時開始する。深掘り時は軽量briefを重ねない。
+1. Journal確定データ分析（`action: chat`, `orchestrationMode: data`）と `POST /foodcourt/journal-deep-analysis` を `Promise.allSettled` で同時開始する。軽量briefは通常分析の基準情報として保持し、専門AIの代わりに捨てない。
 2. dedicated routeは `marugos` と `CHAT_JOURNAL_AI_SCOPE` へ限定する。Journalが解決した期間だけを使い、会話履歴を渡さず、`foodcourt_qa_history` へ保存しない。既存 `/foodcourt/ask` の権限・履歴契約は変えない。
-3. 両方成功時だけ `ai-analyze` の `action: integrate_foodcourt` を別途呼ぶ。2本は非信頼の下書きであり、売上・客数・商品数値はJournalの確定データを正本にする。矛盾は隠さず明記する。
-4. 専門AI失敗時はJournal回答を警告付きで返す。最終統合失敗時は2本を未統合と明記して併記する。Journal失敗時は専門結果だけを店舗の完成分析にせず、不完全警告とローカル確定集計を返す。
+3. 両方成功時だけ `ai-analyze` の `action: integrate_foodcourt` を別途呼ぶ。軽量briefと2本の非信頼な下書きを単純併記せず、会場背景・確定売上・イベント／競合・ワイン／商品・施策へ織り込んだ1本へ統合する。売上・客数・商品数値はJournalの確定データを正本にする。矛盾は対象日数・欠損日・税込／税抜とともに明記する。
+4. ワイン点数・mlは対象期間の全商品から表示上限の前に算出し、compact salesDataと最終統合へ構造化して渡す。イベントは期間内DB全件数と最大36件の詳細一覧を分離する。
+5. 専門AI失敗時はJournal回答を警告付きで返す。最終統合失敗時は2本を未統合と明記して併記する。Journal失敗時は専門結果だけを店舗の完成分析にせず、不完全警告とローカル確定集計を返す。
 
 一時的な長大timeoutだけに頼らない。並列実行、共有deadline、入力上限、専用routeの実HTTP失敗でEdge制限内に収める。
 

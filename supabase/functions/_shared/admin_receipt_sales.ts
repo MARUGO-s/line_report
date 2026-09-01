@@ -1126,7 +1126,7 @@ export async function updateStoreReceiptPhones(
 ): Promise<{ store_key: string; receipt_phones: string[] }> {
   const registry = await loadStoreRegistry(supabase)
   const storeKey = resolveStorePartitionKey(
-    body.store_partition_key ?? body.store_key ?? body.store_name,
+    String(body.store_partition_key ?? body.store_key ?? body.store_name ?? ""),
     registry.map((entry) => String(entry.store_partition_key ?? '').trim()).filter(Boolean),
   )
   if (!storeKey) {

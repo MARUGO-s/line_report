@@ -69,6 +69,7 @@ import {
   generateFoodCourtWeeklyReport,
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
+import { buildFoodcourtJournalCoverage } from "../_shared/foodcourt_journal_coverage.ts"
 import { sanitizeJournalAiPayload } from "../_shared/journal_ai_privacy.ts"
 import {
   assessFoodCourtEvolutionReadiness,
@@ -2443,9 +2444,11 @@ Deno.serve(async (req, info) => {
       const endDate = /^\d{4}-\d{2}-\d{2}$/.test(endRaw) ? endRaw : todayIso
       const lo = startDate <= endDate ? startDate : endDate
       const hi = startDate <= endDate ? endDate : startDate
-      const { data: eventRows, error: eventError } = await supabase
+      // 詳細本文は36件に抑える一方、件数はPostgRESTのexact countを別契約で保持する。
+      // events.lengthを期間内の全件数として扱うと、36件上限がそのまま誤った分析値になる。
+      const { data: eventRows, error: eventError, count: eventTotalCount } = await supabase
         .from("tokyo_dome_events")
-        .select("event_date, title, category, venue, expected_attendance")
+        .select("event_date, title, category, venue, expected_attendance", { count: "exact" })
         .gte("event_date", lo)
         .lte("event_date", hi)
         .order("event_date", { ascending: true })
@@ -2543,6 +2546,8 @@ Deno.serve(async (req, info) => {
         start: lo,
         end: hi,
         events,
+        event_total_count: Math.max(0, Number(eventTotalCount ?? events.length) || 0),
+        event_list_truncated: Number(eventTotalCount ?? events.length) > events.length,
         court: latest ? {
           report_date: String(latest.report_date ?? "").slice(0, 10),
           base_tenant_name: baseName,
@@ -2877,18 +2882,31 @@ Deno.serve(async (req, info) => {
       }
       const fetchedReports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
       const reports = isJournalDeep
-        ? fetchedReports.filter((report) => {
-          const salesDate = fcSalesDate(report)
-          return requestedRanges.some((range) => salesDate >= range.from && salesDate <= range.to)
-        })
+        ? (() => {
+          // created_at降順の先頭だけを売上日ごとの正本として使い、再取込・再解析履歴を二重集計しない。
+          const seenSalesDates = new Set<string>()
+          return fetchedReports.filter((report) => {
+            const salesDate = fcSalesDate(report)
+            if (!requestedRanges.some((range) => salesDate >= range.from && salesDate <= range.to)) return false
+            if (!salesDate || seenSalesDates.has(salesDate)) return false
+            seenSalesDates.add(salesDate)
+            return true
+          })
+        })()
         : fetchedReports
+      const journalCoverage = isJournalDeep
+        ? buildFoodcourtJournalCoverage(
+          requestedRanges,
+          reports.map((report) => fcSalesDate(report)).filter(Boolean),
+        )
+        : null
       if (!reports.length) {
         if (isJournalDeep) {
           return json({
             error: "指定期間のフードコート比較データがありません。",
             code: "foodcourt_data_unavailable",
             request_id: requestId,
-            coverage: { requested_ranges: requestedRanges, report_count: 0 },
+            coverage: { ...journalCoverage, report_count: 0 },
           }, 422)
         }
         return json({ answer: "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
@@ -2941,7 +2959,21 @@ Deno.serve(async (req, info) => {
       const viewingReport = viewingReportId ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === viewingReportId) : null
       const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
       try {
-        const qaResult = await answerFoodCourtQuestion(analysisReports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, analysisDailyLogs)
+        const qaResult = await answerFoodCourtQuestion(
+          analysisReports,
+          baseName,
+          question,
+          groqApiKey,
+          events,
+          weather,
+          supabase,
+          storeKey,
+          history,
+          forecast,
+          viewingDate,
+          analysisDailyLogs,
+          journalCoverage,
+        )
         if (isJournalDeep && !String(qaResult.answer ?? "").trim()) {
           return json({
             error: "フードコート専門AIから有効な分析を取得できませんでした。",
@@ -2961,7 +2993,9 @@ Deno.serve(async (req, info) => {
           const truncated = fetchedReports.length >= 500
           return json({
             ok: true,
-            status: dailyLogsError || truncated ? "partial" : "complete",
+            status: dailyLogsError || truncated || journalCoverage?.coverage_status === "partial"
+              ? "partial"
+              : "complete",
             request_id: requestId,
             store_key: "marugos",
             analysis: {
@@ -2971,7 +3005,7 @@ Deno.serve(async (req, info) => {
               loop_count: qaResult.loopCount,
             },
             coverage: {
-              requested_ranges: requestedRanges,
+              ...journalCoverage,
               used_from: usedDates[0] ?? null,
               used_to: usedDates.at(-1) ?? null,
               report_count: reports.length,

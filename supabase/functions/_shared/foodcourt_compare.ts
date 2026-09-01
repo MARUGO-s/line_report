@@ -1383,7 +1383,8 @@ async function resolveFoodCourtLoopConfig(
     fallbackEach,
   )
   const providerRaw = String(Deno.env.get('FOODCOURT_LOOP_EVALUATOR_PROVIDER') ?? '').trim().toLowerCase()
-  const evaluatorProvider: FoodCourtChatProvider = (['groq', 'gemini', 'claude', 'openai', 'grok'] as const).includes(providerRaw as FoodCourtChatProvider)
+  const allowedEvaluatorProviders: FoodCourtChatProvider[] = ['groq', 'gemini', 'claude', 'openai', 'grok']
+  const evaluatorProvider: FoodCourtChatProvider = allowedEvaluatorProviders.includes(providerRaw as FoodCourtChatProvider)
     ? providerRaw as FoodCourtChatProvider
     : 'claude'
   // 評価JSONが上限で切れると採点不能(evaluation_failed)になる。本番初回で700ちょうどで切れた実績があるため
@@ -3100,6 +3101,17 @@ export function buildFoodCourtNippouBlocks(
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 // events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
 // 競合店プロファイル（業態・価格帯・飲み/食事傾向）も注入し、業態文脈を踏まえた分析にする。
+export type FoodCourtJournalAnalysisScope = {
+  requested_ranges?: Array<{ from: string; to: string }>
+  expected_day_count?: number
+  covered_day_count?: number
+  missing_date_count?: number
+  missing_dates?: string[]
+  missing_dates_truncated?: boolean
+  coverage_status?: "complete" | "partial"
+  sales_basis?: string
+}
+
 export async function answerFoodCourtQuestion(
   reports: Array<Record<string, unknown>>,
   baseName: string,
@@ -3113,6 +3125,7 @@ export async function answerFoodCourtQuestion(
   forecast: ForecastRow[] = [],
   viewingDate?: string | null,
   dailyLogs: Array<Record<string, unknown>> = [],
+  journalScope: FoodCourtJournalAnalysisScope | null = null,
 ): Promise<{ answer: string | null; loopScore: number | null; loopCount: number; xTrendBrief?: string | null }> {
   if (!groqApiKey) return { answer: null, loopScore: null, loopCount: 0 }
   const deadlineAt = fcRequestDeadlineAt()
@@ -3136,7 +3149,20 @@ export async function answerFoodCourtQuestion(
     if (rows.length) blocks.push(`■${fcDayLabel(r)}\n${rows.join('\n')}`)
   }
   if (!blocks.length) return { answer: 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。', loopScore: null, loopCount: 0 }
-  const data = blocks.reverse().join('\n\n')
+  const journalScopeBlock = journalScope
+    ? [
+      "【Journal連携の対象範囲・サーバー確定】",
+      `対象範囲: ${(journalScope.requested_ranges || []).map((range) => `${range.from}〜${range.to}`).join(" / ") || "未指定"}`,
+      `対象日数: ${Number(journalScope.expected_day_count || 0)}日 / フードコート日報あり: ${Number(journalScope.covered_day_count || 0)}日 / 欠損: ${Number(journalScope.missing_date_count || 0)}日`,
+      `欠損日: ${(journalScope.missing_dates || []).join("・") || "なし"}${journalScope.missing_dates_truncated ? "（続きあり）" : ""}`,
+      "フードコート側の売上はテナント比較日報の税抜値。欠損日がある場合、合計を対象期間全体の月間売上と呼ばない。",
+      "Journal側の税込／税抜店舗売上とは税区分と日数を揃えない限り直接比較しない。売上差があっても、同期間のイベント・競合・順位・客層の事実は独立した背景根拠として分析する。",
+    ].join("\n")
+    : ""
+  const data = [journalScopeBlock, blocks.reverse().join('\n\n')].filter(Boolean).join('\n\n')
+  const journalScopeRule = journalScope
+    ? "【Journal連携範囲】日報欠損日は0円扱いせず、部分日報の合計を対象期間全体の売上と呼ばない。Journalとの金額差だけを理由に、イベント・競合・順位の独立した背景事実まで捨てない。"
+    : ""
   const insights = buildBaseInsights(reports, baseName)
   const eventCorr = buildEventCorrelation(reports, baseName, events)
   const eventList = buildEventListText(events)
@@ -3167,6 +3193,7 @@ export async function answerFoodCourtQuestion(
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
   const quantSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、他店舗比較と過去実績データの分析専門家です。`,
+    journalScopeRule,
     `担当は「他店舗との関係」と「過去の実績データ」および「日報施策の数値効果」のみ。イベント・天気の深掘りは別担当。`,
     `【厳守】表の値をそのまま言い換えるだけの回答は禁止。数字は根拠として引用し、必ず「だから何を意味するか」まで述べる。`,
     `(1) 競合プロファイル（各店の業態）を使い、客単価・客数の水準がその業態から見て妥当か想定外かを判定する。`,
@@ -3182,6 +3209,7 @@ export async function answerFoodCourtQuestion(
 
   const extSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
+    journalScopeRule,
     `担当は「東京ドームのイベント」と「天気」のみ。競合比較・過去実績の話は別担当なので触れなくてよい。`,
     `(1) 客数・売上に動きがある日は、そのイベント名・種別・規模・客層まで特定し、なぜ効いた/効かなかったかを客層・滞在時間と業態(ワイン×スパイス＝高単価大人向け)の相性で説明する。`,
     `(2) 野球は対戦相手/デーナイター、ライブはアーティスト/客層、ドームシティの小ホール(後楽園ホール・カナデビアホール等)独自の集客動機も考慮する。`,
@@ -3194,6 +3222,7 @@ export async function answerFoodCourtQuestion(
 
   const opsSystem = [
     `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
+    journalScopeRule,
     `担当は「明日から現場で試せる打ち手」に加え、日報に書かれた「こんなことをしてみた」施策の効果検証と次アクションへの接続。`,
     `【厳守】データに無い販売点数・原価・スタッフ人数は作らない。打ち手は必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
     `【現場の大前提・重要】フードコート店舗であるため、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であり禁止します。デリバリーではなく、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案してください。`,
@@ -3218,6 +3247,7 @@ export async function answerFoodCourtQuestion(
 
   const criticSystem = [
     `あなたは「${baseName}」分析の反証・品質管理担当です。`,
+    journalScopeRule,
     `担当は、専門AIメモに含まれる言い過ぎ、根拠不足、相関と因果の混同、対象日/期間の取り違え、データに無い数字の混入を検出すること。`,
     `日報施策の効果を断定している場合、「日報×実績 効果対照」の数値と照合していないなら「仮説に弱める」よう指摘する。`,
     `担当者評価と実績の不一致を無視しているメモも指摘する。`,
@@ -3230,6 +3260,7 @@ export async function answerFoodCourtQuestion(
 
   const system = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
+    journalScopeRule,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。現場日報があるときは、日報と売上実績をリンクした「施策レポート」としても書く。`,
     `【データの大前提・最重要】売上・客数は「テナント一覧＝翌朝に出る“前日”の売上比較表」由来です。ただし提供データの日付は既に『実際に売上が発生した日（売上日）』へ補正済みなので、表示された日付＝その売上が発生した実日付として扱い、それ以上ずらさないこと（重ねて前日に戻さない）。イベント・天気・曜日との連動も、その売上日の条件でそのまま解釈してよい。`,
     `【厳守・禁止】「売上は¥◯、客単価は¥◯、◯位です」のように表の値をそのまま言い換えるだけ／最大・最小をただ列挙するだけの回答は禁止。数字は根拠として最小限だけ引用し、必ず「だから何を意味するか（原因・メカニズム・顧客行動・示唆）」をセットで述べること。`,

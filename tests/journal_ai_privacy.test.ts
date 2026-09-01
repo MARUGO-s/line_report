@@ -125,6 +125,9 @@ Deno.test("parallel Journal and foodcourt drafts share the same PII minimization
       reservations: [{ customer_name: "山田太郎", guest_count: 4 }],
     },
     integrationReports: {
+      baseline: {
+        text: "山田太郎様が参加したイベント背景",
+      },
       journal: {
         text: "customer_name: 山田太郎 / 電話 090-1234-5678 / guest@example.com",
       },
@@ -139,6 +142,7 @@ Deno.test("parallel Journal and foodcourt drafts share the same PII minimization
   assert(!serialized.includes("guest@example.com"), "email leaked from AI drafts");
   assert(!serialized.includes("えび"), "allergy detail leaked from AI drafts");
   assert(serialized.includes("予約客A"), "stable alias missing from AI drafts");
+  assert(serialized.includes("イベント背景"), "foodcourt baseline was not retained");
   assert(serialized.includes("アレルギーあり"), "allergy presence was not retained");
 });
 

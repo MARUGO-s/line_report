@@ -388,7 +388,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 保存済みレポートとジャーナル横断検索を根拠に、期間比較、月次推移、商品点数・売上、客単価、曜日・時間帯、コース、予約vs飛び込み、改善案等を質問できます。
 - 期間・意図・ワインの単位が曖昧なときは、断定せず選択肢で確認します。
 - マルゴエスの通常AIチャットは、東京ドームイベントと直近のフードコート内順位の軽量要約をすでにかなり踏まえています。会場・競合要因の専門分析が有効な質問だけ、さらに深掘りしてブーストするかを1回確認します。
-- 深掘りを選ぶとJournal分析とフードコート専門AIを同時に動かし、最後に1本へ統合します。通常より数分かかる場合があり、複数AIの追加呼出しでAPI利用料金も高くなります。失敗・再試行分にも料金が発生する場合があります。現在の分析を選べば追加AIは呼びません。
+- 深掘りを選ぶと、通常分析で使う軽量な会場背景を土台に残したまま、Journal分析とフードコート専門AIを同時に動かし、会場・売上・イベント・競合・ワイン・施策を別々に並べず1本へ統合します。通常より数分かかる場合があり、複数AIの追加呼出しでAPI利用料金も高くなります。失敗・再試行分にも料金が発生する場合があります。現在の分析を選べば追加AIは呼びません。
 - 深掘りはマルゴエスのWeb版AIチャット専用です。専門AIや最終統合が失敗した場合は、Journal回答または未統合結果を警告付きで表示し、フードコート結果だけを店舗の完成分析とは扱いません。深掘り結果はフードコート画面のQ&A履歴へ保存しません。
 - 「2026年1月から7月」は1月と7月だけでなく連続する全月として扱い、データがない月だけを明示します。
 - 回答下の「PDFにする」で質問＋回答の印刷用表示を開き、AIチャットPDF履歴へ保存します。
@@ -753,11 +753,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 41件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 94件
+- 共有TypeScriptモジュール: 95件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 141件
 - SQL migrations: 297件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 86件
+- テストファイル: 87件
 
 ### 公開画面・ブラウザコード
 
@@ -854,6 +854,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/foodcourt_compare.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_distillation.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_forecast_utils.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_journal_coverage.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_loop_utils.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/google_service_account_auth.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/google_sheets_client.ts` | SAL-05 / SAL-06 / DEV-02 |

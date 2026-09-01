@@ -9711,24 +9711,43 @@ function classifyWineProductForMl(name, category) {
 }
 
 function collectProductsForWineMl(verifiedData = null) {
+  // AIチャットの期間検索結果を、画面でたまたま開いている別レポートより優先する。
+  if (verifiedData && typeof verifiedData === 'object') {
+    if (Array.isArray(verifiedData.topProducts) && verifiedData.topProducts.length) {
+      return verifiedData.topProducts;
+    }
+    if (Array.isArray(verifiedData.periods)) {
+      const merged = [];
+      for (const p of verifiedData.periods) {
+        if (Array.isArray(p?.topProducts)) merged.push(...p.topProducts);
+      }
+      if (merged.length) return merged;
+    }
+  }
   try {
     if (typeof currentReport !== 'undefined' && currentReport && typeof collectProductsFromReport === 'function') {
       const fromReport = collectProductsFromReport(currentReport);
       if (Array.isArray(fromReport) && fromReport.length) return fromReport;
     }
   } catch (_) {}
-  if (!verifiedData || typeof verifiedData !== 'object') return [];
-  if (Array.isArray(verifiedData.topProducts) && verifiedData.topProducts.length) {
-    return verifiedData.topProducts;
-  }
-  if (Array.isArray(verifiedData.periods)) {
-    const merged = [];
-    for (const p of verifiedData.periods) {
-      if (Array.isArray(p?.topProducts)) merged.push(...p.topProducts);
-    }
-    return merged;
-  }
   return [];
+}
+
+function preparedWineVolumeAnalysisForVerifiedData(verifiedData, wineMl) {
+  const rows = verifiedData?.multiPeriod && Array.isArray(verifiedData?.periods)
+    ? verifiedData.periods.map(period => period?.wineVolumeAnalysis).filter(Boolean)
+    : [verifiedData?.wineVolumeAnalysis].filter(Boolean);
+  if (!rows.length) return null;
+  const combined = computeWineMlVolumeAnalysis([], wineMl);
+  for (const key of ['glass', 'decanter', 'bottle', 'pairing']) {
+    combined[key].qty = rows.reduce((sum, row) => sum + (Number(row?.[key]?.qty) || 0), 0);
+    combined[key].amt = rows.reduce((sum, row) => sum + (Number(row?.[key]?.amt) || 0), 0);
+    combined[key].ml = Math.round(combined[key].qty * combined[key].mlPerUnit);
+  }
+  combined.totalQty = combined.glass.qty + combined.decanter.qty + combined.bottle.qty + combined.pairing.qty;
+  combined.totalMl = combined.glass.ml + combined.decanter.ml + combined.bottle.ml + combined.pairing.ml;
+  combined.totalLiters = Math.round((combined.totalMl / 1000) * 10) / 10;
+  return combined;
 }
 
 function computeWineMlVolumeAnalysis(products, wineMl) {
@@ -9770,8 +9789,9 @@ function formatWineMlAnalysisLines(profile, verifiedData = null) {
   lines.push('【分析アイテム・ワイン提供量(ml)】');
   lines.push(`換算設定: Glass Wine ${wineMl.glassMl}ml/点（店舗設定） / デキャンタ ${wineMl.decanterMl}ml/点（店舗設定） / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点（店舗設定）`);
   const products = collectProductsForWineMl(verifiedData);
-  const analysis = computeWineMlVolumeAnalysis(products, wineMl);
-  if (!products.length || analysis.totalQty <= 0) {
+  const analysis = preparedWineVolumeAnalysisForVerifiedData(verifiedData, wineMl)
+    || computeWineMlVolumeAnalysis(products, wineMl);
+  if (analysis.totalQty <= 0) {
     lines.push('今回の確定集計: ワイン細分類（グラス赤／白／ロゼ／泡／オレンジ、デキャンタ、ボトル赤／白／ロゼ／泡／オレンジ）と、名称が Glass Wine / デキャンタ / Bottle Wine / ペアリング の点数が0。大分類「飲料」だけの商品はml換算しない。換算設定のみ有効。数値捏造禁止');
     return lines;
   }
@@ -9893,7 +9913,12 @@ function formatFoodcourtJournalBriefForAi(brief) {
   const end = String(brief.end || '');
   if (start && end) lines.push(`対象期間: ${start}〜${end}`);
   const events = Array.isArray(brief.events) ? brief.events : [];
-  lines.push(`東京ドームイベント: ${events.length}件（最大36件・期間内）`);
+  const totalEventCount = Number.isFinite(Number(brief.eventTotalCount))
+    ? Math.max(0, Math.trunc(Number(brief.eventTotalCount)))
+    : events.length;
+  const eventListTruncated = brief.eventListTruncated === true || totalEventCount > events.length;
+  lines.push(`東京ドームイベント登録行数: ${totalEventCount}件（対象期間の全件数）`);
+  lines.push(`イベント詳細: ${events.length}件${eventListTruncated ? '（先頭36件のみ。全件数と混同しない）' : '（全件）'}`);
   events.slice(0, 36).forEach((ev) => {
     const date = String(ev?.event_date || '').slice(0, 10);
     const cat = String(ev?.category || '').trim();
@@ -9902,7 +9927,8 @@ function formatFoodcourtJournalBriefForAi(brief) {
     const attText = Number.isFinite(att) && att > 0 ? ` 動員${att}` : '';
     lines.push(`- ${date} ${cat ? cat + ' ' : ''}${title}${attText}`.trim());
   });
-  if (!events.length) lines.push('- 期間内のイベント行は0件（未取得とは限らない）');
+  if (totalEventCount === 0) lines.push('- 期間内のイベント登録行は0件（取得失敗とは区別済み）');
+  else if (!events.length) lines.push('- イベント詳細一覧は未取得。登録行数を0件へ読み替えない');
   const court = brief.court && typeof brief.court === 'object' ? brief.court : null;
   if (court) {
     lines.push(`コート内比較（フードコート日報 ${court.report_date || '日付不明'}・${court.tenant_count || 0}店）`);
@@ -9957,6 +9983,10 @@ async function loadFoodcourtJournalBrief({ storeKey, periodRange = null, verifie
       start: body?.start || range.from,
       end: body?.end || range.to,
       events: Array.isArray(body?.events) ? body.events : [],
+      eventTotalCount: Number.isFinite(Number(body?.event_total_count))
+        ? Math.max(0, Math.trunc(Number(body.event_total_count)))
+        : (Array.isArray(body?.events) ? body.events.length : 0),
+      eventListTruncated: body?.event_list_truncated === true,
       court: body?.court || null
     };
   } catch (err) {
@@ -11706,7 +11736,9 @@ function buildCompactSalesDataForAI() {
     yearlyBreakdown: yearlyArr,
     topProducts: (full.topProducts || []).slice(0, 5),
     weekdayBreakdown: full.weekdayBreakdown || [],
-    hourlyBreakdown: (full.hourlyBreakdown || []).slice(0, 10)
+    hourlyBreakdown: (full.hourlyBreakdown || []).slice(0, 10),
+    // 一般の売れ筋上位とは別に全商品から計算済み。上位5件へ縮めてもワインを失わない。
+    wineVolumeAnalysis: full.wineVolumeAnalysis || null
   };
 }
 
@@ -16971,8 +17003,10 @@ function buildFoodcourtBoostClarificationReply() {
 }
 
 function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
-  const mode = resolveWineMetricMode(query);
-  if (!mode || mode === 'qty') return '';
+  // ワインが質問文に明記されていない総合／ブースト分析でも、確定換算値は常に材料へ残す。
+  // 出力単位の明示が無い場合は、点数とmlの両方を渡して最終AIが0件と誤認しないようにする。
+  const requestedMode = resolveWineMetricMode(query);
+  const mode = requestedMode || 'both';
   if (!verifiedData || verifiedData.reservationOnly || verifiedData.journalProductSearchOnly) return '';
   let wineMl = emptyStoreOpsWineMl();
   try {
@@ -16984,16 +17018,15 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
   const lines = [];
   lines.push(`${indent}【ワイン提供量の確定換算（店舗設定×商品点数）】`);
   lines.push(`${indent}- 換算設定: Glass Wine ${wineMl.glassMl}ml/点 / デキャンタ ${wineMl.decanterMl}ml/点 / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点`);
-  lines.push(`${indent}- 表示モード: ${mode === 'both' ? '点数と総mlの両方' : '総ml'}`);
+  lines.push(`${indent}- 表示モード: ${mode === 'both' ? '点数と総mlの両方' : mode === 'qty' ? '点数（ml換算値も統合材料として保持）' : '総ml'}`);
   for (const period of periods) {
     if (!period || period.reservationOnly) continue;
-    const products = typeof resolveProductsForQuery === 'function'
-      ? resolveProductsForQuery(period.topProducts || [], query, 80)
-      : (period.topProducts || []);
-    const analysis = computeWineMlVolumeAnalysis(
-      products.length ? products : (period.topProducts || []),
-      wineMl
-    );
+    // 保存レポート検索時に全商品明細から事前計算した値を最優先する。
+    // topProductsは表示上限で切られるため、そこからの再計算は最後の互換fallbackだけにする。
+    const prepared = period.wineVolumeAnalysis && typeof period.wineVolumeAnalysis === 'object'
+      ? period.wineVolumeAnalysis
+      : null;
+    const analysis = prepared || computeWineMlVolumeAnalysis(period.topProducts || [], wineMl);
     const label = period.label || verifiedData.label || '対象期間';
     lines.push(
       `${indent}- ${label}: Glass ${analysis.glass.qty}点=${analysis.glass.ml}ml`
@@ -17003,7 +17036,7 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
       + ` / 合計 ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`
     );
   }
-  lines.push(`${indent}- 分析ルール: 上記mlは店舗換算設定と確定点数のみを使う。換算率の捏造禁止。${mode === 'ml' ? '回答の主表示は総ml（必要なら点数を括弧書き）。' : '点数と総mlを併記する。'}`);
+  lines.push(`${indent}- 分析ルール: 上記mlは店舗換算設定と確定点数のみを使う。換算率の捏造禁止。${mode === 'ml' ? '回答の主表示は総ml（必要なら点数を括弧書き）。' : mode === 'qty' ? '質問が点数指定でも、総合分析の材料としてml換算値は保持する。回答の主表示は点数。' : '点数と総mlを併記する。'}`);
   return `\n${lines.join('\n')}`;
 }
 
@@ -18048,6 +18081,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       ? representativeReports
       : (wantsDetail ? detailHydrated : use).filter((r) => !isCrossMonthAggregateReport(r));
     const mergedProducts = mergeProductLists(productSources.map(collectProductsFromReport));
+    const wineVolumeAnalysis = computeWineMlVolumeAnalysis(
+      mergedProducts,
+      readStoreOpsProfile(requestedStoreKey).wineMl
+    );
     // 売上上位だけ先に切ると少額銘柄が落ちる。質問意図で絞ってから上限を適用する。
     // 「コース以外」はコース合算を入れない。ランキング要求件数も反映する。
     const productLimit = Math.max(40, requestedRankingLimit(q, 10));
@@ -18110,6 +18147,8 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       weekdayBreakdown,
       hourlyBreakdown,
       topProducts,
+      // 表示用topProductsの件数制限とは独立した、全商品明細ベースの確定換算。
+      wineVolumeAnalysis,
       detailRangeLimited,
       itemDetailComplete,
       itemDetailIncompleteMonths,
@@ -18150,6 +18189,10 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
     }
     if (!rows.length) return null;
     const agg = aggregateSalesRows(rows);
+    const wineVolumeAnalysis = computeWineMlVolumeAnalysis(
+      agg.topProducts || [],
+      readStoreOpsProfile(requestedStoreKey).wineMl
+    );
     const catTot = agg.foodTotal + agg.drinkTotal || 1;
     return {
       label,
@@ -18177,6 +18220,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       topProducts: wantsItemBreakdown(q)
         ? resolveProductsForQuery(agg.topProducts, q, Math.max(40, requestedRankingLimit(q, 10)))
         : rankProductsForAiDisplay(agg.topProducts, 40),
+      wineVolumeAnalysis,
       detailRangeLimited: false,
       itemDetailComplete: true,
       courseTransactions: summarizeCourseTransactionsFromReports([{ sales: rows }])
@@ -18828,7 +18872,14 @@ async function sendAiChat() {
         period: verifiedData.multiPeriod
           ? verifiedData.periods.map(period => period.label).join(' / ')
           : verifiedData.label,
-        note: '数値はsystemInstruction内の確定済み集計データを参照'
+        note: '数値はsystemInstruction内の確定済み集計データを参照',
+        // 最終統合サーバーへも構造化して渡す。文章下書きが欠落／0件と誤読しても正本を残す。
+        wineVolumeAnalysis: verifiedData.multiPeriod && Array.isArray(verifiedData.periods)
+          ? verifiedData.periods.map(period => ({
+              label: period?.label || '',
+              analysis: period?.wineVolumeAnalysis || null
+            }))
+          : (verifiedData.wineVolumeAnalysis || null)
       }
     : compactData;
 
@@ -18914,8 +18965,8 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
         periodRange: resolveKnowledgePeriodRange(verifiedData),
         storeKey: chatRun.storeKey,
         signal: runOptions.signal,
-        // boost時は同じ軽量briefを重ねず、並列の専門AI結果だけを最終統合へ使う。
-        includeFoodcourtBrief: !foodcourtBoostEnabled
+        // 深掘りは通常分析の置換ではなく加算。軽量briefを常に土台として残す。
+        includeFoodcourtBrief: true
       }),
       '店舗情報と登録資料の準備'
     );
@@ -19028,6 +19079,10 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
             salesData: salesDataForAi,
             chatHistory: chatHistoryForAi,
             integrationReports: {
+              baseline: {
+                text: String(integrated.foodcourtBlock || '').slice(0, 6000),
+                role: '通常分析で使用する会場・イベント・コート内比較の基準情報'
+              },
               journal: {
                 text: journalReply,
                 provider: journalResult.provider || journalResult.model || ''

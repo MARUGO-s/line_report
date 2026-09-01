@@ -188,9 +188,11 @@ Journal確定データ分析 ─┐
 ```
 
 1. `Promise.allSettled` でJournal分析と `POST /foodcourt/journal-deep-analysis` を同時開始する。同じAbortSignalを使い、片方の失敗だけで他方を打ち切らない。
-2. 深掘り時のJournal側は `orchestrationMode: data` とし、専門AI側と外部知見・反証を重複実行しない。軽量briefも重ねて注入しない。
-3. 両レポート成功後にだけ `action: integrate_foodcourt` を別リクエストで呼ぶ。2本は非信頼の分析下書きとして扱い、確定数値はJournalの `salesData` を正本にする。
+2. 深掘り時のJournal側は `orchestrationMode: data` とし、専門AI側と外部知見・反証を重複実行しない。一方、軽量briefは通常分析の基準情報として保持する。これは別レポートとして併記せず、最終統合で会場・イベント・コート内比較の土台として織り込む。
+3. 両レポート成功後にだけ `action: integrate_foodcourt` を別リクエストで呼ぶ。基準briefと2本の非信頼な分析下書きを、重複のない1本へ統合する。確定数値はJournalの `salesData` を正本にし、`wineVolumeAnalysis` がある場合はワイン点数・mlを必ず反映する。
 4. 専門経路は通常の `/foodcourt/ask` を開放せず、専用routeだけをJournal権限へ許可する。期間はJournalが解決した期間をサーバへ渡し、会話履歴を渡さず、`foodcourt_qa_history` に保存しない。
+
+専門側のcoverageには期待日数、採用日数、欠損日、売上の税区分を付ける。部分期間の税抜売上をJournalの全期間税込売上と直接比較せず、欠損を0円へ置換しない。期間差があっても、対象日のイベント・競合・順位・客層の根拠は統合材料として残す。イベント総数はDB全件数を使い、最大36件の詳細一覧長を総数としない。
 
 ### 9.3 部分失敗
 

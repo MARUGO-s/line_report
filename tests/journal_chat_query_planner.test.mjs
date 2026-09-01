@@ -2291,14 +2291,15 @@ test('foodcourt boost runs Journal and specialist analysis concurrently, then fi
     send.indexOf('needsFoodcourtBoostConfirmation') < send.indexOf('requestFoodcourtJournalDeepAnalysis'),
     'the paid specialist must never start before confirmation',
   );
-  assert.match(send, /includeFoodcourtBrief:\s*!foodcourtBoostEnabled/);
+  assert.match(send, /includeFoodcourtBrief:\s*true/);
   assert.match(
     send,
     /Promise\.allSettled\(\[[\s\S]{0,260}requestJournalAnalysis\(\)[\s\S]{0,260}requestFoodcourtJournalDeepAnalysis\(resolvedChatQuery, verifiedData, runOptions\)/,
   );
   assert.match(send, /orchestrationMode:\s*foodcourtBoostEnabled \? 'data' : 'auto'/);
   assert.match(send, /action:\s*'integrate_foodcourt'/);
-  assert.match(send, /integrationReports:\s*\{[\s\S]{0,500}journal:[\s\S]{0,500}foodcourt:/);
+  assert.match(send, /integrationReports:\s*\{[\s\S]{0,500}baseline:[\s\S]{0,500}journal:[\s\S]{0,500}foodcourt:/);
+  assert.match(send, /baseline:[\s\S]{0,220}integrated\.foodcourtBlock/);
   assert.match(send, /orchestrationMode:\s*'data'/);
   assert.ok(
     send.indexOf("if (journalReply && foodcourtReply)") < send.indexOf("action: 'integrate_foodcourt'"),
@@ -2386,6 +2387,37 @@ test('wine ml conversion uses store settings for chat facts', () => {
   assert.match(facts, /合計 198750ml/);
   assert.match(facts, /デキャンタ/);
   assert.match(facts, /表示モード: 総ml/);
+
+  const preparedFacts = context.formatWineVolumeFactsForAi({
+    label: '2026年7月',
+    topProducts: [],
+    wineVolumeAnalysis: analysis,
+  }, '2026年7月の総合的な経営分析をして');
+  assert.match(preparedFacts, /表示モード: 点数と総mlの両方/);
+  assert.match(preparedFacts, /2026年7月: Glass 942点=94200ml/);
+  assert.match(preparedFacts, /合計 198750ml/);
+  assert.doesNotMatch(preparedFacts, /合計 0ml/);
+
+  // 2026年7月の実レポートで確認済みの値。ブースト時も通常分析の90点・14.7Lを失わない。
+  const julyFacts = context.formatWineVolumeFactsForAi({
+    label: '2026年7月',
+    topProducts: [],
+    wineVolumeAnalysis: {
+      glass: { qty: 72, amt: 68900, ml: 7200, mlPerUnit: 100 },
+      decanter: { qty: 16, amt: 54000, ml: 6000, mlPerUnit: 375 },
+      bottle: { qty: 2, amt: 24000, ml: 1500, mlPerUnit: 750 },
+      pairing: { qty: 0, amt: 0, ml: 0, mlPerUnit: 300 },
+      totalQty: 90,
+      totalMl: 14700,
+      totalLiters: 14.7,
+    },
+  }, '2026年7月の売上分析を包括的にして。今後の経営戦略も考察して');
+  assert.match(julyFacts, /2026年7月: Glass 72点=7200ml/);
+  assert.match(julyFacts, /デキャンタ 16点=6000ml/);
+  assert.match(julyFacts, /Bottle 2点=1500ml/);
+  assert.match(julyFacts, /合計 14700ml（約 14\.7L）/);
+  assert.doesNotMatch(julyFacts, /合計 0ml/);
+  assert.match(extractFunction(html, 'buildCompactSalesDataForAI'), /wineVolumeAnalysis:\s*full\.wineVolumeAnalysis/);
 });
 
 test('period expressions beyond closed absolute ranges resolve instead of silently narrowing', () => {
@@ -2515,6 +2547,8 @@ test('marugos journal AI attaches a compact Tokyo Dome foodcourt brief without d
     status: 'ok',
     start: '2026-08-01',
     end: '2026-08-31',
+    eventTotalCount: 103,
+    eventListTruncated: true,
     events: [
       { event_date: '2026-08-10', category: '野球', title: '巨人戦', expected_attendance: 42000 },
     ],
@@ -2538,6 +2572,8 @@ test('marugos journal AI attaches a compact Tokyo Dome foodcourt brief without d
     },
   });
   assert.match(okBlock, /対象期間: 2026-08-01〜2026-08-31/);
+  assert.match(okBlock, /東京ドームイベント登録行数: 103件/);
+  assert.match(okBlock, /先頭36件のみ。全件数と混同しない/);
   assert.match(okBlock, /巨人戦 動員42000/);
   assert.match(okBlock, /売上順位 4\/11 シェア 9.2%/);
   assert.match(okBlock, /タイプ: 集客型（集客は強い・単価が弱み）/);
@@ -2560,7 +2596,10 @@ test('marugos journal AI attaches a compact Tokyo Dome foodcourt brief without d
   );
   assert.match(briefSnippet, /marugos_only/);
   assert.match(briefSnippet, /tokyo_dome_events/);
+  assert.match(briefSnippet, /\{ count: "exact" \}/);
   assert.match(briefSnippet, /\.limit\(36\)/);
+  assert.match(briefSnippet, /event_total_count/);
+  assert.match(briefSnippet, /event_list_truncated/);
   assert.match(briefSnippet, /総合上位/);
   assert.doesNotMatch(briefSnippet, /GROQ_API_KEY|generateFoodCourt/);
   assert.match(adminApiSource, /"\/foodcourt\/journal-brief"/);

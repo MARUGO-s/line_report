@@ -121,9 +121,10 @@ test("store link method matrix keeps staff links out of administrator mutations"
 })
 
 test("Journal foodcourt deep analysis is purpose-limited, Marugos-only, and never writes Q&A history", async () => {
-  const [api, ai] = await Promise.all([
+  const [api, ai, coverage] = await Promise.all([
     read("supabase/functions/admin-api/index.ts"),
     read("supabase/functions/ai-analyze/index.ts"),
+    read("supabase/functions/_shared/foodcourt_journal_coverage.ts"),
   ])
   const matrix = api.slice(
     api.indexOf("const STORE_LINK_ALLOWED_REQUESTS"),
@@ -146,7 +147,13 @@ test("Journal foodcourt deep analysis is purpose-limited, Marugos-only, and neve
   const route = api.slice(routeStart, routeEnd)
   assert.match(route, /isJournalDeep && storeKey\.toLowerCase\(\) !== "marugos"/)
   assert.match(route, /sanitizeJournalAiPayload\(\{[\s\S]{0,180}message: rawQuestion,[\s\S]{0,180}salesData: \{ reports, daily_logs: dailyLogs \}/)
-  assert.match(route, /answerFoodCourtQuestion\(analysisReports[\s\S]{0,180}analysisDailyLogs\)/)
+  assert.match(route, /answerFoodCourtQuestion\([\s\S]{0,500}analysisDailyLogs,[\s\S]{0,120}journalCoverage/)
+  assert.match(route, /buildFoodcourtJournalCoverage\(/)
+  assert.match(api, /import \{ buildFoodcourtJournalCoverage \} from "\.\.\/_shared\/foodcourt_journal_coverage\.ts"/)
+  assert.match(coverage, /export function buildFoodcourtJournalCoverage[\s\S]{0,2400}expected_day_count/)
+  assert.match(coverage, /export function buildFoodcourtJournalCoverage[\s\S]{0,2400}missing_date_count/)
+  assert.match(coverage, /export function buildFoodcourtJournalCoverage[\s\S]{0,2400}sales_basis:\s*"foodcourt_tenant_report_net_tax_excluded"/)
+  assert.match(route, /journalCoverage\?\.coverage_status === "partial"/)
   assert.match(route, /requestedRanges[\s\S]*\.slice\(0, 6\)/)
   assert.match(route, /requestedRanges\.length !== rangeRows\.length/)
   assert.match(route, /invalid_date_range[\s\S]{0,180}400/)
@@ -175,6 +182,8 @@ test("Journal foodcourt deep analysis is purpose-limited, Marugos-only, and neve
   assert.match(ai, /Journal分析とフードコート分析の両方が必要です/)
   assert.match(ai, /parallel_analysis_reports（非信頼のAI下書き・JSON）/)
   assert.match(ai, /店舗の売上・客数・客単価・商品・構成比の正本は sales_data/)
+  assert.match(ai, /coverage_status=partial/)
+  assert.match(ai, /baseline は通常Journal分析で使う会場・イベント・コート内比較の基準情報/)
   assert.match(ai, /action === "integrate_foodcourt" \? "journal_foodcourt" : "journal"/)
   assert.match(api, /\["journal", "journal_foodcourt", "pos_journal"\] as const/)
   assert.match(api, /surfaces: \["journal", "journal_foodcourt", "pos_journal"\]/)
