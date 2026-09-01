@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-09-01 - マルゴエス Journal AI に東京ドーム／フードコート背景の要約を足す
+
+- Request: [foodcourt.html](https://marugo-s.github.io/line_report/foodcourt.html) のイベント・コート内順位・ボトルネック・他店比較を Journal 解析へ組み込む。全件だと時間切れになるので対策も入れる。マルゴエス専用。
+- Mitigation: 新API `GET /foodcourt/journal-brief` が期間内イベント最大36件と直近コート日報1件の順位・シェア・タイプだけを返す。Groq再生成も `/foodcourt/period-summary` も呼ばない。クライアントは8秒・fail-open・2800字。資料取得と並列。
+- Canonical numbers: 売上・客数の正本はジャーナル確定集計。コート日報は会場背景。他店へ転用しない。
+- Also in the same change set: ロゼ／オレンジデキャンタ、ハイボール／有名カクテルの名前自動分類（ブラウザと `pos_journal.ts`）。カタカナ長音はストリップしない。
+- Handoff: `docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md`
+- Verification: Journal AI 78件、POS自動保存＋help 36件、`journal:integration:check` 中核24 OK。
+
 ### 2026-08-30 - マルゴエス選択時に店名が空になる不具合を修正
 
 - Cause: Journal Reportの保存先キーは`marugos`へ小文字化する一方、店舗選択肢は共通マスターの正式キー`marugoS`を使っていた。`select.value = 'marugos'`は一致するoptionが無いため、選択欄だけ空表示になっていた。

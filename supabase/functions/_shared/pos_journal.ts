@@ -231,8 +231,8 @@ export const POS_JOURNAL_PRIMARY_CATEGORIES = [
 type PosJournalPrimaryCategory = typeof POS_JOURNAL_PRIMARY_CATEGORIES[number];
 
 /**
- * 手動分類でだけ使える細分類と、その集約先。
- * コードからは自動で付かない。運用側が商品ごとに割り当てる。
+ * 細分類と、その集約先。コードからは基本付かない。
+ * ハイボールと有名カクテルは商品名から解析時に自動で付ける。
  */
 export const POS_JOURNAL_SUB_CATEGORY_PARENTS: Readonly<
   Record<string, PosJournalPrimaryCategory>
@@ -247,6 +247,8 @@ export const POS_JOURNAL_SUB_CATEGORY_PARENTS: Readonly<
   "グラスオレンジ": "飲料",
   "赤デキャンタ": "飲料",
   "白デキャンタ": "飲料",
+  "ロゼデキャンタ": "飲料",
+  "オレンジデキャンタ": "飲料",
   "ボトル赤": "飲料",
   "ボトル白": "飲料",
   "ボトルロゼ": "飲料",
@@ -467,6 +469,30 @@ export function buildPosJournalCategoryRules(
   return configured ? rules : null;
 }
 
+function normalizeDrinkNameForSubclass(name: unknown): string {
+  return String(name ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[‐‑–—−\-]/g, "")
+    .replace(/[\s　・･'’.]/g, "");
+}
+
+const POS_JOURNAL_FAMOUS_COCKTAIL_RE =
+  /ジントニック|gintonic|ginandtonic|ジンフィズ|ginfizz|ジンバック|ginbuck|モヒート|mojito|マルガリータ|margarita|ブラッディマリー|bloodymary|マティーニ|martini|マンハッタン|manhattan|ネグローニ|negroni|カミカゼ|kamikaze|カイピリーニャ|caipirinha|ピニャコラーダ|pinacolada|キューバリブレ|cubalibre|スクリュードライバー|screwdriver|テキーラサンライズ|tequilasunrise|ロングアイランド|longisland|コスモポリタン|cosmopolitan|カルーアミルク|kaluamilk|カルアミルク|ゴッドファーザー|godfather|モスコミュール|moscowmule|スプモーニ|spumoni|アペロール|aperol|スプリッツ|spritz|オールドファッション|oldfashioned|ダイキリ|daiquiri|サイドカー|sidecar|ベリーニ|bellini|キールロワイヤル|kirroyal|カシスオレンジ|cassisorange|カシスソーダ|オペレーター|ファジーネーブル|fuzzynavel|ブラックルシアン|blackrussian|ホワイトルシアン|whiterussian|シンガポールスリング|singaporesling|ミモザ|mimosa/;
+
+/** 商品名からハイボール／有名カクテルの細分類を付ける。手動上書きより弱い。 */
+export function classifyPosJournalDrinkSubclassByName(
+  name: unknown,
+): "カクテル" | "アルコール" | "" {
+  const n = normalizeDrinkNameForSubclass(name);
+  if (!n) return "";
+  if (/ハイボール|はいぼーる|highball/.test(n)) return "アルコール";
+  if (/カクテル|cocktail/.test(n) || POS_JOURNAL_FAMOUS_COCKTAIL_RE.test(n)) {
+    return "カクテル";
+  }
+  return "";
+}
+
 function codeSpecMatches(
   specs: ReadonlyArray<CodeSpec>,
   digits: string,
@@ -513,6 +539,17 @@ export function classifyPosJournalReportItem(
       known: true,
       byCode: false,
       byOverride: true,
+      needsReview: false,
+    };
+  }
+  const drinkSubclass = classifyPosJournalDrinkSubclassByName(nameText);
+  if (drinkSubclass) {
+    return {
+      category: drinkSubclass,
+      isCharge,
+      known: true,
+      byCode: false,
+      byOverride: false,
       needsReview: false,
     };
   }

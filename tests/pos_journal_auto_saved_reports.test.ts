@@ -4,6 +4,8 @@ import {
   buildPosJournalDaysFromSavedReports,
   buildPosJournalCategoryRules,
   classifyPosJournalReportItem,
+  classifyPosJournalDrinkSubclassByName,
+  posJournalPrimaryCategory,
   mergePosJournalDaysPreferPrimary,
   pickBestJournalSavedReportDays,
   type PosJournalDay,
@@ -797,7 +799,8 @@ Deno.test("stores without rules keep the built-in behaviour", () => {
   assertEquals(buildPosJournalCategoryRules(null), null);
   // 既定値の代表例（Bistro CAVACAVA 向けのコード体系）。
   assertEquals(classifyPosJournalReportItem("0000000000101", {}, "コース6品").category, "フード");
-  assertEquals(classifyPosJournalReportItem("0000000002100", {}, "カクテル").category, "飲料");
+  assertEquals(classifyPosJournalReportItem("0000000002100", {}, "カクテル").category, "カクテル");
+  assertEquals(classifyPosJournalReportItem("0000000002104", {}, "アサヒ中瓶").category, "飲料");
 });
 
 Deno.test("code specs accept ranges, bare codes and mixed separators", () => {
@@ -859,6 +862,39 @@ Deno.test("cocktail and alcohol roll up into drinks like the other sub-categorie
     "アルコール": 900,
     "ソフトドリンク": 900,
   });
+});
+
+Deno.test("highball and famous cocktail names subclass without a manual override", () => {
+  assertEquals(classifyPosJournalDrinkSubclassByName("倍メガハイボール"), "アルコール");
+  assertEquals(classifyPosJournalDrinkSubclassByName("Highball"), "アルコール");
+  assertEquals(classifyPosJournalDrinkSubclassByName("ジントニック"), "カクテル");
+  assertEquals(classifyPosJournalDrinkSubclassByName("Gin and Tonic"), "カクテル");
+  assertEquals(classifyPosJournalDrinkSubclassByName("★SP カクテル"), "カクテル");
+  assertEquals(classifyPosJournalDrinkSubclassByName("ブラッディマリー"), "カクテル");
+  assertEquals(classifyPosJournalDrinkSubclassByName("モヒート"), "カクテル");
+  assertEquals(classifyPosJournalDrinkSubclassByName("カレー2種"), "");
+  // 手動上書きが無くても、解析時点で細分類が付く。
+  assertEquals(classifyPosJournalReportItem("0000000002010", {}, "ハイボール").category, "アルコール");
+  assertEquals(classifyPosJournalReportItem("0000000002401", {}, "ジントニック").category, "カクテル");
+  assertEquals(classifyPosJournalReportItem("0000000002401", {}, "ジントニック").byOverride, false);
+});
+
+Deno.test("decanter sub-categories cover red white rose and orange", () => {
+  for (const colour of ["赤", "白", "ロゼ", "オレンジ"]) {
+    const category = `${colour}デキャンタ`;
+    assertEquals(
+      classifyPosJournalReportItem(
+        "0000000003100",
+        { "0000000003100|w": category },
+        "w",
+      ).category,
+      category,
+    );
+    assertEquals(
+      posJournalPrimaryCategory(category),
+      "飲料",
+    );
+  }
 });
 
 Deno.test("wine sub-categories cover glass and bottle for every colour", () => {

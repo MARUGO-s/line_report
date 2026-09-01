@@ -222,6 +222,27 @@ core(
   "曜日の低売上を定休日の弱点と誤判定しないため、毎回統合します。",
 );
 
+const foodcourtBriefStart = adminApi.indexOf('path === "/foodcourt/journal-brief"');
+const foodcourtBriefEnd = adminApi.indexOf('path === "/foodcourt/daily-summary/list"', foodcourtBriefStart);
+const foodcourtBriefSnippet = foodcourtBriefStart >= 0
+  ? adminApi.slice(foodcourtBriefStart, foodcourtBriefEnd > foodcourtBriefStart ? foodcourtBriefEnd : foodcourtBriefStart + 4000)
+  : "";
+core(
+  "foodcourt_journal_brief",
+  "マルゴエスの東京ドーム／フードコート背景",
+  containsAll(html, [
+    "loadFoodcourtJournalBrief",
+    "formatFoodcourtJournalBriefForAi",
+    "integrated.foodcourtBlock",
+    "/foodcourt/journal-brief",
+  ]) && containsAll(foodcourtBriefSnippet, [
+    "marugos_only",
+    "tokyo_dome_events",
+  ]) && !foodcourtBriefSnippet.includes("GROQ_API_KEY") && !foodcourtBriefSnippet.includes("generateFoodCourt"),
+  "tokyo_dome_events + 直近テナント日報 → コンパクトbrief → マルゴエスAIのみ",
+  "foodcourt.html全件や期間サマリー再生成は呼ばず、イベントとコート内順位だけを会場背景として足します。",
+);
+
 core(
   "product_category_overrides",
   "店舗別の商品分類ルール",

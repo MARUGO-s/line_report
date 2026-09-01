@@ -1651,6 +1651,7 @@ Deno.serve(async (req, info) => {
       "/pos-journals/knowledge/generate-insight",
       "/pos-journals/store-ops",
       "/foodcourt/reports",
+      "/foodcourt/journal-brief",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
       "/foodcourt/ai-fallback-events",
@@ -2416,6 +2417,146 @@ Deno.serve(async (req, info) => {
       // 客数/売上/組数の正本（管理表＝レシート集計＋手入力）。日報が無い日も含む。画面はこれを優先採用。
       const baseDaily = await loadBaseDailyForReports(supabase, storeKey)
       return json({ store_key: storeKey, reports, events, weather, forecast, baseDaily }, 200)
+    }
+    // Journal ReportのマルゴエスAI向け。foodcourt.html全件ではなく、期間内イベントと
+    // 直近のコート内順位だけを返す。Groq再生成はしない（時間切れ対策）。
+    if (req.method === "GET" && path === "/foodcourt/journal-brief") {
+      const storeKey = String(url.searchParams.get("store_key") ?? url.searchParams.get("store") ?? "").trim()
+      if (!storeKey) return json({ error: "store_key is required." }, 400)
+      if (storeKey.toLowerCase() !== "marugos") {
+        return json({ ok: true, skipped: true, reason: "marugos_only" }, 200)
+      }
+      const startRaw = String(url.searchParams.get("start") ?? "").trim()
+      const endRaw = String(url.searchParams.get("end") ?? "").trim()
+      const todayIso = new Date().toISOString().slice(0, 10)
+      const startDate = /^\d{4}-\d{2}-\d{2}$/.test(startRaw) ? startRaw : addDaysIso(todayIso, -31)
+      const endDate = /^\d{4}-\d{2}-\d{2}$/.test(endRaw) ? endRaw : todayIso
+      const lo = startDate <= endDate ? startDate : endDate
+      const hi = startDate <= endDate ? endDate : startDate
+      const { data: eventRows, error: eventError } = await supabase
+        .from("tokyo_dome_events")
+        .select("event_date, title, category, venue, expected_attendance")
+        .gte("event_date", lo)
+        .lte("event_date", hi)
+        .order("event_date", { ascending: true })
+        .limit(36)
+      if (eventError) return json({ error: eventError.message }, 500)
+      const events = (Array.isArray(eventRows) ? eventRows : []).map((row) => ({
+        event_date: String((row as { event_date?: unknown }).event_date ?? "").slice(0, 10),
+        title: String((row as { title?: unknown }).title ?? "").slice(0, 80),
+        category: String((row as { category?: unknown }).category ?? "").slice(0, 40),
+        venue: String((row as { venue?: unknown }).venue ?? "").slice(0, 40),
+        expected_attendance: (row as { expected_attendance?: unknown }).expected_attendance == null
+          ? null
+          : Number((row as { expected_attendance?: unknown }).expected_attendance),
+      })).filter((row) => row.event_date && row.title)
+      const { data: reportRows, error: reportError } = await supabase
+        .from("foodcourt_tenant_reports")
+        .select("report_date, base_tenant_name, tenants")
+        .ilike("store_partition_key", storeKey)
+        .gte("report_date", lo)
+        .lte("report_date", hi)
+        .order("report_date", { ascending: false })
+        .limit(1)
+      if (reportError) return json({ error: reportError.message }, 500)
+      const latest = Array.isArray(reportRows) && reportRows[0]
+        ? reportRows[0] as Record<string, unknown>
+        : null
+      const baseName = String(latest?.base_tenant_name ?? "MARUGO S")
+      const tenantList = (Array.isArray(latest?.tenants) ? latest.tenants : [])
+        .map((tenant) => {
+          const rec = tenant && typeof tenant === "object" ? tenant as Record<string, unknown> : {}
+          const sales = rec.sales == null ? null : Number(rec.sales)
+          const guests = rec.guests == null ? null : Number(rec.guests)
+          return {
+            name: String(rec.name ?? "").trim().slice(0, 40),
+            sales: Number.isFinite(sales) ? sales : null,
+            guests: Number.isFinite(guests) ? guests : null,
+          }
+        })
+        .filter((tenant) => tenant.name && tenant.sales != null && tenant.sales >= 0)
+        .sort((a, b) => (b.sales || 0) - (a.sales || 0))
+      const totalSales = tenantList.reduce((sum, tenant) => sum + (tenant.sales || 0), 0)
+      const norm = (value: string) => value.replace(/\s+/g, "").toLowerCase()
+      const self = tenantList.find((tenant) =>
+        norm(tenant.name) === norm(baseName) || /マルゴ\s*エス|marugo\s*s/.test(norm(tenant.name))
+      ) || null
+      const selfRank = self ? tenantList.findIndex((tenant) => tenant === self) + 1 : null
+      const withMeta = tenantList.map((tenant) => ({
+        ...tenant,
+        unit: tenant.guests && tenant.guests > 0 && tenant.sales != null
+          ? Math.round(tenant.sales / tenant.guests)
+          : null,
+      }))
+      const guestOrder = [...withMeta]
+        .filter((tenant) => tenant.guests != null)
+        .sort((a, b) => (b.guests || 0) - (a.guests || 0))
+      const unitOrder = [...withMeta]
+        .filter((tenant) => tenant.unit != null)
+        .sort((a, b) => (b.unit || 0) - (a.unit || 0))
+      const medianOf = (nums: number[]) => {
+        const xs = nums.filter((n) => Number.isFinite(n)).sort((a, b) => a - b)
+        if (!xs.length) return null
+        const mid = Math.floor(xs.length / 2)
+        return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2
+      }
+      const medGuests = medianOf(withMeta.map((tenant) => tenant.guests).filter((n): n is number => n != null))
+      const medUnit = medianOf(withMeta.map((tenant) => tenant.unit).filter((n): n is number => n != null))
+      const selfMeta = self ? withMeta.find((tenant) => tenant.name === self.name) || null : null
+      const guestRank = selfMeta && selfMeta.guests != null
+        ? guestOrder.findIndex((tenant) => tenant.name === selfMeta.name) + 1
+        : null
+      const unitRank = selfMeta && selfMeta.unit != null
+        ? unitOrder.findIndex((tenant) => tenant.name === selfMeta.name) + 1
+        : null
+      const guestsAtOrAboveMedian = selfMeta?.guests != null && medGuests != null
+        ? selfMeta.guests >= medGuests
+        : null
+      const unitAtOrAboveMedian = selfMeta?.unit != null && medUnit != null
+        ? selfMeta.unit >= medUnit
+        : null
+      const courtType = guestsAtOrAboveMedian == null || unitAtOrAboveMedian == null
+        ? null
+        : guestsAtOrAboveMedian && unitAtOrAboveMedian ? "総合上位"
+        : guestsAtOrAboveMedian ? "集客型"
+        : unitAtOrAboveMedian ? "単価型"
+        : "要改善"
+      const courtTypeNote = courtType === "総合上位" ? "客数・単価とも中央値以上"
+        : courtType === "集客型" ? "集客は強い・単価が弱み"
+        : courtType === "単価型" ? "単価は中位・集客が弱み"
+        : courtType === "要改善" ? "客数・単価とも中央値未満"
+        : null
+      return json({
+        ok: true,
+        skipped: false,
+        store_key: storeKey,
+        start: lo,
+        end: hi,
+        events,
+        court: latest ? {
+          report_date: String(latest.report_date ?? "").slice(0, 10),
+          base_tenant_name: baseName,
+          tenant_count: tenantList.length,
+          total_sales: totalSales,
+          self: selfMeta ? {
+            name: selfMeta.name,
+            sales: selfMeta.sales,
+            guests: selfMeta.guests,
+            unit: selfMeta.unit,
+            rank: selfRank,
+            guest_rank: guestRank,
+            unit_rank: unitRank,
+            share_pct: totalSales > 0 ? Math.round((selfMeta.sales || 0) / totalSales * 1000) / 10 : null,
+            type: courtType,
+            type_note: courtTypeNote,
+          } : null,
+          top: tenantList.slice(0, 5).map((tenant, index) => ({
+            rank: index + 1,
+            name: tenant.name,
+            sales: tenant.sales,
+          })),
+        } : null,
+      }, 200)
     }
     // 「レポート一覧」タブ用：日次AIサマリーの一覧（本文は含まない軽量版。クリック時に
     // /foodcourt/daily-summary?report_id=... で本文を取得する）。

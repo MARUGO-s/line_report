@@ -1,5 +1,13 @@
 # LINE Report AI Handoff
 
+## 2026-09-01 Journal分類拡張とマルゴエスAIのフードコート要約
+
+- 正本の続き: [docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md](./docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md)
+- 分類UI改善（移動済みを隠す、1件戻す、大分類確定、中身閲覧、未分類へ戻す、チャージ上書き禁止、赤／白デキャンタml）はすでに `main`（`70950dc`〜`8a034f3`）。
+- この続きで、ロゼ／オレンジデキャンタ、ハイボール→アルコール／有名カクテル→カクテルの名前自動分類、マルゴエス専用 `GET /foodcourt/journal-brief` を Journal AI へ要約注入した。
+- **禁止:** `foodcourt.html` 全件・期間サマリーGroq再生成を Journal に載せない。コート売上をジャーナル正本にしない。他店へドーム要因を付けない。ハイボール判定でカタカナ `ー` を消さない。
+- 作業コピーは Dropbox の `line_report-main`。Codex の `line-report-mtalk-release` ではない。
+
 ## 2026-08-28 CAVACAVA実LZHと店舗コード1020
 
 - 実LZH`101520260605221707610001.lzh`を共通パーサーで解析し、本番の同一SHA-256原本ID 162と照合した。営業日2026-06-05、総売上70,400円、2組・6名・2会計が一致する。

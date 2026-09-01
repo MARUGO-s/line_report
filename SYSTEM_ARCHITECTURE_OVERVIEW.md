@@ -329,7 +329,9 @@ flowchart TB
 2. **店舗営業情報**（定休・ランチ等）  
 3. **店舗資料 / #メモ**（施策・メニュー。数値出典禁止）  
 
-欠けた系統を推測で埋めない。ナレッジ由来は「登録資料によると」、仮説は「※これは推測です」。
+マルゴエスのみ 4. **東京ドーム／フードコート背景**（`GET /foodcourt/journal-brief`。イベント最大36件＋直近コート順位。Groq再生成なし）
+
+欠けた系統を推測で埋めない。ナレッジ由来は「登録資料によると」、仮説は「※これは推測です」。コート日報の順位は会場背景で、店舗売上の正本はジャーナル。
 
 ---
 
@@ -542,7 +544,7 @@ AI:
 | レポート | `buildBothReports`, `saveCurrentReport`, `writeSavedReports`, `isStaleReport` |
 | AI検索 | `searchSavedReportsByQuery`, `extractRangeRef`, `summarizeMatched` |
 | 確定enrich | `enrichMonthlyMealCategorySplit`, `enrichMonthlyAnomalyItemFacts`, `enrichProductTimelineFacts`, `enrichCourseLineupFacts`, `enrichJournalCohortComparisons`, `enrichReservationFacts`, `rankProductsForAiDisplay` |
-| 統合プロンプト | `buildIntegratedAnalysisContext`, `strictSystemInstruction`, `formatStoreOpsBlockForAi`, `formatStoreKnowledgeBlock` |
+| 統合プロンプト | `buildIntegratedAnalysisContext`, `strictSystemInstruction`, `formatStoreOpsBlockForAi`, `formatFoodcourtJournalBriefForAi`, `formatStoreKnowledgeBlock` |
 | 予測 | `buildSalesForecast`, `compareForecastToActuals` |
 | 履歴 | `JOURNAL_TRASH_TYPES`, `renderJournalTrash` |
 

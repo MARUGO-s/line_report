@@ -75,7 +75,7 @@ const context = {
   SUB_SALES_CATEGORY_PARENTS: {
     'アラカルト':'フード','コース':'フード','デザート':'フード',
     'グラス赤':'飲料','グラス白':'飲料','グラスロゼ':'飲料','グラス泡':'飲料','グラスオレンジ':'飲料',
-    '赤デキャンタ':'飲料','白デキャンタ':'飲料',
+    '赤デキャンタ':'飲料','白デキャンタ':'飲料','ロゼデキャンタ':'飲料','オレンジデキャンタ':'飲料',
     'ボトル赤':'飲料','ボトル白':'飲料','ボトルロゼ':'飲料','ボトル泡':'飲料','ボトルオレンジ':'飲料',
     'カクテル':'飲料','アルコール':'飲料',
     'ソフトドリンク':'飲料','その他ドリンク':'飲料'
@@ -272,6 +272,9 @@ for (const name of [
   'formatStoreKnowledgeBlock',
   'resolveKnowledgePeriodRange',
   'clampAiSystemInstruction',
+  'isMarugoSStoreKey',
+  'formatFoodcourtJournalBriefForAi',
+  'foodcourtBriefRangeFromContext',
   // 大分類への集約。byCategory を読む関数がすべて経由する。
   'primarySalesCategory',
   'catAmt',
@@ -1767,7 +1770,7 @@ test('the knowledge prompt separates selected evidence from the existence-only c
   assert.match(html, /10\. 【今回の分析で参照する店舗資料・根拠】に選定された資料だけを/);
   assert.match(
     html,
-    /\$\{integrated\.storeOpsBlock\}\$\{verifiedDataBlock\}\$\{integrated\.knowledgeBlock\}/,
+    /\$\{integrated\.storeOpsBlock\}\$\{integrated\.foodcourtBlock \|\| ''\}\$\{verifiedDataBlock\}\$\{integrated\.knowledgeBlock\}/,
   );
   assert.match(html, /integrated\.knowledgeBlock/);
   assert.match(html, /loadStoreKnowledgeForAi/);
@@ -1937,6 +1940,18 @@ test('charge category override preserves charge classification in source and dis
   );
   assert.match(html, /チャージ対象の商品コードが\$\{chargeCandidates\.size\}種あるのにチャージ集計が0件/);
   assert.match(html, /chargeCategory:\s*resolveChargeCategoryFromSales\(rows\)/);
+});
+
+test('highball and famous cocktails subclass automatically from the product name', () => {
+  assert.match(extractFunction(html, 'classifyProductAuto'), /classifyDrinkSubclassByName\(name\)/);
+  vm.runInContext(extractFunction(html, 'classifyDrinkSubclassByName'), context);
+  assert.equal(context.classifyDrinkSubclassByName('倍メガハイボール'), 'アルコール');
+  assert.equal(context.classifyDrinkSubclassByName('Highball'), 'アルコール');
+  assert.equal(context.classifyDrinkSubclassByName('ジントニック'), 'カクテル');
+  assert.equal(context.classifyDrinkSubclassByName('Gin and Tonic'), 'カクテル');
+  assert.equal(context.classifyDrinkSubclassByName('★SP カクテル'), 'カクテル');
+  assert.equal(context.classifyDrinkSubclassByName('ブラッディマリー'), 'カクテル');
+  assert.equal(context.classifyDrinkSubclassByName('カレー2種'), '');
 });
 
 test('knowledge load failure is not reported as a successful zero-item result', () => {
@@ -2228,6 +2243,72 @@ test('chat history block is wired into the strict system instruction after the k
   // 撤回禁止の規約が規約本体に入っていること（サーバー側は deno テスト側で担保）
   assert.match(html, /14\. 【過去の自分の回答】/);
   assert.match(html, /撤回・謝罪してはいけません/);
+});
+
+test('marugos journal AI attaches a compact Tokyo Dome foodcourt brief without dumping foodcourt.html', () => {
+  assert.equal(context.isMarugoSStoreKey('marugoS'), true);
+  assert.equal(context.isMarugoSStoreKey('marugos'), true);
+  assert.equal(context.isMarugoSStoreKey('marugo'), false);
+  assert.equal(context.formatFoodcourtJournalBriefForAi({ status: 'skipped' }), '');
+
+  const errorBlock = context.formatFoodcourtJournalBriefForAi({ status: 'error', error: 'timeout' });
+  assert.match(errorBlock, /【東京ドーム・フードコート背景（マルゴエス専用・会場文脈）】/);
+  assert.match(errorBlock, /取得失敗/);
+  assert.match(errorBlock, /イベントなし/);
+
+  const okBlock = context.formatFoodcourtJournalBriefForAi({
+    status: 'ok',
+    start: '2026-08-01',
+    end: '2026-08-31',
+    events: [
+      { event_date: '2026-08-10', category: '野球', title: '巨人戦', expected_attendance: 42000 },
+    ],
+    court: {
+      report_date: '2026-08-10',
+      tenant_count: 11,
+      self: {
+        name: 'MARUGO S',
+        rank: 4,
+        share_pct: 9.2,
+        guest_rank: 3,
+        unit: 1280,
+        unit_rank: 7,
+        type: '集客型',
+        type_note: '集客は強い・単価が弱み',
+      },
+      top: [
+        { rank: 1, name: '店A' },
+        { rank: 2, name: '店B' },
+      ],
+    },
+  });
+  assert.match(okBlock, /対象期間: 2026-08-01〜2026-08-31/);
+  assert.match(okBlock, /巨人戦 動員42000/);
+  assert.match(okBlock, /売上順位 4\/11 シェア 9.2%/);
+  assert.match(okBlock, /タイプ: 集客型（集客は強い・単価が弱み）/);
+  assert.match(okBlock, /店舗売上の正本はジャーナル/);
+  assert.ok(okBlock.length <= 2800);
+
+  assert.match(extractFunction(html, 'loadFoodcourtJournalBrief'), /timeoutMs:\s*8000/);
+  assert.match(extractFunction(html, 'loadFoodcourtJournalBrief'), /\/foodcourt\/journal-brief/);
+  assert.match(integratedAnalysisContextSource, /loadFoodcourtJournalBrief/);
+  assert.match(integratedAnalysisContextSource, /foodcourtBlock/);
+  assert.match(html, /integrated\.foodcourtBlock \|\| ''/);
+  assert.match(html, /マルゴエスでは④東京ドーム・フードコート背景も会場要因として突き合わせる/);
+
+  const briefStart = adminApiSource.indexOf('path === "/foodcourt/journal-brief"');
+  assert.notEqual(briefStart, -1, 'GET /foodcourt/journal-brief must exist');
+  const briefEnd = adminApiSource.indexOf('path === "/foodcourt/daily-summary/list"', briefStart);
+  const briefSnippet = adminApiSource.slice(
+    briefStart,
+    briefEnd > briefStart ? briefEnd : briefStart + 4000,
+  );
+  assert.match(briefSnippet, /marugos_only/);
+  assert.match(briefSnippet, /tokyo_dome_events/);
+  assert.match(briefSnippet, /\.limit\(36\)/);
+  assert.match(briefSnippet, /総合上位/);
+  assert.doesNotMatch(briefSnippet, /GROQ_API_KEY|generateFoodCourt/);
+  assert.match(adminApiSource, /"\/foodcourt\/journal-brief"/);
 });
 
 test('period normalization does not damage non-period text', () => {
