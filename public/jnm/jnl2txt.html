@@ -3623,7 +3623,11 @@ async function loadSalesFromCloudMonthReports(months){
     if(!mk||!monthSet.has(mk)) continue;
     if(!/月間/.test(String(item.title||''))) continue;
     const full=await fetchSupabaseReportById(item.id);
-    reviveSalesList(full?.sales).forEach(p=>{
+    // 大容量レポートは sales を空にして posJournalDays へ退避している。
+    // 退避先を見ないと「伝票なし」と判定され、原本の再解析へ落ちてしまう。
+    const revived=reviveSalesList(full?.sales);
+    const rows=revived.length?revived:reviveSalesFromSharedPosJournalDays(full?.posJournalDays);
+    rows.forEach(p=>{
       if(!p?.date) return;
       const key=`${p.date}|${p.no}|${p.total}|${p.time||''}`;
       if(seen.has(key)) return;
@@ -3669,6 +3673,22 @@ async function propagateCategoryOverridesToCloudReports(changedKeys){
   return { updated, checked, failed };
 }
 
+/**
+ * 組み直したレポートが保存済みより小さくなっていないか。
+ * 分類の付け替えは商品の行き先を変えるだけで、総売上も伝票数も動かさない。
+ * 縮んでいるなら伝票を取りこぼしている（保存済みの明細が読めず、原本の
+ * 再解析で検算に通らなかった会計が落ちた）ということなので、上書きさせない。
+ */
+function isShrunkAgainstSavedReport(built, existing){
+  if(!built||!existing) return false;
+  const savedTotal=Number(existing.totalSales ?? existing.total);
+  const builtTotal=Number(built.total ?? built.totalSales);
+  if(Number.isFinite(savedTotal)&&Number.isFinite(builtTotal)&&builtTotal<savedTotal) return true;
+  const savedCount=Number(existing.salesCount);
+  const builtCount=Number(built.salesCount);
+  return Number.isFinite(savedCount)&&Number.isFinite(builtCount)&&builtCount<savedCount;
+}
+
 /** 伝票を月ごとに分割し、日別・月間レポートをクラウドへ上書き（分類の永続化本体） */
 async function upsertMonthReportsFromSales(sales, { productKey=null } = {}){
   const list=await fetchSupabaseReports();
@@ -3680,6 +3700,7 @@ async function upsertMonthReportsFromSales(sales, { productKey=null } = {}){
     byMonth.get(m).push(s);
   });
   let updated=0, failed=0, skipped=0;
+  const shrunkMonths=[];
   const months=[...byMonth.keys()].sort();
   for(let i=0;i<months.length;i++){
     const month=months[i];
@@ -3695,6 +3716,11 @@ async function upsertMonthReportsFromSales(sales, { productKey=null } = {}){
     const monthly=buildReport('monthly',null,null,month,monthSales,{ silent:true, skipRender:true });
     const existingDaily=list.find(r=>/日別/.test(String(r.title||''))&&monthKeyFromReport(r)===month);
     const existingMonthly=list.find(r=>/月間/.test(String(r.title||''))&&monthKeyFromReport(r)===month);
+    if(isShrunkAgainstSavedReport(daily,existingDaily)||isShrunkAgainstSavedReport(monthly,existingMonthly)){
+      shrunkMonths.push(month);
+      failed++;
+      continue;
+    }
     const batch=[];
     if(daily){
       daily.id=existingDaily?.id||`${Date.now()}_d_${month.replace('-','')}_${Math.random().toString(36).slice(2,6)}`;
@@ -3713,7 +3739,7 @@ async function upsertMonthReportsFromSales(sales, { productKey=null } = {}){
     if(result?.ok) updated+=batch.length;
     else failed+=batch.length;
   }
-  return { updated, failed, skipped, months:months.length };
+  return { updated, failed, skipped, shrunkMonths, months:months.length };
 }
 
 // 会計時刻が16:00未満ならランチ、16:00以降ならディナー。
@@ -7081,12 +7107,38 @@ function clearPendingCategoryMoves(){
   updateClassifyCommitUi();
 }
 
+/**
+ * 開いているレポート自身が持つ会計明細を取り出す。
+ * 伝票が大きい保存レポートは sales を空にして posJournalDays へ退避しており、
+ * さらに一覧経由で開いた場合は要約行しか手元に無い。どちらも取りに行く。
+ */
+async function loadSavedSalesForCurrentReport(){
+  const inMemory=reviveSalesFromSharedPosJournalDays(currentReport?.posJournalDays);
+  if(inMemory.length) return inMemory;
+  const id=String(currentReport?.id||'').trim();
+  if(!id) return [];
+  const full=await fetchSupabaseReportById(id,{ forceRefresh:true });
+  if(!full) return [];
+  const revived=reviveSalesList(full.sales);
+  if(revived.length) return revived;
+  return reviveSalesFromSharedPosJournalDays(full.posJournalDays);
+}
+
 async function resolveSalesForCurrentReport(){
   let sales=reviveSalesList(currentReport?.sales);
   if(sales.length){
     sales=applyAllCategoryOverridesToSales(sales).sales;
     applyWeatherByDateToSales(sales, currentReport?.weatherByDate);
     return enrichSalesWeatherFromCloudJournals(sales);
+  }
+  // 保存済みの会計明細を使い切ってから原本の再解析へ落ちる。ここを飛ばすと、
+  // ブラウザ側の再解析が検算に通らなかった会計を落とすぶんだけ売上が縮み、
+  // 分類を更新しただけでレポートの総額が下がってしまう。
+  const savedSales=await loadSavedSalesForCurrentReport();
+  if(savedSales.length){
+    const withOverrides=applyAllCategoryOverridesToSales(savedSales).sales;
+    applyWeatherByDateToSales(withOverrides, currentReport?.weatherByDate);
+    return enrichSalesWeatherFromCloudJournals(withOverrides);
   }
   let months=sourceMonthsFromReport(currentReport);
   if(!months.length){
@@ -7170,10 +7222,15 @@ async function commitPendingCategoryMoves(){
     }
 
     if(monthSave.failed>0||prop.failed>0){
+      const shrunk=Array.isArray(monthSave.shrunkMonths)?monthSave.shrunkMonths:[];
       finishSaveStatus('分類ルールは保存済み。一部レポートの更新に失敗',true);
       alert(
         '分類ルールは保存しましたが、一部レポートの更新に失敗しました。\n' +
-        `月別更新失敗: ${monthSave.failed} / その他失敗: ${prop.failed}`
+        `月別更新失敗: ${monthSave.failed} / その他失敗: ${prop.failed}` +
+        (shrunk.length
+          ? '\n\n' + shrunk.join(' / ') + ' は伝票を読み切れず売上が減るため、\n' +
+            '保存済みレポートを守って書き込みを中止しました。数値は元のままです。'
+          : '')
       );
     }else{
       finishSaveStatus(`分類を更新しました（${keys.length}商品 / 月別 ${monthSave.updated}件）`);
