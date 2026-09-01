@@ -37,13 +37,18 @@ const TARGETS = Object.freeze([
   Object.freeze({ storeKey: "bistrocavacava", files: 214, months: 10, gross: 13_980_560 }),
 ]);
 
-const allowedArgs = new Set(["--apply", "--dry-run"]);
+const allowedArgs = new Set(["--apply", "--dry-run", "--force"]);
 for (const arg of process.argv.slice(2)) {
   if (!allowedArgs.has(arg)) {
     throw new Error(`Unknown argument: ${arg}`);
   }
 }
 const apply = process.argv.includes("--apply");
+// パーサ版が同じでも作り直したいとき用。分類ルール(pos_journal_category_rules や
+// 商品別オーバーライド)を変えた場合、パーサは変わらないのに保存レポートの
+// 中身は変わる。--force が無いと「現行parserで照合済み」として全件スキップされ、
+// 月が更新扱いにならず保存レポートも作り直されない。
+const force = process.argv.includes("--force");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -210,7 +215,9 @@ async function reparseStore(serviceRoleKey, target, dryRun) {
       store_key: target.storeKey,
       after_id: afterId,
       limit: BATCH_LIMIT,
-      force: dryRun,
+      // dry-run は元々全件を検算するため常に force。
+      // apply では既定でスキップし、--force のときだけ作り直す。
+      force: dryRun || force,
       dry_run: dryRun,
     });
     const rows = [
@@ -382,6 +389,7 @@ async function verifyProduction(serviceRoleKey) {
 
 progress(
   `POS電子ジャーナル バックフィル ${apply ? "--apply (本番データを書き換えます)" : "--dry-run (DBは変更しません)"}` +
+    `${force ? " --force (現行parser済みも作り直す)" : ""}` +
     ` / parser ${PARSER_VERSION}`,
 );
 const serviceRoleKey = loadServiceRoleKey();
