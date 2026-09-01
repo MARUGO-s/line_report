@@ -2055,10 +2055,10 @@
         <tr><td>期間</td><td>対象の年月が分からない、または広すぎるとき</td></tr>
         <tr><td>意図</td><td>何を知りたいか曖昧なとき</td></tr>
         <tr><td>ワインの単位</td><td>「どれくらい出た？」→ <strong>点数／総ml／両方</strong> を確認します</td></tr>
-        <tr><td>フードコート深掘り</td><td>マルゴエスで会場・競合・集客要因をさらに深掘りできる質問では、専門AIも追加するかを一度確認します</td></tr>
+        <tr data-marugos-foodcourt-boost hidden aria-hidden="true"><td>フードコート深掘り</td><td>マルゴエスで会場・競合・集客要因をさらに深掘りできる質問では、専門AIも追加するかを一度確認します</td></tr>
       </tbody></table>
       <p>選択肢のボタンで答えられます。答えると、その条件で確定集計を取り直してから回答します。</p>
-      <div class="jr-note">マルゴエスの通常分析でも東京ドームイベントやコート内順位の要約を参照します。「さらに深掘りしてブーストする」を選ぶと、Journal分析とフードコート専門AIを同時実行し、最後に1つの分析へ統合します。通常より時間がかかり、API利用料金も高くなります。</div>
+      <div class="jr-note" data-marugos-foodcourt-boost hidden aria-hidden="true">マルゴエスの通常分析でも東京ドームイベントやコート内順位の要約を参照します。「さらに深掘りしてブーストする」を選ぶと、Journal分析とフードコート専門AIを同時実行し、最後に1つの分析へ統合します。通常より時間がかかり、API利用料金も高くなります。</div>
       <h4>期間の読み方</h4>
       <p>「2026年1月から7月まで」は<strong>1月〜7月の全月</strong>として扱います。両端の2か月だけを見ることはありません。データが無い月だけ「今回の確定集計には表示されていません」と答えます。</p>
       <h4>回答を残す</h4>
@@ -2685,6 +2685,15 @@ function listJournalStores() {
   return Object.keys(names).sort((a, b) => String(names[a]).localeCompare(String(names[b]), 'ja'))
     .map((k) => ({ store_key: k, store_name: names[k] }));
 }
+
+function updateFoodcourtBoostHelpVisibility(storeKey = STORE_KEY) {
+  const visible = isMarugoSStoreKey(storeKey);
+  document.querySelectorAll('[data-marugos-foodcourt-boost]').forEach((element) => {
+    element.hidden = !visible;
+    if (visible) element.removeAttribute('aria-hidden');
+    else element.setAttribute('aria-hidden', 'true');
+  });
+}
 // Journal Reportの保存先キーは小文字で扱う（例: marugos）が、共通店舗マスターには
 // marugoS / marugoD のように大文字を含む正式キーがある。selectには正式キーを渡す。
 // 保存先を変更せず、表示だけを既存のoptionへ正しく対応付けるためのヘルパー。
@@ -2812,6 +2821,7 @@ async function applySelectedStore(nextKey, opts) {
   if (!key) key = authStoreScope || 'bistrocavacava';
   const changed = key !== STORE_KEY;
   STORE_KEY = key;
+  updateFoodcourtBoostHelpVisibility(key);
   persistStoreKey(key);
   const sel = document.getElementById('storeSelect');
   // STORE_KEYは既存クラウド保存先に合わせて小文字のまま維持する。一方selectには

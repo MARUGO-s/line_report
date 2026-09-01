@@ -7,11 +7,13 @@ const htmlPath = new URL('../public/jnm/jnl2txt.html', import.meta.url);
 const historyPath = new URL('../public/jnm/ai-chat-pdf-history.html', import.meta.url);
 const aiUsagePath = new URL('../public/jnm/ai-usage.html', import.meta.url);
 const appThemePath = new URL('../public/jnm/app-theme.js', import.meta.url);
+const pagesConfigPath = new URL('../public/jnm/pages-config.js', import.meta.url);
 const privacyPath = new URL('../public/jnm/journal-ai-privacy.js', import.meta.url);
 const html = await readFile(htmlPath, 'utf8');
 const historyHtml = await readFile(historyPath, 'utf8');
 const aiUsageHtml = await readFile(aiUsagePath, 'utf8');
 const appThemeJs = await readFile(appThemePath, 'utf8');
+const pagesConfigJs = await readFile(pagesConfigPath, 'utf8');
 const privacyJs = await readFile(privacyPath, 'utf8');
 const aiAnalyzeSource = await readFile(
   new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
@@ -64,6 +66,11 @@ const knowledgeLimits = Object.freeze({
   catalogMaxChars: extractNumericConst(html, 'AI_KNOWLEDGE_CATALOG_MAX_CHARS'),
   chunkChars: extractNumericConst(html, 'AI_KNOWLEDGE_CHUNK_CHARS'),
 });
+
+const pagesConfigContext = {};
+vm.createContext(pagesConfigContext);
+vm.runInContext(pagesConfigJs, pagesConfigContext);
+const journalStoreKeys = Object.keys(pagesConfigContext.LINE_REPORT_PAGES?.STORE_NAMES || {});
 
 const context = {
   SAVED_DATA_CLARIFICATION_MARKER: '保存データの分析対象を選んでください',
@@ -2152,6 +2159,19 @@ test('Marugos asks once before the paid foodcourt boost and explains the tradeof
     false,
     'the paid boost confirmation is Marugos-only',
   );
+  const nonMarugosStores = journalStoreKeys.filter((storeKey) => !context.isMarugoSStoreKey(storeKey));
+  assert.equal(nonMarugosStores.length, journalStoreKeys.length - 1);
+  for (const storeKey of nonMarugosStores) {
+    assert.equal(
+      context.needsFoodcourtBoostConfirmation(
+        '東京ドームと競合を含めて売上低下の原因と改善戦略を深掘りして',
+        [],
+        storeKey,
+      ),
+      false,
+      `${storeKey} must stay on ordinary Journal analysis`,
+    );
+  }
 
   const copy = context.buildFoodcourtBoostClarificationReply();
   assert.match(copy, /現在のAI分析でも/);
@@ -2190,6 +2210,43 @@ test('Marugos asks once before the paid foodcourt boost and explains the tradeof
     context.stripFoodcourtBoostDirective(`${originalQuery} 【FOODCOURT_BOOST:ON】`),
     originalQuery,
   );
+});
+
+test('foodcourt boost help is visible only while Marugos is selected', () => {
+  const helpElements = [
+    {
+      hidden: true,
+      attributes: new Map([['aria-hidden', 'true']]),
+      setAttribute(name, value) { this.attributes.set(name, value); },
+      removeAttribute(name) { this.attributes.delete(name); },
+    },
+    {
+      hidden: true,
+      attributes: new Map([['aria-hidden', 'true']]),
+      setAttribute(name, value) { this.attributes.set(name, value); },
+      removeAttribute(name) { this.attributes.delete(name); },
+    },
+  ];
+  const visibilityContext = {
+    document: { querySelectorAll: () => helpElements },
+    isMarugoSStoreKey: (storeKey) => String(storeKey || '').trim().toLowerCase() === 'marugos',
+  };
+  vm.createContext(visibilityContext);
+  vm.runInContext(
+    `${extractFunction(html, 'updateFoodcourtBoostHelpVisibility')}; this.updateFoodcourtBoostHelpVisibility = updateFoodcourtBoostHelpVisibility;`,
+    visibilityContext,
+  );
+
+  visibilityContext.updateFoodcourtBoostHelpVisibility('bistrocavacava');
+  assert.ok(helpElements.every((element) => element.hidden));
+  assert.ok(helpElements.every((element) => element.attributes.get('aria-hidden') === 'true'));
+
+  visibilityContext.updateFoodcourtBoostHelpVisibility('marugoS');
+  assert.ok(helpElements.every((element) => !element.hidden));
+  assert.ok(helpElements.every((element) => !element.attributes.has('aria-hidden')));
+
+  assert.equal((html.match(/data-marugos-foodcourt-boost hidden/g) || []).length, 2);
+  assert.match(extractFunction(html, 'applySelectedStore'), /updateFoodcourtBoostHelpVisibility\(key\)/);
 });
 
 test('only the latest clarification may consume a short reply', () => {
