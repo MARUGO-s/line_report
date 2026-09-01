@@ -475,6 +475,12 @@
     background:color-mix(in srgb, var(--rv-accent,#b68235) 12%, transparent);
     border:1px solid color-mix(in srgb, var(--rv-accent,#b68235) 32%, transparent)}
   .classification-selinfo.is-empty{background:transparent;border-style:dashed;opacity:.55}
+  /* 押した結果の通知。同じ分類を押すと何も起きないため、無反応と区別できるようにする。 */
+  .classification-notice{font-size:11px;line-height:1.6;margin:-4px 0 10px;padding:7px 10px;border-radius:6px;
+    background:color-mix(in srgb, var(--rv-neutral-700,#dfe3ea) 18%, transparent);
+    border:1px solid var(--rv-neutral-700,#dfe3ea)}
+  .classification-notice.is-warn{background:color-mix(in srgb, var(--rv-accent,#b68235) 14%, transparent);
+    border-color:color-mix(in srgb, var(--rv-accent,#b68235) 38%, transparent)}
   .classification-group{margin-bottom:12px}
   .classification-group > b{display:block;font-size:10px;opacity:.55;margin-bottom:6px;letter-spacing:.06em;font-weight:600}
   .classification-targets{display:flex;flex-wrap:wrap;gap:6px}
@@ -7082,6 +7088,7 @@ function classificationEditorHtml(sales){
       </div>
       <div class="classification-pane">
         <div class="classification-selinfo is-empty" id="classifySelInfo">商品を選ぶと、ここから移動先を選べます</div>
+        <p class="classification-notice" id="classifyNotice" hidden></p>
         ${targetsHtml}
       </div>
     </div>
@@ -7304,6 +7311,7 @@ function bindClassificationEditor(){
 
   const list=view.querySelector('#classifyList');
   const selInfo=view.querySelector('#classifySelInfo');
+  const notice=view.querySelector('#classifyNotice');
   const search=view.querySelector('#classifySearch');
   const unsetOnly=view.querySelector('#classifyUnsetOnly');
   const hideMovedBox=view.querySelector('#classifyHideMoved');
@@ -7338,14 +7346,49 @@ function bindClassificationEditor(){
     if(undoBtn) undoBtn.hidden=back;
   };
 
+  /**
+   * 1件へ分類を当てる。結果を返すのは、同じ分類を押したときに
+   * 「選択が外れるだけ」で終わり、押せていないのか元からそうなのかが
+   * 画面から分からなかったため。
+   */
   const applyCategoryToItem=(el,category)=>{
-    if(!el||!category) return;
+    if(!el||!category) return 'skipped';
     const key=el.dataset.productKey||'';
     const origin=String(el.dataset.origin||'');
+    const wasQueued=classifyItemIsMoved(el);
     markMoved(el,category);
     if(origin===category) unqueuePendingCategoryMove(key);
     else queuePendingCategoryMove(key,category);
     el.classList.remove('selected');
+    if(origin!==category) return 'moved';
+    return wasQueued?'reverted':'unchanged';
+  };
+
+  /** 押した結果を必ず言葉にする。無反応に見えたまま何度も押させない。 */
+  const reportClassifyOutcome=(category,outcome)=>{
+    if(!notice) return;
+    const parts=[];
+    if(outcome.moved) parts.push(`${outcome.moved}件を「${category}」へ移動しました。`);
+    if(outcome.reverted) parts.push(`${outcome.reverted}件の移動を取り消しました。`);
+    if(outcome.unchanged){
+      parts.push(
+        `${outcome.unchanged}件はもともと「${category}」なので変わりません。` +
+        (SUB_SALES_CATEGORY_PARENTS[category]
+          ? ''
+          : `「${category}」は大分類なので細分類は未設定のままで、一覧にも残ります。`)
+      );
+    }
+    notice.textContent=parts.join(' ');
+    notice.hidden=!parts.length;
+    notice.classList.toggle('is-warn',!outcome.moved&&!outcome.reverted&&!!outcome.unchanged);
+  };
+
+  const applyCategoryToItems=(els,category)=>{
+    const outcome={ moved:0, reverted:0, unchanged:0, skipped:0 };
+    els.forEach(el=>{ outcome[applyCategoryToItem(el,category)]+=1; });
+    refreshTargetCounts();
+    applyFilter();
+    reportClassifyOutcome(category,outcome);
   };
 
   const undoMove=(el)=>{
@@ -7438,6 +7481,8 @@ function bindClassificationEditor(){
     }
     const item=event.target.closest('.classification-item');
     if(!item) return;
+    // 選び直した時点で前回の結果表示は用済み。古い文言を残さない。
+    if(notice){ notice.hidden=true; notice.textContent=''; }
     item.classList.toggle('selected');
     refreshSelection();
   };
@@ -7452,9 +7497,7 @@ function bindClassificationEditor(){
       const category=target.dataset.category;
       const picked=items().filter(el=>el.classList.contains('selected'));
       if(!category||!picked.length) return;
-      picked.forEach(el=>applyCategoryToItem(el,category));
-      refreshTargetCounts();
-      applyFilter();
+      applyCategoryToItems(picked,category);
     });
     // ドラッグも従来どおり受ける。慣れた操作を奪わない。
     target.addEventListener('dragover',event=>{
@@ -7472,9 +7515,7 @@ function bindClassificationEditor(){
       const el=classifyDraggingItem
         || items().find(node=>node.dataset.productKey===transferred);
       if(!el||!category) return;
-      applyCategoryToItem(el,category);
-      refreshTargetCounts();
-      applyFilter();
+      applyCategoryToItems([el],category);
     });
   });
   items().forEach(item=>{

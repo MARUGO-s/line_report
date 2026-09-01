@@ -171,8 +171,19 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
   assert.match(html, /classifyDraggingItem=item;/);
 
   // クリックとドラッグで表示が食い違わないよう、描画は1箇所に集約する。
-  assert.equal((html.match(/applyCategoryToItem\(el,category\)/g) || []).length, 2);
+  // 両方とも applyCategoryToItems を通し、実際に当てる処理は1箇所だけにする。
+  assert.equal((html.match(/applyCategoryToItem\(el,category\)/g) || []).length, 1);
+  assert.match(html, /applyCategoryToItems\(picked,category\);/);
+  assert.match(html, /applyCategoryToItems\(\[el\],category\);/);
   assert.match(html, /markMoved\(el,category\)/);
+
+  // 元からその分類の商品へ同じ分類を押すと、選択が外れるだけで何も起きない。
+  // 押せていないのか元からそうなのか分からず「消えない」と読めるので、
+  // 結果を必ず言葉にする。大分類は細分類の代わりにならないことも添える。
+  assert.match(html, /id="classifyNotice"/);
+  assert.match(html, /return wasQueued\?'reverted':'unchanged';/);
+  assert.match(html, /もともと「\$\{category\}」なので変わりません/);
+  assert.match(html, /大分類なので細分類は未設定のままで、一覧にも残ります/);
 
   // 間違えた移動は1件ずつ戻せる。隠したあともトレイから再配置できる。
   assert.match(html, /class="ci-undo"/);
