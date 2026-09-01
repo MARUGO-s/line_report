@@ -697,7 +697,7 @@ Deno.test("manual sub-categories roll up into the existing four totals", () => {
     items: [
       { code: "0000000000101", name: "コース8品", unit: 4_000, qty: 1, amount: 4_000 },
       { code: "0000000000604", name: "パンナコッタ", unit: 1_000, qty: 1, amount: 1_000 },
-      { code: "0000000003000", name: "ボトルワイン", unit: 3_500, qty: 1, amount: 3_500 },
+      { code: "0000000003000", name: "赤 カベルネボトル", unit: 3_500, qty: 1, amount: 3_500 },
       { code: "0000000002500", name: "コーラ", unit: 500, qty: 1, amount: 500 },
       { code: "0000000000002", name: "個室料", unit: 1_000, qty: 1, amount: 1_000 },
     ],
@@ -712,7 +712,7 @@ Deno.test("manual sub-categories roll up into the existing four totals", () => {
     categoryOverrides: {
       "0000000000101|コース8品": "コース",
       "0000000000604|パンナコッタ": "デザート",
-      "0000000003000|ボトルワイン": "ワインボトル",
+      "0000000003000|赤 カベルネボトル": "ボトル赤",
       "0000000002500|コーラ": "ソフトドリンク",
     },
   });
@@ -728,7 +728,7 @@ Deno.test("manual sub-categories roll up into the existing four totals", () => {
   assertEquals(monthly.data.categoryBreakdown, {
     "コース": 4_000,
     "デザート": 1_000,
-    "ワインボトル": 3_500,
+    "ボトル赤": 3_500,
     "ソフトドリンク": 500,
     "室料": 1_000,
   });
@@ -815,4 +815,84 @@ Deno.test("code specs accept ranges, bare codes and mixed separators", () => {
   assertEquals(classifyPosJournalReportItem("0000000002150", {}, "x", rules).category, "飲料");
   // 範囲外は「その他」。設定した範囲だけが効く。
   assertEquals(classifyPosJournalReportItem("0000000000500", {}, "x", rules).category, "その他");
+});
+
+Deno.test("cocktail and alcohol roll up into drinks like the other sub-categories", () => {
+  for (const sub of ["カクテル", "アルコール"]) {
+    assertEquals(
+      classifyPosJournalReportItem(
+        "0000000002401",
+        { "0000000002401|ブラッディマリー": sub },
+        "ブラッディマリー",
+      ).category,
+      sub,
+    );
+  }
+  const day = sampleDay("2026-08-21", 3_000);
+  day.groups = 1;
+  day.guests = 1;
+  day.receipts = [{
+    no: "d", time: "20:00", pay: "現金", total: 3_000, guests: 1,
+    payment_breakdown: { "現金": 3_000 },
+    items: [
+      { code: "0000000002401", name: "ブラッディマリー", unit: 1_200, qty: 1, amount: 1_200 },
+      { code: "0000000002010", name: "ハイボール", unit: 900, qty: 1, amount: 900 },
+      { code: "0000000002500", name: "コーラ", unit: 900, qty: 1, amount: 900 },
+    ],
+  }];
+  const reports = buildJournalSavedReportsFromPosDays({
+    storeKey: "marugos", storeName: "マルゴエス", storeCode: "1022", month: "2026-08",
+    days: [day],
+    categoryOverrides: {
+      "0000000002401|ブラッディマリー": "カクテル",
+      "0000000002010|ハイボール": "アルコール",
+      "0000000002500|コーラ": "ソフトドリンク",
+    },
+  });
+  const monthly = reports.find((r) => r.id.endsWith("_monthly"));
+  if (!monthly) throw new Error("monthly report missing");
+  // 3つとも飲料へ集約され、フードには入らない。
+  assertEquals(monthly.data.drinkTotal, 3_000);
+  assertEquals(monthly.data.foodTotal, 0);
+  assertEquals(monthly.data.categoryBreakdown, {
+    "カクテル": 1_200,
+    "アルコール": 900,
+    "ソフトドリンク": 900,
+  });
+});
+
+Deno.test("wine sub-categories cover glass and bottle for every colour", () => {
+  // 実データにある5色。泡は金額でワイン最大なので、赤白だけでは取りこぼす。
+  const colours = ["赤", "白", "ロゼ", "泡", "オレンジ"];
+  for (const colour of colours) {
+    for (const form of ["グラス", "ボトル"]) {
+      const category = `${form}${colour}`;
+      assertEquals(
+        classifyPosJournalReportItem(
+          "0000000003100",
+          { "0000000003100|w": category },
+          "w",
+        ).category,
+        category,
+      );
+      // どれも飲料へ集約されること。フード側へ漏れない。
+      assertEquals(
+        buildJournalSavedReportsFromPosDays({
+          storeKey: "marugos", storeName: "マルゴエス", storeCode: "1022", month: "2026-08",
+          days: [(() => {
+            const day = sampleDay("2026-08-22", 1_000);
+            day.groups = 1; day.guests = 1;
+            day.receipts = [{
+              no: "w", time: "20:00", pay: "現金", total: 1_000, guests: 1,
+              payment_breakdown: { "現金": 1_000 },
+              items: [{ code: "0000000003100", name: "w", unit: 1_000, qty: 1, amount: 1_000 }],
+            }];
+            return day;
+          })()],
+          categoryOverrides: { "0000000003100|w": category },
+        }).find((r) => r.id.endsWith("_monthly"))?.data.drinkTotal,
+        1_000,
+      );
+    }
+  }
 });

@@ -62,7 +62,10 @@ vm.runInContext(
 // 大分類への集約。byCategory を読む関数がすべて経由するため先に入れる。
 vm.runInContext(`const PRIMARY_SALES_CATEGORIES=['フード','飲料','室料','その他'];
 const SUB_SALES_CATEGORY_PARENTS={'アラカルト':'フード','コース':'フード','デザート':'フード',
-  'ワインボトル':'飲料','グラスワイン':'飲料','ソフトドリンク':'飲料','その他ドリンク':'飲料'};`, context);
+  'グラス赤':'飲料','グラス白':'飲料','グラスロゼ':'飲料','グラス泡':'飲料','グラスオレンジ':'飲料',
+  'ボトル赤':'飲料','ボトル白':'飲料','ボトルロゼ':'飲料','ボトル泡':'飲料','ボトルオレンジ':'飲料',
+  'カクテル':'飲料','アルコール':'飲料',
+  'ソフトドリンク':'飲料','その他ドリンク':'飲料'};`, context);
 vm.runInContext(extractFunction(html, 'primarySalesCategory'), context);
 vm.runInContext(extractFunction(html, 'catAmt'), context);
 vm.runInContext(extractFunction(html, 'sortWeekdayRows'), context);
