@@ -11,7 +11,7 @@
   // フォールバック文言すら出せないため、その内側で待つ。
   // ai-analyze 側は 115s で自ら打ち切って説明付きの応答を返すので、
   // クライアントはそれより長く待ち、サーバーの説明を優先させる。
-  var DEFAULT_AI_REQUEST_TIMEOUT_MS = 135000;
+  var DEFAULT_AI_REQUEST_TIMEOUT_MS = 140000;
 
   async function request(endpoint, payload, options) {
     var opts = options || {};

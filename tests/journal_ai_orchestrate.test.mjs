@@ -88,8 +88,8 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /auth_error/);
   assert.match(ai, /recordJournalAiFallback/);
   assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 70_000/);
-  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 40_000/);
-  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 115_000/);
+  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 50_000/);
+  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 125_000/);
   assert.match(ai, /fetchTextWithTimeout\(OPENAI_ENDPOINT/);
   assert.match(ai, /fetchTextWithTimeout\(CLAUDE_ENDPOINT/);
   assert.match(ai, /providerTimeoutWithinDeadline\(deadlineAt/);
@@ -172,7 +172,7 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
   assert.match(client, /LINE_REPORT_AUTH/);
   assert.match(client, /ログインが必要です/);
   assert.match(client, /privacy\.sanitizePayload/);
-  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 135000/);
+  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 140000/);
   assert.match(client, /AIの応答が/);
   assert.match(client, /AbortController/);
 });
@@ -274,4 +274,31 @@ test('Journal AI hedge keeps OpenAI as the adopted answer', async () => {
   );
   // ヘッジ済みなら縮小枠の再試行は行わない（待ち時間だけ伸びるため）。
   assert.match(body, /shouldRetryBudget && !hedged/);
+});
+
+test('empty OpenAI responses are diagnosed, not retried with a smaller budget', async () => {
+  const ai = await readFile(
+    new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
+    'utf8',
+  );
+  // 実測: 完了枠5200では思考が枠を食い切り、51秒使って本文が空で返っていた。
+  // 推論モデルは思考トークンも同じ枠を消費するため、枠は本文の想定量より
+  // 十分大きく取る必要がある。
+  const budget = Number(
+    ai.match(/OPENAI_COMPLETION_BUDGET_PRIMARY = (\d+)/)[1],
+  );
+  assert.ok(
+    budget >= 10000,
+    `completion budget ${budget} leaves no room for output after reasoning`,
+  );
+
+  // 空応答は枠不足が原因。縮小再試行は状況を悪化させるだけなので行わない。
+  const retryGuard = ai.match(/const shouldRetryBudget = !\[[\s\S]*?\]/)[0];
+  assert.match(retryGuard, /"empty_content"/);
+
+  // 空応答の理由を記録すること。finish_reason が無いと枠不足か真の空かを
+  // 切り分けられず、実データを取り直す羽目になる。
+  assert.match(ai, /finish_reason=\$\{finish\}/);
+  assert.match(ai, /reasoning_tokens=\$\{reasoning\}/);
+  assert.match(ai, /budget=\$\{completionBudget\}/);
 });

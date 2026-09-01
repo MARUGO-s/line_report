@@ -74,7 +74,10 @@ type SynthesizerResult =
   };
 
 /** 対話応答用の完了トークン枠。過大な出力枠で接続を占有しない。 */
-const OPENAI_COMPLETION_BUDGET_PRIMARY = 5200;
+// 推論モデルでは思考トークンもこの枠を消費する。5200 では7ヶ月分×全観点の
+// ような重い分析で思考が枠を食い切り、finish_reason=length のまま本文が空で
+// 返っていた（実測: 51秒使って空応答）。思考と本文の両方が収まる枠にする。
+const OPENAI_COMPLETION_BUDGET_PRIMARY = 12000;
 /** 文脈長など入力由来の失敗時だけ使う縮小再試行枠。 */
 const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
 /**
@@ -94,9 +97,11 @@ const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
  * 分析が成功する一方、それより重い要求が毎回30秒ちょうどで打ち切られていた。
  */
 const OPENAI_REQUEST_TIMEOUT_MS = 70_000;
-const CLAUDE_REQUEST_TIMEOUT_MS = 40_000;
+// Haiku も同じ枠(5200→12000)を生成するため、40秒では足りず毎回時間切れに
+// なっていた（実測 33〜40秒で打ち切り）。
+const CLAUDE_REQUEST_TIMEOUT_MS = 50_000;
 /** 外部ブリーフ取得を含む、1回の分析リクエスト全体の上限。 */
-const JOURNAL_AI_REQUEST_DEADLINE_MS = 115_000;
+const JOURNAL_AI_REQUEST_DEADLINE_MS = 125_000;
 /**
  * OpenAI を単独で待つ時間。これを過ぎても応答が無ければ Claude を併走させ、
  * 先に返った方を採る（ヘッジ）。
@@ -1183,7 +1188,17 @@ async function callOpenAiLuna(
     const rawText = data?.choices?.[0]?.message?.content || "";
     const text = stripThinkingBlocks(rawText);
     if (!text) {
-      return { ok: false, error: "OpenAI returned an empty response", model };
+      // 空応答は枠不足(finish_reason=length)か本当の空かで対処が変わる。
+      // 記録が無いと切り分けに実データを取り直す羽目になるため残す。
+      const finish = data?.choices?.[0]?.finish_reason ?? "unknown";
+      const reasoning =
+        data?.usage?.completion_tokens_details?.reasoning_tokens ?? "unknown";
+      return {
+        ok: false,
+        error:
+          `OpenAI returned an empty response (finish_reason=${finish}, reasoning_tokens=${reasoning}, budget=${completionBudget})`,
+        model,
+      };
     }
     return { ok: true, text, model, usage: extractOpenAiUsage(data, model) };
   } catch (e) {
@@ -1346,6 +1361,8 @@ async function synthesizeWithFallback(
       "missing_key",
       "quota",
       "timeout",
+      // 空応答は枠を使い切った結果。縮小再試行は状況を悪化させるだけ。
+      "empty_content",
     ].includes(failReason);
     // ヘッジ済みなら Claude が既に走っており、そちらが救済になる。
     // ここで縮小枠を足すと待ち時間だけ伸びるので行わない。
