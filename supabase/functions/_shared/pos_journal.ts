@@ -395,10 +395,84 @@ function numberInRanges(
     ranges.some(([from, to]) => value >= from && value <= to);
 }
 
+/**
+ * 店舗ごとのコード範囲。画面の入力欄と同じテキスト仕様を解釈した結果を持つ。
+ * 行の無い店舗では null を渡し、コード内の既定値へフォールバックする。
+ */
+export type PosJournalCategoryRules = {
+  food: ReadonlyArray<CodeSpec>;
+  drink: ReadonlyArray<CodeSpec>;
+  room: ReadonlyArray<CodeSpec>;
+  charge: ReadonlyArray<CodeSpec>;
+};
+
+type CodeSpec =
+  | { kind: "range"; start: number; end: number }
+  | { kind: "code"; digits: string; number: number };
+
+/**
+ * '0100-0199, 0250' 形式を解釈する。
+ * 画面側 parseCategorySpecs と同じ規則にすること。ここがずれると、
+ * 同じ設定でも画面と保存レポートで分類が食い違う。
+ */
+export function parsePosJournalCodeSpecs(spec: unknown): CodeSpec[] {
+  return String(spec ?? "")
+    .split(/[\s,、;；]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token): CodeSpec | null => {
+      const range = token.match(/^(\d+)\s*[-〜～]\s*(\d+)$/);
+      if (range) {
+        const start = Number(range[1]);
+        const end = Number(range[2]);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        return {
+          kind: "range",
+          start: Math.min(start, end),
+          end: Math.max(start, end),
+        };
+      }
+      const digits = String(token).normalize("NFKC").replace(/[^0-9]/g, "");
+      if (!digits) return null;
+      return { kind: "code", digits, number: Number(digits) };
+    })
+    .filter((spec): spec is CodeSpec => spec !== null);
+}
+
+/** DBの1行から解釈済みの範囲を作る。全欄が空なら null(=既定値を使う)。 */
+export function buildPosJournalCategoryRules(
+  row: Record<string, unknown> | null | undefined,
+): PosJournalCategoryRules | null {
+  if (!isRecord(row)) return null;
+  const rules: PosJournalCategoryRules = {
+    food: parsePosJournalCodeSpecs(row.food_codes),
+    drink: parsePosJournalCodeSpecs(row.drink_codes),
+    room: parsePosJournalCodeSpecs(row.room_codes),
+    charge: parsePosJournalCodeSpecs(row.charge_codes),
+  };
+  const configured = rules.food.length + rules.drink.length + rules.room.length +
+    rules.charge.length;
+  return configured ? rules : null;
+}
+
+function codeSpecMatches(
+  specs: ReadonlyArray<CodeSpec>,
+  digits: string,
+  number: number | null,
+): boolean {
+  return specs.some((spec) =>
+    spec.kind === "code"
+      ? (spec.digits === digits || (number != null && spec.number === number))
+      : (number != null && number >= spec.start && number <= spec.end)
+  );
+}
+
 export function classifyPosJournalReportItem(
   code: unknown,
   overrides: Record<string, unknown> = {},
   name: unknown = "",
+  /** 店舗ごとのコード範囲。null なら従来どおりコード内の既定値を使う。 */
+  rules: PosJournalCategoryRules | null = null,
 ): {
   category: PosJournalReportCategory;
   isCharge: boolean;
@@ -413,7 +487,11 @@ export function classifyPosJournalReportItem(
   const overrideKey = `${codeText}|${nameText}`;
   const override = String(overrides[overrideKey] ?? "").trim();
   const number = normalizedCodeNumber(codeText);
-  const isCharge = number != null && POS_JOURNAL_CHARGE_CODES.has(number);
+  const digits = codeText.replace(/[^0-9]/g, "");
+  // 店舗設定があればそちらを正とする。無ければ従来の定数。
+  const isCharge = rules
+    ? codeSpecMatches(rules.charge, digits, number)
+    : (number != null && POS_JOURNAL_CHARGE_CODES.has(number));
   if (
     (POS_JOURNAL_REPORT_CATEGORIES as readonly string[]).includes(override)
   ) {
@@ -426,7 +504,17 @@ export function classifyPosJournalReportItem(
       needsReview: false,
     };
   }
-  if (numberInRanges(number, POS_JOURNAL_FOOD_RANGES) || isCharge) {
+  const matchesFood = rules
+    ? codeSpecMatches(rules.food, digits, number)
+    : numberInRanges(number, POS_JOURNAL_FOOD_RANGES);
+  const matchesDrink = rules
+    ? codeSpecMatches(rules.drink, digits, number)
+    : numberInRanges(number, POS_JOURNAL_DRINK_RANGES);
+  const matchesRoom = rules
+    ? codeSpecMatches(rules.room, digits, number)
+    : (number != null && POS_JOURNAL_ROOM_CODES.has(number));
+  // チャージだけに当たった商品はフードの内数として扱う（画面側と同じ規則）。
+  if (matchesFood || isCharge) {
     return {
       category: "フード",
       isCharge,
@@ -436,7 +524,7 @@ export function classifyPosJournalReportItem(
       needsReview: false,
     };
   }
-  if (numberInRanges(number, POS_JOURNAL_DRINK_RANGES)) {
+  if (matchesDrink) {
     return {
       category: "飲料",
       isCharge: false,
@@ -446,7 +534,7 @@ export function classifyPosJournalReportItem(
       needsReview: false,
     };
   }
-  if (number != null && POS_JOURNAL_ROOM_CODES.has(number)) {
+  if (matchesRoom) {
     return {
       category: "室料",
       isCharge: false,
@@ -469,6 +557,7 @@ export function classifyPosJournalReportItem(
 export function applyPosJournalCategoryOverrides(
   days: PosJournalDay[],
   overrides: Record<string, unknown> = {},
+  rules: PosJournalCategoryRules | null = null,
 ): PosJournalDay[] {
   return (Array.isArray(days) ? days : []).map((day) => ({
     ...day,
@@ -481,6 +570,7 @@ export function applyPosJournalCategoryOverrides(
               item.code,
               overrides,
               item.name,
+              rules,
             );
             const existing = String(item.category ?? "").trim();
             const keepExisting =
@@ -1145,6 +1235,8 @@ export function buildJournalSavedReportsFromPosDays(params: {
   days: PosJournalDay[];
   journalIds?: number[];
   categoryOverrides?: Record<string, unknown>;
+  /** 店舗ごとのコード範囲。未指定ならコード内の既定値を使う。 */
+  categoryRules?: PosJournalCategoryRules | null;
   createdAt?: string;
 }): Array<{
   id: string;
@@ -1209,6 +1301,7 @@ export function buildJournalSavedReportsFromPosDays(params: {
           item.code,
           overrides,
           item.name,
+          params.categoryRules ?? null,
         );
         return {
           code: safeText(item.code, 24),

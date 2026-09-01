@@ -176,6 +176,8 @@ import {
 import {
   applyCachedWeatherToPosJournalDays,
   buildJournalSavedReportsFromPosDays,
+  buildPosJournalCategoryRules,
+  type PosJournalCategoryRules,
   buildJournalSavedReportHtml,
   buildPosJournalSummary,
   buildPosJournalDaysFromSavedReports,
@@ -13640,6 +13642,33 @@ type PosJournalAutoReportResult = {
   failures: Array<{ month: string; error: string }>
 }
 
+/**
+ * 店舗ごとの商品コード範囲を読む。行が無ければ null を返し、
+ * pos_journal.ts のコード内既定値へフォールバックする（既存店舗は無変更）。
+ */
+async function fetchPosJournalCategoryRules(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+): Promise<PosJournalCategoryRules | null> {
+  const { data, error } = await supabase
+    .from("pos_journal_category_rules")
+    .select("food_codes, drink_codes, room_codes, charge_codes")
+    .eq("store_partition_key", storeKey)
+    .maybeSingle()
+  if (error) {
+    // 設定が読めないだけで日次レポート生成を止めない。既定値で続行する。
+    console.error(
+      "POS journal category rules fetch failed:",
+      storeKey,
+      error.message,
+    )
+    return null
+  }
+  return buildPosJournalCategoryRules(
+    data as Record<string, unknown> | null,
+  )
+}
+
 async function fetchPosJournalCategoryOverrides(
   supabase: ReturnType<typeof createClient>,
   storeKey: string,
@@ -13799,6 +13828,7 @@ async function upsertPosJournalAutoReports(
     supabase,
     storeKey,
   )
+  const categoryRules = await fetchPosJournalCategoryRules(supabase, storeKey)
   for (const month of monthList) {
     try {
       const rows = await fetchPosJournalRows(supabase, storeKey, month)
@@ -13843,6 +13873,7 @@ async function upsertPosJournalAutoReports(
           Number.isSafeInteger(id) && id > 0
         ),
         categoryOverrides,
+        categoryRules,
       })
       if (!reports.length) continue
       const now = new Date().toISOString()

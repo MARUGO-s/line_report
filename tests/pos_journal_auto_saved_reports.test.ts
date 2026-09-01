@@ -2,6 +2,7 @@ import {
   buildJournalSavedReportsFromPosDays,
   buildJournalSavedReportHtml,
   buildPosJournalDaysFromSavedReports,
+  buildPosJournalCategoryRules,
   classifyPosJournalReportItem,
   mergePosJournalDaysPreferPrimary,
   pickBestJournalSavedReportDays,
@@ -764,4 +765,54 @@ Deno.test("sub-categories are accepted as manual overrides but never come from c
     ).category,
     "フード",
   );
+});
+
+Deno.test("per-store code rules replace the built-in ranges", () => {
+  // 既定値ではマルゴエスの 300/2600/3000 番台がどれも「その他」に落ちる。
+  assertEquals(classifyPosJournalReportItem("0000000000301", {}, "冷菜盛り合わせ").category, "その他");
+  assertEquals(classifyPosJournalReportItem("0000000002609", {}, "オーガニックコーヒー").category, "その他");
+  assertEquals(classifyPosJournalReportItem("0000000003000", {}, "ボトルワイン").category, "その他");
+
+  const rules = buildPosJournalCategoryRules({
+    food_codes: "0100-0699",
+    drink_codes: "2000-3299",
+    room_codes: "0002",
+    charge_codes: "0001",
+  });
+  if (!rules) throw new Error("rules must be built");
+  assertEquals(classifyPosJournalReportItem("0000000000301", {}, "冷菜盛り合わせ", rules).category, "フード");
+  assertEquals(classifyPosJournalReportItem("0000000002609", {}, "オーガニックコーヒー", rules).category, "飲料");
+  assertEquals(classifyPosJournalReportItem("0000000003000", {}, "ボトルワイン", rules).category, "飲料");
+  assertEquals(classifyPosJournalReportItem("0000000000002", {}, "個室料", rules).category, "室料");
+
+  // チャージはカテゴリではなく内数。フードに入れつつ isCharge を立てる。
+  const charge = classifyPosJournalReportItem("0000000000001", {}, "チャージ料", rules);
+  assertEquals(charge.category, "フード");
+  assertEquals(charge.isCharge, true);
+});
+
+Deno.test("stores without rules keep the built-in behaviour", () => {
+  // 全欄が空なら null を返し、既存店舗の分類は一切変わらない。
+  assertEquals(buildPosJournalCategoryRules({ food_codes: "", drink_codes: "", room_codes: "", charge_codes: "" }), null);
+  assertEquals(buildPosJournalCategoryRules(null), null);
+  // 既定値の代表例（Bistro CAVACAVA 向けのコード体系）。
+  assertEquals(classifyPosJournalReportItem("0000000000101", {}, "コース6品").category, "フード");
+  assertEquals(classifyPosJournalReportItem("0000000002100", {}, "カクテル").category, "飲料");
+});
+
+Deno.test("code specs accept ranges, bare codes and mixed separators", () => {
+  const rules = buildPosJournalCategoryRules({
+    food_codes: "0100-0199、0250 0300\n0400",
+    drink_codes: "2100〜2199",
+    room_codes: "",
+    charge_codes: "",
+  });
+  if (!rules) throw new Error("rules must be built");
+  for (const code of ["0000000000150", "0000000000250", "0000000000300", "0000000000400"]) {
+    assertEquals(classifyPosJournalReportItem(code, {}, "x", rules).category, "フード");
+  }
+  // 全角チルダの範囲も画面側と同じく解釈すること。
+  assertEquals(classifyPosJournalReportItem("0000000002150", {}, "x", rules).category, "飲料");
+  // 範囲外は「その他」。設定した範囲だけが効く。
+  assertEquals(classifyPosJournalReportItem("0000000000500", {}, "x", rules).category, "その他");
 });
