@@ -6978,9 +6978,14 @@ function classificationRows(sales){
     const row=totals.get(key)||{key,code:item.code,name:item.name,category:item.category,qty:0,amount:0};
     row.qty+=item.qty; row.amount+=item.amount; row.category=item.category; totals.set(key,row);
   }));
+  // 未反映の移動を反映するが、元の分類も残す。これが無いと再描画のたびに
+  // 「どこから動かしたか」が失われ、移動済みの印も付け直せない。
   Object.entries(pendingCategoryMoves||{}).forEach(([key,category])=>{
     const row=totals.get(key);
-    if(row&&SALES_CATEGORIES.includes(category)) row.category=category;
+    if(row&&SALES_CATEGORIES.includes(category)&&row.category!==category){
+      row.originCategory=row.category;
+      row.category=category;
+    }
   });
   return [...totals.values()].sort((a,b)=>b.amount-a.amount);
 }
@@ -6997,12 +7002,16 @@ function classificationEditorHtml(sales){
   const pendingCount=Object.keys(pendingCategoryMoves||{}).length;
   const itemsHtml=rows.map(row=>{
     const refined=isRefinedCategory(row.category);
-    return `<div class="classification-item${pendingCategoryMoves[row.key]?' pending-move':''}" draggable="true"`
+    // 再描画でも移動済みの見た目を復元する。origin は移動前の分類。
+    const moved=Object.prototype.hasOwnProperty.call(row,'originCategory');
+    const origin=moved?String(row.originCategory||''):String(row.category||'');
+    return `<div class="classification-item${moved?' pending-move':''}" draggable="true"`
       +` data-product-key="${esc(row.key)}" data-name="${esc(String(row.name||'').toLowerCase())}"`
-      +` data-refined="${refined?'1':'0'}" data-origin="${esc(row.category||'')}" data-moved="0">`
+      +` data-refined="${refined?'1':'0'}" data-origin="${esc(origin)}" data-moved="${moved?'1':'0'}">`
       +`<span class="ci-name">${esc(row.name)}</span>`
-      +`<span class="classification-from" hidden></span><span class="classification-arrow" hidden>→</span>`
-      +`<span class="classification-tag${refined?'':' is-unset'}">${esc(row.category||'未分類')}</span>`
+      +`<span class="classification-from"${moved&&origin?'':' hidden'}>${esc(origin||'未分類')}</span>`
+      +`<span class="classification-arrow"${moved&&origin?'':' hidden'}>→</span>`
+      +`<span class="classification-tag${refined?'':' is-unset'}${moved?' is-moved':''}">${esc(row.category||'未分類')}</span>`
       +`<span class="ci-amount">${yen(row.amount)}</span></div>`;
   }).join('');
   const targetsHtml=CLASSIFICATION_TARGET_GROUPS.map(group=>{

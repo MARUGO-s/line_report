@@ -165,4 +165,13 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
 
   // クリックとドラッグで表示が食い違わないよう、描画は1箇所に集約する。
   assert.equal((html.match(/markMoved\(el,category\)/g) || []).length, 2);
+
+  // 再描画をまたいでも移動状態が残ること。classificationRows は未反映の移動を
+  // row.category へ反映するため、元の分類を別に持たないと描画時に
+  // 「どこから動かしたか」が失われ、data-moved が 0 のままになって隠せない。
+  assert.match(html, /row\.originCategory=row\.category;/);
+  assert.match(html, /const moved=Object\.prototype\.hasOwnProperty\.call\(row,'originCategory'\);/);
+  assert.match(html, /data-moved="\$\{moved\?'1':'0'\}"/);
+  // 初期描画で data-moved を 0 に固定しないこと（それが原因で隠せなかった）。
+  assert.doesNotMatch(html, /data-origin="\$\{esc\(row\.category\|\|''\)\}" data-moved="0"/);
 });
