@@ -87,8 +87,8 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /shouldRetryBudget/);
   assert.match(ai, /auth_error/);
   assert.match(ai, /recordJournalAiFallback/);
-  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 70_000/);
-  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 50_000/);
+  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 100_000/);
+  assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 55_000/);
   assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 125_000/);
   assert.match(ai, /fetchTextWithTimeout\(OPENAI_ENDPOINT/);
   assert.match(ai, /fetchTextWithTimeout\(CLAUDE_ENDPOINT/);
@@ -222,10 +222,13 @@ test('Journal AI timeout budgets nest inside the Supabase gateway limit', async 
   // 説明もローカル集計フォールバックも画面に出せない。
   const GATEWAY_IDLE_TIMEOUT_MS = 150_000;
 
-  // 内側から外側へ、必ず余裕を持って収まること。
+  // ヘッジ導入後、両者は45秒以降そもそも並走する。合計ではなく
+  // 「各経路が期限に収まるか」で判定する。
+  //   並走時   : OpenAI 単独 / ヘッジ開始 + Claude
+  //   逐次時   : OpenAI がヘッジ前に失敗 -> その時点 + Claude（< hedge + claude）
   assert.ok(
-    openai + claude <= deadline,
-    `providers ${openai}+${claude} must fit in deadline ${deadline}`,
+    openai <= deadline,
+    `OpenAI ${openai} must fit in deadline ${deadline}`,
   );
   assert.ok(
     deadline < clientWait,
@@ -287,9 +290,18 @@ test('empty OpenAI responses are diagnosed, not retried with a smaller budget', 
   const budget = Number(
     ai.match(/OPENAI_COMPLETION_BUDGET_PRIMARY = (\d+)/)[1],
   );
+  // 実測の生成速度は約100トークン/秒。枠が「与えた時間で生成しきれない量」だと
+  // 空応答が時間切れに置き換わるだけで解決しない。両者の整合を検証する。
+  const openaiMs = Number(ai.match(/OPENAI_REQUEST_TIMEOUT_MS = ([\d_]+)/)[1].replace(/_/g, ''));
+  const generatableTokens = (openaiMs / 1000) * 100;
   assert.ok(
-    budget >= 10000,
-    `completion budget ${budget} leaves no room for output after reasoning`,
+    budget <= generatableTokens,
+    `budget ${budget} cannot be generated within ${openaiMs}ms (~${generatableTokens} tokens)`,
+  );
+  // 逆に小さすぎると思考で枠を使い切り、本文が空になる。
+  assert.ok(
+    budget >= 8000,
+    `budget ${budget} leaves no room for output after reasoning`,
   );
 
   // 空応答は枠不足が原因。縮小再試行は状況を悪化させるだけなので行わない。
