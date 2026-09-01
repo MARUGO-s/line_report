@@ -201,4 +201,13 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
   assert.match(html, /data-moved="\$\{moved\?'1':'0'\}"/);
   // 初期描画で data-moved を 0 に固定しないこと（それが原因で隠せなかった）。
   assert.doesNotMatch(html, /data-origin="\$\{esc\(row\.category\|\|''\)\}" data-moved="0"/);
+
+  // 分類ボタンだけで中身を見られる。未分類（自動分類）へも戻せる。
+  assert.match(html, /id="classifyBrowseBar"/);
+  assert.match(html, /class="ci-unclass"/);
+  assert.match(html, /const CLASSIFY_AUTO='自動分類'/);
+  assert.match(html, /data-category="自動分類"/);
+  assert.match(html, /setBrowseCategory\(/);
+  assert.match(html, /category===CLASSIFY_AUTO/);
+  assert.match(html, /function classifyProductAuto/);
 });
