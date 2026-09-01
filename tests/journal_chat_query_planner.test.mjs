@@ -75,6 +75,7 @@ const context = {
   SUB_SALES_CATEGORY_PARENTS: {
     'アラカルト':'フード','コース':'フード','デザート':'フード',
     'グラス赤':'飲料','グラス白':'飲料','グラスロゼ':'飲料','グラス泡':'飲料','グラスオレンジ':'飲料',
+    '赤デキャンタ':'飲料','白デキャンタ':'飲料',
     'ボトル赤':'飲料','ボトル白':'飲料','ボトルロゼ':'飲料','ボトル泡':'飲料','ボトルオレンジ':'飲料',
     'カクテル':'飲料','アルコール':'飲料',
     'ソフトドリンク':'飲料','その他ドリンク':'飲料'
@@ -109,7 +110,7 @@ const context = {
   },
   recoverReportFromPosJournalMonth: async () => null,
   isPosCategoryRollupName: () => false,
-  readStoreOpsProfile: () => ({ wineMl: { glassMl: 100, bottleMl: 750, pairingMl: 300 } }),
+  readStoreOpsProfile: () => ({ wineMl: { glassMl: 100, decanterMl: 375, bottleMl: 750, pairingMl: 300 } }),
   resolveProductsForQuery: (products) => (Array.isArray(products) ? products : []),
   monthKeyFromReport(report) {
     const text = String(report?.period || report?.title || '');
@@ -2095,12 +2096,14 @@ test('wine ml conversion uses store settings for chat facts', () => {
     { name: 'Glass Wine', qty: 942, amt: 1412300 },
     { name: 'ペアリング', qty: 181, amt: 905000 },
     { name: 'Bottle Wine', qty: 65, amt: 759300 },
+    { name: 'デキャンタワイン', qty: 4, amt: 24000, category: '赤デキャンタ' },
   ];
-  const analysis = context.computeWineMlVolumeAnalysis(products, { glassMl: 100, pairingMl: 300 });
+  const analysis = context.computeWineMlVolumeAnalysis(products, { glassMl: 100, pairingMl: 300, decanterMl: 375 });
   assert.equal(analysis.glass.ml, 94200);
   assert.equal(analysis.pairing.ml, 54300);
   assert.equal(analysis.bottle.ml, 48750);
-  assert.equal(analysis.totalMl, 197250);
+  assert.equal(analysis.decanter.ml, 1500);
+  assert.equal(analysis.totalMl, 198750);
 
   const facts = context.formatWineVolumeFactsForAi({
     multiPeriod: true,
@@ -2110,7 +2113,8 @@ test('wine ml conversion uses store settings for chat facts', () => {
     ],
   }, '2025年と2026年ではどれくらいワインが出たか 表示単位:総ml');
   assert.match(facts, /ワイン提供量の確定換算/);
-  assert.match(facts, /合計 197250ml/);
+  assert.match(facts, /合計 198750ml/);
+  assert.match(facts, /デキャンタ/);
   assert.match(facts, /表示モード: 総ml/);
 });
 

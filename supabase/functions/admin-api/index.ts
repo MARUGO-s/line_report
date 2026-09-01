@@ -16061,7 +16061,7 @@ function normalizeStoreOpsCalendarEvents(raw: unknown): Array<Record<string, unk
   return out
 }
 
-/** ワイン提供量(ml)換算。ボトルは店舗差が小さいため 750 固定。グラス／ペアリングは店舗設定。 */
+/** ワイン提供量(ml)換算。ボトルは店舗差が小さいため 750 固定。グラス／デキャンタ／ペアリングは店舗設定。 */
 function normalizeStoreOpsWineMl(raw: unknown): Record<string, number> {
   const src = isRecord(raw) ? raw : {}
   const clampMl = (value: unknown, fallback: number) => {
@@ -16071,6 +16071,7 @@ function normalizeStoreOpsWineMl(raw: unknown): Record<string, number> {
   }
   return {
     glassMl: clampMl(src.glassMl ?? src.glass, 100),
+    decanterMl: clampMl(src.decanterMl ?? src.decanter, 375),
     bottleMl: 750,
     pairingMl: clampMl(src.pairingMl ?? src.pairing, 300),
   }

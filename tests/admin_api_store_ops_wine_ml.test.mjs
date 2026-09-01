@@ -30,9 +30,10 @@ const save = sectionBetween(
   "// ===== Journal Report 店舗ナレッジ",
 );
 
-test("store ops wineMl keeps bottle fixed at 750 and clamps glass/pairing", () => {
+test("store ops wineMl keeps bottle fixed at 750 and clamps glass/decanter/pairing", () => {
   assert.match(normalize, /bottleMl:\s*750/);
   assert.match(normalize, /glassMl:\s*clampMl/);
+  assert.match(normalize, /decanterMl:\s*clampMl/);
   assert.match(normalize, /pairingMl:\s*clampMl/);
   assert.match(normalize, /wineMl:\s*normalizeStoreOpsWineMl/);
 });
@@ -44,6 +45,7 @@ test("store ops save preserves wineMl when key omitted", () => {
 
 test("Journal Report UI and AI analysis wire wine ml settings", () => {
   assert.match(html, /id="opsWineGlassMl"/);
+  assert.match(html, /id="opsWineDecanterMl"/);
   assert.match(html, /id="opsWineBottleMl"/);
   assert.match(html, /id="opsWinePairingMl"/);
   assert.match(html, /ワイン提供量の換算/);

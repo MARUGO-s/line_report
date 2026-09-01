@@ -426,7 +426,7 @@
   .classification-editor .classify-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
   .classification-editor .classify-pending{font-size:12px;opacity:.75}
   .classification-editor .classify-pending.has-pending{opacity:1;font-weight:600;color:var(--rv-accent,#b68235)}
-  /* 分類先が21個に増え、レーン並列では空欄が場所を取り、目的のレーンまで
+  /* 分類先が増え、レーン並列では空欄が場所を取り、目的のレーンまで
      長距離ドラッグが必要になっていた。左で商品を選び、右のボタンで移動する
      二面構成にする。ドラッグも従来どおり残す。 */
   .classification-split{display:grid;grid-template-columns:minmax(260px,1fr) minmax(280px,1.1fr);gap:14px}
@@ -493,7 +493,7 @@
   .classification-group{margin-bottom:12px}
   .classification-group > b{display:block;font-size:10px;opacity:.55;margin-bottom:6px;letter-spacing:.06em;font-weight:600}
   .classification-targets{display:flex;flex-wrap:wrap;gap:6px}
-  /* 分類先。空でも1行分しか占めないので、21個あっても視界に収まる。 */
+  /* 分類先。空でも1行分しか占めないので、数が増えても視界に収まる。 */
   .classification-target{font:inherit;font-size:11px;padding:6px 10px;border-radius:var(--rv-radius-sm,6px);
     border:1px solid var(--rv-neutral-700,#dfe3ea);background:transparent;color:var(--text);cursor:pointer;
     display:inline-flex;align-items:center;gap:6px}
@@ -1979,10 +1979,11 @@
       <h4>ワイン提供量（ml）換算</h4>
       <table class="jr-table"><tbody>
         <tr><td>グラスワイン</td><td>既定 100ml／点（変更可）</td></tr>
+        <tr><td>デキャンタ</td><td>既定 375ml／点（変更可）</td></tr>
         <tr><td>ボトルワイン</td><td>750ml／点（固定）</td></tr>
         <tr><td>ペアリング</td><td>既定 300ml／点（変更可）</td></tr>
       </tbody></table>
-      <div class="jr-warn"><strong>銘柄名だけのボトルは換算に入りません。</strong> 対象は「グラスワイン」「ボトルワイン」「ペアリング」に相当する商品だけです。</div>
+      <div class="jr-warn"><strong>銘柄名だけのボトルは換算に入りません。</strong> 対象は「グラスワイン」「デキャンタ」「ボトルワイン」「ペアリング」に相当する商品、または分類で赤／白デキャンタを付けた商品です。</div>
       <h4>過去売上への同期</h4>
       <p>ジャーナルを正として、過去売上（手入力の日次・月次）へ自動反映する設定です。<strong>既定はオフ</strong>で、店舗ごとに明示的に有効化します。</p>
       <div class="jr-note">初期値に戻しても、同期設定・カレンダー・ワインml設定は消えません。</div>
@@ -2369,10 +2370,13 @@
 
   <div class="card" style="margin-top:14px;">
     <div class="card-kicker">ワイン提供量の換算（ml・分析用）</div>
-    <p class="kn-note" style="margin-top:0;">Glass Wine / Bottle Wine / ペアリングの点数を ml に換算し、AI分析の1項目として使います。ボトルはほぼ750mlのため固定です。グラスは店舗ごとに設定してください。</p>
+    <p class="kn-note" style="margin-top:0;">Glass Wine / デキャンタ / Bottle Wine / ペアリングの点数を ml に換算し、AI分析の1項目として使います。ボトルはほぼ750mlのため固定です。グラスとデキャンタは店舗ごとに設定してください。</p>
     <div class="kn-form">
       <label class="kn-field kn-narrow">グラスワイン（ml／点）
         <input id="opsWineGlassMl" type="number" min="1" max="5000" step="1" value="100">
+      </label>
+      <label class="kn-field kn-narrow">デキャンタ（ml／点）
+        <input id="opsWineDecanterMl" type="number" min="1" max="5000" step="1" value="375">
       </label>
       <label class="kn-field kn-narrow">ボトルワイン（ml／点）
         <input id="opsWineBottleMl" type="number" value="750" readonly disabled title="ボトルは750ml固定">
@@ -2381,7 +2385,7 @@
         <input id="opsWinePairingMl" type="number" min="1" max="5000" step="1" value="300">
       </label>
     </div>
-    <p class="kn-note">商品名に Glass Wine / Bottle Wine / ペアリング を含む点数×上記 ml で合計します。保存後、プレビューとAI分析に反映されます。</p>
+    <p class="kn-note">商品名に Glass Wine / デキャンタ / Bottle Wine / ペアリング を含む点数、または分類「赤デキャンタ」「白デキャンタ」の点数×上記 ml で合計します。保存後、プレビューとAI分析に反映されます。</p>
   </div>
 
   <div class="card" style="margin-top:14px;">
@@ -3806,6 +3810,7 @@ const CLASSIFY_AUTO='自動分類';
 const SUB_SALES_CATEGORY_PARENTS={
   'アラカルト':'フード','コース':'フード','デザート':'フード',
   'グラス赤':'飲料','グラス白':'飲料','グラスロゼ':'飲料','グラス泡':'飲料','グラスオレンジ':'飲料',
+  '赤デキャンタ':'飲料','白デキャンタ':'飲料',
   'ボトル赤':'飲料','ボトル白':'飲料','ボトルロゼ':'飲料','ボトル泡':'飲料','ボトルオレンジ':'飲料',
   'カクテル':'飲料','アルコール':'飲料',
   'ソフトドリンク':'飲料','その他ドリンク':'飲料'
@@ -7039,11 +7044,12 @@ ${recent || '—'}
 ※予測値です。確定実績ではありません。詳細は画面の「売上予測」からも確認できます。`;
 }
 
-/** 分類先をグループへまとめる。21個を並べるだけでは目的地を探せない。 */
+/** 分類先をグループへまとめる。並べるだけでは目的地を探せない。 */
 const CLASSIFICATION_TARGET_GROUPS=[
   {label:'大分類（コードから自動で付く分類）',categories:PRIMARY_SALES_CATEGORIES},
   {label:'フード内訳',categories:['アラカルト','コース','デザート']},
   {label:'ワイン（グラス）',categories:['グラス赤','グラス白','グラスロゼ','グラス泡','グラスオレンジ']},
+  {label:'ワイン（デキャンタ）',categories:['赤デキャンタ','白デキャンタ']},
   {label:'ワイン（ボトル）',categories:['ボトル赤','ボトル白','ボトルロゼ','ボトル泡','ボトルオレンジ']},
   {label:'その他ドリンク',categories:['カクテル','アルコール','ソフトドリンク','その他ドリンク']}
 ];
@@ -9333,7 +9339,7 @@ const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
 一般的な居酒屋・Barのテンプレではなく、ワイン提案・ペアリング・ドリンク構成・姉妹店連携を軸に、数値根拠付きで弱点抽出と具体策まで書いてください。
 
 【レポート必須】多角分析の章ではランチとディナーを必ず分け、客単価・フード／ドリンク比率を昼夜別で示すこと。期間に12月が含まれる場合はクリスマス季節商品の証拠を確認し、証拠が無ければ仮説としてのみ言及すること。
-【分析アイテム・ワイン提供量(ml)・必須】店舗営業情報の換算設定と、salesData.wineVolumeAnalysis（または店舗営業情報ブロックのワインml節）を使い、Glass Wine / Bottle Wine / ペアリングの提供量(ml)と合計mlを必ず1節で示すこと。換算率や点数は与えられた数値のみを使い、捏造しない。
+【分析アイテム・ワイン提供量(ml)・必須】店舗営業情報の換算設定と、salesData.wineVolumeAnalysis（または店舗営業情報ブロックのワインml節）を使い、Glass Wine / デキャンタ / Bottle Wine / ペアリングの提供量(ml)と合計mlを必ず1節で示すこと。換算率や点数は与えられた数値のみを使い、捏造しない。
 【3系統統合・必須】毎回①店舗営業情報（定休等・ワインml換算）②売上ジャーナル数値③登録資料（施策・メニュー）を読んでから書くこと。店舗営業情報を読まずに曜日弱点を語ってはいけない。`;
 
 /** 店舗立地（AI分析用）。全店を新宿三丁目前提にしない。 */
@@ -9407,7 +9413,7 @@ let opsCalRangeAnchor = '';
 let opsCalEditingId = '';
 
 function emptyStoreOpsWineMl() {
-  return { glassMl: 100, bottleMl: 750, pairingMl: 300 };
+  return { glassMl: 100, decanterMl: 375, bottleMl: 750, pairingMl: 300 };
 }
 
 function normalizeStoreOpsWineMl(raw) {
@@ -9419,6 +9425,7 @@ function normalizeStoreOpsWineMl(raw) {
   };
   return {
     glassMl: clampMl(src.glassMl ?? src.glass, 100),
+    decanterMl: clampMl(src.decanterMl ?? src.decanter, 375),
     bottleMl: 750,
     pairingMl: clampMl(src.pairingMl ?? src.pairing, 300)
   };
@@ -9648,7 +9655,9 @@ function normalizeWineProductSearchText(name) {
     .replace(/\s+/g, '');
 }
 
-function classifyWineProductForMl(name) {
+function classifyWineProductForMl(name, category) {
+  const cat = String(category || '').trim();
+  if (cat === '赤デキャンタ' || cat === '白デキャンタ') return 'decanter';
   const n = normalizeWineProductSearchText(name);
   if (!n || isPosCategoryRollupName?.(name)) return '';
   // ペアリングを先に判定（「ペアリング＋ワイン」名でもペアリング扱い）
@@ -9659,6 +9668,7 @@ function classifyWineProductForMl(name) {
     n.includes('bottlewine') ||
     n.includes('ボトルワイン')
   ) return 'bottle';
+  if (n.includes('デキャンタ') || n.includes('デカンタ') || n.includes('decanter')) return 'decanter';
   if (
     ((n.includes('グラス') || n.includes('glass')) && (n.includes('ワイン') || n.includes('wine'))) ||
     n.includes('glasswine') ||
@@ -9692,11 +9702,12 @@ function computeWineMlVolumeAnalysis(products, wineMl) {
   const rates = normalizeStoreOpsWineMl(wineMl);
   const buckets = {
     glass: { key: 'glass', label: 'Glass Wine', qty: 0, amt: 0, mlPerUnit: rates.glassMl, ml: 0 },
+    decanter: { key: 'decanter', label: 'デキャンタ', qty: 0, amt: 0, mlPerUnit: rates.decanterMl, ml: 0 },
     bottle: { key: 'bottle', label: 'Bottle Wine', qty: 0, amt: 0, mlPerUnit: rates.bottleMl, ml: 0 },
     pairing: { key: 'pairing', label: 'ペアリング', qty: 0, amt: 0, mlPerUnit: rates.pairingMl, ml: 0 }
   };
   for (const p of (Array.isArray(products) ? products : [])) {
-    const cls = classifyWineProductForMl(p?.name || p?.product || p?.title);
+    const cls = classifyWineProductForMl(p?.name || p?.product || p?.title, p?.category);
     if (!cls || !buckets[cls]) continue;
     const qty = Number(p?.qty ?? p?.quantity) || 0;
     const amt = Number(p?.amt ?? p?.amount ?? p?.total) || 0;
@@ -9706,11 +9717,12 @@ function computeWineMlVolumeAnalysis(products, wineMl) {
   for (const b of Object.values(buckets)) {
     b.ml = Math.round(b.qty * b.mlPerUnit);
   }
-  const totalMl = buckets.glass.ml + buckets.bottle.ml + buckets.pairing.ml;
-  const totalQty = buckets.glass.qty + buckets.bottle.qty + buckets.pairing.qty;
+  const totalMl = buckets.glass.ml + buckets.decanter.ml + buckets.bottle.ml + buckets.pairing.ml;
+  const totalQty = buckets.glass.qty + buckets.decanter.qty + buckets.bottle.qty + buckets.pairing.qty;
   return {
     rates,
     glass: buckets.glass,
+    decanter: buckets.decanter,
     bottle: buckets.bottle,
     pairing: buckets.pairing,
     totalMl,
@@ -9723,7 +9735,7 @@ function formatWineMlAnalysisLines(profile, verifiedData = null) {
   const wineMl = normalizeStoreOpsWineMl(profile?.wineMl);
   const lines = [];
   lines.push('【分析アイテム・ワイン提供量(ml)】');
-  lines.push(`換算設定: Glass Wine ${wineMl.glassMl}ml/点（店舗設定） / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点（店舗設定）`);
+  lines.push(`換算設定: Glass Wine ${wineMl.glassMl}ml/点（店舗設定） / デキャンタ ${wineMl.decanterMl}ml/点（店舗設定） / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点（店舗設定）`);
   const products = collectProductsForWineMl(verifiedData);
   const analysis = computeWineMlVolumeAnalysis(products, wineMl);
   if (!products.length || analysis.totalQty <= 0) {
@@ -9731,6 +9743,7 @@ function formatWineMlAnalysisLines(profile, verifiedData = null) {
     return lines;
   }
   lines.push(`Glass Wine: ${analysis.glass.qty}点 × ${analysis.glass.mlPerUnit}ml = ${analysis.glass.ml}ml（売上 ${yen(analysis.glass.amt)}）`);
+  lines.push(`デキャンタ: ${analysis.decanter.qty}点 × ${analysis.decanter.mlPerUnit}ml = ${analysis.decanter.ml}ml（売上 ${yen(analysis.decanter.amt)}）`);
   lines.push(`ペアリング: ${analysis.pairing.qty}点 × ${analysis.pairing.mlPerUnit}ml = ${analysis.pairing.ml}ml（売上 ${yen(analysis.pairing.amt)}）`);
   lines.push(`Bottle Wine: ${analysis.bottle.qty}点 × ${analysis.bottle.mlPerUnit}ml = ${analysis.bottle.ml}ml（売上 ${yen(analysis.bottle.amt)}）`);
   lines.push(`合計提供量: ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`);
@@ -10335,6 +10348,7 @@ function readStoreOpsForm() {
     calendarEvents: opsCalendarEvents,
     wineMl: {
       glassMl: document.getElementById('opsWineGlassMl')?.value,
+      decanterMl: document.getElementById('opsWineDecanterMl')?.value,
       bottleMl: 750,
       pairingMl: document.getElementById('opsWinePairingMl')?.value
     }
@@ -10355,6 +10369,7 @@ function fillStoreOpsForm(profile) {
   const notes = document.getElementById('opsNotes');
   const sync = document.getElementById('opsJournalSalesSync');
   const glassMl = document.getElementById('opsWineGlassMl');
+  const decanterMl = document.getElementById('opsWineDecanterMl');
   const bottleMl = document.getElementById('opsWineBottleMl');
   const pairingMl = document.getElementById('opsWinePairingMl');
   if (lunch) lunch.value = p.lunchOffered;
@@ -10367,6 +10382,7 @@ function fillStoreOpsForm(profile) {
   if (sync) sync.checked = !!p.journalSalesSync;
   updateJournalSalesSyncSwitchLabel(!!p.journalSalesSync);
   if (glassMl) glassMl.value = String(p.wineMl.glassMl);
+  if (decanterMl) decanterMl.value = String(p.wineMl.decanterMl);
   if (bottleMl) bottleMl.value = '750';
   if (pairingMl) pairingMl.value = String(p.wineMl.pairingMl);
   opsCalendarEvents = normalizeStoreOpsCalendarEvents(p.calendarEvents);
@@ -16591,14 +16607,14 @@ function shouldAskWineMetricClarification(query, chatHistory) {
 
 function buildWineMetricClarificationReply(userMsg = '') {
   const q = String(userMsg || '').trim();
-  let wineMl = { glassMl: 100, bottleMl: 750, pairingMl: 300 };
+  let wineMl = { glassMl: 100, decanterMl: 375, bottleMl: 750, pairingMl: 300 };
   try {
     wineMl = normalizeStoreOpsWineMl(readStoreOpsProfile().wineMl);
   } catch (_) {}
   const topic = q
     ? `「${q.length > 60 ? `${q.slice(0, 60)}…` : q}」について、`
     : '';
-  return `${topic}ワインの出し方をどう表しますか？ **点数**・**総ml**・**両方**のどれがよいですか？\n\n総mlは店舗情報の換算（Glass Wine ${wineMl.glassMl}ml／Bottle Wine ${wineMl.bottleMl}ml固定／ペアリング ${wineMl.pairingMl}ml）で計算します。`;
+  return `${topic}ワインの出し方をどう表しますか？ **点数**・**総ml**・**両方**のどれがよいですか？\n\n総mlは店舗情報の換算（Glass Wine ${wineMl.glassMl}ml／デキャンタ ${wineMl.decanterMl}ml／Bottle Wine ${wineMl.bottleMl}ml固定／ペアリング ${wineMl.pairingMl}ml）で計算します。`;
 }
 
 function normalizeWineMetricChoice(selected) {
@@ -16675,7 +16691,7 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
     : [verifiedData];
   const lines = [];
   lines.push(`${indent}【ワイン提供量の確定換算（店舗設定×商品点数）】`);
-  lines.push(`${indent}- 換算設定: Glass Wine ${wineMl.glassMl}ml/点 / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点`);
+  lines.push(`${indent}- 換算設定: Glass Wine ${wineMl.glassMl}ml/点 / デキャンタ ${wineMl.decanterMl}ml/点 / Bottle Wine ${wineMl.bottleMl}ml/点（固定） / ペアリング ${wineMl.pairingMl}ml/点`);
   lines.push(`${indent}- 表示モード: ${mode === 'both' ? '点数と総mlの両方' : '総ml'}`);
   for (const period of periods) {
     if (!period || period.reservationOnly) continue;
@@ -16689,6 +16705,7 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
     const label = period.label || verifiedData.label || '対象期間';
     lines.push(
       `${indent}- ${label}: Glass ${analysis.glass.qty}点=${analysis.glass.ml}ml`
+      + ` / デキャンタ ${analysis.decanter.qty}点=${analysis.decanter.ml}ml`
       + ` / ペアリング ${analysis.pairing.qty}点=${analysis.pairing.ml}ml`
       + ` / Bottle ${analysis.bottle.qty}点=${analysis.bottle.ml}ml`
       + ` / 合計 ${analysis.totalMl}ml（約 ${analysis.totalLiters}L）`

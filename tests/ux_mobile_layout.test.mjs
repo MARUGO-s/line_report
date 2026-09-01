@@ -120,7 +120,7 @@ test('classification workspace uses select-and-assign, not 21 parallel lanes', a
 
   // 分類先はグループに分ける。21個をただ並べても目的地を探せない。
   assert.match(html, /const CLASSIFICATION_TARGET_GROUPS=\[/);
-  for (const label of ['フード内訳', 'ワイン（グラス）', 'ワイン（ボトル）']) {
+  for (const label of ['フード内訳', 'ワイン（グラス）', 'ワイン（デキャンタ）', 'ワイン（ボトル）']) {
     assert.ok(html.includes(label), `target group ${label} must exist`);
   }
 
