@@ -426,16 +426,47 @@
   .classification-editor .classify-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
   .classification-editor .classify-pending{font-size:12px;opacity:.75}
   .classification-editor .classify-pending.has-pending{opacity:1;font-weight:600;color:var(--rv-accent,#b68235)}
-  /* 大分類4つに細分類7つが加わり11レーンになる。列数を固定すると
-     カテゴリを足すたびに崩れるので、幅に合わせて自動で折り返す。 */
-  .classification-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-  .classification-lane{background:transparent;border:1px solid var(--rv-neutral-700,#dfe3ea);border-radius:var(--rv-radius-md,8px);min-height:90px;padding:8px}
-  .classification-lane.over{background:color-mix(in srgb, var(--rv-accent,#5b8edb) 10%, transparent);border-color:var(--rv-accent,#5b8edb)}
-  .classification-lane h5{font-size:11px;margin:0 0 7px;opacity:.7}
-  .classification-item{display:flex;align-items:center;justify-content:space-between;gap:5px;background:color-mix(in srgb, var(--rv-text,#000) 4%, transparent);border:1px solid var(--rv-neutral-700,#e4e3de);border-radius:var(--rv-radius-sm,6px);padding:5px 7px;margin:4px 0;font-size:11px;cursor:grab}
+  /* 分類先が21個に増え、レーン並列では空欄が場所を取り、目的のレーンまで
+     長距離ドラッグが必要になっていた。左で商品を選び、右のボタンで移動する
+     二面構成にする。ドラッグも従来どおり残す。 */
+  .classification-split{display:grid;grid-template-columns:minmax(260px,1fr) minmax(280px,1.1fr);gap:14px}
+  @media (max-width:860px){.classification-split{grid-template-columns:1fr}}
+  .classification-pane{border:1px solid var(--rv-neutral-700,#dfe3ea);border-radius:var(--rv-radius-md,8px);padding:10px}
+  .classification-pane h5{font-size:11px;margin:0 0 8px;opacity:.7;font-weight:600}
+  .classification-filter{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+  .classification-filter input[type=search]{flex:1;min-width:150px;font:inherit;font-size:12px;padding:6px 9px;
+    border:1px solid var(--border-input,#d9dee8);border-radius:6px;background:var(--page);color:var(--text)}
+  .classification-filter label{font-size:11px;opacity:.8;display:flex;align-items:center;gap:5px;cursor:pointer}
+  .classification-list{max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:3px}
+  .classification-item{display:flex;align-items:center;gap:7px;padding:6px 8px;border:1px solid transparent;
+    border-radius:var(--rv-radius-sm,6px);cursor:pointer;font-size:11px}
+  /* display:flex は hidden 属性(UA の display:none)より詳細度が高い。
+     これが無いと絞り込んでも行が消えず、件数表示とだけ食い違う。 */
+  .classification-item[hidden]{display:none}
+  .classification-item:hover{background:color-mix(in srgb, var(--rv-text,#000) 6%, transparent)}
+  .classification-item.selected{background:color-mix(in srgb, var(--rv-accent,#b68235) 16%, transparent);
+    border-color:var(--rv-accent,#b68235)}
   .classification-item.pending-move{outline:1px dashed var(--rv-accent,#b68235);outline-offset:1px}
-  .classification-item small{font-family:var(--rv-font-sans,inherit);opacity:.6;white-space:nowrap}
-  @media (max-width:760px){.classification-board{grid-template-columns:1fr 1fr}}
+  .classification-item .ci-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .classification-item .ci-amount{opacity:.6;white-space:nowrap;font-family:var(--rv-font-sans,inherit)}
+  .classification-tag{font-size:10px;padding:1px 6px;border-radius:99px;border:1px solid var(--rv-neutral-700,#dfe3ea);
+    opacity:.75;white-space:nowrap}
+  .classification-tag.is-unset{opacity:.45;border-style:dashed}
+  .classification-selinfo{font-size:12px;margin:0 0 10px;padding:7px 10px;border-radius:6px;
+    background:color-mix(in srgb, var(--rv-accent,#b68235) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--rv-accent,#b68235) 32%, transparent)}
+  .classification-selinfo.is-empty{background:transparent;border-style:dashed;opacity:.55}
+  .classification-group{margin-bottom:12px}
+  .classification-group > b{display:block;font-size:10px;opacity:.55;margin-bottom:6px;letter-spacing:.06em;font-weight:600}
+  .classification-targets{display:flex;flex-wrap:wrap;gap:6px}
+  /* 分類先。空でも1行分しか占めないので、21個あっても視界に収まる。 */
+  .classification-target{font:inherit;font-size:11px;padding:6px 10px;border-radius:var(--rv-radius-sm,6px);
+    border:1px solid var(--rv-neutral-700,#dfe3ea);background:transparent;color:var(--text);cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px}
+  .classification-target:hover,.classification-target.over{border-color:var(--rv-accent,#b68235);
+    background:color-mix(in srgb, var(--rv-accent,#b68235) 12%, transparent)}
+  .classification-target .ct-count{font-size:10px;opacity:.55;font-family:var(--rv-font-sans,inherit)}
+  .classification-empty{font-size:11px;opacity:.55;padding:14px 4px}
   /* 店舗ナレッジ（施策・メニュー資料） */
   .kn-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
   .kn-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--text-2)}
@@ -6921,31 +6952,77 @@ ${recent || '—'}
 ※予測値です。確定実績ではありません。詳細は画面の「売上予測」からも確認できます。`;
 }
 
-function classificationEditorHtml(sales){
+/** 分類先をグループへまとめる。21個を並べるだけでは目的地を探せない。 */
+const CLASSIFICATION_TARGET_GROUPS=[
+  {label:'大分類（コードから自動で付く分類）',categories:PRIMARY_SALES_CATEGORIES},
+  {label:'フード内訳',categories:['アラカルト','コース','デザート']},
+  {label:'ワイン（グラス）',categories:['グラス赤','グラス白','グラスロゼ','グラス泡','グラスオレンジ']},
+  {label:'ワイン（ボトル）',categories:['ボトル赤','ボトル白','ボトルロゼ','ボトル泡','ボトルオレンジ']},
+  {label:'その他ドリンク',categories:['カクテル','アルコール','ソフトドリンク','その他ドリンク']}
+];
+
+/** 一覧に出す商品行を作る。未確定の移動も反映する。 */
+function classificationRows(sales){
   const totals=new Map();
-  sales.forEach(s=>s.items.forEach(item=>{
+  (Array.isArray(sales)?sales:[]).forEach(s=>(s.items||[]).forEach(item=>{
     const key=productGroupKey(item.code,item.name);
     const row=totals.get(key)||{key,code:item.code,name:item.name,category:item.category,qty:0,amount:0};
     row.qty+=item.qty; row.amount+=item.amount; row.category=item.category; totals.set(key,row);
   }));
-  // 未確定のドラッグ移動を表示に反映
   Object.entries(pendingCategoryMoves||{}).forEach(([key,category])=>{
     const row=totals.get(key);
     if(row&&SALES_CATEGORIES.includes(category)) row.category=category;
   });
-  const lanes=new Map(SALES_CATEGORIES.map(c=>[c,[]]));
-  [...totals.values()].sort((a,b)=>b.amount-a.amount).forEach(row=>lanes.get(row.category)?.push(row));
+  return [...totals.values()].sort((a,b)=>b.amount-a.amount);
+}
+
+/** 細分類が付いているか。大分類のままなら「未分類」として絞り込める。 */
+function isRefinedCategory(category){
+  return !!SUB_SALES_CATEGORY_PARENTS[String(category||'').trim()];
+}
+
+function classificationEditorHtml(sales){
+  const rows=classificationRows(sales);
+  const counts=new Map(SALES_CATEGORIES.map(c=>[c,0]));
+  rows.forEach(row=>{ if(counts.has(row.category)) counts.set(row.category,counts.get(row.category)+1); });
   const pendingCount=Object.keys(pendingCategoryMoves||{}).length;
-  const laneHtml=SALES_CATEGORIES.map(category=>`<div class="classification-lane" data-category="${esc(category)}"><h5>${esc(category)}（ここへ移動）</h5>${lanes.get(category).map(row=>`<div class="classification-item${pendingCategoryMoves[row.key]?' pending-move':''}" draggable="true" data-product-key="${esc(row.key)}"><span>${esc(row.name)}</span><small>${yen(row.amount)}</small></div>`).join('')}</div>`).join('');
+  const itemsHtml=rows.map(row=>{
+    const refined=isRefinedCategory(row.category);
+    return `<div class="classification-item${pendingCategoryMoves[row.key]?' pending-move':''}" draggable="true"`
+      +` data-product-key="${esc(row.key)}" data-name="${esc(String(row.name||'').toLowerCase())}"`
+      +` data-refined="${refined?'1':'0'}">`
+      +`<span class="ci-name">${esc(row.name)}</span>`
+      +`<span class="classification-tag${refined?'':' is-unset'}">${esc(row.category||'未分類')}</span>`
+      +`<span class="ci-amount">${yen(row.amount)}</span></div>`;
+  }).join('');
+  const targetsHtml=CLASSIFICATION_TARGET_GROUPS.map(group=>{
+    const buttons=group.categories.filter(c=>SALES_CATEGORIES.includes(c)).map(category=>
+      `<button type="button" class="classification-target" data-category="${esc(category)}">`
+      +`${esc(category)}<span class="ct-count">${counts.get(category)||0}</span></button>`).join('');
+    return buttons?`<div class="classification-group"><b>${esc(group.label)}</b><div class="classification-targets">${buttons}</div></div>`:'';
+  }).join('');
   return `<div class="classification-editor">
     <h4>商品分類ワークスペース</h4>
-    <p class="editor-note">商品をドラッグして分類レーンへ移せます。移動だけではまだ保存されません。「分類を更新」を押すと、移動した商品すべての分類ルールと集計がクラウドへ反映されます。</p>
+    <p class="editor-note">左で商品を選び（複数可）、右の分類ボタンを押すと移動します。ドラッグでも移動できます。移動だけではまだ保存されません。「分類を更新」を押すと、移動した商品すべての分類ルールと集計がクラウドへ反映されます。</p>
     <div class="classify-actions">
       <button type="button" class="rv-btn rv-btn-primary" id="classifyCommitBtn" ${pendingCount?'' :'disabled'}>分類を更新${pendingCount?`（${pendingCount}件）`:''}</button>
       <button type="button" class="rv-btn rv-btn-secondary" id="classifyResetBtn" ${pendingCount?'' :'disabled'}>移動を取り消す</button>
       <span class="classify-pending${pendingCount?' has-pending':''}" id="classifyPendingLabel">${pendingCount?`未反映の移動: ${pendingCount}件`:'未反映の移動はありません'}</span>
     </div>
-    <div class="classification-board">${laneHtml}</div>
+    <div class="classification-split">
+      <div class="classification-pane">
+        <div class="classification-filter">
+          <input type="search" id="classifySearch" placeholder="商品名で絞り込み（例: 赤、カレー）" autocomplete="off">
+          <label><input type="checkbox" id="classifyUnsetOnly"> 細分類が未設定のみ</label>
+        </div>
+        <h5 id="classifyListCount">商品 ${rows.length}件</h5>
+        <div class="classification-list" id="classifyList">${itemsHtml||'<p class="classification-empty">商品がありません。</p>'}</div>
+      </div>
+      <div class="classification-pane">
+        <div class="classification-selinfo is-empty" id="classifySelInfo">商品を選ぶと、ここから移動先を選べます</div>
+        ${targetsHtml}
+      </div>
+    </div>
   </div>`;
 }
 
@@ -7115,25 +7192,96 @@ function bindClassificationEditor(){
   if(commitBtn) commitBtn.onclick=()=>commitPendingCategoryMoves();
   if(resetBtn) resetBtn.onclick=()=>resetPendingCategoryMovesAndRedraw();
 
-  view.querySelectorAll('.classification-item').forEach(item=>item.addEventListener('dragstart',event=>{
-    event.dataTransfer.setData('text/plain',item.dataset.productKey||'');
-  }));
-  view.querySelectorAll('.classification-lane').forEach(lane=>{
-    lane.addEventListener('dragover',event=>{event.preventDefault();lane.classList.add('over');});
-    lane.addEventListener('dragleave',()=>lane.classList.remove('over'));
-    lane.addEventListener('drop',event=>{
-      event.preventDefault(); lane.classList.remove('over');
-      const key=event.dataTransfer.getData('text/plain'), category=lane.dataset.category;
+  const list=view.querySelector('#classifyList');
+  const selInfo=view.querySelector('#classifySelInfo');
+  const search=view.querySelector('#classifySearch');
+  const unsetOnly=view.querySelector('#classifyUnsetOnly');
+  const countLabel=view.querySelector('#classifyListCount');
+  const items=()=>[...view.querySelectorAll('.classification-item')];
+
+  const refreshSelection=()=>{
+    const picked=items().filter(el=>el.classList.contains('selected'));
+    if(!selInfo) return picked;
+    if(!picked.length){
+      selInfo.textContent='商品を選ぶと、ここから移動先を選べます';
+      selInfo.classList.add('is-empty');
+    }else{
+      const sum=picked.reduce((total,el)=>{
+        const raw=el.querySelector('.ci-amount')?.textContent||'';
+        return total+(Number(raw.replace(/[^0-9-]/g,''))||0);
+      },0);
+      selInfo.textContent=`選択中 ${picked.length}件（${yen(sum)}）— 移動先を選んでください`;
+      selInfo.classList.remove('is-empty');
+    }
+    return picked;
+  };
+
+  const applyFilter=()=>{
+    const q=String(search?.value||'').trim().toLowerCase();
+    const onlyUnset=!!unsetOnly?.checked;
+    let shown=0;
+    items().forEach(el=>{
+      const matchText=!q||String(el.dataset.name||'').includes(q);
+      const matchUnset=!onlyUnset||el.dataset.refined!=='1';
+      const visible=matchText&&matchUnset;
+      el.hidden=!visible;
+      // 隠れた行を選択したままにすると、見えないものが移動して事故になる。
+      if(!visible) el.classList.remove('selected');
+      if(visible) shown+=1;
+    });
+    if(countLabel) countLabel.textContent=`商品 ${items().length}件中 ${shown}件を表示`;
+    refreshSelection();
+  };
+
+  // クリックで選択。長距離ドラッグの代わりになる主操作。
+  if(list) list.addEventListener('click',event=>{
+    const item=event.target.closest('.classification-item');
+    if(!item) return;
+    item.classList.toggle('selected');
+    refreshSelection();
+  });
+  if(search) search.addEventListener('input',applyFilter);
+  if(unsetOnly) unsetOnly.addEventListener('change',applyFilter);
+
+  view.querySelectorAll('.classification-target').forEach(target=>{
+    target.addEventListener('click',()=>{
+      const category=target.dataset.category;
+      const picked=items().filter(el=>el.classList.contains('selected'));
+      if(!category||!picked.length) return;
+      picked.forEach(el=>{
+        queuePendingCategoryMove(el.dataset.productKey,category);
+        el.classList.remove('selected');
+        el.classList.add('pending-move');
+        el.dataset.refined=SUB_SALES_CATEGORY_PARENTS[category]?'1':'0';
+        const tag=el.querySelector('.classification-tag');
+        if(tag){ tag.textContent=category; tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]); }
+      });
+      const count=target.querySelector('.ct-count');
+      if(count) count.textContent=String((Number(count.textContent)||0)+picked.length);
+      applyFilter();
+    });
+    // ドラッグも従来どおり受ける。慣れた操作を奪わない。
+    target.addEventListener('dragover',event=>{event.preventDefault();target.classList.add('over');});
+    target.addEventListener('dragleave',()=>target.classList.remove('over'));
+    target.addEventListener('drop',event=>{
+      event.preventDefault(); target.classList.remove('over');
+      const key=event.dataTransfer.getData('text/plain'), category=target.dataset.category;
       if(!key||!category) return;
-      // 画面上だけ移動（クラウド同期は「分類を更新」まで保留）
-      const item=[...view.querySelectorAll('.classification-item')].find(el=>el.dataset.productKey===key);
-      if(item){
-        lane.appendChild(item);
-        item.classList.add('pending-move');
+      const el=items().find(node=>node.dataset.productKey===key);
+      if(el){
+        el.classList.add('pending-move');
+        el.dataset.refined=SUB_SALES_CATEGORY_PARENTS[category]?'1':'0';
+        const tag=el.querySelector('.classification-tag');
+        if(tag){ tag.textContent=category; tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]); }
       }
       queuePendingCategoryMove(key,category);
+      applyFilter();
     });
   });
+  items().forEach(item=>item.addEventListener('dragstart',event=>{
+    event.dataTransfer.setData('text/plain',item.dataset.productKey||'');
+  }));
+
   view.querySelectorAll('.report-tab').forEach(tab=>{
     tab.addEventListener('click',()=>{
       const target=tab.dataset.target;

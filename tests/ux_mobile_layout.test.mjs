@@ -108,3 +108,34 @@ test('AI loading sub-label wraps instead of overflowing the chat bubble', async 
   );
   assert.match(html, /class="ai-loading-sub">準備完了後に/);
 });
+
+test('classification workspace uses select-and-assign, not 21 parallel lanes', async () => {
+  const html = await read('public/jnm/jnl2txt.html');
+
+  // 分類先が21個に増え、レーン並列では空欄が場所を取り、目的地まで長距離
+  // ドラッグが必要だった。左で選び右のボタンで移す二面構成にした。
+  assert.match(html, /class="classification-split"/);
+  assert.match(html, /class="classification-target"/);
+  assert.doesNotMatch(html, /class="classification-board"/);
+
+  // 分類先はグループに分ける。21個をただ並べても目的地を探せない。
+  assert.match(html, /const CLASSIFICATION_TARGET_GROUPS=\[/);
+  for (const label of ['フード内訳', 'ワイン（グラス）', 'ワイン（ボトル）']) {
+    assert.ok(html.includes(label), `target group ${label} must exist`);
+  }
+
+  // 絞り込みが無いと目的の商品に辿り着けない。
+  assert.match(html, /id="classifySearch"/);
+  assert.match(html, /id="classifyUnsetOnly"/);
+
+  // display:flex は hidden 属性より詳細度が高い。この行が無いと絞り込んでも
+  // 行が消えず、件数表示とだけ食い違う（実際にその症状が出た）。
+  assert.match(html, /\.classification-item\[hidden\]\{display:none\}/);
+
+  // 隠れた行が選択されたままだと、見えないものが移動して事故になる。
+  assert.match(html, /if\(!visible\) el\.classList\.remove\('selected'\);/);
+
+  // ドラッグは従来どおり残す。慣れた操作を奪わない。
+  assert.match(html, /target\.addEventListener\('drop'/);
+  assert.match(html, /addEventListener\('dragstart'/);
+});
