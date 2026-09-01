@@ -2513,3 +2513,30 @@ test('product and cohort evidence carries daily gross reconciliation coverage in
   assert.match(cohort, /detailCoverage:\s*raw\?\.detail_coverage \|\| null/);
   assert.match(cohort, /detailCoverage:\s*meta\.detailCoverage/);
 });
+
+test('saving product categories verifies against the server, not the 10-minute cache', async () => {
+  // 保存直後の確認読みがキャッシュを掴むと、実際は保存できているのに
+  // 「分類ルールのクラウド保存確認に失敗しました」と出て、利用者は
+  // 保存されなかったと誤解する。実際にその症状が出た。
+  const detailFetch = extractFunction(html, 'fetchSupabaseReportById');
+  // キャッシュを迂回できること。
+  assert.match(detailFetch, /options\.forceRefresh/);
+  assert.match(
+    detailFetch,
+    /if \(options\.forceRefresh\) savedReportDetailCache\.delete\(cacheKey\);/,
+  );
+  // 迂回指定時はキャッシュを読まないこと。
+  assert.match(
+    detailFetch,
+    /const cached = options\.forceRefresh \? null : savedReportDetailCache\.get\(cacheKey\);/,
+  );
+
+  // 保存確認は必ず最新を読むこと。
+  const persist = extractFunction(html, 'persistProductCategoryOverridesToCloud');
+  assert.match(
+    persist,
+    /fetchSupabaseReportById\(categoryOverridesReportId\(\),\s*\{\s*forceRefresh:\s*true\s*\}\)/,
+  );
+  // 確認自体は残すこと。書き込みの取りこぼしを見逃さないため。
+  assert.match(persist, /クラウド保存確認に失敗/);
+});

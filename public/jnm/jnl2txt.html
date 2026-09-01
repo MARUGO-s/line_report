@@ -3495,8 +3495,10 @@ async function persistProductCategoryOverridesToCloud(overrides,syncedFingerprin
       store_key:STORE_KEY
     })
   });
-  // 保存確認（取りこぼし防止）
-  const verified=await fetchSupabaseReportById(categoryOverridesReportId());
+  // 保存確認（取りこぼし防止）。
+  // キャッシュ越しだと保存前の内容と比べてしまい、実際は成功しているのに
+  // 「保存確認に失敗」と表示されるため、ここは必ずサーバーから読み直す。
+  const verified=await fetchSupabaseReportById(categoryOverridesReportId(),{forceRefresh:true});
   const got=(verified&&typeof verified.overrides==='object')?verified.overrides:{};
   const keys=Object.keys(clean);
   for(const k of keys){
@@ -4846,7 +4848,10 @@ async function fetchSupabaseReports(options = {}) {
 async function fetchSupabaseReportById(id, options = {}) {
   const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
   const cacheKey = `${requestedStoreKey}|${id}`;
-  const cached = savedReportDetailCache.get(cacheKey);
+  // 保存直後の確認読みなど、必ず最新を見たい場面ではキャッシュを迂回する。
+  // 10分TTLのキャッシュを掴むと、書き込んだ内容と読み戻しが食い違う。
+  if (options.forceRefresh) savedReportDetailCache.delete(cacheKey);
+  const cached = options.forceRefresh ? null : savedReportDetailCache.get(cacheKey);
   if (cached && (Date.now() - cached.time) < SAVED_REPORT_DETAIL_TTL_MS) return { ...cached.report };
   try {
     const body = await adminApiFetch('/pos-journals/saved-reports/item?store_key=' + encodeURIComponent(requestedStoreKey) + '&id=' + encodeURIComponent(id), {
