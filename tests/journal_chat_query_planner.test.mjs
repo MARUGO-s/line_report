@@ -1985,6 +1985,33 @@ test('knowledge load failure is not reported as a successful zero-item result', 
   assert.match(integratedAnalysisContextSource, /資料APIを確認できませんでした。登録件数は未確認です/);
 });
 
+test('menu-image knowledge requires structured names and prices before RAG save', () => {
+  const analyzeStart = adminApiSource.indexOf('async function analyzeStoreKnowledgeImage(');
+  const analyzeEnd = adminApiSource.indexOf('async function processLinePostKnowledge(', analyzeStart);
+  assert.notEqual(analyzeStart, -1);
+  assert.notEqual(analyzeEnd, -1);
+  const analyze = adminApiSource.slice(analyzeStart, analyzeEnd);
+
+  assert.match(analyze, /"menu_items": \[/);
+  assert.match(analyze, /判読できるメニュー名を全件列挙/);
+  assert.match(analyze, /各メニューの価格/);
+  assert.match(analyze, /responseMimeType: "application\/json"/);
+  assert.match(analyze, /maxOutputTokens: 8192/);
+  assert.match(analyze, /result\.category === "メニュー" && result\.needs_review/);
+  assert.match(analyze, /【再解析指示】/);
+  assert.match(analyze, /scoreKnowledgeMenuExtraction/);
+  assert.match(analyze, /menu_item_count:/);
+  assert.match(analyze, /priced_item_count:/);
+
+  assert.match(html, /accept="[^"]*\.heic,[^"]*\.heif/);
+  assert.match(html, /form\.append\('category_hint'/);
+  assert.match(html, /form\.append\('title_hint'/);
+  assert.match(html, /id="knModalQuality"[^>]*aria-live="polite"/);
+  assert.match(html, /function countKnowledgePriceMentionsInBrowser/);
+  assert.match(html, /メニュー資料には価格付きの商品一覧が必要です/);
+  assert.match(html, /商品名と価格を「抽出された詳細内容」へ追記してください/);
+});
+
 test('store knowledge API and storage stay behind the admin API', async () => {
   const adminApi = await readFile(
     new URL('../supabase/functions/admin-api/index.ts', import.meta.url),
@@ -2073,6 +2100,7 @@ test('LINE knowledge registration reports failures and never acknowledges a miss
   const dbSave = quoted.indexOf('let saveRes = await postKnowledge(recordPayload)');
   assert.ok(uploadGuard >= 0 && uploadGuard < dbSave, 'Storage失敗はDB保存前に停止する');
   assert.match(quoted, /if \(!storagePath \|\| !storagePath\.toLowerCase\(\)\.startsWith/);
+  assert.match(quoted, /if \(result\.needs_review === true\)[\s\S]*return false/);
   assert.match(quoted, /const sha256Hex = String\(uploadJson\.sha256_hex \|\| ''\)/);
   assert.match(quoted, /sha256_hex:\s*sha256Hex/);
   assert.match(quoted, /await cleanupUploadedKnowledgeFile\(storagePath\)/);

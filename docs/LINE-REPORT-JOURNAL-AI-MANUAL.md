@@ -339,6 +339,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 資料タブには施策、メニュー、価格改定、イベント、マニュアル、現場メモ等を登録し、期間・タグ・キーワード・有効状態で管理します。
 - タイトル、概要または本文、任意の期間、画像・PDF・テキスト等の添付を保存できます。長文は検索用チャンクへ分割します。
+- メニュー画像は、判読できる商品名・価格・区分・説明を一覧化してから本文と検索用チャンクへ保存します。概要だけ、または価格が無い結果は自動で1回読み直し、それでも不足する場合は確認画面で警告して価格を追記するまで保存しません。HEIC・HEIF画像にも対応します。
 - 資料は売上の背景・要因を説明するために使い、金額の正本にはしません。資料由来は「登録資料によると」、推測は「これは推測」と分けます。
 - 既定削除は論理削除で、必要なら復元できます。添付は非公開保管し、閲覧時に一時URLを発行します。
 - AIは分析期間と重なる資料と質問に関連する資料を選び、全資料目次は存在確認にだけ使います。
@@ -753,11 +754,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 41件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 95件
+- 共有TypeScriptモジュール: 96件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 141件
 - SQL migrations: 297件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 87件
+- テストファイル: 88件
 
 ### 公開画面・ブラウザコード
 
@@ -868,6 +869,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/journal_sales_sync.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/knowledge_file_extract.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
 | `supabase/functions/_shared/knowledge_memo_tag.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
+| `supabase/functions/_shared/knowledge_menu_extract.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
 | `supabase/functions/_shared/line_admin_webhook.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/line_client.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
 | `supabase/functions/_shared/line_display_names.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |

@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-09-02 メニュー画像の構造化抽出と品質ゲート
+
+- `admin-api /pos-journals/knowledge/analyze-image` はメニュー画像を概要だけにせず、`menu_items`の区分・商品名・価格・説明と全文文字起こしを返す。RAGへ保存する本文は価格付き商品一覧を先頭に置く。
+- 画像メニューで構造化商品または価格が無いときは、同じ全体deadline内で1回再解析する。再解析後も不足なら`needs_review`を返し、Web側は価格を追記するまで確定・保存を拒否する。
+- 価格や文字が読めない場合は推測で埋めない。`extraction_notes`と「判読不可」で利用者確認へ回す。
+- 新しい正規化・品質判定の正本は`supabase/functions/_shared/knowledge_menu_extract.ts`。HEIC/HEIFも資料画面の選択対象。
+
 ## 2026-09-01 フードコートブーストの加算統合・ワイン復旧
 
 - ブースト時も `GET /foodcourt/journal-brief` を外さない。これは別レポートとして残すものではなく、通常分析で使う会場・イベント・コート内比較の基準情報である。

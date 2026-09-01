@@ -798,6 +798,9 @@
   .kn-modal-close:hover { color: #fff; }
   .kn-modal-body { padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
   .kn-modal-intro { font-size: 13px; color: #cbd5e1; margin: 0; }
+  .kn-modal-quality { font-size: 13px; line-height: 1.55; padding: 10px 12px; border-radius: 8px; margin: 0; }
+  .kn-modal-quality.is-ok { color: #bbf7d0; background: rgba(22, 163, 74, 0.16); border: 1px solid rgba(74, 222, 128, 0.45); }
+  .kn-modal-quality.is-warning { color: #fde68a; background: rgba(180, 83, 9, 0.2); border: 1px solid rgba(251, 191, 36, 0.55); }
   .kn-modal-content { display: flex; gap: 20px; flex-wrap: wrap; }
   .kn-modal-left { flex: 1 1 250px; display: flex; justify-content: center; align-items: flex-start; }
   .kn-modal-img { max-width: 100%; max-height: 350px; border-radius: 8px; border: 1px solid #475569; object-fit: contain; }
@@ -2451,7 +2454,7 @@
       </label>
       <div class="kn-field kn-full">
         <label class="kn-drop-zone" id="knDropZone">
-          <input id="knFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.md,.xlsx,.docx" style="display:none;">
+          <input id="knFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,.txt,.csv,.md,.xlsx,.docx" style="display:none;">
           <div class="kn-drop-icon">📂 📸</div>
           <div class="kn-drop-text">ここに画像・PDF・Excel・Word・テキストをドラッグ＆ドロップ、または貼り付け (Ctrl+V / Cmd+V)、またはクリックして選択</div>
           <div class="kn-drop-sub">（Gemini 2.0 Flash が全自動でAI解析します・20MBまで対応）</div>
@@ -2476,6 +2479,7 @@
       </div>
       <div class="kn-modal-body">
         <p class="kn-modal-intro">AIが画像（メニュー表・資料）から抽出した内容です。間違えがある場合は直接手入力で修正してください。</p>
+        <p id="knModalQuality" class="kn-modal-quality" role="status" aria-live="polite" hidden></p>
         <div class="kn-modal-content">
           <div class="kn-modal-left">
             <img id="knModalPreview" src="" alt="プレビュー" class="kn-modal-img" />
@@ -2508,7 +2512,7 @@
       </div>
       <div class="kn-modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeKnImageModal()">キャンセル</button>
-        <button type="button" class="btn btn-primary" onclick="applyImageAnalysisToForm()">この内容で確定・フォームに反映</button>
+        <button id="knModalApplyBtn" type="button" class="btn btn-primary" onclick="applyImageAnalysisToForm()">この内容で確定・フォームに反映</button>
       </div>
     </div>
   </div>
@@ -15520,6 +15524,7 @@ const AI_KNOWLEDGE_LIST_MAX_ITEMS = 2000;
 let knowledgeEditingId = null;
 let knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
 let knowledgeLoadState = { status: 'idle', truncated: false, error: '' };
+let knowledgeImageAnalysisState = { category: '', needsReview: false, menuItemCount: 0, pricedItemCount: 0, warnings: [] };
 
 function knowledgeEl(id) { return document.getElementById(id); }
 
@@ -15557,6 +15562,7 @@ function resetKnowledgeForm() {
   if (category) category.value = '施策';
   const file = knowledgeEl('knFile');
   if (file) file.value = '';
+  knowledgeImageAnalysisState = { category: '', needsReview: false, menuItemCount: 0, pricedItemCount: 0, warnings: [] };
   const btn = knowledgeEl('knSaveBtn');
   if (btn) btn.textContent = '保存';
   setKnowledgeStatus('');
@@ -15841,6 +15847,12 @@ async function saveKnowledgeForm() {
   const bodyText = (knowledgeEl('knBody')?.value || '').trim();
   if (!title) { setKnowledgeStatus('タイトルを入力してください。', true); return; }
   if (!summary && !bodyText) { setKnowledgeStatus('概要または内容を入力してください。', true); return; }
+  const selectedFile = knowledgeEl('knFile')?.files?.[0];
+  const selectedCategory = knowledgeEl('knCategory')?.value || 'その他';
+  if (selectedFile && selectedCategory === 'メニュー' && countKnowledgePriceMentionsInBrowser(bodyText) === 0) {
+    setKnowledgeStatus('メニュー資料には価格付きの商品一覧が必要です。AI解析結果を確認し、商品名と価格を「内容」へ追記してください。', true);
+    return;
+  }
   const start = knowledgeEl('knPeriodStart')?.value || '';
   const end = knowledgeEl('knPeriodEnd')?.value || '';
   if (start && end && start > end) { setKnowledgeStatus('開始日が終了日より後になっています。', true); return; }
@@ -15848,7 +15860,7 @@ async function saveKnowledgeForm() {
   setKnowledgeStatus('保存中…', false, true);
   try {
     let attachment = null;
-    const file = knowledgeEl('knFile')?.files?.[0];
+    const file = selectedFile;
     if (file) {
       setKnowledgeStatus('添付ファイルをアップロード中…', false, true);
       const form = new FormData();
@@ -15858,7 +15870,7 @@ async function saveKnowledgeForm() {
     }
     const payload = {
       store_key: STORE_KEY,
-      category: knowledgeEl('knCategory')?.value || 'その他',
+      category: selectedCategory,
       title,
       summary,
       body_text: bodyText,
@@ -16459,7 +16471,7 @@ async function handleKnowledgeFileChange(file) {
   }
   // 画像・PDF は Gemini がそのまま読み取り、Excel / Word / テキストはサーバ側で
   // テキスト化してから解析する（いずれも /knowledge/analyze-image が処理する）。
-  const isImage = /^(image\/)/.test(type) || /\.(png|jpg|jpeg|webp)$/.test(name);
+  const isImage = /^(image\/)/.test(type) || /\.(png|jpg|jpeg|webp|heic|heif)$/.test(name);
   const isPdf = type === 'application/pdf' || /\.pdf$/.test(name);
   const isSheet = /spreadsheetml|ms-excel/.test(type) || /\.(xlsx|xlsm)$/.test(name);
   const isDoc = /wordprocessingml/.test(type) || /\.docx$/.test(name);
@@ -16481,6 +16493,8 @@ async function analyzeKnowledgeFileWithGemini(file) {
     const form = new FormData();
     form.append('file', file);
     form.append('store_key', STORE_KEY);
+    form.append('category_hint', knowledgeEl('knCategory')?.value || 'その他');
+    form.append('title_hint', (knowledgeEl('knTitle')?.value || '').trim());
     const response = await adminApiFetch(`${KNOWLEDGE_API}/analyze-image`, {
       method: 'POST',
       body: form,
@@ -16492,7 +16506,11 @@ async function analyzeKnowledgeFileWithGemini(file) {
     const result = response.result || {};
     const previewUrl = URL.createObjectURL(file);
     showKnImageModal(result, previewUrl);
-    setKnowledgeStatus('画像解析が完了しました。ポップアップで抽出内容をご確認・手入力修正してください。');
+    if (result.needs_review === true) {
+      setKnowledgeStatus('解析結果に商品名・価格の不足があります。ポップアップの警告に従って修正してください。', true);
+    } else {
+      setKnowledgeStatus('画像解析が完了しました。ポップアップで抽出内容をご確認・手入力修正してください。');
+    }
   } catch (err) {
     setKnowledgeStatus(`画像解析に失敗しました: ${err.message || err}（概要・内容へ手動でご記入ください）`, true);
   }
@@ -16512,7 +16530,44 @@ function showKnImageModal(result, previewUrl) {
   set('knModalBody', result.body_text || '');
   set('knModalTags', Array.isArray(result.tags) ? result.tags.join(', ') : (result.tags || ''));
 
+  const warnings = Array.isArray(result.warnings) ? result.warnings.map(v => String(v || '').trim()).filter(Boolean) : [];
+  knowledgeImageAnalysisState = {
+    category: String(result.category || ''),
+    needsReview: result.needs_review === true,
+    menuItemCount: Number(result.menu_item_count) || 0,
+    pricedItemCount: Number(result.priced_item_count) || 0,
+    warnings
+  };
+  renderKnowledgeImageQuality();
+
   modal.hidden = false;
+}
+
+function countKnowledgePriceMentionsInBrowser(value) {
+  const matches = String(value || '').match(/(?:[¥￥\\]\s*\d[\d,]*|\d[\d,]*\s*円)/g) || [];
+  return new Set(matches.map(value => value.replace(/\s+/g, ''))).size;
+}
+
+function renderKnowledgeImageQuality(message = '') {
+  const el = knowledgeEl('knModalQuality');
+  const button = knowledgeEl('knModalApplyBtn');
+  if (!el) return;
+  const state = knowledgeImageAnalysisState;
+  const needsReview = state.needsReview === true;
+  el.hidden = false;
+  el.classList.toggle('is-warning', needsReview);
+  el.classList.toggle('is-ok', !needsReview);
+  if (needsReview) {
+    const details = state.warnings.length ? state.warnings.join(' ') : '抽出内容が不足しています。';
+    el.textContent = message || `⚠️ ${details} 商品名と価格を確認・追記するまでメニュー資料として確定できません。`;
+    if (button) button.textContent = '不足を修正してからフォームに反映';
+  } else if (state.category === 'メニュー') {
+    el.textContent = message || `✅ メニュー ${state.menuItemCount}件、価格付き ${state.pricedItemCount}件を構造化しました。画像と照合してから確定してください。`;
+    if (button) button.textContent = 'この内容で確定・フォームに反映';
+  } else {
+    el.textContent = message || '✅ 資料のタイトル・概要・本文・タグを抽出しました。原本と照合してから確定してください。';
+    if (button) button.textContent = 'この内容で確定・フォームに反映';
+  }
 }
 
 function closeKnImageModal() {
@@ -16527,6 +16582,12 @@ function applyImageAnalysisToForm() {
   const summary = getVal('knModalSummary');
   const body = getVal('knModalBody');
   const tags = getVal('knModalTags');
+  if (category === 'メニュー' && countKnowledgePriceMentionsInBrowser(body) === 0) {
+    knowledgeImageAnalysisState.needsReview = true;
+    renderKnowledgeImageQuality('⚠️ 価格付きの商品がまだありません。画像を見ながら、商品名と価格を「抽出された詳細内容」へ追記してください。');
+    knowledgeEl('knModalBody')?.focus();
+    return;
+  }
 
   const setVal = (id, val) => { const el = knowledgeEl(id); if (el) el.value = val; };
   setVal('knCategory', category);
@@ -16536,7 +16597,8 @@ function applyImageAnalysisToForm() {
   setVal('knTags', tags);
 
   closeKnImageModal();
-  setKnowledgeStatus('AI解析内容（手動修正反映済み）をフォームへ設定しました。「保存」を押すとRAGログへ保存されます。');
+  knowledgeImageAnalysisState.needsReview = false;
+  setKnowledgeStatus('商品名・価格を含むAI解析内容をフォームへ設定しました。「保存」を押すとRAGログへ保存されます。');
 }
 
 // ---- 資料タブ専用 ドロップゾーン & クリップボード貼り付けイベント設定 ----

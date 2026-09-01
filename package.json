@@ -25,7 +25,7 @@
     "test:foodcourt": "node --test tests/foodcourt_*.test.ts",
     "test:reservation": "node --test tests/reservation_*.test.ts",
     "test:receipt": "deno test --no-lock --no-check --allow-read --allow-env tests/yamato_collect_expense.test.ts && node --test tests/receipt_*.test.ts",
-    "test:journal-ai": "deno test --no-lock --allow-read --allow-env tests/journal_grok_x_search.test.ts tests/journal_ai_privacy.test.ts tests/journal_ai_brief_cache.test.ts tests/journal_ai_usage_tokens.test.ts && node --test tests/journal_ai_orchestrate.test.mjs tests/journal_chat_query_planner.test.mjs tests/journal_ai_weather.test.mjs",
+    "test:journal-ai": "deno test --no-lock --allow-read --allow-env tests/knowledge_menu_extract.test.ts tests/journal_grok_x_search.test.ts tests/journal_ai_privacy.test.ts tests/journal_ai_brief_cache.test.ts tests/journal_ai_usage_tokens.test.ts && node --test tests/journal_ai_orchestrate.test.mjs tests/journal_chat_query_planner.test.mjs tests/journal_ai_weather.test.mjs",
     "test:pos-journal": "deno test --no-lock --allow-read tests/paged_row_scan.test.ts tests/pos_journal_lha.test.ts tests/pos_journal_ai.test.ts tests/pos_journal_ai_uncaptured.test.ts tests/pos_journal_shared_reports.test.ts tests/pos_journal_auto_saved_reports.test.ts tests/journal_product_index.test.ts tests/admin_access_log.test.ts && node --test tests/admin_api_pos_journal_pagination.test.mjs tests/admin_api_pos_journal_repair.test.mjs tests/admin_api_pos_journal_shared_reference.test.mjs tests/journal_sales_sync.test.mjs tests/pos_journal_ai_history.test.mjs tests/admin_api_access_history.test.mjs"
   },
   "dependencies": {

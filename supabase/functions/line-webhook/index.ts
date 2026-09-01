@@ -2130,6 +2130,12 @@ async function registerQuotedImageAsKnowledge(
 
     const analyzeJson = await analyzeRes.json()
     const result = analyzeJson.result || {}
+    // LINE経由には確認・修正モーダルが無い。メニュー名・価格が不足した画像を
+    // 「登録成功」とするより、元メディアを残してWeb資料タブからの再確認を促す。
+    if (result.needs_review === true) {
+      console.warn('Knowledge file analysis needs manual review:', result.warnings)
+      return false
+    }
 
     // 3. 原本ファイルを Storage (store-knowledge) へ保存
     const uploadData = new FormData()

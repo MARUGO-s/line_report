@@ -73,6 +73,22 @@ Journal Report（`public/jnm/jnl2txt.html`）のAIが、売上数値だけでな
 | GET | `/pos-journals/knowledge/download` | 署名URL発行（`createSignedMediaUrl` を流用） |
 | DELETE | `/pos-journals/knowledge/item` | 既定は論理削除。`purge: true` + `confirmation: "delete"` で完全削除＋添付消去 |
 
+### メニュー画像の抽出品質（2026-09-02）
+
+`POST /pos-journals/knowledge/analyze-image` は、カテゴリがメニューの資料では概要だけを返さず、
+判読できる全商品を `menu_items`（区分・商品名・価格・説明）へ構造化する。RAGへ保存する
+`body_text` の先頭には同じ内容を箇条書きで組み立て、続けて画像内全文と判読上の注意を残す。
+
+- 横向き・斜めの画像も向きを補正して読むよう指示する
+- Hot/Iced、Regular/Large、税込・税別、共通価格を原資料どおり保持する
+- 読めない箇所を推測せず `extraction_notes` に残す
+- 画像メニューで商品一覧または価格が取れない場合は、残り時間内で1回だけ再解析する
+- 再解析後も不足する場合は `needs_review` と警告を返し、Web画面は価格を追記するまで確定・保存させない
+- HEIC / HEIF は画像資料として選択・解析できる
+
+この品質ゲートにより「抹茶・紅茶・コーヒー等を扱う」といった概要だけが、価格付きメニュー資料として
+成功扱いされることを防ぐ。添付原本は従来どおり非公開Storageに保持する。
+
 **削除の既定を論理削除にしている理由**: 終了した施策も「去年の同じ月は何をしていたか」に
 答えるために必要なため。無効化＝現在の提案には使わない、という意味にしている。
 
