@@ -1542,6 +1542,8 @@
     gap: 10px;
     min-height: 28px;
     color: var(--text-2, #9aa3ad);
+    /* 吹き出しの幅を超えて伸びると、中の文言が右端で切れる */
+    max-width: 100%;
   }
   .ai-loading-mark {
     flex: 0 0 auto;
@@ -1568,6 +1570,19 @@
     letter-spacing: 0.04em;
     color: var(--text-2, #9aa3ad);
     white-space: nowrap;
+  }
+  /* 見出し行(ai-loading-label)は nowrap で点滅ドットを同じ行に保つ。
+     一方この補足行は長く、同じクラスを使うと折り返せずに右端で切れる。 */
+  .ai-loading-sub {
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    color: var(--text-2, #9aa3ad);
+    opacity: .72;
+    margin-top: 7px;
+    white-space: normal;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
   .ai-loading-dots {
     display: inline-flex;
@@ -18779,8 +18794,8 @@ function classifyJournalChatIntentClient(message) {
 
 function buildAiChatPreparingHtml(multiPlanned) {
   const next = multiPlanned
-    ? '<div class="ai-loading-label" style="font-size:11px;opacity:.72;margin-top:7px;">準備完了後に 数値AI・Web知見・X検索・統合 を開始します</div>'
-    : '<div class="ai-loading-label" style="font-size:11px;opacity:.72;margin-top:7px;">保存データの確認後にAI分析を開始します</div>';
+    ? '<div class="ai-loading-sub">準備完了後に 数値AI・Web知見・X検索・統合 を開始します</div>'
+    : '<div class="ai-loading-sub">保存データの確認後にAI分析を開始します</div>';
   return '<div class="ai-loading-wrap" role="status" aria-live="polite" aria-label="分析データを準備中">' +
     '<div class="ai-loading-mark"><span class="ai-loading-spinner" aria-hidden="true"></span></div>' +
     '<div><div class="ai-loading-label">分析データを準備中<span class="ai-loading-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div>' + next + '</div>' +

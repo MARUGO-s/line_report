@@ -83,3 +83,28 @@ test('short chat histories stay next to the composer instead of leaving a middle
   const chat = await read('public/chat.html');
   assert.match(chat, /\.messages::before \{[\s\S]*?margin-top: auto;/);
 });
+
+test('AI loading sub-label wraps instead of overflowing the chat bubble', async () => {
+  const html = await read('public/jnm/jnl2txt.html');
+
+  // 見出し行は点滅ドットを同じ行に保つため nowrap のままでよい。
+  assert.match(html, /\.ai-loading-label \{[^}]*white-space: nowrap;/);
+
+  // 長い補足行が同じクラスを使うと折り返せず、吹き出しの右端で文字が切れる。
+  // 実際に「…を開始しま」で切れる不具合が出たため、専用クラスへ分けた。
+  const sub = html.match(/\.ai-loading-sub \{[^}]*\}/);
+  assert.ok(sub, '.ai-loading-sub must exist');
+  assert.match(sub[0], /white-space: normal;/);
+  assert.doesNotMatch(sub[0], /white-space: nowrap;/);
+
+  // 親が吹き出し幅を超えると、子を折り返しても切れたままになる。
+  assert.match(html, /\.ai-loading-wrap \{[^}]*max-width: 100%;/);
+
+  // 補足行が nowrap のクラスへ戻っていないこと。
+  assert.doesNotMatch(
+    html,
+    /class="ai-loading-label"[^>]*>準備完了後に/,
+    'the long sub-label must not reuse the nowrap label class',
+  );
+  assert.match(html, /class="ai-loading-sub">準備完了後に/);
+});
