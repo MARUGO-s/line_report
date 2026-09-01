@@ -162,7 +162,6 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
   // 片付いた行を隠せると残りに集中できる。
   assert.match(html, /id="classifyHideMoved"/);
   assert.match(html, /function classifyItemIsMoved\(el\)/);
-  assert.match(html, /const matchMoved=!hideMoved\|\|!classifyItemIsMoved\(el\);/);
   // data-moved だけ見ると、ドラッグで印が付かなかった行が残る。
   // 未反映キューと pending-move も「移動済み」とみなす。
   assert.match(html, /el\.classList\.contains\('pending-move'\)/);
@@ -172,7 +171,15 @@ test('moved rows are unmistakable and can be hidden once handled', async () => {
   assert.match(html, /classifyDraggingItem=item;/);
 
   // クリックとドラッグで表示が食い違わないよう、描画は1箇所に集約する。
-  assert.equal((html.match(/markMoved\(el,category\)/g) || []).length, 2);
+  assert.equal((html.match(/applyCategoryToItem\(el,category\)/g) || []).length, 2);
+  assert.match(html, /markMoved\(el,category\)/);
+
+  // 間違えた移動は1件ずつ戻せる。隠したあともトレイから再配置できる。
+  assert.match(html, /class="ci-undo"/);
+  assert.match(html, /id="classifyMovedWrap"/);
+  assert.match(html, /function unqueuePendingCategoryMove/);
+  assert.match(html, /const undo=event\.target\.closest\('\.ci-undo'\)/);
+  assert.match(html, /origin===category\) unqueuePendingCategoryMove/);
 
   // 再描画をまたいでも移動状態が残ること。classificationRows は未反映の移動を
   // row.category へ反映するため、元の分類を別に持たないと描画時に
