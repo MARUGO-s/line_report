@@ -446,7 +446,16 @@
   .classification-item:hover{background:color-mix(in srgb, var(--rv-text,#000) 6%, transparent)}
   .classification-item.selected{background:color-mix(in srgb, var(--rv-accent,#b68235) 16%, transparent);
     border-color:var(--rv-accent,#b68235)}
-  .classification-item.pending-move{outline:1px dashed var(--rv-accent,#b68235);outline-offset:1px}
+  /* 破線の枠は行の区切り線に見えてしまい、移動済みだと分からなかった。
+     左の色帯と淡い背景にして、行そのものが変化したと読めるようにする。 */
+  .classification-item.pending-move{border-left:3px solid var(--rv-accent,#b68235);
+    background:color-mix(in srgb, var(--rv-accent,#b68235) 9%, transparent);padding-left:6px}
+  .classification-item.pending-move .ci-name{font-weight:600}
+  /* 旧分類は取り消し線で残す。どこから動かしたかが分かると戻す判断ができる。 */
+  .classification-from{font-size:10px;opacity:.45;text-decoration:line-through;white-space:nowrap}
+  .classification-arrow{font-size:10px;opacity:.5}
+  .classification-tag.is-moved{border-color:var(--rv-accent,#b68235);opacity:1;
+    background:color-mix(in srgb, var(--rv-accent,#b68235) 18%, transparent);border-style:solid}
   .classification-item .ci-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .classification-item .ci-amount{opacity:.6;white-space:nowrap;font-family:var(--rv-font-sans,inherit)}
   .classification-tag{font-size:10px;padding:1px 6px;border-radius:99px;border:1px solid var(--rv-neutral-700,#dfe3ea);
@@ -6990,8 +6999,9 @@ function classificationEditorHtml(sales){
     const refined=isRefinedCategory(row.category);
     return `<div class="classification-item${pendingCategoryMoves[row.key]?' pending-move':''}" draggable="true"`
       +` data-product-key="${esc(row.key)}" data-name="${esc(String(row.name||'').toLowerCase())}"`
-      +` data-refined="${refined?'1':'0'}">`
+      +` data-refined="${refined?'1':'0'}" data-origin="${esc(row.category||'')}" data-moved="0">`
       +`<span class="ci-name">${esc(row.name)}</span>`
+      +`<span class="classification-from" hidden></span><span class="classification-arrow" hidden>→</span>`
       +`<span class="classification-tag${refined?'':' is-unset'}">${esc(row.category||'未分類')}</span>`
       +`<span class="ci-amount">${yen(row.amount)}</span></div>`;
   }).join('');
@@ -7014,6 +7024,7 @@ function classificationEditorHtml(sales){
         <div class="classification-filter">
           <input type="search" id="classifySearch" placeholder="商品名で絞り込み（例: 赤、カレー）" autocomplete="off">
           <label><input type="checkbox" id="classifyUnsetOnly"> 細分類が未設定のみ</label>
+          <label><input type="checkbox" id="classifyHideMoved"> 移動済みを隠す</label>
         </div>
         <h5 id="classifyListCount">商品 ${rows.length}件</h5>
         <div class="classification-list" id="classifyList">${itemsHtml||'<p class="classification-empty">商品がありません。</p>'}</div>
@@ -7196,8 +7207,28 @@ function bindClassificationEditor(){
   const selInfo=view.querySelector('#classifySelInfo');
   const search=view.querySelector('#classifySearch');
   const unsetOnly=view.querySelector('#classifyUnsetOnly');
+  const hideMovedBox=view.querySelector('#classifyHideMoved');
   const countLabel=view.querySelector('#classifyListCount');
   const items=()=>[...view.querySelectorAll('.classification-item')];
+
+  /** 移動済みの行を「旧分類 → 新分類」で見せる。元に戻したかも判別できる。 */
+  const markMoved=(el,category)=>{
+    const origin=String(el.dataset.origin||'');
+    const back=origin===category;
+    el.dataset.moved=back?'0':'1';
+    el.classList.toggle('pending-move',!back);
+    el.dataset.refined=SUB_SALES_CATEGORY_PARENTS[category]?'1':'0';
+    const from=el.querySelector('.classification-from');
+    const arrow=el.querySelector('.classification-arrow');
+    const tag=el.querySelector('.classification-tag');
+    if(from){ from.textContent=origin||'未分類'; from.hidden=back||!origin; }
+    if(arrow) arrow.hidden=back||!origin;
+    if(tag){
+      tag.textContent=category;
+      tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]);
+      tag.classList.toggle('is-moved',!back);
+    }
+  };
 
   const refreshSelection=()=>{
     const picked=items().filter(el=>el.classList.contains('selected'));
@@ -7219,11 +7250,14 @@ function bindClassificationEditor(){
   const applyFilter=()=>{
     const q=String(search?.value||'').trim().toLowerCase();
     const onlyUnset=!!unsetOnly?.checked;
+    const hideMoved=!!hideMovedBox?.checked;
     let shown=0;
     items().forEach(el=>{
       const matchText=!q||String(el.dataset.name||'').includes(q);
       const matchUnset=!onlyUnset||el.dataset.refined!=='1';
-      const visible=matchText&&matchUnset;
+      // 片付いた行を隠せると、残りに集中できる。
+      const matchMoved=!hideMoved||el.dataset.moved!=='1';
+      const visible=matchText&&matchUnset&&matchMoved;
       el.hidden=!visible;
       // 隠れた行を選択したままにすると、見えないものが移動して事故になる。
       if(!visible) el.classList.remove('selected');
@@ -7242,6 +7276,7 @@ function bindClassificationEditor(){
   });
   if(search) search.addEventListener('input',applyFilter);
   if(unsetOnly) unsetOnly.addEventListener('change',applyFilter);
+  if(hideMovedBox) hideMovedBox.addEventListener('change',applyFilter);
 
   view.querySelectorAll('.classification-target').forEach(target=>{
     target.addEventListener('click',()=>{
@@ -7251,10 +7286,7 @@ function bindClassificationEditor(){
       picked.forEach(el=>{
         queuePendingCategoryMove(el.dataset.productKey,category);
         el.classList.remove('selected');
-        el.classList.add('pending-move');
-        el.dataset.refined=SUB_SALES_CATEGORY_PARENTS[category]?'1':'0';
-        const tag=el.querySelector('.classification-tag');
-        if(tag){ tag.textContent=category; tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]); }
+        markMoved(el,category);
       });
       const count=target.querySelector('.ct-count');
       if(count) count.textContent=String((Number(count.textContent)||0)+picked.length);
@@ -7268,12 +7300,7 @@ function bindClassificationEditor(){
       const key=event.dataTransfer.getData('text/plain'), category=target.dataset.category;
       if(!key||!category) return;
       const el=items().find(node=>node.dataset.productKey===key);
-      if(el){
-        el.classList.add('pending-move');
-        el.dataset.refined=SUB_SALES_CATEGORY_PARENTS[category]?'1':'0';
-        const tag=el.querySelector('.classification-tag');
-        if(tag){ tag.textContent=category; tag.classList.toggle('is-unset',!SUB_SALES_CATEGORY_PARENTS[category]); }
-      }
+      if(el) markMoved(el,category);
       queuePendingCategoryMove(key,category);
       applyFilter();
     });

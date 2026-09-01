@@ -139,3 +139,30 @@ test('classification workspace uses select-and-assign, not 21 parallel lanes', a
   assert.match(html, /target\.addEventListener\('drop'/);
   assert.match(html, /addEventListener\('dragstart'/);
 });
+
+test('moved rows are unmistakable and can be hidden once handled', async () => {
+  const html = await read('public/jnm/jnl2txt.html');
+
+  // 破線の枠は行の区切り線に見え、移動済みだと分からなかった。
+  // 左の色帯と淡い背景にして、行そのものが変化したと読めるようにする。
+  const moved = html.match(/\.classification-item\.pending-move\{[^}]*\}/);
+  assert.ok(moved, '.pending-move style must exist');
+  assert.match(moved[0], /border-left:3px solid/);
+  assert.doesNotMatch(moved[0], /dashed/);
+
+  // 「旧分類 → 新分類」を出す。どこから動かしたかが分かると戻す判断ができる。
+  assert.match(html, /\.classification-from\{[^}]*text-decoration:line-through/);
+  assert.match(html, /class="classification-from"/);
+  assert.match(html, /data-origin=/);
+
+  // 元の分類へ戻したら移動扱いを解除すること。戻したのに印が残ると混乱する。
+  assert.match(html, /const back=origin===category;/);
+  assert.match(html, /el\.classList\.toggle\('pending-move',!back\);/);
+
+  // 片付いた行を隠せると残りに集中できる。
+  assert.match(html, /id="classifyHideMoved"/);
+  assert.match(html, /const matchMoved=!hideMoved\|\|el\.dataset\.moved!=='1';/);
+
+  // クリックとドラッグで表示が食い違わないよう、描画は1箇所に集約する。
+  assert.equal((html.match(/markMoved\(el,category\)/g) || []).length, 2);
+});
