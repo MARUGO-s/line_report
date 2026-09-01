@@ -3611,7 +3611,6 @@ function applyCategoryOverrideToSales(sales,key,category){
         return {
           ...it,
           category:auto.category,
-          isCharge:auto.isCharge===true,
           needsReview:!!auto.needsReview,
           known:true,
           byOverride:false
@@ -3647,7 +3646,7 @@ function applyAllCategoryOverridesToSales(sales, {removedKeys}={}){
         const auto=classifyProductAuto(it.code,it.name);
         if(it.category!==auto.category||it.byOverride){
           changed=true;
-          return { ...it, category:auto.category, isCharge:auto.isCharge===true, needsReview:!!auto.needsReview, known:true, byOverride:false };
+          return { ...it, category:auto.category, needsReview:!!auto.needsReview, known:true, byOverride:false };
         }
         return it;
       }
