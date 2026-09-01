@@ -10,7 +10,7 @@ Generated from `knowledge/system-architecture.json` and the current Graphify gra
 - Supabase: hocbnifuactbvmyjraxy
 - Graphify: 6106 nodes / 12525 relationships / 673 communities
 - SQL coverage: 299 files / 772 nodes
-- Generated: 2026-09-01T06:33:38.710Z
+- Generated: 2026-09-01T06:50:55.540Z
 
 ## Required workflow
 1. Read `AGENTS.md`, `PROJECT_PROGRESS.md`, `AI_HANDOFF.md`, `docs/AI_KNOWLEDGE_SYSTEM.md`, and Obsidian `70_AI作業環境/00_AI_START_HERE.md`.
