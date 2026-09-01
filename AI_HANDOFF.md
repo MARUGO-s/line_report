@@ -1,5 +1,14 @@
 # LINE Report AI Handoff
 
+## 2026-09-01 マルゴエスAIチャットの任意フードコート深掘り
+
+- 通常のマルゴエスAI分析／チャットは、既存 `GET /foodcourt/journal-brief` の軽量な東京ドーム・コート内順位背景を維持する。
+- Web版AIチャットで会場・競合要因が有効な質問だけ、「現在のAI分析でもかなり踏まえている」と説明してから、さらにブーストするかを1回確認する。追加時間・API料金増加・失敗／再試行分の課金可能性を同意前に表示する。他店・M-talk・単純照会は対象外。
+- 同意時はJournal分析と専用 `POST /foodcourt/journal-deep-analysis` を並列開始し、両方成功時だけ `ai-analyze action=integrate_foodcourt` を別呼出しする。Journal確定集計が数値の正本。
+- dedicated routeは `marugos` とJournal店舗スコープに限定し、通常 `/foodcourt/ask` を開放しない。会話履歴を使わず `foodcourt_qa_history` に保存しない。
+- 部分失敗は成功結果を捨てない。専門側失敗はJournal、統合失敗は未統合2本＋警告、Journal側失敗は専門結果だけを完成分析にせずローカル確定集計へフォールバックする。
+- 詳細は [docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md](./docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md) の3.5。
+
 ## 2026-09-01 Journal分類拡張とマルゴエスAIのフードコート要約
 
 - 正本の続き: [docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md](./docs/HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md)

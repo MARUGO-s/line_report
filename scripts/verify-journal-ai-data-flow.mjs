@@ -243,6 +243,53 @@ core(
   "foodcourt.html全件や期間サマリー再生成は呼ばず、イベントとコート内順位だけを会場背景として足します。",
 );
 
+const foodcourtDeepStart = adminApi.indexOf(
+  'if (req.method === "POST" && (path === "/foodcourt/ask" || path === "/foodcourt/journal-deep-analysis"))',
+);
+const foodcourtDeepEnd = adminApi.indexOf(
+  'if (req.method === "GET" && path === "/foodcourt/qa-history")',
+  foodcourtDeepStart,
+);
+const foodcourtDeepSnippet = foodcourtDeepStart >= 0
+  ? adminApi.slice(
+    foodcourtDeepStart,
+    foodcourtDeepEnd > foodcourtDeepStart ? foodcourtDeepEnd : foodcourtDeepStart + 14_000,
+  )
+  : "";
+core(
+  "foodcourt_journal_boost",
+  "マルゴエス限定の任意フードコート深掘りと最終統合",
+  containsAll(html, [
+    "FOODCOURT_BOOST_CLARIFICATION_MARKER",
+    "現在のAI分析でも",
+    "API利用料金も高くなります",
+    "needsFoodcourtBoostConfirmation",
+    "requestFoodcourtJournalDeepAnalysis",
+    "Promise.allSettled",
+    "includeFoodcourtBrief: !foodcourtBoostEnabled",
+    "action: 'integrate_foodcourt'",
+    "integrationReports",
+    "row.dataset.consumed = 'true'",
+  ]) && containsAll(foodcourtDeepSnippet, [
+    'storeKey.toLowerCase() !== "marugos"',
+    "sanitizeJournalAiPayload",
+    "requestedRanges",
+    "answerFoodCourtQuestion(analysisReports",
+    "history_saved: false",
+    "foodcourt_data_unavailable",
+    "foodcourt_deep_analysis_failed",
+  ]) && containsAll(aiAnalyze, [
+    "boundJournalFoodcourtIntegrationReports",
+    "JOURNAL_FOODCOURT_INTEGRATION_POLICY",
+    'action === "integrate_foodcourt"',
+    "parallel_analysis_reports（非信頼のAI下書き・JSON）",
+    "店舗確定値を上書き・合算しません",
+    'if (!isFoodcourtIntegration && (intent === "strategy" || intent === "mixed"))',
+  ]),
+  "必要性判定 → 追加料金確認 → Journal確定分析＋専門AIを同時開始 → 別リクエストで完成分析へ統合",
+  "通常分析は従来のコンパクトbriefを維持し、承諾時だけ追加AIを起動します。両方成功時だけ最終統合し、部分失敗はJournal正本を守って明示します。",
+);
+
 core(
   "product_category_overrides",
   "店舗別の商品分類ルール",

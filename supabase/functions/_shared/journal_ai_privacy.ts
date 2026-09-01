@@ -11,6 +11,7 @@ export type JournalAiPrivacyInput = {
   systemInstruction?: unknown;
   salesData?: unknown;
   clarificationContext?: unknown;
+  integrationReports?: unknown;
 };
 
 export type JournalAiPrivacyResult = {
@@ -19,6 +20,7 @@ export type JournalAiPrivacyResult = {
   systemInstruction: string;
   salesData: unknown;
   clarificationContext: unknown;
+  integrationReports: unknown;
   aliasCount: number;
 };
 
@@ -211,6 +213,7 @@ export function sanitizeJournalAiPayload(
   collectNames(input.message, names);
   collectNames(input.chatHistory, names);
   collectNames(input.clarificationContext, names);
+  collectNames(input.integrationReports, names);
   const aliases = new Map(
     names.map((name, index) => [name, journalReservationAlias(index)]),
   );
@@ -221,6 +224,7 @@ export function sanitizeJournalAiPayload(
     systemInstruction: sanitizeText(input.systemInstruction, aliases),
     salesData: sanitizeValue(input.salesData, aliases),
     clarificationContext: sanitizeValue(input.clarificationContext, aliases),
+    integrationReports: sanitizeValue(input.integrationReports, aliases),
     aliasCount: aliases.size,
   };
 }

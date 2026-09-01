@@ -2055,8 +2055,10 @@
         <tr><td>期間</td><td>対象の年月が分からない、または広すぎるとき</td></tr>
         <tr><td>意図</td><td>何を知りたいか曖昧なとき</td></tr>
         <tr><td>ワインの単位</td><td>「どれくらい出た？」→ <strong>点数／総ml／両方</strong> を確認します</td></tr>
+        <tr><td>フードコート深掘り</td><td>マルゴエスで会場・競合・集客要因をさらに深掘りできる質問では、専門AIも追加するかを一度確認します</td></tr>
       </tbody></table>
       <p>選択肢のボタンで答えられます。答えると、その条件で確定集計を取り直してから回答します。</p>
+      <div class="jr-note">マルゴエスの通常分析でも東京ドームイベントやコート内順位の要約を参照します。「さらに深掘りしてブーストする」を選ぶと、Journal分析とフードコート専門AIを同時実行し、最後に1つの分析へ統合します。通常より時間がかかり、API利用料金も高くなります。</div>
       <h4>期間の読み方</h4>
       <p>「2026年1月から7月まで」は<strong>1月〜7月の全月</strong>として扱います。両端の2か月だけを見ることはありません。データが無い月だけ「今回の確定集計には表示されていません」と答えます。</p>
       <h4>回答を残す</h4>
@@ -9953,6 +9955,43 @@ async function loadFoodcourtJournalBrief({ storeKey, periodRange = null, verifie
   }
 }
 
+function foodcourtBoostRangesFromVerifiedData(verifiedData) {
+  const resolved = resolveKnowledgePeriodRange(verifiedData);
+  const ranges = Array.isArray(resolved?.segments) ? resolved.segments : (resolved ? [resolved] : []);
+  return ranges
+    .filter(range => /^\d{4}-\d{2}-\d{2}$/.test(String(range?.from || '')) && /^\d{4}-\d{2}-\d{2}$/.test(String(range?.to || '')))
+    .map(range => ({ from: String(range.from), to: String(range.to) }))
+    .slice(0, 6);
+}
+
+async function requestFoodcourtJournalDeepAnalysis(question, verifiedData, options = {}) {
+  const storeKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
+  if (!isMarugoSStoreKey(storeKey)) throw new Error('フードコート深掘りはマルゴエス専用です。');
+  const body = await adminApiFetch('/foodcourt/journal-deep-analysis', {
+    method: 'POST',
+    timeoutMs: 138000,
+    maxAttempts: 1,
+    signal: options.signal || null,
+    body: JSON.stringify({
+      store_key: storeKey,
+      question: String(question || '').slice(0, 500),
+      requested_ranges: foodcourtBoostRangesFromVerifiedData(verifiedData),
+      source_surface: 'journal_foodcourt_boost'
+    })
+  });
+  const text = String(body?.analysis?.text || '').trim();
+  if (!body?.ok || !text) {
+    throw new Error(String(body?.error || 'フードコート専門AIの回答を取得できませんでした。'));
+  }
+  return {
+    text,
+    requestId: String(body?.request_id || ''),
+    coverage: body?.coverage || null,
+    diagnostics: body?.diagnostics || null,
+    note: `フードコート専門AI（対象レポート${Number(body?.analysis?.report_count || 0)}件）`
+  };
+}
+
 /**
  * AI分析の直前に店舗営業情報を必ずクラウド→ローカル→初期値の順で確定する。
  * タブを開いていなくても、分析時に最新の店舗情報を読む。
@@ -9984,7 +10023,8 @@ async function buildIntegratedAnalysisContext({
   forReport = false,
   reportData = currentReport,
   storeKey = STORE_KEY,
-  signal = null
+  signal = null,
+  includeFoodcourtBrief = true
 } = {}) {
   const requestedStoreKey = String(storeKey || STORE_KEY || '').trim().toLowerCase();
   const profile = await ensureStoreOpsProfileForAi(requestedStoreKey, {
@@ -10004,14 +10044,14 @@ async function buildIntegratedAnalysisContext({
     query = `${reportData?.title || ''} ${period} 売上分析 施策 メニュー`;
   }
 
-  const foodcourtTask = (!MTALK_EMBED)
+  const foodcourtTask = (!MTALK_EMBED && includeFoodcourtBrief)
     ? loadFoodcourtJournalBrief({
         storeKey: requestedStoreKey,
         periodRange: range,
         verifiedData,
         signal
       })
-    : Promise.resolve({ status: 'skipped' });
+    : Promise.resolve({ status: includeFoodcourtBrief ? 'skipped' : 'deep_pending' });
 
   let knowledgeBlock = '';
   let knowledgeCount = 0;
@@ -10078,6 +10118,8 @@ async function buildIntegratedAnalysisContext({
     ? ''
     : foodcourtBrief.status === 'ok'
       ? '添付あり → ドームイベント・コート内順位は会場背景。売上金額の正本は①'
+      : foodcourtBrief.status === 'deep_pending'
+        ? '専門AIの深掘り結果は別経路で付与 → Journal単独ブロックには重複添付せず、最終統合で使用'
       : foodcourtBrief.status === 'error'
         ? '取得失敗 → ドーム連動は未確認。推測で埋めない'
         : '今回は未添付（埋め込み画面等）。ドーム要因を断定しない';
@@ -16554,6 +16596,9 @@ knowledgeEl('knFile')?.addEventListener('change', (e) => handleKnowledgeFileChan
 
 const SAVED_DATA_CLARIFICATION_MARKER = '保存データの分析対象を選んでください';
 const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してください';
+const FOODCOURT_BOOST_CLARIFICATION_MARKER = 'さらに分析をブーストしますか';
+const FOODCOURT_BOOST_ON_DIRECTIVE = '【FOODCOURT_BOOST:ON】';
+const FOODCOURT_BOOST_OFF_DIRECTIVE = '【FOODCOURT_BOOST:OFF】';
 
 /**
  * 保存済みの全期間を求める表現を共通判定する。
@@ -16839,6 +16884,82 @@ function resolveWineMetricClarificationReply(query, chatHistory) {
   return `${original} 表示単位:${selected}`.trim();
 }
 
+function hasFoodcourtBoostDirective(query) {
+  return String(query || '').includes(FOODCOURT_BOOST_ON_DIRECTIVE)
+    || String(query || '').includes(FOODCOURT_BOOST_OFF_DIRECTIVE);
+}
+
+function isFoodcourtBoostEnabled(query) {
+  return String(query || '').includes(FOODCOURT_BOOST_ON_DIRECTIVE);
+}
+
+function stripFoodcourtBoostDirective(query) {
+  return String(query || '')
+    .replaceAll(FOODCOURT_BOOST_ON_DIRECTIVE, ' ')
+    .replaceAll(FOODCOURT_BOOST_OFF_DIRECTIVE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveFoodcourtBoostClarificationReply(query, chatHistory) {
+  const raw = String(query || '').normalize('NFKC').trim();
+  if (!raw || hasFoodcourtBoostDirective(raw) || !Array.isArray(chatHistory)) return raw;
+  let askedIndex = -1;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    const asked = item.clarification === 'foodcourtBoost'
+      || String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER);
+    if (asked) askedIndex = i;
+    break;
+  }
+  if (askedIndex < 0) return raw;
+  const assistantItem = chatHistory[askedIndex];
+  const original = String(assistantItem?.originalQuery || '').trim();
+  if (!original) return raw;
+
+  // 新しい完全な質問が来た場合は、以前の確認を破棄して新規質問として扱う。
+  if (isSelfContainedAiQuestion(raw)) return raw;
+  const selected = resolveNaturalClarificationChoice(raw, assistantItem);
+  const normalized = `${selected} ${raw}`.normalize('NFKC');
+  // 「含めない」は「含める」を含むため、否定を必ず先に判定する。
+  const declines = /現在の分析|今のまま|含めない|利用しない|使用しない|不要|いらない|ジャーナルだけ|journalだけ|通常(?:の)?分析|いいえ|やめる|今回は(?:いい|結構)|(?:^|\s)2(?:$|[.、)\s])|後者/i;
+  const accepts = /さらに|深掘り|ブースト|含める|利用する|使用する|統合する|お願いします|お願い|はい|実行する|(?:^|\s)1(?:$|[.、)\s])|前者/i;
+  if (declines.test(normalized)) return `${original} ${FOODCOURT_BOOST_OFF_DIRECTIVE}`.trim();
+  if (accepts.test(normalized)) return `${original} ${FOODCOURT_BOOST_ON_DIRECTIVE}`.trim();
+  // 「大丈夫」「結構です」など曖昧な返答では追加課金を開始しない。
+  return `${original} ${FOODCOURT_BOOST_OFF_DIRECTIVE}`.trim();
+}
+
+function needsFoodcourtBoostConfirmation(query, chatHistory, storeKey = STORE_KEY) {
+  if (typeof MTALK_EMBED !== 'undefined' && MTALK_EMBED) return false;
+  if (!isMarugoSStoreKey(storeKey) || hasFoodcourtBoostDirective(query)) return false;
+  const q = String(query || '').normalize('NFKC').toLowerCase();
+  if (!q) return false;
+  // 同じ質問で確認済みなら、回答が解決されるまでは重ねて質問しない。
+  const latestAssistant = Array.isArray(chatHistory)
+    ? [...chatHistory].reverse().find(item => item?.role === 'assistant')
+    : null;
+  if (latestAssistant && (
+    latestAssistant.clarification === 'foodcourtBoost'
+    || String(latestAssistant.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER)
+  )) return false;
+  const explicitVenue = /フードコート|東京ドーム|イベント|試合|ライブ|コンサート|動員|来場|テナント|コート内|順位|シェア|競合|他店|パブリックビューイング|\bpv\b|天気|天候/i.test(q);
+  const strategic = /原因|理由|戦略|改善|施策|提案|経営|詳細分析|総合分析|深掘り|課題|集客|予測|見通し|ボトルネック|伸ばす|強化/.test(q);
+  const business = /売上|売り上げ|客数|客単価|商品|メニュー|フード|ドリンク|ワイン|店舗|実績|全体|構成|比率/.test(q);
+  return explicitVenue || (strategic && business);
+}
+
+function buildFoodcourtBoostClarificationReply() {
+  return `### 🚀 ${FOODCOURT_BOOST_CLARIFICATION_MARKER}
+
+現在のAI分析でも、**東京ドームのイベントやフードコート内順位などの要約をかなり踏まえています**。
+
+さらに分析をブーストするため、フードコート専門AIも同時に動かし、Journal分析と1つの完成分析に統合しますか？
+
+※「さらに深掘りしてブーストする」を選ぶと、通常より数分かかる場合があり、複数AIを追加で呼ぶためAPI利用料金も高くなります。失敗・再試行した処理にも料金が発生する場合があります。`;
+}
+
 function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
   const mode = resolveWineMetricMode(query);
   if (!mode || mode === 'qty') return '';
@@ -16877,9 +16998,12 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
 }
 
 function resolveAiChatQuery(query, chatHistory) {
-  return resolveWineMetricClarificationReply(
-    resolveAiIntentClarificationReply(
-      resolveSavedDataClarificationReply(query, chatHistory),
+  return resolveFoodcourtBoostClarificationReply(
+    resolveWineMetricClarificationReply(
+      resolveAiIntentClarificationReply(
+        resolveSavedDataClarificationReply(query, chatHistory),
+        chatHistory
+      ),
       chatHistory
     ),
     chatHistory
@@ -16923,11 +17047,17 @@ function countRecentClarificationsByKind(chatHistory, kind = '') {
     const isClarification = item.clarification === 'intent'
       || item.clarification === 'period'
       || item.clarification === 'wineMetric'
+      || item.clarification === 'foodcourtBoost'
       || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
-      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER)
+      || String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER);
     if (!isClarification) break;
     const itemKind = item.clarification
-      || (String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER) ? 'period' : 'intent');
+      || (String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER)
+        ? 'period'
+        : String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER)
+          ? 'foodcourtBoost'
+          : 'intent');
     if (!kind || itemKind === kind) count += 1;
   }
   return count;
@@ -16946,8 +17076,10 @@ function hasAnsweredDataContext(chatHistory) {
     const isClarification = item.clarification === 'intent'
       || item.clarification === 'period'
       || item.clarification === 'wineMetric'
+      || item.clarification === 'foodcourtBoost'
       || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
-      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER);
+      || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER)
+      || String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER);
     return !isClarification;
   }
   return false;
@@ -18423,6 +18555,15 @@ async function sendAiChat() {
   const msg = input.value.trim();
   if(!msg) return;
 
+  // ボタンを押さず自由入力で確認へ回答した場合も、過去の選択肢を消費済みにする。
+  // 後から古い「深掘り」ボタンを押して追加料金処理を重複起動する事故を防ぐ。
+  document.querySelectorAll('#aiChatMessages .ai-clarify-choices:not([data-consumed="true"])').forEach((row) => {
+    row.dataset.consumed = 'true';
+    row.querySelectorAll('button').forEach((choiceButton) => {
+      choiceButton.disabled = true;
+    });
+  });
+
   input.value = '';
   input.disabled = true;
   const sendBtn = document.getElementById('aiChatSend');
@@ -18641,6 +18782,35 @@ async function sendAiChat() {
     return;
   }
 
+  // 現在の軽量な東京ドーム／コート内要約で十分な通常分析と、追加料金を伴う
+  // フードコート専門AIの深掘りを分ける。確認前には追加の深掘りAPIを呼ばない。
+  if (needsFoodcourtBoostConfirmation(resolvedChatQuery, aiChatHistory, chatRun.storeKey)) {
+    const reply = buildFoodcourtBoostClarificationReply();
+    const clarificationChoices = ['さらに深掘りしてブーストする', '現在の分析で進める'];
+    removeAiChatLoading(loadingId);
+    appendAiChatMessage('ai', reply, {
+      question: msg,
+      provider: 'local-foodcourt-boost-clarifier',
+      clarificationChoices
+    });
+    aiChatHistory.push({
+      role: 'assistant',
+      content: reply,
+      clarification: 'foodcourtBoost',
+      originalQuery: resolvedChatQuery,
+      clarificationChoices
+    });
+    finishChatUi();
+    return;
+  }
+
+  const latestAssistantForBoost = [...aiChatHistory].reverse().find(item => item?.role === 'assistant');
+  const foodcourtBoostEnabled = !MTALK_EMBED
+    && isMarugoSStoreKey(chatRun.storeKey)
+    && isFoodcourtBoostEnabled(resolvedChatQuery)
+    && latestAssistantForBoost?.clarification === 'foodcourtBoost';
+  resolvedChatQuery = stripFoodcourtBoostDirective(resolvedChatQuery);
+
   const verifiedData = (queryResult && !queryResult.notMatchedLabel) ? queryResult : null;
   const salesDataForAi = verifiedData
     ? {
@@ -18733,7 +18903,9 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
         queryText: resolvedChatQuery,
         periodRange: resolveKnowledgePeriodRange(verifiedData),
         storeKey: chatRun.storeKey,
-        signal: runOptions.signal
+        signal: runOptions.signal,
+        // boost時は同じ軽量briefを重ねず、並列の専門AI結果だけを最終統合へ使う。
+        includeFoodcourtBrief: !foodcourtBoostEnabled
       }),
       '店舗情報と登録資料の準備'
     );
@@ -18798,53 +18970,172 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
   try {
     assertCurrentAiChatRun(chatRun);
     if (!AI_CLIENT) throw new Error('AI通信モジュールを読み込めません。');
-    // 戦略・混合は Perplexity / Grok が並列で走るので、待ち表示も複数AI向けに切り替える。
-    const chatIntent = classifyJournalChatIntentClient(resolvedChatQuery);
-    setAiChatLoadingMode(loadingId, chatIntent === 'strategy' || chatIntent === 'mixed');
-    const aiResponse = await AI_CLIENT.request(AI_ENDPOINT, {
-        action: 'chat',
-        message: resolvedChatQuery,
-        systemInstruction: strictSystemInstructionClamped,
-        salesData: salesDataForAi,
-        // 現在の発言は message で別送するため重複させず、直近12発話だけに制限する。
-        chatHistory: aiChatHistory.slice(0, -1).slice(-12).map(item => ({
-          role: item.role === 'user' ? 'user' : 'assistant',
-          content: String(item.content || '').slice(0, 1600)
-        })),
-        orchestrationMode: 'auto',
-        storeKey: chatRun.storeKey,
-        storeName: resolveStoreDisplayName(chatRun.storeKey),
-        storeLocationBlock: buildStoreLocationBlockForAi(chatRun.storeKey)
-      }, {
-        anonKey: SUPABASE_ANON_KEY,
-        signal: runOptions.signal
+    const chatHistoryForAi = aiChatHistory.slice(0, -1).slice(-12).map(item => ({
+      role: item.role === 'user' ? 'user' : 'assistant',
+      content: String(item.content || '').slice(0, 1600)
+    }));
+    const requestJournalAnalysis = () => AI_CLIENT.request(AI_ENDPOINT, {
+      action: 'chat',
+      message: resolvedChatQuery,
+      systemInstruction: strictSystemInstructionClamped,
+      salesData: salesDataForAi,
+      chatHistory: chatHistoryForAi,
+      // 深掘り時は専門AI側がWeb/X/反証まで担当するため、Journal側は確定データ分析に集中する。
+      orchestrationMode: foodcourtBoostEnabled ? 'data' : 'auto',
+      storeKey: chatRun.storeKey,
+      storeName: resolveStoreDisplayName(chatRun.storeKey),
+      storeLocationBlock: buildStoreLocationBlockForAi(chatRun.storeKey)
+    }, {
+      anonKey: SUPABASE_ANON_KEY,
+      signal: runOptions.signal
     });
 
-    assertCurrentAiChatRun(chatRun);
-    removeAiChatLoading(loadingId);
-
-    const res = aiResponse.response;
-    const result = aiResponse.body;
-    const reply = (res.ok && result.text) ? result.text : null;
-
-    if (reply) {
-      // OpenAI Luna 応答成功（戦略系は Perplexity/Grok をオーケストレーション済み）
-      const modeNote = result.note || (result.mode ? `モード: ${result.mode}` : '');
-      const displayReply = modeNote ? `${reply}\n\n---\n_${modeNote}_` : reply;
-      appendAiChatMessage('ai', displayReply, {
-        question: msg,
-        mode: result.mode || '',
-        provider: result.provider || result.orchestration?.synthesizer || result.model || 'openai'
-      });
-      aiChatHistory.push({ role: 'assistant', content: reply });
-    } else {
-      // OpenAI呼び出し失敗。エラー内容を明記した上で、ローカル集計ロジックの回答にフォールバックする。
-      const errDetail = result.error || `HTTP ${res.status}`;
-      const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory, runOptions);
+    if (foodcourtBoostEnabled) {
+      setAiChatFoodcourtBoostLoadingMode(loadingId, 'parallel');
+      // 同じAbortSignalで2系統を本当に同時開始し、片方の失敗で他方を途中破棄しない。
+      const [journalSettled, foodcourtSettled] = await Promise.allSettled([
+        requestJournalAnalysis(),
+        requestFoodcourtJournalDeepAnalysis(resolvedChatQuery, verifiedData, runOptions)
+      ]);
       assertCurrentAiChatRun(chatRun);
-      const displayReply = `⚠️ **AI接続エラー**: ${errDetail}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
-      appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
-      aiChatHistory.push({ role: 'assistant', content: localReply });
+
+      const journalResponse = journalSettled.status === 'fulfilled' ? journalSettled.value : null;
+      const journalResult = journalResponse?.body || {};
+      const journalReply = journalResponse?.response?.ok && journalResult?.text
+        ? String(journalResult.text).trim()
+        : '';
+      const foodcourtResult = foodcourtSettled.status === 'fulfilled' ? foodcourtSettled.value : null;
+      const foodcourtReply = String(foodcourtResult?.text || '').trim();
+
+      if (journalReply && foodcourtReply) {
+        setAiChatFoodcourtBoostLoadingMode(loadingId, 'integrating');
+        let integrationResponse = null;
+        try {
+          integrationResponse = await AI_CLIENT.request(AI_ENDPOINT, {
+            action: 'integrate_foodcourt',
+            message: resolvedChatQuery,
+            systemInstruction: strictSystemInstructionClamped,
+            salesData: salesDataForAi,
+            chatHistory: chatHistoryForAi,
+            integrationReports: {
+              journal: {
+                text: journalReply,
+                provider: journalResult.provider || journalResult.model || ''
+              },
+              foodcourt: {
+                text: foodcourtReply,
+                coverage: foodcourtResult.coverage || null
+              }
+            },
+            orchestrationMode: 'data',
+            storeKey: chatRun.storeKey,
+            storeName: resolveStoreDisplayName(chatRun.storeKey),
+            storeLocationBlock: buildStoreLocationBlockForAi(chatRun.storeKey)
+          }, {
+            anonKey: SUPABASE_ANON_KEY,
+            signal: runOptions.signal
+          });
+          assertCurrentAiChatRun(chatRun);
+        } catch (integrationError) {
+          if (integrationError?.name === 'AbortError' || integrationError?.code === 'AI_CHAT_CANCELLED') throw integrationError;
+          console.warn('Journal＋フードコート最終統合に失敗:', integrationError);
+        }
+        const integratedResult = integrationResponse?.body || {};
+        const integratedReply = integrationResponse?.response?.ok && integratedResult?.text
+          ? String(integratedResult.text).trim()
+          : '';
+        removeAiChatLoading(loadingId);
+        if (integratedReply) {
+          const modeNote = integratedResult.note || 'モード: Journal＋フードコート深掘り統合';
+          const displayReply = `${integratedReply}\n\n---\n_${modeNote}_`;
+          appendAiChatMessage('ai', displayReply, {
+            question: msg,
+            mode: integratedResult.mode || 'journal_foodcourt',
+            provider: integratedResult.provider || integratedResult.orchestration?.synthesizer || integratedResult.model || 'orchestrated'
+          });
+          aiChatHistory.push({ role: 'assistant', content: integratedReply });
+        } else {
+          const integrationDetail = integrationResponse?.body?.error || (integrationResponse ? `HTTP ${integrationResponse.response?.status || 'error'}` : '統合AIへ接続できませんでした');
+          const displayReply = `### ⚠️ 2つの分析は完了しましたが、最終統合だけ失敗しました
+
+${integrationDetail}
+
+## Journal分析（店舗数値の正本）
+${journalReply}
+
+## フードコート専門AI（会場・競合背景）
+${foodcourtReply}
+
+---
+_上記は未統合の2レポートです。店舗売上・客数・商品数値はJournal分析を正本として扱ってください。_`;
+          appendAiChatMessage('ai', displayReply, { question: msg, mode: 'journal_foodcourt_unmerged', provider: 'parallel-drafts' });
+          aiChatHistory.push({ role: 'assistant', content: displayReply });
+        }
+      } else if (journalReply) {
+        removeAiChatLoading(loadingId);
+        const foodcourtError = foodcourtSettled.status === 'rejected'
+          ? String(foodcourtSettled.reason?.message || foodcourtSettled.reason || '不明なエラー')
+          : 'フードコート専門AIの回答が空でした';
+        const modeNote = journalResult.note || 'モード: Journal確定データ分析';
+        const displayReply = `${journalReply}\n\n---\n⚠️ フードコート専門AIの深掘りは完了できませんでした（${foodcourtError}）。Journal分析だけを最終回答として表示しています。\n\n_${modeNote}_`;
+        appendAiChatMessage('ai', displayReply, {
+          question: msg,
+          mode: 'journal_foodcourt_partial',
+          provider: journalResult.provider || journalResult.model || 'journal'
+        });
+        aiChatHistory.push({ role: 'assistant', content: journalReply });
+      } else {
+        removeAiChatLoading(loadingId);
+        const journalError = journalSettled.status === 'rejected'
+          ? String(journalSettled.reason?.message || journalSettled.reason || '不明なエラー')
+          : String(journalResult?.error || `HTTP ${journalResponse?.response?.status || 'error'}`);
+        const localReply = await generateLocalConsultantReply(resolvedChatQuery, compactData, aiChatHistory, runOptions);
+        assertCurrentAiChatRun(chatRun);
+        const foodcourtStatus = foodcourtReply
+          ? 'フードコート専門AIは完了しましたが、店舗確定分析が失敗したため安全上は統合していません。'
+          : 'フードコート専門AIも完了できませんでした。';
+        const displayReply = `### ⚠️ Journal分析を完了できませんでした
+
+${journalError}
+
+${foodcourtStatus}
+
+確定データのローカル集計回答へ切り替えます。
+
+---
+
+${localReply}`;
+        appendAiChatMessage('ai', displayReply, { question: msg, mode: 'journal_foodcourt_incomplete', provider: 'local' });
+        aiChatHistory.push({ role: 'assistant', content: localReply });
+      }
+    } else {
+      // 通常分析は従来どおり。戦略・混合は Perplexity / Grok を並列実行する。
+      const chatIntent = classifyJournalChatIntentClient(resolvedChatQuery);
+      setAiChatLoadingMode(loadingId, chatIntent === 'strategy' || chatIntent === 'mixed');
+      const aiResponse = await requestJournalAnalysis();
+      assertCurrentAiChatRun(chatRun);
+      removeAiChatLoading(loadingId);
+
+      const res = aiResponse.response;
+      const result = aiResponse.body;
+      const reply = (res.ok && result.text) ? result.text : null;
+      if (reply) {
+        const modeNote = result.note || (result.mode ? `モード: ${result.mode}` : '');
+        const displayReply = modeNote ? `${reply}\n\n---\n_${modeNote}_` : reply;
+        appendAiChatMessage('ai', displayReply, {
+          question: msg,
+          mode: result.mode || '',
+          provider: result.provider || result.orchestration?.synthesizer || result.model || 'openai'
+        });
+        aiChatHistory.push({ role: 'assistant', content: reply });
+      } else {
+        const errDetail = result.error || `HTTP ${res.status}`;
+        const localReply = await generateLocalConsultantReply(resolvedChatQuery, compactData, aiChatHistory, runOptions);
+        assertCurrentAiChatRun(chatRun);
+        const displayReply = `⚠️ **AI接続エラー**: ${errDetail}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
+        appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
+        aiChatHistory.push({ role: 'assistant', content: localReply });
+      }
     }
   } catch(err) {
     if (!isCurrentAiChatRun(chatRun) || err?.name === 'AbortError' || err?.code === 'AI_CHAT_CANCELLED') {
@@ -18852,7 +19143,7 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
     }
     console.warn('AI Chat remote error, fallback to local advisor:', err);
     removeAiChatLoading(loadingId);
-    const localReply = await generateLocalConsultantReply(msg, compactData, aiChatHistory, runOptions);
+    const localReply = await generateLocalConsultantReply(resolvedChatQuery, compactData, aiChatHistory, runOptions);
     if (!isCurrentAiChatRun(chatRun)) return;
     const displayReply = `⚠️ **AI接続エラー**: ${err && err.message ? err.message : String(err)}\nローカル集計による回答に切り替えます。\n\n---\n\n${localReply}`;
     appendAiChatMessage('ai', displayReply, { question: msg, provider: 'local' });
@@ -18887,7 +19178,8 @@ function isAiClarificationHistoryItem(item) {
   if (item.clarification) return true;
   const content = String(item.content || '');
   return content.includes(SAVED_DATA_CLARIFICATION_MARKER)
-    || content.includes(AI_INTENT_CLARIFICATION_MARKER);
+    || content.includes(AI_INTENT_CLARIFICATION_MARKER)
+    || content.includes(FOODCOURT_BOOST_CLARIFICATION_MARKER);
 }
 
 /**
@@ -18958,6 +19250,11 @@ function appendAiChatMessage(role, text, meta) {
         btn.className = 'ai-clarify-choice-btn';
         btn.textContent = choice;
         btn.onclick = () => {
+          if (row.dataset.consumed === 'true') return;
+          row.dataset.consumed = 'true';
+          row.querySelectorAll('button').forEach((choiceButton) => {
+            choiceButton.disabled = true;
+          });
           const chatInput = document.getElementById('aiChatInput');
           if (chatInput) chatInput.value = choice;
           if (typeof sendAiChat === 'function') sendAiChat();
@@ -19579,6 +19876,20 @@ function buildAiChatLoadingHtml(multi) {
   '</div>';
 }
 
+function buildAiChatFoodcourtBoostLoadingHtml(phase = 'parallel') {
+  const integrating = phase === 'integrating';
+  return '<div class="ai-loading-wrap is-multi" role="status" aria-live="polite" aria-label="Journalとフードコート専門AIで分析中">' +
+    '<div class="ai-loading-agents">' +
+      '<div class="ai-loading-agent" data-role="journal"><span class="ai-loading-spinner" aria-hidden="true"></span><span>Journal分析</span></div>' +
+      '<div class="ai-loading-agent" data-role="foodcourt"><span class="ai-loading-spinner" aria-hidden="true"></span><span>フードコート専門AI</span></div>' +
+      '<div class="ai-loading-agent" data-role="verify"><span class="ai-loading-spinner" aria-hidden="true"></span><span>反証・検証</span></div>' +
+      '<div class="ai-loading-agent" data-role="synth"><span class="ai-loading-spinner" aria-hidden="true"></span><span>最終統合</span></div>' +
+    '</div>' +
+    `<div class="ai-loading-label">${integrating ? '2つの分析を1つに最終統合中' : 'Journalとフードコートを同時分析中'}<span class="ai-loading-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div>` +
+    '<div class="ai-loading-sub">通常より数分かかる場合があります。この画面を開いたままお待ちください。</div>' +
+  '</div>';
+}
+
 function appendAiChatLoading(opts) {
   const container = document.getElementById('aiChatMessages');
   const div = document.createElement('div');
@@ -19605,6 +19916,15 @@ function setAiChatLoadingMode(id, multi) {
   if (el.dataset.loadingMode === next) return;
   el.dataset.loadingMode = next;
   el.innerHTML = buildAiChatLoadingHtml(multi);
+}
+
+function setAiChatFoodcourtBoostLoadingMode(id, phase = 'parallel') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const next = `foodcourt-${phase}`;
+  if (el.dataset.loadingMode === next) return;
+  el.dataset.loadingMode = next;
+  el.innerHTML = buildAiChatFoodcourtBoostLoadingHtml(phase);
 }
 
 function removeAiChatLoading(id) {

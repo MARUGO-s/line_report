@@ -69,6 +69,7 @@ import {
   generateFoodCourtWeeklyReport,
   fcSalesDate,
 } from "../_shared/foodcourt_compare.ts"
+import { sanitizeJournalAiPayload } from "../_shared/journal_ai_privacy.ts"
 import {
   assessFoodCourtEvolutionReadiness,
   FOODCOURT_PASSING_SCORE_MAX,
@@ -281,6 +282,7 @@ const STORE_LINK_ALLOWED_REQUESTS: Readonly<Record<string, ReadonlySet<string>>>
     "GET /pos-journals/product-search",
     "GET /pos-journals/product-cohort",
     "POST /pos-journals/cohort-compare",
+    "POST /foodcourt/journal-deep-analysis",
   ]),
 }
 
@@ -1087,6 +1089,13 @@ function addDaysIso(iso: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+function isStrictIsoDate(value: unknown): value is string {
+  const raw = String(value ?? "").trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false
+  const parsed = new Date(`${raw}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === raw
+}
+
 // businessDateIso を含む月の「前月」の範囲を返す（月次振り返りは常に完全に終わった月を対象にする）。
 function previousMonthRange(businessDateIso: string): { yearMonth: string; monthStart: string; monthEnd: string } | null {
   const d = new Date(`${businessDateIso}T00:00:00Z`)
@@ -1652,6 +1661,7 @@ Deno.serve(async (req, info) => {
       "/pos-journals/store-ops",
       "/foodcourt/reports",
       "/foodcourt/journal-brief",
+      "/foodcourt/journal-deep-analysis",
       "/foodcourt/ask",
       "/foodcourt/qa-history",
       "/foodcourt/ai-fallback-events",
@@ -2783,32 +2793,104 @@ Deno.serve(async (req, info) => {
         ...loop,
       }, 200)
     }
-    // 蓄積データへの質問応答（Q&A）。蓄積された全レポートを根拠に Groq が回答（毎回の自動出力はしない運用）。
-    if (req.method === "POST" && path === "/foodcourt/ask") {
+    // 蓄積データへの質問応答（Q&A）。Journal用のdeep routeは同じ分析器を使うが、
+    // マルゴエス限定・期間固定・履歴非保存・明確なHTTP失敗契約にする。
+    if (req.method === "POST" && (path === "/foodcourt/ask" || path === "/foodcourt/journal-deep-analysis")) {
+      const isJournalDeep = path === "/foodcourt/journal-deep-analysis"
       const body = await workReq.json().catch(() => ({})) as Record<string, unknown>
       const storeKey = String(body.store_key ?? body.store ?? url.searchParams.get("store_key") ?? "").trim()
-      const question = String(body.question ?? "").trim()
+      const rawQuestion = String(body.question ?? "").trim()
       if (!storeKey) return json({ error: "store_key is required." }, 400)
-      if (!question) return json({ error: "question is required." }, 400)
+      if (!rawQuestion) return json({ error: "question is required." }, 400)
+      if (rawQuestion.length > 500) return json({ error: "question must be 1-500 characters." }, 400)
+      if (isJournalDeep && storeKey.toLowerCase() !== "marugos") {
+        return json({ error: "フードコート深掘りはマルゴエス専用です。" }, 403)
+      }
+      let question = rawQuestion
+      const requestId = isJournalDeep ? crypto.randomUUID() : null
+      const rangeRows = Array.isArray(body.requested_ranges) ? body.requested_ranges : []
+      const requestedRanges = rangeRows.map((row) => {
+        const rec = row && typeof row === "object" ? row as Record<string, unknown> : {}
+        const from = String(rec.from ?? "").slice(0, 10)
+        const to = String(rec.to ?? "").slice(0, 10)
+        if (!isStrictIsoDate(from) || !isStrictIsoDate(to)) return null
+        return from <= to ? { from, to } : { from: to, to: from }
+      }).filter((row): row is { from: string; to: string } => row != null).slice(0, 6)
+      if (
+        isJournalDeep &&
+        (rangeRows.length > 6 || (rangeRows.length > 0 && requestedRanges.length !== rangeRows.length))
+      ) {
+        return json({
+          error: "requested_ranges は有効な日付範囲を最大6件まで指定してください。",
+          code: "invalid_date_range",
+          request_id: requestId,
+        }, 400)
+      }
+      if (isJournalDeep && requestedRanges.length === 0) {
+        const today = jstDateIso(0)
+        requestedRanges.push({ from: jstDateIso(-90), to: today })
+      }
       // 会話継続: 直前までのQ&A履歴を受け取り、文脈として渡す（指示語が効くように）。最新8件・各4000字まで。
       const historyRaw = Array.isArray((body as { history?: unknown }).history) ? (body.history as unknown[]) : []
-      const history = historyRaw.map((h) => {
+      const history = (isJournalDeep ? [] : historyRaw).map((h) => {
         const o = (h && typeof h === "object") ? h as Record<string, unknown> : {}
         const role = String(o.role ?? "")
         const content = String(o.content ?? "").slice(0, 4000)
         return (role === "user" || role === "assistant") && content ? { role, content } : null
       }).filter((x): x is { role: string; content: string } => x != null).slice(-8)
       const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? ""
-      if (!groqApiKey) return json({ error: "GROQ_API_KEY is missing." }, 500)
-      const { data, error } = await supabase
+      if (!groqApiKey) {
+        if (isJournalDeep) {
+          return json({
+            error: "フードコート専門分析を開始できませんでした。",
+            code: "foodcourt_ai_unavailable",
+            request_id: requestId,
+          }, 500)
+        }
+        return json({ error: "GROQ_API_KEY is missing." }, 500)
+      }
+      let reportsQuery = supabase
         .from("foodcourt_tenant_reports")
         .select("id, report_date, tenants, created_at, base_tenant_name")
         .ilike("store_partition_key", storeKey)
         .order("created_at", { ascending: false })
-        .limit(90)
-      if (error) return json({ error: error.message }, 500)
-      const reports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+        .limit(isJournalDeep ? 500 : 90)
+      if (isJournalDeep) {
+        const from = requestedRanges.map((row) => row.from).sort()[0]
+        const to = requestedRanges.map((row) => row.to).sort().at(-1) || from
+        // tenant reportは売上日の翌朝発行なので、DB検索境界を1日進める。
+        reportsQuery = reportsQuery
+          .gte("report_date", addDaysIso(from, 1))
+          .lte("report_date", addDaysIso(to, 1))
+      }
+      const { data, error } = await reportsQuery
+      if (error) {
+        console.error(`${path} reports load failed:`, error.message)
+        if (isJournalDeep) {
+          return json({
+            error: "フードコート比較データを取得できませんでした。",
+            code: "foodcourt_data_load_failed",
+            request_id: requestId,
+          }, 500)
+        }
+        return json({ error: error.message }, 500)
+      }
+      const fetchedReports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
+      const reports = isJournalDeep
+        ? fetchedReports.filter((report) => {
+          const salesDate = fcSalesDate(report)
+          return requestedRanges.some((range) => salesDate >= range.from && salesDate <= range.to)
+        })
+        : fetchedReports
       if (!reports.length) {
+        if (isJournalDeep) {
+          return json({
+            error: "指定期間のフードコート比較データがありません。",
+            code: "foodcourt_data_unavailable",
+            request_id: requestId,
+            coverage: { requested_ranges: requestedRanges, report_count: 0 },
+          }, 422)
+        }
         return json({ answer: "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
       }
       const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
@@ -2818,15 +2900,39 @@ Deno.serve(async (req, info) => {
       const forecast = await loadForecastForStore(supabase, storeKey)
       // 現場日報（foodcourt_daily_logs）: Q&A分析の精度向上のため直近60日分を取得してAIに渡す。
       // 失敗時は空配列にせず error をレスポンス・ログに出し、サイレント劣化を防ぐ。
-      const todayForLogs = jstDateIso(0)
-      const logsFrom = jstDateIso(-60)
+      const todayForLogs = isJournalDeep
+        ? requestedRanges.map((row) => row.to).sort().at(-1) || jstDateIso(0)
+        : jstDateIso(0)
+      const logsFrom = isJournalDeep
+        ? requestedRanges.map((row) => row.from).sort()[0]
+        : jstDateIso(-60)
       const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
         supabase,
         storeKey,
-        { from: logsFrom, to: todayForLogs, limit: 60 },
+        { from: logsFrom, to: todayForLogs, limit: isJournalDeep ? 120 : 60 },
       )
       if (dailyLogsError) {
-        console.error("foodcourt/ask daily_logs load failed:", dailyLogsError)
+        console.error(`${path} daily_logs load failed:`, dailyLogsError)
+      }
+      let analysisReports = reports
+      let analysisDailyLogs = dailyLogs
+      if (isJournalDeep) {
+        // Journal経由では質問だけでなく、日報自由記述を含む分析材料も外部AI送信前に
+        // 同じ仮名化テーブルで処理する。原本・DBは変更しない。
+        const privacySafe = sanitizeJournalAiPayload({
+          message: rawQuestion,
+          salesData: { reports, daily_logs: dailyLogs },
+        })
+        question = privacySafe.message
+        const safeData = isRecord(privacySafe.salesData)
+          ? privacySafe.salesData
+          : {}
+        analysisReports = Array.isArray(safeData.reports)
+          ? safeData.reports as Array<Record<string, unknown>>
+          : []
+        analysisDailyLogs = Array.isArray(safeData.daily_logs)
+          ? safeData.daily_logs as Array<Record<string, unknown>>
+          : []
       }
       // 画面に表示中の単日レポート(viewing_report_id)を、特に日付指定のない質問のデフォルト対象日としてAIに伝える。
       // これが無いと、AIは全履歴のどの日の話かを画面と無関係に(会話文脈だけで)決めてしまい、時間軸がずれる。
@@ -2835,11 +2941,50 @@ Deno.serve(async (req, info) => {
       const viewingReport = viewingReportId ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === viewingReportId) : null
       const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
       try {
-        const qaResult = await answerFoodCourtQuestion(reports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, dailyLogs)
+        const qaResult = await answerFoodCourtQuestion(analysisReports, baseName, question, groqApiKey, events, weather, supabase, storeKey, history, forecast, viewingDate, analysisDailyLogs)
+        if (isJournalDeep && !String(qaResult.answer ?? "").trim()) {
+          return json({
+            error: "フードコート専門AIから有効な分析を取得できませんでした。",
+            code: "foodcourt_empty_analysis",
+            request_id: requestId,
+          }, 502)
+        }
         let answer = qaResult.answer || "回答を生成できませんでした。もう一度お試しください。"
         // 日報テーブル読込失敗時は回答末尾に注意を付与（AIは「日報なし」と誤認するため）。
         if (dailyLogsError) {
-          answer += `\n\n⚠️ システム注意: 現場日報の取得に失敗したため、施策記録は未参照です（${dailyLogsError}）。`
+          answer += isJournalDeep
+            ? "\n\n⚠️ システム注意: 現場日報の取得に失敗したため、施策記録は未参照です。"
+            : `\n\n⚠️ システム注意: 現場日報の取得に失敗したため、施策記録は未参照です（${dailyLogsError}）。`
+        }
+        if (isJournalDeep) {
+          const usedDates = reports.map((report) => fcSalesDate(report)).filter(Boolean).sort()
+          const truncated = fetchedReports.length >= 500
+          return json({
+            ok: true,
+            status: dailyLogsError || truncated ? "partial" : "complete",
+            request_id: requestId,
+            store_key: "marugos",
+            analysis: {
+              text: answer,
+              report_count: reports.length,
+              loop_score: qaResult.loopScore,
+              loop_count: qaResult.loopCount,
+            },
+            coverage: {
+              requested_ranges: requestedRanges,
+              used_from: usedDates[0] ?? null,
+              used_to: usedDates.at(-1) ?? null,
+              report_count: reports.length,
+              prompt_detail_days: Math.min(reports.length, 45),
+              truncated,
+            },
+            diagnostics: {
+              daily_logs_count: dailyLogsCount,
+              daily_logs_error: dailyLogsError ? "unavailable" : null,
+            },
+            history_saved: false,
+            usage: { tracking: "best_effort", surface: "foodcourt" },
+          }, 200)
         }
         const { data: savedQa, error: saveQaError } = await supabase
           .from("foodcourt_qa_history")
@@ -2873,7 +3018,14 @@ Deno.serve(async (req, info) => {
           daily_logs_error: dailyLogsError,
         }, 200)
       } catch (e) {
-        console.error("foodcourt/ask error:", e)
+        console.error(`${path} error:`, e)
+        if (isJournalDeep) {
+          return json({
+            error: "フードコート専門分析を完了できませんでした。",
+            code: "foodcourt_deep_analysis_failed",
+            request_id: requestId,
+          }, 502)
+        }
         return json({
           answer: "⚠️ データの容量が大きい、または一時的な負荷のため、回答の生成に失敗しました。\n少し時間をおいてもう一度お試しいただくか、質問をもう少し短く・具体的にしてみてください。",
           reportCount: reports.length,
@@ -18587,6 +18739,12 @@ function resolveAdminRateLimit(method: string, path: string): { maxRequests: num
       windowMs: ADMIN_RATE_LIMIT_UPLOAD_WINDOW_MS,
     }
   }
+  if (method === "POST" && path === "/foodcourt/journal-deep-analysis") {
+    return {
+      maxRequests: 8,
+      windowMs: ADMIN_RATE_LIMIT_DEFAULT_WINDOW_MS,
+    }
+  }
   if (path.startsWith("/chat-admin/") && method !== "GET") {
     return {
       maxRequests: 60,
@@ -20843,7 +21001,7 @@ async function fetchAiUsageCostState(
   }
   let journalModels: Array<ReturnType<typeof mapSurfaceRow>> = []
   const journalSurfaceRows: Array<ReturnType<typeof mapSurfaceRow>> = []
-  for (const surface of ["journal", "pos_journal"] as const) {
+  for (const surface of ["journal", "journal_foodcourt", "pos_journal"] as const) {
     const { data: jData, error: jError } = await supabase.rpc(
       "ai_usage_surface_model_totals",
       { p_from, p_to, p_store: journalStoreParam, p_surface: surface },
@@ -20932,7 +21090,7 @@ async function fetchAiUsageCostState(
     foodcourt: { store: FOODCOURT_STORE_KEY, models: foodcourtModels },
     journal: {
       store: journalStoreParam,
-      surfaces: ["journal", "pos_journal"],
+      surfaces: ["journal", "journal_foodcourt", "pos_journal"],
       models: journalModels,
     },
     mtalk: { surfaces: ["mtalk"], models: mtalkModels },

@@ -1,5 +1,13 @@
 # LINE Report Project Progress
 
+### 2026-09-01 - マルゴエスJournal AIチャットに任意のフードコート深掘りを追加
+
+- UX: 通常分析は既存の軽量 `GET /foodcourt/journal-brief` を維持。会場・競合要因が有効な質問だけ、現在の分析でもかなり背景を踏まえていることを説明した上で、「さらに深掘りしてブーストする」かを1回確認する。追加時間とAPI料金増加を同意前に表示する。
+- Scope: `marugos` のWeb版AIチャットだけ。他店、M-talk、単純な数値照会では確認しない。拒否・曖昧返答では追加課金を始めず、従来の軽量brief経路で続ける。
+- Pipeline: 同意時はJournal分析（`orchestrationMode: data`）と `POST /foodcourt/journal-deep-analysis` を `Promise.allSettled` で並列実行し、両方成功後に `ai-analyze action=integrate_foodcourt` が1本へ最終統合する。
+- Security/data: dedicated routeはマルゴエス＋Journal店舗スコープ限定。Journalが解決した期間を使い、通常の `/foodcourt/ask` を開放せず、会話履歴と `foodcourt_qa_history` 保存を行わない。確定数値の正本はJournal。
+- Resilience: 専門AI失敗時はJournal回答、統合失敗時は未統合2本を警告付きで表示。Journal失敗時は専門結果だけを完成分析にせずローカル確定集計へフォールバックする。
+
 ### 2026-09-01 - ワインml換算がグラス赤／ボトル赤の細分類を見るようにする
 
 - Symptom: 分類済みでもAIが「ワイン点数は0点／グラス・デキャンタ・ボトル別は判断できない」と返した。ビールだけがドリンク上位に出ていた。

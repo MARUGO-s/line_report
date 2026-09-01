@@ -286,7 +286,7 @@ flowchart TB
 ### 8.1 通信
 
 - エンドポイント: `.../functions/v1/ai-analyze`  
-- `action`: `analyze` | `chat` | `clarify`  
+- `action`: `analyze` | `chat` | `clarify` | `integrate_foodcourt`
 - 店舗スコープ検証・レート制限あり  
 - 売上合成: OpenAI（既定 `gpt-5.6-luna`）→ Anthropic Claude Haiku フォールバック  
 - 外部知見: Perplexity / Grok（オーケストレーション時）。数値出典にはしない  
@@ -329,9 +329,28 @@ flowchart TB
 2. **店舗営業情報**（定休・ランチ等）  
 3. **店舗資料 / #メモ**（施策・メニュー。数値出典禁止）  
 
-マルゴエスのみ 4. **東京ドーム／フードコート背景**（`GET /foodcourt/journal-brief`。イベント最大36件＋直近コート順位。Groq再生成なし）
+マルゴエスのみ 4. **東京ドーム／フードコート背景**（`GET /foodcourt/journal-brief`。イベント最大36件＋直近コート順位。Groq再生成なし）。これは標準経路で常時使う軽量briefで、追加深掘りを選ばなくても利用される。
 
 欠けた系統を推測で埋めない。ナレッジ由来は「登録資料によると」、仮説は「※これは推測です」。コート日報の順位は会場背景で、店舗売上の正本はジャーナル。
+
+### 8.5 マルゴエスWeb版AIチャットの任意深掘り
+
+会場・競合分析が回答を強化する質問だけ、軽量briefで進めるか、フードコート専門AIまで追加してブーストするかを1回確認する。確認は `marugos` のWeb版だけで、他店・M-talk・単純数値照会では出さない。追加経路の時間（通常より数分の場合）とAPI料金増加を同意前に表示し、否定・曖昧回答では呼び出さない。
+
+```text
+Browser
+  ├─ ai-analyze action=chat, orchestrationMode=data   （Journal確定データ）
+  └─ admin-api POST /foodcourt/journal-deep-analysis （専門・反証・統合）
+                    │
+                    └─ 両方成功時のみ
+                         ai-analyze action=integrate_foodcourt
+                              └─ 1本の完成分析
+```
+
+- 2本は `Promise.allSettled` で並列開始し、同じキャンセル信号を共有する。専門側はJournalが解決した日付範囲だけを使う。
+- 専用routeは `marugos` とJournal AI店舗スコープへ限定する。通常の `/foodcourt/ask` は開放せず、会話履歴を渡さず、`foodcourt_qa_history` にも保存しない。
+- `integrate_foodcourt` は2本を非信頼下書きとして再検証し、Journal確定集計を売上・客数・商品数値の正本にする。コート実績は会場・競合背景であり合算しない。
+- 専門AIだけ失敗したらJournal回答、最終統合だけ失敗したら未統合の2本を警告付きで表示する。Journalが失敗したときは専門結果だけを完成回答にせず、ローカル確定集計へフォールバックする。
 
 ---
 
@@ -545,6 +564,7 @@ AI:
 | AI検索 | `searchSavedReportsByQuery`, `extractRangeRef`, `summarizeMatched` |
 | 確定enrich | `enrichMonthlyMealCategorySplit`, `enrichMonthlyAnomalyItemFacts`, `enrichProductTimelineFacts`, `enrichCourseLineupFacts`, `enrichJournalCohortComparisons`, `enrichReservationFacts`, `rankProductsForAiDisplay` |
 | 統合プロンプト | `buildIntegratedAnalysisContext`, `strictSystemInstruction`, `formatStoreOpsBlockForAi`, `formatFoodcourtJournalBriefForAi`, `formatStoreKnowledgeBlock` |
+| フードコート深掘り | `needsFoodcourtBoostConfirmation`, `requestFoodcourtJournalDeepAnalysis`, `setAiChatFoodcourtBoostLoadingMode` |
 | 予測 | `buildSalesForecast`, `compareForecastToActuals` |
 | 履歴 | `JOURNAL_TRASH_TYPES`, `renderJournalTrash` |
 

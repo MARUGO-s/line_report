@@ -120,6 +120,66 @@ test("store link method matrix keeps staff links out of administrator mutations"
   assert.match(api, /!isStoreLinkRequestAllowed\(authResult\.scopeKind, req\.method, path\)[\s\S]*403/)
 })
 
+test("Journal foodcourt deep analysis is purpose-limited, Marugos-only, and never writes Q&A history", async () => {
+  const [api, ai] = await Promise.all([
+    read("supabase/functions/admin-api/index.ts"),
+    read("supabase/functions/ai-analyze/index.ts"),
+  ])
+  const matrix = api.slice(
+    api.indexOf("const STORE_LINK_ALLOWED_REQUESTS"),
+    api.indexOf("// CRON_AUTH_TOKEN"),
+  )
+  const dashboardScope = matrix.slice(
+    matrix.indexOf("[FOODCOURT_DASHBOARD_SCOPE]"),
+    matrix.indexOf("[FOODCOURT_DAILY_LOG_SCOPE]"),
+  )
+  const journalScope = matrix.slice(
+    matrix.indexOf("[CHAT_JOURNAL_AI_SCOPE]"),
+  )
+  assert.doesNotMatch(dashboardScope, /journal-deep-analysis/)
+  assert.match(journalScope, /POST \/foodcourt\/journal-deep-analysis/)
+  assert.doesNotMatch(journalScope, /POST \/foodcourt\/ask/)
+
+  const routeStart = api.indexOf('if (req.method === "POST" && (path === "/foodcourt/ask" || path === "/foodcourt/journal-deep-analysis"))')
+  const routeEnd = api.indexOf('if (req.method === "GET" && path === "/foodcourt/qa-history")', routeStart)
+  assert.ok(routeStart >= 0 && routeEnd > routeStart, "deep-analysis route must exist")
+  const route = api.slice(routeStart, routeEnd)
+  assert.match(route, /isJournalDeep && storeKey\.toLowerCase\(\) !== "marugos"/)
+  assert.match(route, /sanitizeJournalAiPayload\(\{[\s\S]{0,180}message: rawQuestion,[\s\S]{0,180}salesData: \{ reports, daily_logs: dailyLogs \}/)
+  assert.match(route, /answerFoodCourtQuestion\(analysisReports[\s\S]{0,180}analysisDailyLogs\)/)
+  assert.match(route, /requestedRanges[\s\S]*\.slice\(0, 6\)/)
+  assert.match(route, /requestedRanges\.length !== rangeRows\.length/)
+  assert.match(route, /invalid_date_range[\s\S]{0,180}400/)
+  assert.match(route, /const history = \(isJournalDeep \? \[\] : historyRaw\)/)
+  assert.match(route, /answerFoodCourtQuestion\(/)
+  assert.match(route, /history_saved: false/)
+  assert.match(route, /foodcourt_data_unavailable[\s\S]{0,180}422/)
+  assert.match(route, /foodcourt_deep_analysis_failed[\s\S]{0,180}502/)
+  assert.doesNotMatch(route, /detail:\s*String\(e\)/)
+  assert.match(route, /usage:\s*\{ tracking: "best_effort", surface: "foodcourt" \}/)
+  assert.ok(
+    route.indexOf("if (isJournalDeep)") < route.indexOf('.from("foodcourt_qa_history")'),
+    "deep route must return before the ordinary Q&A-history insert",
+  )
+
+  const rateLimit = api.slice(
+    api.indexOf("function resolveAdminRateLimit"),
+    api.indexOf("async function consumeRateLimitFromDb"),
+  )
+  assert.match(rateLimit, /path === "\/foodcourt\/journal-deep-analysis"[\s\S]{0,140}maxRequests: 8/)
+
+  assert.match(ai, /type AiAction = "analyze" \| "chat" \| "clarify" \| "integrate_foodcourt"/)
+  assert.match(ai, /integrate_foodcourt: 8/)
+  assert.match(ai, /isFoodcourtIntegration[\s\S]{0,220}canonicalStoreKey[\s\S]{0,120}marugos/)
+  assert.match(ai, /integrationReports is required/)
+  assert.match(ai, /Journal分析とフードコート分析の両方が必要です/)
+  assert.match(ai, /parallel_analysis_reports（非信頼のAI下書き・JSON）/)
+  assert.match(ai, /店舗の売上・客数・客単価・商品・構成比の正本は sales_data/)
+  assert.match(ai, /action === "integrate_foodcourt" \? "journal_foodcourt" : "journal"/)
+  assert.match(api, /\["journal", "journal_foodcourt", "pos_journal"\] as const/)
+  assert.match(api, /surfaces: \["journal", "journal_foodcourt", "pos_journal"\]/)
+})
+
 test("cron credentials are endpoint-bound and rate-limit failures deny requests", async () => {
   const [api, ai] = await Promise.all([
     read("supabase/functions/admin-api/index.ts"),

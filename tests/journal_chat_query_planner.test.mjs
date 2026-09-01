@@ -68,6 +68,9 @@ const knowledgeLimits = Object.freeze({
 const context = {
   SAVED_DATA_CLARIFICATION_MARKER: '保存データの分析対象を選んでください',
   AI_INTENT_CLARIFICATION_MARKER: '知りたい内容を具体化してください',
+  FOODCOURT_BOOST_CLARIFICATION_MARKER: 'さらに分析をブーストしますか',
+  FOODCOURT_BOOST_ON_DIRECTIVE: '【FOODCOURT_BOOST:ON】',
+  FOODCOURT_BOOST_OFF_DIRECTIVE: '【FOODCOURT_BOOST:OFF】',
   WEEKDAY_ORDER: ['月', '火', '水', '木', '金', '土', '日'],
   // 期間解決の番兵年（開区間の端点）。アプリ側の定数と一致させること。
   // 分類の2階層モデル。アプリ側の定義と一致させること。
@@ -171,6 +174,12 @@ for (const name of [
   'resolveSavedDataClarificationReply',
   'resolveAiIntentClarificationReply',
   'resolveWineMetricClarificationReply',
+  'hasFoodcourtBoostDirective',
+  'isFoodcourtBoostEnabled',
+  'stripFoodcourtBoostDirective',
+  'resolveFoodcourtBoostClarificationReply',
+  'needsFoodcourtBoostConfirmation',
+  'buildFoodcourtBoostClarificationReply',
   'resolveAiChatQuery',
   'needsAiIntentClarification',
   'needsWineMetricClarification',
@@ -276,6 +285,7 @@ for (const name of [
   'normalizeKnowledgeEvidenceText',
   'formatStoreKnowledgeBlock',
   'resolveKnowledgePeriodRange',
+  'foodcourtBoostRangesFromVerifiedData',
   'clampAiSystemInstruction',
   'isMarugoSStoreKey',
   'formatFoodcourtJournalBriefForAi',
@@ -2109,6 +2119,173 @@ test('wine volume questions ask 点数 / 総ml / 両方 before answering', () =>
   assert.match(html, /formatWineVolumeFactsForAi/);
   assert.match(html, /local-wine-metric-clarifier/);
   assert.match(html, /ai-clarify-choice-btn/);
+});
+
+test('Marugos asks once before the paid foodcourt boost and explains the tradeoff', () => {
+  assert.equal(
+    context.needsFoodcourtBoostConfirmation(
+      '2025年12月から2026年8月の売上低下の原因と改善戦略を分析して',
+      [],
+      'marugos',
+    ),
+    true,
+  );
+  assert.equal(
+    context.needsFoodcourtBoostConfirmation(
+      '2026年8月の東京ドームイベントと客数の関係を見て',
+      [],
+      'marugoS',
+    ),
+    true,
+  );
+  assert.equal(
+    context.needsFoodcourtBoostConfirmation('2026年8月の総売上はいくら？', [], 'marugos'),
+    false,
+    'simple exact-number lookup must stay on the current analysis path',
+  );
+  assert.equal(
+    context.needsFoodcourtBoostConfirmation(
+      '2026年8月の売上低下の原因と改善戦略を分析して',
+      [],
+      'bistrocavacava',
+    ),
+    false,
+    'the paid boost confirmation is Marugos-only',
+  );
+
+  const copy = context.buildFoodcourtBoostClarificationReply();
+  assert.match(copy, /現在のAI分析でも/);
+  assert.match(copy, /東京ドームのイベントやフードコート内順位/);
+  assert.match(copy, /かなり踏まえています/);
+  assert.match(copy, /さらに分析をブースト/);
+  assert.match(copy, /Journal分析と1つの完成分析に統合/);
+  assert.match(copy, /通常より数分かかる/);
+  assert.match(copy, /API利用料金も高くなります/);
+  assert.match(copy, /失敗・再試行した処理にも料金が発生/);
+
+  const originalQuery = '2026年8月の売上低下の原因と改善戦略を分析して';
+  const confirmation = {
+    role: 'assistant',
+    clarification: 'foodcourtBoost',
+    originalQuery,
+    clarificationChoices: ['さらに深掘りしてブーストする', '現在の分析で進める'],
+    content: copy,
+  };
+  assert.match(
+    context.resolveAiChatQuery('さらに深掘りしてブーストする', [confirmation]),
+    /【FOODCOURT_BOOST:ON】$/,
+  );
+  assert.match(
+    context.resolveAiChatQuery('現在の分析で進める', [confirmation]),
+    /【FOODCOURT_BOOST:OFF】$/,
+  );
+  assert.match(context.resolveAiChatQuery('はい', [confirmation]), /【FOODCOURT_BOOST:ON】$/);
+  assert.match(context.resolveAiChatQuery('いいえ', [confirmation]), /【FOODCOURT_BOOST:OFF】$/);
+  assert.equal(
+    context.needsFoodcourtBoostConfirmation(originalQuery, [confirmation], 'marugos'),
+    false,
+    'the same pending question must not display duplicate confirmations',
+  );
+  assert.equal(
+    context.stripFoodcourtBoostDirective(`${originalQuery} 【FOODCOURT_BOOST:ON】`),
+    originalQuery,
+  );
+});
+
+test('only the latest clarification may consume a short reply', () => {
+  const history = [
+    {
+      role: 'assistant',
+      clarification: 'foodcourtBoost',
+      originalQuery: '2026年8月の売上低下の原因と改善戦略を分析して',
+      clarificationChoices: ['さらに深掘りしてブーストする', '現在の分析で進める'],
+      content: context.buildFoodcourtBoostClarificationReply(),
+    },
+    {
+      role: 'assistant',
+      clarification: 'wineMetric',
+      originalQuery: 'ワインはどれくらい出たか',
+      clarificationChoices: ['点数', '総ml', '両方'],
+      content: context.buildWineMetricClarificationReply('ワインはどれくらい出たか'),
+    },
+  ];
+  const resolved = context.resolveAiChatQuery('点数', history);
+  assert.match(resolved, /^ワインはどれくらい出たか 表示単位:点数$/);
+  assert.doesNotMatch(resolved, /FOODCOURT_BOOST/);
+});
+
+test('foodcourt boost runs Journal and specialist analysis concurrently, then finalizes once', () => {
+  const send = extractFunction(html, 'sendAiChat');
+  const deepRequest = extractFunction(html, 'requestFoodcourtJournalDeepAnalysis');
+  const choiceRenderer = extractFunction(html, 'appendAiChatMessage');
+  const needsConfirmation = extractFunction(html, 'needsFoodcourtBoostConfirmation');
+
+  assert.match(send, /needsFoodcourtBoostConfirmation\(/);
+  assert.match(send, /clarification:\s*'foodcourtBoost'/);
+  assert.match(send, /const foodcourtBoostEnabled = !MTALK_EMBED/);
+  assert.match(send, /&& isMarugoSStoreKey\(chatRun\.storeKey\)/);
+  assert.match(send, /&& isFoodcourtBoostEnabled\(resolvedChatQuery\)/);
+  assert.match(send, /latestAssistantForBoost\?\.clarification === 'foodcourtBoost'/);
+  assert.ok(
+    send.indexOf('shouldAskWineMetricClarification') < send.indexOf('needsFoodcourtBoostConfirmation'),
+    'foodcourt opt-in must be asked only after the existing wine-unit clarification',
+  );
+  assert.ok(
+    send.indexOf('needsFoodcourtBoostConfirmation') < send.indexOf('requestFoodcourtJournalDeepAnalysis'),
+    'the paid specialist must never start before confirmation',
+  );
+  assert.match(send, /includeFoodcourtBrief:\s*!foodcourtBoostEnabled/);
+  assert.match(
+    send,
+    /Promise\.allSettled\(\[[\s\S]{0,260}requestJournalAnalysis\(\)[\s\S]{0,260}requestFoodcourtJournalDeepAnalysis\(resolvedChatQuery, verifiedData, runOptions\)/,
+  );
+  assert.match(send, /orchestrationMode:\s*foodcourtBoostEnabled \? 'data' : 'auto'/);
+  assert.match(send, /action:\s*'integrate_foodcourt'/);
+  assert.match(send, /integrationReports:\s*\{[\s\S]{0,500}journal:[\s\S]{0,500}foodcourt:/);
+  assert.match(send, /orchestrationMode:\s*'data'/);
+  assert.ok(
+    send.indexOf("if (journalReply && foodcourtReply)") < send.indexOf("action: 'integrate_foodcourt'"),
+    'final integration must be charged only after both drafts succeed',
+  );
+  assert.match(send, /Journal分析だけを最終回答として表示しています/);
+  assert.match(send, /店舗確定分析が失敗したため安全上は統合していません/);
+  assert.match(send, /2つの分析は完了しましたが、最終統合だけ失敗しました/);
+  assert.match(send, /signal:\s*runOptions\.signal/g);
+  const paidBranch = send.slice(
+    send.indexOf('if (foodcourtBoostEnabled)'),
+    send.indexOf('} else {\n      // 通常分析は従来どおり'),
+  );
+  assert.match(paidBranch, /requestFoodcourtJournalDeepAnalysis/);
+  assert.match(needsConfirmation, /MTALK_EMBED/);
+  assert.match(needsConfirmation, /isMarugoSStoreKey\(storeKey\)/);
+
+  assert.match(deepRequest, /\/foodcourt\/journal-deep-analysis/);
+  assert.match(deepRequest, /method:\s*'POST'/);
+  assert.match(deepRequest, /timeoutMs:\s*138000/);
+  assert.match(deepRequest, /maxAttempts:\s*1/);
+  assert.match(deepRequest, /signal:\s*options\.signal \|\| null/);
+  assert.match(deepRequest, /requested_ranges:\s*foodcourtBoostRangesFromVerifiedData\(verifiedData\)/);
+  assert.doesNotMatch(deepRequest, /chatHistory|history:/);
+
+  assert.match(choiceRenderer, /if \(row\.dataset\.consumed === 'true'\) return/);
+  assert.match(choiceRenderer, /row\.dataset\.consumed = 'true'/);
+  assert.match(choiceRenderer, /row\.querySelectorAll\('button'\)[\s\S]{0,180}choiceButton\.disabled = true/);
+  assert.match(send, /#aiChatMessages \.ai-clarify-choices:not\(\[data-consumed="true"\]\)/);
+  assert.match(send, /row\.dataset\.consumed = 'true'[\s\S]{0,180}choiceButton\.disabled = true/);
+});
+
+test('foodcourt boost preserves disjoint verified periods instead of widening the gap', () => {
+  const ranges = context.foodcourtBoostRangesFromVerifiedData({
+    multiPeriod: true,
+    periods: [
+      { monthlyBreakdown: [{ key: '2025-12' }, { key: '2026-01' }] },
+      { monthlyBreakdown: [{ key: '2026-07' }, { key: '2026-08' }] },
+    ],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(ranges)), [
+    { from: '2025-12-01', to: '2026-01-31' },
+    { from: '2026-07-01', to: '2026-08-31' },
+  ]);
 });
 
 test('wine ml conversion uses store settings for chat facts', () => {

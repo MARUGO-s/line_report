@@ -905,15 +905,14 @@ export function buildFoodCourtProviderOrder(preferred: FoodCourtChatProvider): F
 }
 
 /**
- * 評価AI専用の期限。共有 deadline が専門AI/統合AIで尽きていると Claude 1発 timeout のまま
- * Groq まで届かず「全滅」になるため、評価フェーズは最低でも約30秒の壁時計を確保する。
+ * 評価AI専用の期限。上限45秒だが、呼び出し全体の共有deadlineは絶対に延長しない。
+ * Gateway上限付近で新しい30秒枠を作ると、呼び出し全体が150秒を越えて応答不能になるため。
  */
 export function foodCourtEvalDeadlineAt(sharedDeadlineAt?: number | null): number {
   const now = Date.now()
-  const minBudget = now + 30_000
   const maxBudget = now + 45_000
   if (sharedDeadlineAt == null || !Number.isFinite(sharedDeadlineAt)) return maxBudget
-  return Math.min(maxBudget, Math.max(minBudget, sharedDeadlineAt))
+  return Math.min(maxBudget, sharedDeadlineAt)
 }
 
 function extractGeminiText(json: unknown): string {
@@ -1490,7 +1489,7 @@ async function evaluateFoodCourtAnswer(params: {
     [{ role: 'system', content: evalSystem }, { role: 'user', content: evalUser }],
     params.groqApiKey, params.primary, params.config.evaluatorMaxTokens, params.config.evaluatorProvider, params.fallbackModel,
     {
-      // 共有 deadline が尽きていても評価専用の壁時計を確保（Claude→Gemini→Groq まで届かせる）
+      // 評価にも最大45秒を与えるが、呼び出し全体の共有deadlineは延長しない。
       deadlineAt: foodCourtEvalDeadlineAt(params.deadlineAt),
       perProviderMs: 18000,
       fallbackLog: { supabase: params.supabase, storeKey: params.storeKey, surface: params.surface, role: 'evaluator' },

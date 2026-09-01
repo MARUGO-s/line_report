@@ -117,3 +117,53 @@ Deno.test("single-character names are not collected from free text", () => {
     "unrelated product name was changed",
   );
 });
+
+Deno.test("parallel Journal and foodcourt drafts share the same PII minimization", () => {
+  const result = sanitizeJournalAiPayload({
+    message: "山田太郎さんの予約施策も踏まえて統合して",
+    salesData: {
+      reservations: [{ customer_name: "山田太郎", guest_count: 4 }],
+    },
+    integrationReports: {
+      journal: {
+        text: "customer_name: 山田太郎 / 電話 090-1234-5678 / guest@example.com",
+      },
+      foodcourt: {
+        text: "山田太郎様の来店施策。アレルギー内容: えび",
+      },
+    },
+  });
+  const serialized = JSON.stringify(result.integrationReports);
+  assert(!serialized.includes("山田太郎"), "real name leaked from AI drafts");
+  assert(!serialized.includes("090-1234-5678"), "phone leaked from AI drafts");
+  assert(!serialized.includes("guest@example.com"), "email leaked from AI drafts");
+  assert(!serialized.includes("えび"), "allergy detail leaked from AI drafts");
+  assert(serialized.includes("予約客A"), "stable alias missing from AI drafts");
+  assert(serialized.includes("アレルギーあり"), "allergy presence was not retained");
+});
+
+Deno.test("parallel Journal and foodcourt drafts are sanitized before final integration", () => {
+  const result = sanitizeJournalAiPayload({
+    message: "山田太郎さんの来店背景も含めて統合して",
+    integrationReports: {
+      journal: {
+        text: `- 2026-08-04 19:00 / 山田太郎 / リピート（3回） / 食べログ / アレルギー エビ
+- 売れ筋商品: 山田錦 ¥12,000`,
+      },
+      foodcourt: {
+        text: "customer_name: 山田太郎 / phone: 090-1234-5678 / email: guest@example.com / アレルギー内容: 小麦",
+      },
+    },
+  });
+  const serialized = JSON.stringify(result.integrationReports);
+  assert(result.aliasCount === 1, `expected one stable alias: ${result.aliasCount}`);
+  assert(!serialized.includes("山田太郎"), "real name leaked from parallel drafts");
+  assert(!serialized.includes("090-1234-5678"), "phone leaked from parallel drafts");
+  assert(!serialized.includes("guest@example.com"), "email leaked from parallel drafts");
+  assert(!serialized.includes("エビ"), "allergy detail leaked from Journal draft");
+  assert(!serialized.includes("小麦"), "allergy detail leaked from foodcourt draft");
+  assert(serialized.includes("予約客A"), "stable alias is missing from parallel drafts");
+  assert(serialized.includes("アレルギーあり"), "allergy presence was not retained");
+  assert(serialized.includes("山田錦 ¥12,000"), "product name was corrupted in Journal draft");
+  assert(result.message.includes("予約客Aさん"), "message and drafts did not share one alias map");
+});

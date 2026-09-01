@@ -10,7 +10,7 @@
 ユーザー依頼は2系統。
 
 1. Journal Report の商品分類を使いやすくし、デキャンタ色とハイボール／カクテルを解析時に自動で付ける。
-2. [foodcourt.html](https://marugo-s.github.io/line_report/foodcourt.html) の東京ドーム連動・コート内順位・ボトルネック・他店比較を、**マルゴエス（`marugos`）の Journal AI だけ**へ組み込む。全件を渡すと分析が時間切れになるので、要約だけにする。
+2. [foodcourt.html](https://marugo-s.github.io/line_report/foodcourt.html) の東京ドーム連動・コート内順位・ボトルネック・他店比較を、**マルゴエス（`marugos`）の Journal AI だけ**へ組み込む。通常経路は軽量要約を使い、さらに必要な質問だけ利用者確認後に専門AIを追加する。
 
 数値の正本はジャーナル確定集計のまま。コート日報の順位・シェアは会場背景。他店舗へ東京ドーム要因を転用しない。
 
@@ -100,7 +100,7 @@ HEAD 直前までの関連コミット:
 **やってはいけないこと**
 
 - `foodcourt.html` のDOMや全レポートJSONを Journal プロンプトへ載せない。
-- `/foodcourt/period-summary`、`/foodcourt/daily-summary`、`/foodcourt/ask`、予測・Q&A・週次の Groq 再生成を Journal 経路から呼ばない。
+- 通常経路から `/foodcourt/period-summary`、`/foodcourt/daily-summary`、`/foodcourt/ask`、予測・Q&A・週次の Groq 再生成を呼ばない。追加深掘りは3.5の専用routeだけを使う。
 - コート日報の売上金額をジャーナル確定売上の代わりに使わせない。
 - 新宿三丁目など他店の Journal AI にドーム要因を付けない。`marugos` 以外は `{ skipped: true }`。
 - 取得失敗を「イベントなし」と断定させない。
@@ -118,11 +118,34 @@ HEAD 直前までの関連コミット:
 
 チェックリストはマルゴエスだけ4系統。他店は従来の3系統。
 
+### 3.5 マルゴエスWeb版AIチャットの任意フードコート深掘り
+
+通常チャットは3.3の軽量briefで十分な背景をすでに使う。そのうえで、東京ドーム・イベント・天候・コート内順位・競合、または売上／客数の原因・戦略など、専門分析が有効な質問だけ次の確認を1回出す。
+
+- 現在のAI分析でも、東京ドームイベントやフードコート内順位の要約をかなり踏まえている。
+- 「さらに深掘りしてブーストする」は通常より数分かかる場合があり、複数AIを追加で呼ぶためAPI利用料金が高くなる。
+- 失敗・再試行した処理にも料金が発生する場合がある。
+- 「現在の分析で進める」または曖昧な返答では追加処理を起動しない。
+
+対象は `marugos` の通常Web版AIチャットだけ。単純な数値照会、他店、M-talk埋込みでは確認しない。
+
+同意後の配線:
+
+1. Journal確定データ分析（`action: chat`, `orchestrationMode: data`）と `POST /foodcourt/journal-deep-analysis` を `Promise.allSettled` で同時開始する。深掘り時は軽量briefを重ねない。
+2. dedicated routeは `marugos` と `CHAT_JOURNAL_AI_SCOPE` へ限定する。Journalが解決した期間だけを使い、会話履歴を渡さず、`foodcourt_qa_history` へ保存しない。既存 `/foodcourt/ask` の権限・履歴契約は変えない。
+3. 両方成功時だけ `ai-analyze` の `action: integrate_foodcourt` を別途呼ぶ。2本は非信頼の下書きであり、売上・客数・商品数値はJournalの確定データを正本にする。矛盾は隠さず明記する。
+4. 専門AI失敗時はJournal回答を警告付きで返す。最終統合失敗時は2本を未統合と明記して併記する。Journal失敗時は専門結果だけを店舗の完成分析にせず、不完全警告とローカル確定集計を返す。
+
+一時的な長大timeoutだけに頼らない。並列実行、共有deadline、入力上限、専用routeの実HTTP失敗でEdge制限内に収める。
+
 ## 4. 主なファイル
 
 - `public/jnm/jnl2txt.html`
 - `supabase/functions/_shared/pos_journal.ts`
 - `supabase/functions/admin-api/index.ts`
+- `supabase/functions/ai-analyze/index.ts`
+- `supabase/functions/_shared/journal_ai_privacy.ts`
+- `supabase/functions/_shared/foodcourt_compare.ts`
 - `supabase/functions/_shared/line_report_help_manual.ts`（JAI-01 / FCT-01。`npm run help:update` 済み）
 - `docs/JOURNAL-REPORT-FEATURES.md`
 - `SYSTEM_ARCHITECTURE_OVERVIEW.md`
@@ -146,6 +169,10 @@ DB migration は不要。既存テーブル `tokyo_dome_events` と `foodcourt_t
 
 - 本番マルゴエスで AI分析／チャットを1回実行し、プロンプトに「東京ドーム・フードコート背景」が出ること
 - 他店で同じ操作をしてブロックが付かないこと
+- qualifying質問で確認が1回だけ出て、拒否時はdeep routeを呼ばないこと
+- 同意時にJournalとdeep routeが並列になり、両成功後だけ `integrate_foodcourt` が動くこと
+- dedicated routeが未認証401、他店403、Q&A履歴非保存になること
+- 各部分失敗で完成扱い・正本が逆転しないこと
 - `foodcourt.html` 本体の動作回帰（今回は読んでいない。API追加のみ）
 - 保存済みレポートのハイボール再分類は、ジャーナル再読込後に確認
 
@@ -153,7 +180,7 @@ DB migration は不要。既存テーブル `tokyo_dome_events` と `foodcourt_t
 
 ## 6. デプロイ
 
-push すると GitHub Actions が GitHub Pages と Edge Functions をデプロイする。`admin-api` の journal-brief は Edge 側の反映待ち。Pages だけ先に出ると、クライアントは新APIを呼んで 404/スキップになり、fail-open で分析は通る。
+push すると GitHub Actions が GitHub Pages と Edge Functions をデプロイする。`admin-api` の journal-brief／journal-deep-analysis と `ai-analyze` の integrate_foodcourt は Edge 側の反映待ち。Pages だけ先に出た場合も通常の軽量分析は維持するが、深掘り同意後は部分失敗として警告表示になる。
 
 手動 `supabase functions deploy` は通常不要。
 
@@ -166,10 +193,13 @@ push すると GitHub Actions が GitHub Pages と Edge Functions をデプロ�
 5. コート日報の売上をジャーナル正本と合算・置換する。
 6. `docs/LINE-REPORT-JOURNAL-AI-MANUAL.md` を直接編集する。正本は `line_report_help_manual.ts`。
 7. Codex 側の `line-report-mtalk-release` を編集して Dropbox の正本と分岐させる。
+8. 深掘り確認前、拒否後、曖昧返答で追加AIを起動する。
+9. `/foodcourt/ask` をJournal権限へ開放したり、深掘り結果をQ&A履歴へ保存する。
+10. 2本を直列実行してEdge上限へ近づける、または専門結果だけを店舗完成分析として表示する。
 
 ## 8. 意図的にやっていないこと
 
-- 天気相関・来客予測・Q&A・週次レポート本文を Journal AI へ入れること
+- 来客予測・週次レポート本文を通常のJournal AIへ常時入れること
 - フードコート画面自体の改修
 - 他店 Journal への会場データ注入
 - 保存済みレポートへの自動再分類バックフィル

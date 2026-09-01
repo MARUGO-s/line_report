@@ -167,3 +167,39 @@ POS はコードを再利用することがある（例: 同じ下4桁で以前�
 | 質問プランナ・enrich・プロンプト | `public/jnm/jnl2txt.html`（`index.html` と同一 Twin） |
 | 商品インデックス／product-search | `supabase/functions/_shared/journal_product_index.ts` / `admin-api` |
 | Additive ルール（エージェント用） | `.cursor/rules/ai-enrichment-additive.mdc` |
+
+---
+
+## 9. マルゴエス限定のフードコート深掘り（任意）
+
+### 9.1 通常分析との境界
+
+- マルゴエス（`marugos`）の通常のAI分析／AIチャットは、`GET /foodcourt/journal-brief` の東京ドームイベントと直近コート内順位の軽量要約をすでに参照する。
+- Web版AIチャットで会場・競合要因の詳細が有効な質問だけ、期間・意図・ワイン単位の確認後に「さらに分析をブーストするか」を1回確認する。単純な数値照会、他店舗、M-talk埋込みでは確認しない。
+- 確認文には「現在の分析でもかなり踏まえている」こと、追加経路は通常より数分かかる場合があること、複数AIの追加呼出しでAPI利用料金が高くなること、失敗・再試行にも料金が発生しうることを明記する。
+- 「現在の分析で進める」または曖昧な返答では追加課金を開始せず、軽量briefを含む従来の分析を続ける。
+
+### 9.2 同意後の実行順
+
+```text
+Journal確定データ分析 ─┐
+                        ├─ 両方成功 ─→ ai-analyze integrate_foodcourt ─→ 1本の完成分析
+フードコート専門AI ───┘
+```
+
+1. `Promise.allSettled` でJournal分析と `POST /foodcourt/journal-deep-analysis` を同時開始する。同じAbortSignalを使い、片方の失敗だけで他方を打ち切らない。
+2. 深掘り時のJournal側は `orchestrationMode: data` とし、専門AI側と外部知見・反証を重複実行しない。軽量briefも重ねて注入しない。
+3. 両レポート成功後にだけ `action: integrate_foodcourt` を別リクエストで呼ぶ。2本は非信頼の分析下書きとして扱い、確定数値はJournalの `salesData` を正本にする。
+4. 専門経路は通常の `/foodcourt/ask` を開放せず、専用routeだけをJournal権限へ許可する。期間はJournalが解決した期間をサーバへ渡し、会話履歴を渡さず、`foodcourt_qa_history` に保存しない。
+
+### 9.3 部分失敗
+
+| 状態 | 表示 |
+|------|------|
+| 2本成功・統合成功 | 統合AIの完成分析だけを表示 |
+| Journal成功・専門AI失敗 | Journal回答を表示し、専門深掘り失敗を明記 |
+| 2本成功・統合失敗 | 2本を「未統合」と明記して併記。Journal数値が正本 |
+| Journal失敗・専門AI成功 | 専門結果だけを完成分析にせず、不完全警告＋ローカル確定集計 |
+| 両方失敗 | ローカル確定集計へフォールバック |
+
+タイムアウトを一時的に延ばし続けるのではなく、並列化、共有deadline、入力上限、専用HTTP失敗契約でEdge実行時間内に収める。

@@ -245,7 +245,7 @@ test("reservation-based visitor structure is limited to the actual store and imp
   )
   assert.match(
     admin,
-    /buildJournalAiServerPolicy\("chat", locationBlock, canonicalStoreKey \|\| ""\)/,
+    /buildJournalAiServerPolicy\([\s\S]{0,180}isFoodcourtIntegration \? "integrate_foodcourt" : "chat"[\s\S]{0,180}canonicalStoreKey \|\| ""/,
   )
   assert.doesNotMatch(
     admin,

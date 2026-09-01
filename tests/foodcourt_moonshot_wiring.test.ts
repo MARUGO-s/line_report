@@ -86,11 +86,13 @@ test('specialists and integrators have production-safe timeout budgets', () => {
   assert.equal(dailyCritic.length, 1)
 })
 
-test('evaluator avoids all-failed by keeping a dedicated deadline and Claude→Gemini→Groq order', () => {
+test('evaluator keeps provider fallbacks without extending the shared request deadline', () => {
   assert.match(source, /export function buildFoodCourtProviderOrder/)
   assert.match(source, /export function foodCourtEvalDeadlineAt/)
   assert.match(source, /preferred === 'claude'[\s\S]{0,80}return \['claude',\s*'gemini',\s*'groq'\]/)
   assert.match(source, /preferred === 'groq'[\s\S]{0,80}return \['groq',\s*'gemini'\]/)
+  assert.match(source, /return Math\.min\(maxBudget, sharedDeadlineAt\)/)
+  assert.doesNotMatch(source, /Math\.max\(minBudget, sharedDeadlineAt\)/)
   assert.match(source, /deadlineAt:\s*foodCourtEvalDeadlineAt\(params\.deadlineAt\)/)
   assert.match(source, /perProviderMs:\s*18000/)
   assert.match(source, /FALLBACK_SLOT_MS\s*=\s*10_000/)
