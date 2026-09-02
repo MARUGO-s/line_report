@@ -48,12 +48,13 @@ test('M-talk image posts are archived in the existing LINE media library', async
 });
 
 test('M-talk menu image reuses the first vision pass, retries only low-quality menus, and requires an authenticated decision', async () => {
-  const [chat, dispatch, bridge, api, migration] = await Promise.all([
+  const [chat, dispatch, bridge, api, migration, fkMigration] = await Promise.all([
     read('public/chat.html'),
     read('supabase/functions/chat-knowledge/index.ts'),
     read('supabase/functions/_shared/chat_store_file_bridge.ts'),
     read('supabase/functions/admin-api/index.ts'),
     read('supabase/migrations/20260911040000_chat_menu_knowledge_drafts.sql'),
+    read('supabase/migrations/20260911041000_chat_menu_knowledge_draft_fk_indexes.sql'),
   ]);
 
   assert.match(bridge, /const menuPrompt = \[/);
@@ -96,4 +97,7 @@ test('M-talk menu image reuses the first vision pass, retries only low-quality m
   assert.match(migration, /enable row level security/);
   assert.match(migration, /revoke all on table public\.chat_menu_knowledge_drafts from public, anon, authenticated/);
   assert.match(migration, /unique \(source_message_id\)/);
+  for (const column of ['card_message_id', 'requested_by', 'resolved_by', 'result_document_id']) {
+    assert.match(fkMigration, new RegExp(`chat_menu_knowledge_drafts \\(${column}\\)`));
+  }
 });

@@ -4,12 +4,12 @@
 - cluster-only mode — file stats not available
 
 ## Summary
-- 6181 nodes · 12719 edges · 672 communities (278 shown, 234 thin omitted)
+- 6182 nodes · 12719 edges · 673 communities (278 shown, 234 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 189 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4dff1159`
+- Built from commit: `a2cbf469`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -598,7 +598,7 @@
 - **LINE Chat Report Confirmation Metaphor** — public_icons_logo_mark_chat_bubble, public_icons_logo_mark_bar_chart, public_icons_logo_mark_success_badge [INFERRED 0.85]
 - **LINE Report Visual Product Pillars** — public_icons_logo_mark_speech_bubble, public_icons_logo_mark_ascending_bar_chart, public_icons_logo_mark_approval_check_badge, public_icons_logo_mark_line_report_product [INFERRED 0.85]
 
-## Communities (672 total, 234 thin omitted)
+## Communities (673 total, 234 thin omitted)
 
 ### Community 0 - "admin-api/index.ts"
 Cohesion: 0.02
@@ -1714,7 +1714,7 @@ Nodes (3): apiFetch, loadReviews, openNearbySearch
 
 ## Knowledge Gaps
 - **1084 isolated node(s):** `AdminAuthenticationResult`, `AiUsageProviderBucket`, `AiUsageStoreRow`, `AppError`, `AuthenticatedAdmin` (+1079 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2105 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2106 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **234 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Work-memory lessons
