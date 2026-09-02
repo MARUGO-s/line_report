@@ -9,7 +9,7 @@ import {
   loadChatStoreBot,
   resolveRoomStoreKey,
 } from "../_shared/chat_store_file_bridge.ts"
-import { postChatCard, postChatCardIndependent, type ChatCardSection } from "../_shared/chat_bridge.ts"
+import { postChatCard, postChatCardIndependent, type ChatCard, type ChatCardSection } from "../_shared/chat_bridge.ts"
 import {
   ensureMtalkRoomSettings,
   loadMtalkRoomFlags,
@@ -27,6 +27,10 @@ import {
   processMtalkDailySalesFile,
   replyDailySalesTemplateDownload,
 } from "../_shared/mtalk_daily_sales_import.ts"
+import {
+  buildMtalkMenuKnowledgeCard,
+  type MtalkMenuKnowledgeAnalysis,
+} from "../_shared/mtalk_menu_knowledge.ts"
 
 const SETTINGS_TRIGGER_WORDS = new Set(["設定", "権限設定", "せってい", "ルーム設定"])
 // 実ファイルは public/room_settings.html。M-talk用の別ページは存在しないので、
@@ -207,6 +211,90 @@ async function registerQuotedImage(
     console.warn("chat-knowledge save failed:", saveRes.status, await saveRes.text())
     return false
   }
+  return true
+}
+
+/** 解析済みメニューを確認待ち下書きにし、店舗Botのカードとして返す。 */
+async function offerMenuKnowledgeRegistration(
+  supabase: DbClient,
+  params: {
+    storeKey: string
+    groupId: number
+    sourceMessageId: number
+    requestedBy: string
+    imagePath: string
+    contentType: string
+    analysis: MtalkMenuKnowledgeAnalysis
+    asUser?: { id: string; username: string } | null
+  },
+): Promise<boolean> {
+  const { data: existing, error: existingError } = await supabase
+    .from("chat_menu_knowledge_drafts")
+    .select("id, status, card_message_id, result_document_id")
+    .eq("source_message_id", params.sourceMessageId)
+    .maybeSingle()
+  if (existingError) {
+    console.warn("chat menu draft lookup failed:", existingError.message)
+    return false
+  }
+  if (existing?.card_message_id) return true
+
+  let draft = existing
+  if (!draft) {
+    const { data, error } = await supabase
+      .from("chat_menu_knowledge_drafts")
+      .insert({
+        group_id: params.groupId,
+        source_message_id: params.sourceMessageId,
+        requested_by: params.requestedBy,
+        store_partition_key: params.storeKey,
+        image_storage_path: params.imagePath,
+        image_mime_type: params.contentType,
+        analysis: params.analysis,
+      })
+      .select("id, status, card_message_id, result_document_id")
+      .maybeSingle()
+    if (error || !data) {
+      if (String(error?.code ?? "") === "23505") {
+        const { data: raced } = await supabase
+          .from("chat_menu_knowledge_drafts")
+          .select("id, status, card_message_id, result_document_id")
+          .eq("source_message_id", params.sourceMessageId)
+          .maybeSingle()
+        draft = raced
+      } else {
+        console.warn("chat menu draft insert failed:", error?.message ?? "missing row")
+        return false
+      }
+    } else {
+      draft = data
+    }
+  }
+  const draftId = String(draft?.id ?? "").trim()
+  if (!draftId) return false
+  if (draft?.card_message_id) return true
+
+  const posted = await postChatCard(supabase, {
+    groupId: params.groupId,
+    kind: "menu_knowledge_draft",
+    text: `AIがメニュー画像を解析しました: ${params.analysis.title}（${params.analysis.menu_item_count}品）`,
+    cards: [buildMtalkMenuKnowledgeCard({
+      draftId,
+      analysis: params.analysis,
+      status: "pending",
+    })],
+    asUser: params.asUser,
+  })
+  if (!posted.ok || !posted.messageId) {
+    console.warn("chat menu card post failed:", posted.error ?? "missing message id")
+    return false
+  }
+  const { error: linkError } = await supabase
+    .from("chat_menu_knowledge_drafts")
+    .update({ card_message_id: posted.messageId, updated_at: new Date().toISOString() })
+    .eq("id", draftId)
+    .is("card_message_id", null)
+  if (linkError) console.warn("chat menu card link failed:", linkError.message)
   return true
 }
 
@@ -528,6 +616,21 @@ async function handleDispatch(req: Request, supabase: DbClient): Promise<Respons
     })
     if (flags.image_analysis_reply_enabled === false) {
       return json({ ok: true, processed: true, kind: result.kind, reply: false }, 200)
+    }
+    if (result.menuKnowledge) {
+      const offered = await offerMenuKnowledgeRegistration(supabase, {
+        storeKey,
+        groupId,
+        sourceMessageId: messageId,
+        requestedBy: String(message.user_id || ""),
+        imagePath: image.path,
+        contentType: file.type || "image/jpeg",
+        analysis: result.menuKnowledge,
+        asUser: storeBot,
+      })
+      if (offered) {
+        return json({ ok: true, processed: true, kind: "menu_knowledge_draft" }, 200)
+      }
     }
     await postStoreRoomLineStyleReply(supabase, groupId, result, storeBot)
     return json({ ok: true, processed: true, kind: result.kind }, 200)

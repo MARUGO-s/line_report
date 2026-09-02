@@ -1,5 +1,15 @@
 # LINE Report Project Progress
 
+### 2026-09-02 - M-talkからメニュー画像を確認付きでJournal資料へ登録
+
+- Request: M-talkの入力欄へ画像をドロップし、メニューならJournal Report「資料」タブと同等の精度で商品名・説明・価格を抽出して返信し、カードボタンで登録／見送りを選べるようにする。
+- Analysis: 既存の店舗ルーム画像を無条件で2回目のAIへ送る構成は、非メニューまで外部送信回数と料金を増やす。既存の1回目の画像判定を`receipt / reservation / menu / general`へ拡張し、非メニューはそこで終了。メニューと判定したのに商品・価格が不足する場合だけ、Journalと同じ品質ゲートで1回再確認する。
+- Prompt parity: Journal資料画面と同じ共通資料規約、共通メニュー規約、認証済み店舗専用規約を既存画像解析へ加算し、`normalizeKnowledgeMenuItems`、`buildStructuredKnowledgeMenuBody`、`assessKnowledgeMenuQuality`も共用する。MARUGO S専用ワイン表規約は`marugos`ルームだけに適用する。
+- Confirmation: 解析結果はM-talkの店舗Botカードへ返し、「この内容で資料へ登録」「今回は登録しない」のサーバー発行ボタンを表示する。登録前は専用下書きだけを保存し、資料テーブル・RAG・資料Storageには書かない。
+- Security: 決定APIはM-talk JWT、画像の投稿者本人、送信権限、ルーム店舗対応、下書きの店舗・期限・状態を毎回検証する。下書きテーブルはservice-role専用RLS、元画像パスは同一ルーム接頭辞を必須とし、SHA-256重複防止、非公開Storage、既存`saveStoreKnowledge`経路を維持する。
+- Reliability: 解決ボタンの二重実行をUIとDB状態遷移の両方で防止。登録後のカード同期に失敗しても、資料行が参照するStorage原本をエラー処理で削除しない。処理中に別ルームへ切り替えても開始時のgroup_idを固定する。
+- Tests/docs: メニューJSON・カード状態・非メニュー拒否、単一AI呼出し、認証・店舗境界、RLS、フロント決定APIを回帰テストへ追加。M-talk／Journal資料／プロンプトブロック／統合AIマニュアルを同期する。
+
 ### 2026-09-02 - メニュー画像を商品名・価格付きのRAG資料へ構造化
 
 - Symptom: 5SのドリンクメニューHEICを資料解析しても、概要とタグだけが本文へ入り、画像上の多数の商品名・価格がRAGへ保存されなかった。

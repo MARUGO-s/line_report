@@ -1877,6 +1877,11 @@ body.modal-open .input-area {
   background: #eee;
   color: #333;
 }
+.msg-card-action:disabled {
+  opacity: .58;
+  cursor: wait;
+  filter: saturate(.55);
+}
 
 .input-area {
   position: relative;

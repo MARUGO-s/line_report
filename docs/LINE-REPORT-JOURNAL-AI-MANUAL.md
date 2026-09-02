@@ -19,7 +19,7 @@
 | RSV 予約・カレンダー | Gmail自動取込、予約スクショ、予約表、本日の予約 | RSV-01 予約メール・スクショ・予約表 |
 | OPS 店舗運用・権限・小口 | ルーム設定、配信、検索、メディア、小口現金とトラブル対応 | OPS-01 ルーム設定・権限・セルフ設定<br>OPS-02 検索・メディア・予定の探し方<br>OPS-03 小口現金・経費・出金<br>OPS-04 メディア・文書ライブラリと閲覧権限 |
 | JRN Journal Report基本・取込 | 電子ジャーナル取込、保存レポート、店舗情報と確定集計 | JRN-01 Journal Reportの目的と画面<br>JRN-02 ジャーナル取込・保存レポート・原本<br>JRN-03 確定集計・カテゴリ・ランチ／ディナー<br>JRN-04 店舗情報・営業カレンダー・ワインml<br>JRN-05 LINE Report電子ジャーナルとJournal Reportの違い |
-| KNW 資料・#メモ・店舗情報 | 資料タブ、LINE #メモ、施策・メニュー・営業カレンダー | KNW-01 資料タブ・施策・メニュー資料<br>KNW-02 LINE #メモ・#日報・添付資料登録 |
+| KNW 資料・#メモ・店舗情報 | 資料タブ、LINE #メモ、施策・メニュー・営業カレンダー | KNW-01 資料タブ・施策・メニュー資料<br>KNW-02 LINE #メモ・M-talkメニュー画像・添付資料登録 |
 | JAI Journal AI分析・チャット | 確定集計、商品・コード・コース、比較、予約、予測、PDF | JAI-01 標準AI分析の根拠と出力<br>JAI-02 AIチャットで質問できる内容<br>JAI-03 商品・銘柄・商品コード・コース分析<br>JAI-04 予約・飛び込み・売上予測・MAPE<br>JAI-05 履歴・ゴミ箱・管理者機能 |
 | FCT フードコート分析・日報・予測 | テナント実績、イベント・天気、日報、複数AI、来客予測と進化 | FCT-01 フードコート分析の全体像とデータ<br>FCT-02 フードコート複数AI・Q&A・サマリー<br>FCT-03 来客予測・MAPE・AI学習進化<br>FCT-04 フードコート日報・日次履歴・週次報告<br>FCT-05 品質評価・RAG・蒸留・プロンプト候補<br>FCT-06 イベント・天気・週次配信・日本戦PVアラート |
 | REV 口コミ・競合分析 | 自店舗Google口コミ、周辺競合、評価・件数・競合圧力 | REV-01 自店舗Google口コミ<br>REV-02 周辺競合・口コミ・競合圧力 |
@@ -348,19 +348,21 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **主な実装根拠:** `public/jnm/jnl2txt.html` / `supabase/functions/_shared/knowledge_file_extract.ts` / `supabase/functions/admin-api/index.ts` / `docs/JOURNAL-STORE-KNOWLEDGE.md`
 
-### KNW-02 LINE #メモ・#日報・添付資料登録
+### KNW-02 LINE #メモ・M-talkメニュー画像・添付資料登録
 
-**要点:** LINEから店舗資料へ現場メモや添付を登録する方法を説明する。
+**要点:** LINEやM-talkから店舗資料へ現場メモ・メニュー画像・添付を登録する方法を説明する。
 
 - 「#メモ」「#日報」「#note」は同義です。本文付きで送ると店舗資料へ自動分類して保存します。
 - 画像・PDF等を資料登録するときは、先に添付を送り、そのメッセージへ引用返信で「#メモ」と送ります。画像だけでは本文タグがないため資料登録されません。
+- M-talkの店舗Botがいるルームへメニュー画像を送ると、1回目の通常画像解析でメニューかを判定し、Journal Report資料画面と同じ共通・メニュー・店舗専用規約で商品名、価格、説明を抽出します。メニューで商品・価格が不足する場合だけ1回読み直し、メニューでない画像には追加解析も資料登録カードも出しません。
+- メニューと判定した場合は、解析結果と「この内容で資料へ登録」「今回は登録しない」をM-talkへ返します。登録ボタンを押すまで店舗資料には保存せず、登録後はJournal Reportの資料タブで編集できます。HEICはM-talk送信時にJPEGへ変換して解析・保存します。
 - 空の「#メモ」だけでは登録せず、使い方ガイドを返します。
 - 送信日時を資料期間として保存し、対象期間と重なる分析へ添付します。他月の投稿を類似度だけで混ぜません。
 - 成功後の資料はJournal Reportの資料タブで閲覧・編集します。LINE上だけで資料一覧は表示しません。
 
-**検索語:** #メモ / ＃メモ / #日報 / #note / lineメモ / 現場日報 / 引用返信 / 画像メモ / pdfメモ / 資料へ登録 / 登録されない
+**検索語:** #メモ / ＃メモ / #日報 / #note / lineメモ / 現場日報 / 引用返信 / 画像メモ / pdfメモ / 資料へ登録 / 登録されない / m-talkメニュー / メニュー画像 / 登録する / 登録しない
 
-**主な実装根拠:** `supabase/functions/chat-knowledge/index.ts` / `supabase/functions/line-webhook/index.ts` / `supabase/functions/_shared/knowledge_memo_tag.ts` / `supabase/functions/admin-api/index.ts`
+**主な実装根拠:** `public/chat.html` / `supabase/functions/chat-knowledge/index.ts` / `supabase/functions/_shared/chat_store_file_bridge.ts` / `supabase/functions/_shared/mtalk_menu_knowledge.ts` / `supabase/functions/line-webhook/index.ts` / `supabase/functions/_shared/knowledge_memo_tag.ts` / `supabase/functions/admin-api/index.ts`
 
 ## JAI Journal AI分析・チャット
 
@@ -754,11 +756,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 41件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 97件
+- 共有TypeScriptモジュール: 98件
 - 補助・運用・レガシーコード: 40件
-- admin-api静的ルート: 141件
-- SQL migrations: 297件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 88件
+- admin-api静的ルート: 142件
+- SQL migrations: 298件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 89件
 
 ### 公開画面・ブラウザコード
 
@@ -890,6 +892,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/mtalk_casual_chat.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_daily_sales_import.ts` | SAL-05 / SAL-07 / OPS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_help_manual.ts` | OPS-01 / OPS-02 / JAI-02 / DEV-04 |
+| `supabase/functions/_shared/mtalk_menu_knowledge.ts` | KNW-01 / KNW-02 / OPS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_room_id.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_room_settings.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_schedule_register.ts` | RSV-01 / JAI-04 / DEV-02 |
@@ -1006,6 +1009,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/chat-media-archive` | OPS-02 / OPS-04 / DEV-02 |
 | `/chat-media-link` | OPS-02 / OPS-04 / DEV-02 |
 | `/chat-media-view` | OPS-02 / OPS-04 / DEV-02 |
+| `/chat-menu-knowledge-decision` | KNW-01 / KNW-02 / OPS-01 / DEV-02 |
 | `/chat-room-config` | OPS-01 / DEV-02 |
 | `/chat-room-purge` | OPS-01 / DEV-02 |
 | `/chat-schedule` | RSV-01 / OPS-01 / DEV-02 |

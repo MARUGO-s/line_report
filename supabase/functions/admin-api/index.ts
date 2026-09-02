@@ -236,9 +236,14 @@ import JSZip from "https://esm.sh/jszip@3.10.1"
 import { isMtalkSyntheticRoomId, mtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import {
   ensureMtalkRoomSettings,
+  loadMtalkStoreBot,
   mtalkUserCanAccessStore,
   resolveMtalkRoomStoreKey,
 } from "../_shared/mtalk_room_settings.ts"
+import {
+  buildMtalkMenuKnowledgeCard,
+  normalizeMtalkMenuKnowledgeAnalysis,
+} from "../_shared/mtalk_menu_knowledge.ts"
 
 const ADMIN_SURFACE_LEGACY = "legacy"
 const ADMIN_SURFACE_LINE_REPORT = "line_report"
@@ -1563,6 +1568,16 @@ Deno.serve(async (req, info) => {
   if (req.method === "POST" && path === "/chat-media-archive") {
     try {
       return json(await archiveChatMedia(req, workReq, supabase), 200)
+    } catch (e) {
+      const err = asAppError(e)
+      return json({ error: err.message }, err.status)
+    }
+  }
+  // M-talkのAIメニュー解析カード。本人JWT＋現在のルーム送信権限＋店舗所属を
+  // 毎回確認し、登録ボタンを押した時だけ店舗ナレッジへ原本と解析結果を移す。
+  if (req.method === "POST" && path === "/chat-menu-knowledge-decision") {
+    try {
+      return json(await decideChatMenuKnowledge(req, workReq, supabase), 200)
     } catch (e) {
       const err = asAppError(e)
       return json({ error: err.message }, err.status)
@@ -5988,6 +6003,322 @@ async function archiveChatMedia(
     throw { status: 500, message: `メディアライブラリへの保存に失敗しました: ${result.reason ?? "unknown error"}` } satisfies AppError
   }
   return { saved: true, room_id: room.roomId }
+}
+
+const MTALK_MENU_DRAFT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function mtalkMenuKnowledgeImageFileName(sourceMessageId: unknown, mimeType: string): string {
+  const extension = new Map<string, string>([
+    ["image/png", "png"],
+    ["image/webp", "webp"],
+    ["image/gif", "gif"],
+    ["image/heic", "heic"],
+    ["image/heif", "heif"],
+  ]).get(String(mimeType || "").toLowerCase()) || "jpg"
+  return `mtalk_menu_${toNonNegativeInteger(sourceMessageId) || "image"}.${extension}`
+}
+
+async function updateChatMenuKnowledgeCard(
+  supabase: ReturnType<typeof createClient<any>>,
+  draft: Record<string, unknown>,
+  status: "registered" | "declined" | "failed",
+  analysis: NonNullable<ReturnType<typeof normalizeMtalkMenuKnowledgeAnalysis>>,
+  documentId: number | null = null,
+): Promise<void> {
+  const cardMessageId = toNonNegativeInteger(draft.card_message_id)
+  const groupId = toNonNegativeInteger(draft.group_id)
+  if (!cardMessageId || !groupId) return
+  const draftId = toSafeString(draft.id)
+  const card = buildMtalkMenuKnowledgeCard({ draftId, analysis, status, documentId })
+  const content = status === "registered"
+    ? `メニュー資料を登録しました: ${analysis.title}`
+    : status === "declined"
+    ? `今回はメニュー資料へ登録しませんでした: ${analysis.title}`
+    : `メニュー資料の登録に失敗しました: ${analysis.title}`
+  const bot = await loadMtalkStoreBot(supabase, toSafeString(draft.store_partition_key))
+  if (!bot) {
+    console.warn("chat menu card replacement skipped: store bot is missing")
+    return
+  }
+  // chat_guard_message_edit intentionally freezes card payloads, including for
+  // service-role calls. Preserve that invariant: insert the resolved card first,
+  // repoint the draft, then remove the old interactive card.
+  const { data: replacement, error: insertError } = await supabase
+    .from("chat_messages")
+    .insert({
+      group_id: groupId,
+      user_id: bot.id,
+      username: bot.username,
+      content: content.slice(0, 2000),
+      kind: "card",
+      payload: { v: 1, kind: "menu_knowledge_draft", cards: [card] },
+    })
+    .select("id")
+    .single()
+  if (insertError || !toNonNegativeInteger(replacement?.id)) {
+    console.warn("chat menu card replacement failed:", insertError?.message || "missing message id")
+    return
+  }
+  const replacementId = toNonNegativeInteger(replacement.id)
+  const { error: draftError } = await supabase
+    .from("chat_menu_knowledge_drafts")
+    .update({ card_message_id: replacementId, updated_at: new Date().toISOString() })
+    .eq("id", draftId)
+    .eq("group_id", groupId)
+  if (draftError) {
+    console.warn("chat menu draft card pointer update failed:", draftError.message)
+    return
+  }
+  const { error: deleteError } = await supabase
+    .from("chat_messages")
+    .delete()
+    .eq("id", cardMessageId)
+    .eq("group_id", groupId)
+    .eq("kind", "card")
+  if (deleteError) console.warn("old chat menu card removal failed:", deleteError.message)
+}
+
+async function postChatMenuKnowledgeDecisionReply(
+  supabase: ReturnType<typeof createClient<any>>,
+  groupId: number,
+  storeKey: string,
+  text: string,
+): Promise<void> {
+  const bot = await loadMtalkStoreBot(supabase, storeKey)
+  if (!bot) return
+  const { error } = await supabase.from("chat_messages").insert({
+    group_id: groupId,
+    user_id: bot.id,
+    username: bot.username,
+    content: text.slice(0, 2000),
+    kind: "text",
+  })
+  if (error) console.warn("chat menu decision reply failed:", error.message)
+}
+
+async function decideChatMenuKnowledge(
+  req: Request,
+  workReq: Request,
+  supabase: ReturnType<typeof createClient<any>>,
+): Promise<Record<string, unknown>> {
+  const body = await parseJson(workReq)
+  if (!isRecord(body)) throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+  const groupId = toNonNegativeInteger(body.group_id)
+  const draftId = toSafeString(body.draft_id).trim().toLowerCase()
+  const decision = toSafeString(body.decision).trim().toLowerCase()
+  if (!groupId || !MTALK_MENU_DRAFT_UUID_RE.test(draftId) || !["register", "decline"].includes(decision)) {
+    throw { status: 400, message: "group_id, draft_id and decision are required." } satisfies AppError
+  }
+  const userId = await authenticateChatMember(req, supabase, groupId, "send")
+  const room = await resolveMtalkRoomStoreKey(supabase, groupId)
+  if (!room.storeKey || room.ambiguous) {
+    throw { status: 403, message: "このトークの店舗を一意に確認できません。" } satisfies AppError
+  }
+  const storeKey = await requireMtalkRoomStoreBinding(supabase, userId, groupId, room.storeKey)
+
+  const { data: rawDraft, error: draftError } = await supabase
+    .from("chat_menu_knowledge_drafts")
+    .select("*")
+    .eq("id", draftId)
+    .eq("group_id", groupId)
+    .maybeSingle()
+  if (draftError) {
+    throw { status: 500, message: `解析下書きの確認に失敗しました: ${draftError.message}` } satisfies AppError
+  }
+  const draft = isRecord(rawDraft) ? rawDraft : null
+  if (!draft || toSafeString(draft.store_partition_key).toLowerCase() !== storeKey.toLowerCase()) {
+    throw { status: 404, message: "メニュー解析の下書きが見つかりません。" } satisfies AppError
+  }
+  if (toSafeString(draft.requested_by) !== userId) {
+    throw { status: 403, message: "このメニュー解析を操作できるのは画像の投稿者本人だけです。" } satisfies AppError
+  }
+  const analysis = normalizeMtalkMenuKnowledgeAnalysis(draft.analysis)
+  if (!analysis) {
+    throw { status: 422, message: "メニュー解析結果が不完全なため登録できません。" } satisfies AppError
+  }
+  const currentStatus = toSafeString(draft.status)
+  if (currentStatus === "registered") {
+    return {
+      ok: true,
+      status: "registered",
+      document_id: toNonNegativeInteger(draft.result_document_id),
+      already_resolved: true,
+    }
+  }
+  if (currentStatus === "declined") {
+    return { ok: true, status: "declined", already_resolved: true }
+  }
+  if (new Date(toSafeString(draft.expires_at)).getTime() <= Date.now()) {
+    throw { status: 410, message: "この確認は期限切れです。画像をもう一度送信してください。" } satisfies AppError
+  }
+
+  if (decision === "decline") {
+    const now = new Date().toISOString()
+    const { data: resolved, error } = await supabase
+      .from("chat_menu_knowledge_drafts")
+      .update({
+        status: "declined",
+        resolved_by: userId,
+        resolved_at: now,
+        updated_at: now,
+        last_error: null,
+      })
+      .eq("id", draftId)
+      .in("status", ["pending", "failed"])
+      .select("id")
+      .maybeSingle()
+    if (error) throw { status: 500, message: `見送り処理に失敗しました: ${error.message}` } satisfies AppError
+    if (!resolved) return { ok: true, status: currentStatus, already_resolved: true }
+    const updatedDraft = { ...draft, status: "declined", resolved_by: userId }
+    await updateChatMenuKnowledgeCard(supabase, updatedDraft, "declined", analysis)
+    await postChatMenuKnowledgeDecisionReply(
+      supabase,
+      groupId,
+      storeKey,
+      `今回は「${analysis.title}」を店舗資料へ登録しませんでした。画像はM-talkのメディアには残ります。`,
+    )
+    return { ok: true, status: "declined" }
+  }
+
+  const claimTime = new Date().toISOString()
+  const { data: claimed, error: claimError } = await supabase
+    .from("chat_menu_knowledge_drafts")
+    .update({
+      status: "registering",
+      resolved_by: userId,
+      updated_at: claimTime,
+      last_error: null,
+    })
+    .eq("id", draftId)
+    .in("status", ["pending", "failed"])
+    .select("id")
+    .maybeSingle()
+  if (claimError) throw { status: 500, message: `登録開始に失敗しました: ${claimError.message}` } satisfies AppError
+  if (!claimed) {
+    throw { status: 409, message: "このメニュー資料は別の操作で処理中です。" } satisfies AppError
+  }
+
+  let uploadedPath = ""
+  let persistedDocumentId = 0
+  try {
+    const imagePath = toSafeString(draft.image_storage_path).trim()
+    if (!imagePath.startsWith(`groups/${groupId}/`)) {
+      throw { status: 400, message: "画像保存先が不正です。" } satisfies AppError
+    }
+    const { data: blob, error: downloadError } = await supabase.storage
+      .from("chat-images")
+      .download(imagePath)
+    if (downloadError || !blob) {
+      throw { status: 500, message: "元画像を取得できませんでした。" } satisfies AppError
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    if (!bytes.length || bytes.length > STORE_KNOWLEDGE_MAX_FILE_BYTES) {
+      throw { status: 400, message: "元画像のサイズが資料登録の上限外です。" } satisfies AppError
+    }
+    const digest = await crypto.subtle.digest("SHA-256", bytes)
+    const sha256Hex = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from("store_knowledge_documents")
+      .select("id")
+      .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(storeKey))
+      .eq("sha256_hex", sha256Hex)
+      .eq("is_active", true)
+      .maybeSingle()
+    if (duplicateError) {
+      throw { status: 500, message: `重複確認に失敗しました: ${duplicateError.message}` } satisfies AppError
+    }
+    let documentId = toNonNegativeInteger(duplicate?.id)
+    if (!documentId) {
+      const sourceFileName = imagePath.split("/").at(-1) || `mtalk_menu_${draft.source_message_id}.jpg`
+      const mimeType = normalizeStoreKnowledgeUploadMime(
+        sourceFileName,
+        toSafeString(draft.image_mime_type) || blob.type || "image/jpeg",
+      )
+      const knowledgeFileName = mtalkMenuKnowledgeImageFileName(draft.source_message_id, mimeType)
+      const safetyError = await validateStoreKnowledgePayloadSafety("image", bytes)
+      if (safetyError) throw { status: 400, message: safetyError } satisfies AppError
+      uploadedPath = `${normalizeStoreKnowledgeStoreKey(storeKey)}/${sha256Hex.slice(0, 12)}_${Date.now()}_${knowledgeFileName}`
+      const { error: uploadError } = await supabase.storage
+        .from(STORE_KNOWLEDGE_BUCKET)
+        .upload(uploadedPath, bytes, { contentType: mimeType, upsert: false })
+      if (uploadError) {
+        throw { status: 500, message: `画像原本の保存に失敗しました: ${uploadError.message}` } satisfies AppError
+      }
+      const { data: actor } = await supabase
+        .from("chat_users")
+        .select("username")
+        .eq("id", userId)
+        .maybeSingle()
+      const saved = await saveStoreKnowledge(supabase as unknown as ReturnType<typeof createClient>, {
+        store_key: storeKey,
+        category: "メニュー",
+        title: analysis.title,
+        summary: analysis.summary,
+        body_text: analysis.body_text,
+        tags: ["M-talk投稿", "AI画像解析", ...analysis.tags],
+        storage_bucket: STORE_KNOWLEDGE_BUCKET,
+        storage_path: uploadedPath,
+        original_file_name: knowledgeFileName,
+        mime_type: mimeType,
+        file_size_bytes: bytes.length,
+        sha256_hex: sha256Hex,
+        source_type: "line_post",
+        created_by: `${toSafeString(actor?.username) || "M-talk"}（M-talk）`,
+      }, null, true)
+      documentId = toNonNegativeInteger(saved.id)
+    }
+    if (!documentId) throw { status: 500, message: "資料IDを確認できませんでした。" } satisfies AppError
+    // From this point the document is durable. Never remove its Storage object from
+    // the error path even if synchronizing the M-talk draft/card later fails.
+    persistedDocumentId = documentId
+
+    const resolvedAt = new Date().toISOString()
+    const { error: resolvedError } = await supabase
+      .from("chat_menu_knowledge_drafts")
+      .update({
+        status: "registered",
+        result_document_id: documentId,
+        resolved_by: userId,
+        resolved_at: resolvedAt,
+        updated_at: resolvedAt,
+        last_error: null,
+      })
+      .eq("id", draftId)
+      .eq("status", "registering")
+    if (resolvedError) {
+      throw { status: 500, message: `登録結果の保存に失敗しました: ${resolvedError.message}` } satisfies AppError
+    }
+    const updatedDraft = { ...draft, status: "registered", result_document_id: documentId }
+    await updateChatMenuKnowledgeCard(supabase, updatedDraft, "registered", analysis, documentId)
+    await postChatMenuKnowledgeDecisionReply(
+      supabase,
+      groupId,
+      storeKey,
+      `✅ 「${analysis.title}」を店舗ナレッジ（資料）へ登録しました。Journal Reportの「資料」から確認できます。`,
+    )
+    return { ok: true, status: "registered", document_id: documentId }
+  } catch (error) {
+    if (uploadedPath && !persistedDocumentId) {
+      await supabase.storage.from(STORE_KNOWLEDGE_BUCKET).remove([uploadedPath]).catch(() => {})
+    }
+    const appError = asAppError(error)
+    const failedAt = new Date().toISOString()
+    await supabase
+      .from("chat_menu_knowledge_drafts")
+      .update({
+        status: "failed",
+        result_document_id: persistedDocumentId || null,
+        updated_at: failedAt,
+        last_error: appError.message.slice(0, 1000),
+      })
+      .eq("id", draftId)
+      .eq("status", "registering")
+    await updateChatMenuKnowledgeCard(supabase, draft, "failed", analysis)
+    throw appError
+  }
 }
 
 /**

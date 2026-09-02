@@ -136,9 +136,20 @@ Geminiには`responseMimeType: application/json`と`responseSchema`を同時に�
 - commit: `747dda9`（`fix(knowledge): add store-specific menu extraction prompts`）
 - 本番: `admin-api` v1166、GitHub Pages / Edge Functionsともデプロイ成功
 
+## 9. M-talk画像解析での再利用（2026-09-02）
+
+M-talkの店舗ルーム画像は、レシート・予約・一般画像を判定してきた既存の1回目のGemini呼出しへ、
+この文書の3ブロックを加算する。メニューと判定された応答だけを`menu_items`として正規化し、
+`buildStructuredKnowledgeMenuBody`と`assessKnowledgeMenuQuality`へ通す。商品・価格が不足するメニューだけ、同じGeminiと専用ブロックで1回再確認する。
+非メニュー画像は追加送信せず、外部送信回数・料金・情報露出面を増やさない。
+
+解析結果は即時保存せず、M-talkの店舗Botカードへ表示する。利用者が登録ボタンを押すと、
+認証・ルーム店舗スコープを再確認したサーバーだけが既存`saveStoreKnowledge`を呼び、RAGを生成する。
+このため、抽出ロジックはJournal資料画面と共通だが、確認UIはM-talkカード、編集UIと登録後の正本は
+Journal Report「資料」タブという役割分担になる。
+
 ## 関連資料
 
 - [JOURNAL-STORE-KNOWLEDGE.md](../JOURNAL-STORE-KNOWLEDGE.md)
 - [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md)
 - [HANDOFF-2026-08-10-JOURNAL-KNOWLEDGE-A-B.md](./HANDOFF-2026-08-10-JOURNAL-KNOWLEDGE-A-B.md)
-

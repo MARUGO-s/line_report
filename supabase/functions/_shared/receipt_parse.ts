@@ -690,6 +690,44 @@ function coerceMaybeJsonObject(raw: unknown): Record<string, unknown> | null {
   return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
 }
 
+function normalizeLineImageMenuAnalysis(
+  raw: unknown,
+): import('./receipt_types.ts').LineImageMenuAnalysis | null {
+  const data = coerceMaybeJsonObject(raw)
+  if (!data) return null
+  const value = (input: unknown, max: number): string | null => {
+    const normalized = normalizeInlineText(String(input ?? '')).slice(0, max)
+    return normalized || null
+  }
+  const menuItems = (Array.isArray(data.menu_items) ? data.menu_items : [])
+    .flatMap((item) => {
+      const row = coerceMaybeJsonObject(item)
+      if (!row) return []
+      const name = value(row.name, 300)
+      if (!name) return []
+      return [{
+        section: value(row.section, 120),
+        name,
+        price: value(row.price, 240),
+        description: value(row.description, 1000),
+      }]
+    })
+    .slice(0, 300)
+  const bodyText = String(data.body_text ?? '').trim().slice(0, 60_000) || null
+  if (!menuItems.length && !bodyText) return null
+  return {
+    title: value(data.title, 200),
+    summary: value(data.summary, 2000),
+    menuItems,
+    bodyText,
+    extractionNotes: value(data.extraction_notes, 2000),
+    tags: (Array.isArray(data.tags) ? data.tags : [])
+      .map((tag) => value(tag, 80))
+      .filter((tag): tag is string => !!tag)
+      .slice(0, 30),
+  }
+}
+
 export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): import('./receipt_types.ts').LineImageAnalysisResult | null {
   const summary = normalizeInlineText(String(raw.summary ?? '')).slice(0, 240)
   const kind = String(raw.kind ?? '').trim().toLowerCase()
@@ -700,12 +738,23 @@ export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): 
   const reservation = kind === 'reservation'
     ? normalizeLineImageReservationAnalysis(coerceMaybeJsonObject(raw.reservation) ?? raw.reservation)
     : null
+  const menu = kind === 'menu'
+    ? normalizeLineImageMenuAnalysis(coerceMaybeJsonObject(raw.menu) ?? raw.menu)
+    : null
 
   if (!summary) {
     // 予約: summary が無くても予約項目から合成する。
     if (reservation && (reservation.customerName || reservation.date)) {
       const syn = [reservation.date, reservation.time, reservation.customerName].filter(Boolean).join(' ')
       return { summary: (syn || '予約').slice(0, 240), receipt: null, receiptModelConfidence, reservation }
+    }
+    if (menu) {
+      return {
+        summary: (menu.summary || menu.title || 'メニュー画像').slice(0, 240),
+        receipt: null,
+        receiptModelConfidence,
+        menu,
+      }
     }
     if (!receipt) return null
     const syntheticSummary = [
@@ -721,6 +770,7 @@ export function normalizeLineImageAnalysisResult(raw: Record<string, unknown>): 
   }
 
   if (kind === 'reservation') return { summary, receipt: null, receiptModelConfidence, reservation }
+  if (kind === 'menu') return menu ? { summary, receipt: null, receiptModelConfidence, menu } : null
   if (kind === 'general') return { summary, receipt: null, receiptModelConfidence }
   return { summary, receipt, receiptModelConfidence }
 }

@@ -89,6 +89,7 @@ const SHARED_MODULE_RULES: SharedModuleRule[] = [
   // M-talkの売上取込は、チャット全般ではなく過去売上の一括取込として索引する。
   // 汎用の mtalk_.* より前に置くこと（helpCodesForSharedModule は先勝ち）。
   { pattern: /^mtalk_daily_sales_import\.ts$/, codes: ['SAL-05', 'SAL-07', 'OPS-01', 'DEV-02'] },
+  { pattern: /^mtalk_menu_knowledge\.ts$/, codes: ['KNW-01', 'KNW-02', 'OPS-01', 'DEV-02'] },
   { pattern: /^(chat_.*|mtalk_.*|web_push)\.ts$/, codes: ['OPS-01', 'OPS-02', 'RSV-01', 'JAI-02', 'DEV-02'] },
   { pattern: /^competitor_review_context\.ts$/, codes: ['REV-01', 'REV-02', 'DEV-02'] },
   { pattern: /^(foodcourt_.*|tokyo_dome_schedule|weather_daily)\.ts$/, codes: ['FCT-01', 'FCT-02', 'FCT-03', 'FCT-04', 'FCT-05', 'FCT-06', 'DEV-02'] },
@@ -138,6 +139,7 @@ export function helpCodesForApiPath(path: string): string[] {
   if (value.startsWith('/chat-admin')) return ['ADM-01', 'ADM-03', 'OPS-01', 'DEV-02']
   if (value.startsWith('/chat-schedule')) return ['RSV-01', 'OPS-01', 'DEV-02']
   if (value.startsWith('/chat-media')) return ['OPS-02', 'OPS-04', 'DEV-02']
+  if (value.startsWith('/chat-menu-knowledge')) return ['KNW-01', 'KNW-02', 'OPS-01', 'DEV-02']
   if (value.startsWith('/chat-room') || value.startsWith('/room-config')) return ['OPS-01', 'DEV-02']
   if (value.startsWith('/messages/search')) return ['OPS-02', 'DEV-02']
   if (value.startsWith('/calendar-events/search')) return ['OPS-02', 'RSV-01', 'DEV-02']

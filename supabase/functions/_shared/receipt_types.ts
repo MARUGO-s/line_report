@@ -36,11 +36,27 @@ export type LineImageReservationAnalysis = {
   notes: string | null       // その他メモ/備考/要望/特記事項
 }
 
+/** 店舗メニュー画像。M-talkでは資料登録前の確認カードにだけ使う。 */
+export type LineImageMenuAnalysis = {
+  title: string | null
+  summary: string | null
+  menuItems: Array<{
+    section: string | null
+    name: string | null
+    price: string | null
+    description: string | null
+  }>
+  bodyText: string | null
+  extractionNotes: string | null
+  tags: string[]
+}
+
 export type LineImageAnalysisResult = {
   summary: string
   receipt: LineImageReceiptAnalysis | null
   receiptModelConfidence?: number | null
   reservation?: LineImageReservationAnalysis | null
+  menu?: LineImageMenuAnalysis | null
 }
 
 export type LineImageVisionFailure = {

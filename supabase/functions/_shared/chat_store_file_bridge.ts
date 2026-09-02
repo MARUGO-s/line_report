@@ -18,19 +18,38 @@ import {
   mergeReceiptConfidence,
   resolveReceiptDateIsoForPersist,
 } from './receipt_parse.ts'
-import { RECEIPT_ANALYSIS_CONFIDENCE_MIN } from './receipt_types.ts'
+import { RECEIPT_ANALYSIS_CONFIDENCE_MIN, type LineImageAnalysisResult } from './receipt_types.ts'
 import {
   alignReceiptStoreNameToRegistry,
   receiptStoreNameMatchesRegistry,
 } from './receipt_store_name_match.ts'
 import { attemptReceiptRegistration } from './receipt_save_flow.ts'
-import { fetchStoreReceiptAnalysisPromptAddition, resolveBuiltinStoreReceiptPrompt, combineStoreReceiptPromptAdditions } from './receipt_prompt.ts'
+import {
+  combineStoreReceiptPromptAdditions,
+  fetchStoreReceiptAnalysisPromptAddition,
+  resolveBuiltinStoreReceiptPrompt,
+  STORE_RECEIPT_PROMPT_MAX_CHARS,
+} from './receipt_prompt.ts'
 import { loadReceiptReplyContext } from './receipt_reply_context.ts'
 import { buildReceiptChatCard } from './receipt_flex_reply.ts'
 import { handleStoreReceiptTextMessage } from './receipt_correction.ts'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { postChatCard, type ChatCard } from './chat_bridge.ts'
 import { mtalkCardFromLineReply } from './chat_flex_card.ts'
+import {
+  buildKnowledgeCommonPromptBlock,
+  buildStoreKnowledgeSpecializedPromptBlock,
+  KNOWLEDGE_MENU_EXTRACTION_PROMPT_BLOCK,
+} from './knowledge_menu_prompt.ts'
+import {
+  assessKnowledgeMenuQuality,
+  buildStructuredKnowledgeMenuBody,
+  normalizeKnowledgeMenuItems,
+} from './knowledge_menu_extract.ts'
+import {
+  normalizeMtalkMenuKnowledgeAnalysis,
+  type MtalkMenuKnowledgeAnalysis,
+} from './mtalk_menu_knowledge.ts'
 
 // deno-lint-ignore no-explicit-any
 type DbClient = any
@@ -40,6 +59,58 @@ type DbClient = any
 // line_message_media の一意制約で必ず1件になる。
 export function mtalkMediaMessageId(groupId: number, chatMessageId: number): string {
   return `mtalk-${groupId}-${chatMessageId}`
+}
+
+function menuKnowledgeFromLineImageAnalysis(
+  analyzedResult: LineImageAnalysisResult | null | undefined,
+): MtalkMenuKnowledgeAnalysis | null {
+  const menu = analyzedResult?.menu
+  if (!menu || analyzedResult?.receipt) return null
+  const menuItems = normalizeKnowledgeMenuItems(menu.menuItems.map((item) => ({
+    section: item.section,
+    name: item.name,
+    price: item.price,
+    description: item.description,
+  })))
+  const bodyText = buildStructuredKnowledgeMenuBody(
+    menuItems,
+    menu.bodyText || '',
+    menu.extractionNotes || '',
+  )
+  const quality = assessKnowledgeMenuQuality({
+    category: 'メニュー',
+    menuItems,
+    bodyText,
+    requireStructuredItems: true,
+  })
+  return normalizeMtalkMenuKnowledgeAnalysis({
+    title: menu.title || 'M-talk メニュー画像',
+    category: 'メニュー',
+    summary: menu.summary || analyzedResult?.summary,
+    body_text: bodyText,
+    tags: ['M-talk投稿', 'メニュー', ...menu.tags],
+    menu_items: menuItems,
+    menu_item_count: quality.menu_item_count,
+    priced_item_count: quality.priced_item_count,
+    unpriced_item_count: quality.unpriced_item_count,
+    needs_review: quality.needs_review,
+    warnings: quality.warnings,
+  })
+}
+
+function preferMenuKnowledgeResult(
+  current: MtalkMenuKnowledgeAnalysis,
+  candidate: MtalkMenuKnowledgeAnalysis | null,
+): MtalkMenuKnowledgeAnalysis {
+  if (!candidate) return current
+  if (current.needs_review !== candidate.needs_review) return candidate.needs_review ? current : candidate
+  if (candidate.priced_item_count !== current.priced_item_count) {
+    return candidate.priced_item_count > current.priced_item_count ? candidate : current
+  }
+  if (candidate.menu_item_count !== current.menu_item_count) {
+    return candidate.menu_item_count > current.menu_item_count ? candidate : current
+  }
+  return candidate.body_text.length > current.body_text.length ? candidate : current
 }
 
 export async function resolveStoreLineRoomId(supabase: DbClient, storeKey: string): Promise<string | null> {
@@ -201,7 +272,12 @@ export async function processStoreRoomImageLikeLine(
     contentType?: string | null
     bytes: Uint8Array
   },
-): Promise<{ text: string; card?: ChatCard; kind: 'receipt' | 'media' | 'error' }> {
+): Promise<{
+  text: string
+  card?: ChatCard
+  kind: 'receipt' | 'media' | 'error'
+  menuKnowledge?: MtalkMenuKnowledgeAnalysis | null
+}> {
   const media = await saveStoreRoomFileToMediaLibrary(supabase, {
     storeKey: params.storeKey,
     groupId: params.groupId,
@@ -225,10 +301,27 @@ export async function processStoreRoomImageLikeLine(
     }
   }
 
-  const prompt = combineStoreReceiptPromptAdditions(
+  const receiptPrompt = combineStoreReceiptPromptAdditions(
     resolveBuiltinStoreReceiptPrompt(registry.store_partition_key),
     await fetchStoreReceiptAnalysisPromptAddition(supabase, registry.store_partition_key),
   )
+  // 画像を外部AIへ送る回数は従来どおり1回のまま。既存のレシート解析JSONへ
+  // menu分岐を加え、Journal Report資料画面と同じ共通・メニュー・店舗専用規約を
+  // 同じプロンプト内の独立ブロックとして渡す。
+  const menuPrompt = [
+    buildKnowledgeCommonPromptBlock({
+      sourceLabel: 'M-talkへ投稿された画像',
+      categoryHint: '自動判定',
+      titleHint: '',
+    }),
+    KNOWLEDGE_MENU_EXTRACTION_PROMPT_BLOCK,
+    buildStoreKnowledgeSpecializedPromptBlock(registry.store_partition_key),
+  ].filter(Boolean).join('\n\n')
+  // Keep both independent prompt blocks inside the receipt vision addition cap.
+  // Receipt rules keep their leading/built-in priority; the complete menu block
+  // (including the authenticated store specialization) is always retained.
+  const receiptBudget = Math.max(0, STORE_RECEIPT_PROMPT_MAX_CHARS - menuPrompt.length - 2)
+  const prompt = [receiptPrompt.slice(0, receiptBudget), menuPrompt].filter(Boolean).join('\n\n')
   let analyzed = await analyzeLineImageWithGemini(
     params.bytes,
     params.contentType || 'image/jpeg',
@@ -273,15 +366,45 @@ export async function processStoreRoomImageLikeLine(
     }
   }
 
-  if (!analyzed.analysis?.receipt) {
-    const summary = String(analyzed.analysis?.summary ?? '').trim()
+  const analyzedResult = analyzed.analysis
+  if (!analyzedResult?.receipt) {
+    let menuKnowledge = menuKnowledgeFromLineImageAnalysis(analyzedResult)
+    // Journal資料画面と同じ品質ゲート。非メニュー画像には追加AIを
+    // 呼ばず、1回目がメニューと判定された上で価格・商品が不足する時だけ
+    // 同じGeminiに1回再確認させる。失敗時は初回結果を捨てない。
+    if (menuKnowledge?.needs_review) {
+      const retryPrompt = [
+        menuPrompt,
+        '【メニュー品質再確認】前回は価格付き商品が不足しました。画像を区画・セルごとに再走査し、読める全商品の商品名・価格種別・価格・説明をmenu_itemsへ対応付けてください。読めない値は推測せずnullとextraction_notesにしてください。',
+      ].join('\n\n').slice(0, STORE_RECEIPT_PROMPT_MAX_CHARS)
+      const retry = await analyzeLineImageWithGemini(
+        params.bytes,
+        params.contentType || 'image/jpeg',
+        `${media.lineMessageId}-menu-retry`,
+        geminiKey,
+        retryPrompt,
+        resolveReceiptGeminiFlashLiteModel(),
+      )
+      menuKnowledge = preferMenuKnowledgeResult(
+        menuKnowledge,
+        menuKnowledgeFromLineImageAnalysis(retry.analysis),
+      )
+    }
+    if (menuKnowledge) {
+      return {
+        text: `メニュー画像を解析しました（${menuKnowledge.menu_item_count}品）。`,
+        kind: 'media',
+        menuKnowledge,
+      }
+    }
+    const summary = String(analyzedResult?.summary ?? '').trim()
     return {
       text: summary ? `画像を確認しました。\n${summary}` : 'レシートとして読み取れる項目がありませんでした。',
       kind: 'media',
     }
   }
 
-  const receiptRaw = analyzed.analysis.receipt
+  const receiptRaw = analyzedResult.receipt
   const alignedStoreName = alignReceiptStoreNameToRegistry(receiptRaw.storeName, registry)
   const receiptAligned = String(alignedStoreName ?? '') !== String(receiptRaw.storeName ?? '')
     ? { ...receiptRaw, storeName: alignedStoreName }
@@ -289,7 +412,7 @@ export async function processStoreRoomImageLikeLine(
   const receipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
   const confidence = mergeReceiptConfidence(
     computeReceiptHeuristicConfidence(receipt),
-    analyzed.analysis.receiptModelConfidence ?? null,
+    analyzedResult.receiptModelConfidence ?? null,
   )
   if (confidence < RECEIPT_ANALYSIS_CONFIDENCE_MIN) {
     return {
@@ -320,7 +443,7 @@ export async function processStoreRoomImageLikeLine(
     user_id: params.senderUserId || null,
     receipt_date: receiptDateIso,
     receipt_payload: receipt,
-    summary_text: analyzed.analysis.summary ?? null,
+    summary_text: analyzedResult.summary ?? null,
     store_display_name: storeDisplayName,
     sender_display_name: params.senderName,
   })

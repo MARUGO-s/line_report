@@ -47,6 +47,14 @@ LINE 売上／レシート／予約管理システム（約22店舗）の**セ�
 - 本番DBで架空非メンバー、正規利用者、非参加ルーム、transaction内で一時停止した利用者を再検証した。非メンバーと非参加ルームは本文・所属・添付0件、停止時は本文・Keep・個人メモ・添付0件。停止操作は同一transactionでROLLBACKし、本番データを変更していない。
 - `20260910040000_security_authorization_hardening.sql`で`pg_trgm`を`extensions` schemaへ移し、既存indexのOID参照を保ったままpublic配置警告を解消する。併せて重複index、RLS initplan、重複SELECT policyも権限を広げず整理する。
 
+### 2026-09-02 M-talkメニュー画像の確認登録
+
+- M-talkへ投稿した画像がメニューと判定された場合も、解析結果だけで店舗資料へ自動登録しない。`chat_menu_knowledge_drafts`へ7日間の確認待ち下書きを作り、投稿者本人がカードの「このまま資料に登録」を押した場合だけ、Journal Reportの店舗資料へ保存する。
+- `chat_menu_knowledge_drafts`はRLSを有効にし、`public / anon / authenticated`の直接権限をすべて剥がしてservice-roleだけに限定する。ブラウザは表を直接更新せず、本人JWT付きの`POST /chat-menu-knowledge-decision`だけを使用する。
+- 決定APIは、投稿者本人、送信可能なルーム参加者、現在承認済みの店舗所属、ルームと店舗Botの結び付き、下書きの店舗、画像の非公開Storageパスを毎回照合する。別ルーム・別店舗・別ユーザーの下書きIDを指定しても登録できない。
+- 登録時は同じ非公開`chat-images`原本をサーバ側で再取得し、SHA-256重複検査後に非公開の店舗資料Storageへ保存する。画像パスや解析本文をブラウザから受け直さず、クライアント改ざんによる別画像登録を防ぐ。
+- BotカードはDBの編集禁止規則を緩めない。決定後は、操作ボタンを除いた解決済みカードをservice-roleで新規作成して旧カードを削除し、二重クリックは画面側の即時無効化とDB状態遷移の両方で防止する。
+
 ### 2026-08-28 全体認可再監査
 
 - 本番のブラウザ権限、全public tableのRLS、Storage bucket/policy、anon/authenticatedのSECURITY DEFINER実行権を再列挙した。業務テーブルはRLS有効で、anonが実行できるSECURITY DEFINERは0。`chat-images`は非公開、公開bucketは重要ファイルを置かない`chat-icons`だけ。

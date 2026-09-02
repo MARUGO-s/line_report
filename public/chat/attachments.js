@@ -971,6 +971,55 @@ function parseStoreChangeCommand(text) {
   return { approve: match[1].toLowerCase() === 'approve', requestId: Number(match[2]) };
 }
 
+function parseMenuKnowledgeDecisionCommand(text) {
+  const match = /^mtalk-menu-knowledge:(register|decline):([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+    .exec(String(text || '').trim());
+  if (!match) return null;
+  return { decision: match[1].toLowerCase(), draftId: match[2].toLowerCase() };
+}
+
+function setMenuKnowledgeDecisionButtonsDisabled(draftId, disabled) {
+  const suffix = `:${String(draftId || '').toLowerCase()}`;
+  document.querySelectorAll('[data-card-command^="mtalk-menu-knowledge:"]').forEach((button) => {
+    if (String(button.getAttribute('data-card-command') || '').toLowerCase().endsWith(suffix)) {
+      button.disabled = disabled;
+      button.setAttribute('aria-busy', disabled ? 'true' : 'false');
+    }
+  });
+}
+
+async function decideMenuKnowledgeFromCard(decision, draftId) {
+  if (!currentUser || !currentGroupId) return;
+  if (!requireCurrentRoomSend()) return;
+  const groupId = currentGroupId;
+  setMenuKnowledgeDecisionButtonsDisabled(draftId, true);
+  try {
+    const { data: sessionData } = await sb.auth.getSession();
+    const accessToken = String(sessionData?.session?.access_token || '');
+    const endpoint = CONFIG.adminApiUrl ? CONFIG.adminApiUrl('/chat-menu-knowledge-decision') : '';
+    if (!accessToken || !endpoint) throw new Error('資料登録APIへ接続できませんでした');
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_id: groupId,
+        draft_id: draftId,
+        decision,
+      }),
+      cache: 'no-store',
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || '操作に失敗しました');
+    showChatToast(result.status === 'registered'
+      ? 'Journal Reportの資料へ登録しました。'
+      : '今回は資料へ登録しませんでした。');
+  } catch (error) {
+    console.error('Menu knowledge decision error:', error);
+    setMenuKnowledgeDecisionButtonsDisabled(draftId, false);
+    alert(error.message || '資料の操作に失敗しました');
+  }
+}
+
 async function reviewSignupFromCard(approve, userId) {
   if (!currentUser) return;
   if (!currentUserIsSignupManager()) {
@@ -1022,6 +1071,11 @@ async function sendCardCommand(text) {
   const storeChange = parseStoreChangeCommand(content);
   if (storeChange) {
     await reviewStoreChangeFromCard(storeChange.approve, storeChange.requestId);
+    return;
+  }
+  const menuKnowledge = parseMenuKnowledgeDecisionCommand(content);
+  if (menuKnowledge) {
+    await decideMenuKnowledgeFromCard(menuKnowledge.decision, menuKnowledge.draftId);
     return;
   }
   if (!currentGroupId) return;
