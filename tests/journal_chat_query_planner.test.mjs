@@ -27,6 +27,10 @@ const lineWebhookSource = await readFile(
   new URL('../supabase/functions/line-webhook/index.ts', import.meta.url),
   'utf8',
 );
+const knowledgeMenuPromptSource = await readFile(
+  new URL('../supabase/functions/_shared/knowledge_menu_prompt.ts', import.meta.url),
+  'utf8',
+);
 
 function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -1993,15 +1997,24 @@ test('menu-image knowledge requires structured names and prices before RAG save'
   const analyze = adminApiSource.slice(analyzeStart, analyzeEnd);
 
   assert.match(analyze, /"menu_items": \[/);
-  assert.match(analyze, /判読できるメニュー名を全件列挙/);
-  assert.match(analyze, /各メニューの価格/);
+  assert.match(analyze, /KNOWLEDGE_MENU_EXTRACTION_PROMPT_BLOCK/);
+  assert.match(analyze, /buildStoreKnowledgeSpecializedPromptBlock\(storeKey\)/);
+  assert.match(analyze, /resolveStoreKnowledgeStoreKey\(formData\.get\("store_key"\), storeScope\)/);
   assert.match(analyze, /responseMimeType: "application\/json"/);
+  assert.match(analyze, /responseSchema/);
   assert.match(analyze, /maxOutputTokens: 8192/);
   assert.match(analyze, /result\.category === "メニュー" && result\.needs_review/);
   assert.match(analyze, /【再解析指示】/);
   assert.match(analyze, /scoreKnowledgeMenuExtraction/);
   assert.match(analyze, /menu_item_count:/);
   assert.match(analyze, /priced_item_count:/);
+  assert.match(analyze, /unpriced_item_count:/);
+  assert.match(knowledgeMenuPromptSource, /全店共通・メニュー専用規約/);
+  assert.match(knowledgeMenuPromptSource, /画像全体の行・列・区画/);
+  assert.match(knowledgeMenuPromptSource, /店舗専用・MARUGO S 精度強化規約/);
+  assert.match(knowledgeMenuPromptSource, /Glass 950円/);
+  assert.match(knowledgeMenuPromptSource, /50ml・375ml・500ml等は容量であり価格ではない/);
+  assert.match(knowledgeMenuPromptSource, /STORE_SPECIALIZED_PROMPT_BLOCKS\[key\] \?\? ""/);
 
   assert.match(html, /accept="[^"]*\.heic,[^"]*\.heif/);
   assert.match(html, /function isKnowledgeHeicFile/);
@@ -2018,6 +2031,7 @@ test('menu-image knowledge requires structured names and prices before RAG save'
   assert.match(html, /form\.append\('title_hint'/);
   assert.match(html, /id="knModalQuality"[^>]*aria-live="polite"/);
   assert.match(html, /function countKnowledgePriceMentionsInBrowser/);
+  assert.match(html, /Decanter\|デキャンタ\|Bottle\|ボトル/);
   assert.match(html, /メニュー資料には価格付きの商品一覧が必要です/);
   assert.match(html, /商品名と価格を「抽出された詳細内容」へ追記してください/);
 

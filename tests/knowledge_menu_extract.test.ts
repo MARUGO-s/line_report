@@ -4,8 +4,14 @@ import {
   buildStructuredKnowledgeMenuBody,
   countKnowledgePriceMentions,
   normalizeKnowledgeMenuItems,
+  normalizeKnowledgeMenuPrice,
   scoreKnowledgeMenuExtraction,
 } from "../supabase/functions/_shared/knowledge_menu_extract.ts";
+import {
+  buildKnowledgeCommonPromptBlock,
+  buildStoreKnowledgeSpecializedPromptBlock,
+  KNOWLEDGE_MENU_EXTRACTION_PROMPT_BLOCK,
+} from "../supabase/functions/_shared/knowledge_menu_prompt.ts";
 
 Deno.test("menu extraction normalizes item names, sections, prices and aliases", () => {
   const items = normalizeKnowledgeMenuItems([
@@ -108,6 +114,88 @@ Deno.test("price counter recognizes Japanese yen formats without treating plain 
   assertEquals(countKnowledgePriceMentions("抹茶、紅茶、コーヒー"), 0);
 });
 
+Deno.test("wine menu bare amounts become yen prices without converting serving volumes", () => {
+  assertEquals(
+    normalizeKnowledgeMenuPrice("Glass 950 / Decanter 4500 / Bottle 6000"),
+    "Glass 950円 / Decanter 4,500円 / Bottle 6,000円",
+  );
+  assertEquals(
+    normalizeKnowledgeMenuPrice("Glass 1300 (50ml) / Bottle 9000 (375ml)"),
+    "Glass 1,300円 (50ml) / Bottle 9,000円 (375ml)",
+  );
+  assertEquals(countKnowledgePriceMentions("Glass 950 / Bottle 6000"), 2);
+  assertEquals(countKnowledgePriceMentions("50ml / 375ml / 2022年"), 0);
+  assertEquals(countKnowledgePriceMentions("Glass 50ml / Bottle 375ml"), 0);
+});
+
+Deno.test("MARUGO S fourteen-cell wine list keeps every product and price group", () => {
+  const rawPrices = [
+    "Glass 1400 / Bottle 10000",
+    "Glass 950 / Bottle 7000",
+    "Glass 1100 / Decanter 5300 / Bottle 7500",
+    "Glass 1200 / Decanter 5800 / Bottle 8000",
+    "Glass 1000 / Decanter 4800 / Bottle 6800",
+    "Glass 700 / Decanter 3300 / Bottle 4500",
+    "Glass 600 / Decanter 2800 / Bottle 4000",
+    "Glass 1500 / Decanter 7300 / Bottle 10000",
+    "Glass 1200 / Decanter 5800 / Bottle 8000",
+    "Glass 600 / Decanter 2800 / Bottle 4000",
+    "Glass 800 / Decanter 3800 / Bottle 5000",
+    "Glass 950 / Decanter 4500 / Bottle 6000",
+    "Glass 1300 (50ml) / Bottle 9000 (375ml)",
+    "Glass 1200 (50ml) / Bottle 11000 (500ml)",
+  ];
+  const items = normalizeKnowledgeMenuItems(rawPrices.map((price, index) => ({
+    section: index < 4 ? "SPARKLING" : index < 8 ? "WHITE" : index < 12 ? "RED" : "DESSERT",
+    name: `Wine ${index + 1}`,
+    price,
+    description: index >= 12 ? "容量表記あり" : "",
+  })));
+  const quality = assessKnowledgeMenuQuality({
+    category: "メニュー",
+    menuItems: items,
+    bodyText: buildStructuredKnowledgeMenuBody(items, "", ""),
+    requireStructuredItems: true,
+  });
+  assertEquals(items.length, 14);
+  assertEquals(quality.priced_item_count, 14);
+  assertEquals(quality.unpriced_item_count, 0);
+  assertEquals(quality.needs_review, false);
+  assertMatch(items[11].price, /Glass 950円 \/ Decanter 4,500円 \/ Bottle 6,000円/);
+  assertMatch(items[12].price, /Glass 1,300円 \(50ml\) \/ Bottle 9,000円 \(375ml\)/);
+});
+
+Deno.test("menu quality requires price coverage for every extracted item", () => {
+  const partialItems = normalizeKnowledgeMenuItems([
+    { section: "RED", name: "Pinot Noir", price: "Glass 950 / Bottle 6000" },
+    { section: "DESSERT", name: "Chenin Blanc", price: "判読不可" },
+  ]);
+  const partial = assessKnowledgeMenuQuality({
+    category: "メニュー",
+    menuItems: partialItems,
+    bodyText: buildStructuredKnowledgeMenuBody(partialItems, "", ""),
+    requireStructuredItems: true,
+  });
+  assertEquals(partial.priced_item_count, 1);
+  assertEquals(partial.unpriced_item_count, 1);
+  assert(partial.needs_review);
+  assertMatch(partial.warnings.join(" "), /1件の価格が未抽出/);
+
+  const completeItems = normalizeKnowledgeMenuItems([
+    { section: "RED", name: "Pinot Noir", price: "Glass 950 / Bottle 6000" },
+    { section: "DESSERT", name: "Chenin Blanc", price: "Glass 1300 (50ml) / Bottle 9000 (375ml)" },
+  ]);
+  const complete = assessKnowledgeMenuQuality({
+    category: "メニュー",
+    menuItems: completeItems,
+    bodyText: buildStructuredKnowledgeMenuBody(completeItems, "", ""),
+    requireStructuredItems: true,
+  });
+  assertEquals(complete.needs_review, false);
+  assertEquals(complete.priced_item_count, 2);
+  assert(scoreKnowledgeMenuExtraction(complete) > scoreKnowledgeMenuExtraction(partial));
+});
+
 Deno.test("non-menu documents are not blocked by menu quality rules", () => {
   const quality = assessKnowledgeMenuQuality({
     category: "マニュアル",
@@ -117,4 +205,24 @@ Deno.test("non-menu documents are not blocked by menu quality rules", () => {
   });
   assertEquals(quality.needs_review, false);
   assertEquals(quality.warnings, []);
+});
+
+Deno.test("prompt blocks keep common menu rules global and MARUGO S rules store-scoped", () => {
+  const common = buildKnowledgeCommonPromptBlock({
+    sourceLabel: "画像",
+    categoryHint: "メニュー",
+    titleHint: "ワインリスト",
+  });
+  assertMatch(common, /全店共通・資料抽出規約/);
+  assertMatch(KNOWLEDGE_MENU_EXTRACTION_PROMPT_BLOCK, /全店共通・メニュー専用規約/);
+  assertMatch(KNOWLEDGE_MENU_EXTRACTION_PROMPT_BLOCK, /Glass 950円/);
+
+  const marugos = buildStoreKnowledgeSpecializedPromptBlock("marugoS");
+  assertMatch(marugos, /店舗専用・MARUGO S/);
+  assertMatch(marugos, /東京ドームのフードコート店舗/);
+  assertMatch(marugos, /Glass \/ Decanter \/ Bottle/);
+  assertMatch(marugos, /別のMARUGO S資料や過去メニューの内容を混ぜない/);
+
+  assertEquals(buildStoreKnowledgeSpecializedPromptBlock("bistrocavacava"), "");
+  assertEquals(buildStoreKnowledgeSpecializedPromptBlock("marugo"), "");
 });

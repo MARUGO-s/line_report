@@ -16649,8 +16649,11 @@ function showKnImageModal(result, previewUrl) {
 }
 
 function countKnowledgePriceMentionsInBrowser(value) {
-  const matches = String(value || '').match(/(?:[¥￥\\]\s*\d[\d,]*|\d[\d,]*\s*円)/g) || [];
-  return new Set(matches.map(value => value.replace(/\s+/g, ''))).size;
+  const source = String(value || '');
+  const matches = source.match(/(?:[¥￥\\]\s*\d[\d,]*|\d[\d,]*\s*円)/g) || [];
+  if (matches.length) return new Set(matches.map(value => value.replace(/\s+/g, ''))).size;
+  const labeled = source.match(/(?:Glass|グラス|Decanter|デキャンタ|Bottle|ボトル)\s*[:：]?\s*\d[\d,]*(?![\d,])(?!\s*(?:ml|cl|cc|oz|l)\b)/gi) || [];
+  return new Set(labeled.map(value => value.replace(/\s+/g, '').toLowerCase())).size;
 }
 
 function renderKnowledgeImageQuality(message = '') {
