@@ -48,6 +48,7 @@
 | [ROOM-PERMISSION-TEST-CHECKLIST.md](./ROOM-PERMISSION-TEST-CHECKLIST.md) | QA | 権限・Webhook 設定の動作確認 |
 | [LINE-RECEIPT-ANALYSIS.md](./LINE-RECEIPT-ANALYSIS.md) | 運用・開発 | レシート OCR・店舗 Webhook・保存フロー |
 | [JOURNAL-STORE-KNOWLEDGE.md](./JOURNAL-STORE-KNOWLEDGE.md) | 運用・開発 | Journal Report「資料」タブ — 施策・メニュー資料の登録とAI分析への注入（期間一致で必ず添付／数値の正本は確定集計） |
+| [JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md](./JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md) | AI・開発 | 店舗資料メニュー画像の共通・種別・店舗専用プロンプト設計。小口レシートと同じ加算式ブロック構造、MARUGO S専用規約、品質ゲート |
 | [JOURNAL-REPORT-FEATURES.md](./JOURNAL-REPORT-FEATURES.md) | 運用・開発・説明 | **Journal Report 機能の詳細正本** — タブ／取込／店舗情報／資料・LINE `#メモ`／AI分析・チャット／予測／履歴 |
 | [HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md](./HANDOFF-2026-09-01-JOURNAL-FOODCOURT-CLASSIFICATION.md) | AI・開発 | **2026-09-01の続き** — 商品分類拡張とマルゴエス Journal AI へのフードコート要約。全件投入禁止・店舗キー・検証・やり残し |
 | [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) | 運用・開発・AI | Journal Report AIチャットの決まりごと — 確定集計の追加原則、銘柄／商品コード下4桁、西暦誤認禁止、プロンプト規約、API |

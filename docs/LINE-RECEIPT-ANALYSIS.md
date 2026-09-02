@@ -345,6 +345,11 @@ Claude採用店（claudia2）に**別店舗のレシート（＝経費）**を�
 
 経費プロンプト（`EXPENSE_RECEIPT_PROMPT_ADDITION`）は **共通コア**（全レシート普遍ルール）＋ **仕入先/形式別ブロック**（`EXPENSE_VENDOR_PROMPT_BLOCKS`・発動条件つき）で構成。新しい仕入先で誤読が出たら**ブロックを1つ足すだけ**（共通コア・他ブロックは触らない＝既存解析を壊さない）。実装: [`_shared/receipt_prompt.ts`](../supabase/functions/_shared/receipt_prompt.ts)。
 
+この加算式ブロック設計はJournal Reportの店舗資料メニュー画像解析にも採用している。店舗資料側は
+**全店共通資料規約＋メニュー種別規約＋認証済み店舗キーに対応する店舗専用規約**を連結し、
+専用規約で共通出力契約を置き換えない。MARUGO Sのワイン表専用規約と追加手順は
+[JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md](./JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md)を参照。
+
 #### ヤマト宅急便コレクト：横長領収証形式
 
 従来の「左下にご依頼主があり、商品明細がない代引送り状」とは別に、次の横長形式へ対応しています。

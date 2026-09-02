@@ -2,10 +2,13 @@
 
 ## 2026-09-02 メニュー画像の構造化抽出と品質ゲート
 
+- プロンプトは「全店共通資料規約＋全店共通メニュー規約＋店舗専用規約＋共通JSON Schema」の独立ブロックで組み立てる。小口レシートの共通コア＋仕入先／形式別ブロック＋店舗固有追記と同じ加算式設計で、店舗固有修正を共通規約へ混ぜない。
+- MARUGO S専用規約は認証済み店舗キー`marugos`だけに適用し、ワイン区分、生産者・銘柄・品種、Glass／Decanter／Bottle価格、容量をセル単位で対応付ける。他店舗は共通ブロックだけを使う。
 - `admin-api /pos-journals/knowledge/analyze-image` はメニュー画像を概要だけにせず、`menu_items`の区分・商品名・価格・説明と全文文字起こしを返す。RAGへ保存する本文は価格付き商品一覧を先頭に置く。
 - 画像メニューで構造化商品または価格が無いときは、同じ全体deadline内で1回再解析する。再解析後も不足なら`needs_review`を返し、Web側は価格を追記するまで確定・保存を拒否する。
 - 価格や文字が読めない場合は推測で埋めない。`extraction_notes`と「判読不可」で利用者確認へ回す。
 - 新しい正規化・品質判定の正本は`supabase/functions/_shared/knowledge_menu_extract.ts`。HEIC/HEIFも資料画面の選択対象。
+- ブロック設計・追加手順の正本は[docs/JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md](./docs/JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md)。実装commitは`747dda9`、本番`admin-api` v1166。
 
 ## 2026-09-01 フードコートブーストの加算統合・ワイン復旧
 

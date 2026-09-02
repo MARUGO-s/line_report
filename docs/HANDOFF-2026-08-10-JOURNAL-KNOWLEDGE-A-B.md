@@ -14,6 +14,16 @@
 
 **補足（リポジトリ構成の誤解を防ぐため）**: `~/Library/CloudStorage/Dropbox/web/line_report` は `line_report-main` へのシンボリックリンクで、実体は1つ。クローンが二重化しているわけではない。
 
+## 0-2. 追記: メニュー画像の店舗別プロンプトブロック（2026-09-02）
+
+- commit `747dda9`で、店舗資料画像解析を「全店共通資料規約＋全店共通メニュー規約＋店舗専用規約＋共通JSON Schema」に分離した。
+- これは小口レシートの`EXPENSE_RECEIPT_PROMPT_CORE + EXPENSE_VENDOR_PROMPT_BLOCKS + 店舗固有追記`と同じ加算式設計である。専用ブロックは共通規約を置換しない。
+- MARUGO S専用ブロックは、認証済み店舗スコープから解決した`marugos`にだけ適用する。クライアント任意値だけで他店ブロックを有効化できない。
+- ワイン表は区分、生産者・銘柄・品種、`Glass / Decanter / Bottle`の価格、容量を分離する。裸数字の価格には円を補い、`50ml / 375ml`を価格にしない。
+- 商品件数・価格付き件数・未価格件数を検算し、不足時は1回再解析、なお不足なら保存前に`needs_review`を表示する。
+- 14セルの実画像相当fixtureで14商品／14価格、容量の価格誤認なし。全CI成功。`admin-api` v1166とPagesへ本番反映済み。
+- 正本: [JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md](./JOURNAL-KNOWLEDGE-MENU-PROMPT-BLOCKS.md)
+
 ## 1. ユーザーの依頼
 
 1. 中断していた Journal Report の店舗資料機能を、A案（選定資料の詳細）＋B案（全資料目次）の複合案で引き継いで実装する。
