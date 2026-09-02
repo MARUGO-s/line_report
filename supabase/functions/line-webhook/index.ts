@@ -2111,7 +2111,7 @@ async function registerQuotedImageAsKnowledge(
       'x-store-key': storeKey
     }
 
-    // 2. Gemini 2.0 Flash によるAI解析（Excel/Word はサーバ側でテキスト化して解析）
+    // 2. 現行GeminiモデルによるAI解析（Excel/Word はサーバ側でテキスト化して解析）
     const formData = new FormData()
     const blob = new Blob([binary], { type: contentType })
     formData.append('file', blob, fileName)

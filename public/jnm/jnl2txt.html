@@ -2457,12 +2457,12 @@
           <input id="knFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,.txt,.csv,.md,.xlsx,.docx" style="display:none;">
           <div class="kn-drop-icon">📂 📸</div>
           <div class="kn-drop-text">ここに画像・PDF・Excel・Word・テキストをドラッグ＆ドロップ、または貼り付け (Ctrl+V / Cmd+V)、またはクリックして選択</div>
-          <div class="kn-drop-sub">（Gemini 2.0 Flash が全自動でAI解析します・20MBまで対応）</div>
+          <div class="kn-drop-sub">（現在のGemini画像解析モデルが全自動でAI解析します・20MBまで対応）</div>
           <div id="knDropFileName" class="kn-drop-file-name"></div>
         </label>
       </div>
     </div>
-    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・Excel・Word・テキスト・CSV・Markdownを添付すると、Gemini 2.0 Flash が全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
+    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・Excel・Word・テキスト・CSV・Markdownを添付すると、現在のGemini画像解析モデルが全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。HEIC/HEIFは解析用コピーだけJPEGへ変換し、保存時の原本は変更しません。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
     <div class="kn-actions">
       <button id="knSaveBtn" class="btn btn-primary">保存</button>
       <button id="knResetBtn" class="btn btn-secondary">クリア</button>
@@ -2474,7 +2474,7 @@
   <div id="knImageModal" class="kn-modal-backdrop" hidden>
     <div class="kn-modal-dialog">
       <div class="kn-modal-header">
-        <span class="kn-modal-title">✨ Gemini 2.0 Flash による画像解析結果</span>
+        <span class="kn-modal-title">✨ Geminiによる画像解析結果</span>
         <button type="button" class="kn-modal-close" onclick="closeKnImageModal()">✕</button>
       </div>
       <div class="kn-modal-body">
@@ -16482,16 +16482,103 @@ async function handleKnowledgeFileChange(file) {
   }
 }
 
-/** Gemini 2.0 Flash を使用して添付ファイル（画像・PDF・Excel・Word・テキスト）を全自動解析 */
+let knowledgeHeicConverterPromise = null;
+
+function isKnowledgeHeicFile(file) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || '').toLowerCase();
+  return type === 'image/heic' || type === 'image/heif' || /\.(heic|heif)$/.test(name);
+}
+
+function knowledgeJpegFileName(name) {
+  const base = String(name || 'knowledge-image').replace(/\.(heic|heif)$/i, '');
+  return `${base || 'knowledge-image'}.jpg`;
+}
+
+function loadKnowledgeHeicConverter() {
+  if (typeof window.heic2any === 'function') return Promise.resolve(window.heic2any);
+  if (knowledgeHeicConverterPromise) return knowledgeHeicConverterPromise;
+  knowledgeHeicConverterPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-knowledge-heic-converter="1"]');
+    const finish = () => {
+      if (typeof window.heic2any === 'function') resolve(window.heic2any);
+      else reject(new Error('HEIC変換ライブラリを読み込めませんでした。'));
+    };
+    if (existing) {
+      existing.addEventListener('load', finish, { once: true });
+      existing.addEventListener('error', () => reject(new Error('HEIC変換ライブラリを読み込めませんでした。')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = new URL('../vendor/heic2any.min.js', window.location.href).href;
+    script.async = true;
+    script.dataset.knowledgeHeicConverter = '1';
+    script.addEventListener('load', finish, { once: true });
+    script.addEventListener('error', () => reject(new Error('HEIC変換ライブラリを読み込めませんでした。')), { once: true });
+    document.head.appendChild(script);
+  }).catch((error) => {
+    knowledgeHeicConverterPromise = null;
+    throw error;
+  });
+  return knowledgeHeicConverterPromise;
+}
+
+async function convertKnowledgeHeicToJpeg(file) {
+  let jpegBlob = null;
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('画像変換用Canvasを作成できませんでした。');
+      context.drawImage(bitmap, 0, 0);
+      if (typeof bitmap.close === 'function') bitmap.close();
+      jpegBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    } catch (_error) {
+      jpegBlob = null;
+    }
+  }
+  if (!jpegBlob) {
+    const heic2any = await loadKnowledgeHeicConverter();
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    jpegBlob = Array.isArray(converted) ? converted[0] : converted;
+  }
+  if (!(jpegBlob instanceof Blob) || jpegBlob.size <= 0) {
+    throw new Error('HEICをAI解析用JPEGへ変換できませんでした。');
+  }
+  if (jpegBlob.size > 20 * 1024 * 1024) {
+    throw new Error('HEICの変換後画像が20MBを超えました。写真を少し縮小して再試行してください。');
+  }
+  return new File([jpegBlob], knowledgeJpegFileName(file.name), {
+    type: 'image/jpeg',
+    lastModified: Number(file.lastModified) || Date.now()
+  });
+}
+
+async function prepareKnowledgeFileForAnalysis(file) {
+  if (!isKnowledgeHeicFile(file)) return file;
+  setKnowledgeStatus('HEICをAI解析用JPEGへ変換しています…（保存する原本は変更しません）', false, true);
+  return await convertKnowledgeHeicToJpeg(file);
+}
+
+/** 現在のGemini画像解析モデルを使用して添付ファイル（画像・PDF・Excel・Word・テキスト）を全自動解析 */
 async function analyzeKnowledgeFileWithGemini(file) {
   if (!file || !getAdminToken()) {
     setKnowledgeStatus('AI解析には管理トークンの接続が必要です。', true);
     return;
   }
-  setKnowledgeStatus('AI解析中… ✨ Gemini 2.0 Flash がメニュー名や価格を自動抽出しています（ページ数の多いPDFは1〜2分かかります）', false, true);
+  setKnowledgeStatus('AI解析中… ✨ Geminiがメニュー名や価格を自動抽出しています（ページ数の多いPDFは1〜2分かかります）', false, true);
   try {
+    const analysisFile = await prepareKnowledgeFileForAnalysis(file);
+    if (analysisFile !== file) {
+      setKnowledgeStatus('HEIC変換完了。Geminiがメニュー名と価格を解析しています…', false, true);
+    }
     const form = new FormData();
-    form.append('file', file);
+    // AIには互換性の高い解析用コピーを渡す。選択中の原本fileは置き換えず、
+    // 保存操作ではHEIC/HEIF原本と元のファイル名を維持する。
+    form.append('file', analysisFile, analysisFile.name);
     form.append('store_key', STORE_KEY);
     form.append('category_hint', knowledgeEl('knCategory')?.value || 'その他');
     form.append('title_hint', (knowledgeEl('knTitle')?.value || '').trim());

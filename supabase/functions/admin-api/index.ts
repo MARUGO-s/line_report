@@ -16549,10 +16549,11 @@ const STORE_KNOWLEDGE_SOURCE_TYPES = new Set<string>([
   "ai_insight",
   "line_post",
 ])
-/** 画像OCR・LINE投稿分類に使う Gemini モデル（先頭から順に試す） */
+/** 画像OCR・LINE投稿分類に使う現行の Gemini モデル（先頭から順に試す）。
+ *  gemini-2.0-flash は 2026-06-01 に停止済みなので再追加しない。 */
 const STORE_KNOWLEDGE_GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
   "gemini-2.5-flash",
 ]
 /** Gemini 1回あたりの上限。応答が返らないモデルに引きずられて
@@ -17384,6 +17385,26 @@ function knowledgeUint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+/** ブラウザが空欄・octet-stream・誤ったMIMEを送っても、拡張子からGemini対応MIMEへ正規化する。 */
+function normalizeStoreKnowledgeUploadMime(fileName: string, declaredMime: string): string {
+  const name = String(fileName || "").toLowerCase()
+  const declared = String(declaredMime || "").toLowerCase().split(";", 1)[0].trim()
+  const byExtension: Array<[RegExp, string]> = [
+    [/\.heic$/, "image/heic"],
+    [/\.heif$/, "image/heif"],
+    [/\.png$/, "image/png"],
+    [/\.jpe?g$/, "image/jpeg"],
+    [/\.webp$/, "image/webp"],
+    [/\.gif$/, "image/gif"],
+    [/\.pdf$/, "application/pdf"],
+  ]
+  for (const [pattern, mime] of byExtension) {
+    if (pattern.test(name)) return mime
+  }
+  if (declared && declared !== "application/octet-stream") return declared
+  return "application/octet-stream"
+}
+
 /** Gemini generateContent をモデルフォールバック付きで呼び、テキストを返す（失敗時は空文字） */
 async function callKnowledgeGemini(
   parts: Array<Record<string, unknown>>,
@@ -17431,14 +17452,28 @@ async function callKnowledgeGemini(
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(remainingMs),
       })
+      const responseText = await res.text()
+      let resJson: Record<string, any> = {}
+      try {
+        const parsed = JSON.parse(responseText)
+        if (isRecord(parsed)) resJson = parsed
+      } catch {
+        // HTML等の非JSON応答も、本文を外部へ返さず下の診断ログだけに留める。
+      }
       if (res.ok) {
-        const resJson = await res.json()
         const text = String(
           resJson?.candidates?.[0]?.content?.parts?.[0]?.text ?? "",
         )
         if (text) return text
+        const finishReason = toSafeString(resJson?.candidates?.[0]?.finishReason).slice(0, 80)
+        const blockReason = toSafeString(resJson?.promptFeedback?.blockReason).slice(0, 80)
+        console.warn(
+          `[knowledge-gemini] empty response model=${model} finish=${finishReason || "none"} block=${blockReason || "none"}`,
+        )
       } else {
-        console.warn(`Gemini model ${model} failed (${res.status})`)
+        const reason = toSafeString(resJson?.error?.message || resJson?.error?.status || responseText)
+          .replace(/\s+/g, " ").slice(0, 280)
+        console.warn(`[knowledge-gemini] model=${model} status=${res.status} reason=${reason || "unknown"}`)
       }
     } catch (e) {
       console.warn(`Gemini model ${model} error:`, e)
@@ -17494,7 +17529,7 @@ function parseGeminiJson(text: string): Record<string, unknown> | null {
   }
 }
 
-/** Gemini 2.0 Flash による画像・PDF等のマルチモーダル解析（DBには書かない読み取り専用） */
+/** 現行Geminiモデルによる画像・PDF等のマルチモーダル解析（DBには書かない読み取り専用） */
 async function analyzeStoreKnowledgeImage(req: Request) {
   if (!(Deno.env.get("GEMINI_API_KEY") ?? "")) {
     throw {
@@ -17529,7 +17564,7 @@ async function analyzeStoreKnowledgeImage(req: Request) {
     } satisfies AppError
   }
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const mimeType = file.type || "image/jpeg"
+  const mimeType = normalizeStoreKnowledgeUploadMime(file.name || "", file.type || "")
   const categoryHint = normalizeStoreKnowledgeCategory(formData.get("category_hint"))
   const titleHint = toSafeString(formData.get("title_hint")).trim().slice(0, 200)
   const kind = classifyKnowledgeFile(file.name || "", mimeType)

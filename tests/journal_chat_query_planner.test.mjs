@@ -2004,12 +2004,27 @@ test('menu-image knowledge requires structured names and prices before RAG save'
   assert.match(analyze, /priced_item_count:/);
 
   assert.match(html, /accept="[^"]*\.heic,[^"]*\.heif/);
+  assert.match(html, /function isKnowledgeHeicFile/);
+  assert.match(html, /async function convertKnowledgeHeicToJpeg/);
+  assert.match(html, /\.\.\/vendor\/heic2any\.min\.js/);
+  assert.match(html, /form\.append\('file', analysisFile, analysisFile\.name\)/);
+  assert.match(html, /保存する原本は変更しません/);
   assert.match(html, /form\.append\('category_hint'/);
   assert.match(html, /form\.append\('title_hint'/);
   assert.match(html, /id="knModalQuality"[^>]*aria-live="polite"/);
   assert.match(html, /function countKnowledgePriceMentionsInBrowser/);
   assert.match(html, /メニュー資料には価格付きの商品一覧が必要です/);
   assert.match(html, /商品名と価格を「抽出された詳細内容」へ追記してください/);
+
+  const modelListStart = adminApiSource.indexOf('const STORE_KNOWLEDGE_GEMINI_MODELS = [');
+  const modelListEnd = adminApiSource.indexOf(']', modelListStart);
+  const modelList = adminApiSource.slice(modelListStart, modelListEnd + 1);
+  assert.match(modelList, /gemini-3\.6-flash/);
+  assert.match(modelList, /gemini-3\.5-flash/);
+  assert.doesNotMatch(modelList, /gemini-2\.0-flash|gemini-1\.5-flash/);
+  assert.match(adminApiSource, /function normalizeStoreKnowledgeUploadMime/);
+  assert.match(adminApiSource, /\[\/\\\.heic\$\/, "image\/heic"\]/);
+  assert.match(adminApiSource, /\[knowledge-gemini\] model=\$\{model\} status=\$\{res\.status\}/);
 });
 
 test('store knowledge API and storage stay behind the admin API', async () => {

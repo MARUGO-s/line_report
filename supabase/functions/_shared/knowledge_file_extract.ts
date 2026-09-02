@@ -1,6 +1,6 @@
 // 店舗ナレッジ（資料）に添付されたファイルから、Gemini へ渡すテキストを抽出する共通モジュール。
 //
-// Gemini 2.0 Flash が inlineData で直接受け取れるのは画像と PDF のみ。
+// 現行Geminiモデルが inlineData で直接受け取れるのは画像と PDF のみ。
 // Excel(.xlsx/.xlsm) と Word(.docx) はバイナリのまま渡しても解釈できないため、
 // ここでプレーンテキストへ変換してから text パートとして渡す。
 //
