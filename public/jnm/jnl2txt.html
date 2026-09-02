@@ -2462,7 +2462,7 @@
         </label>
       </div>
     </div>
-    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・Excel・Word・テキスト・CSV・Markdownを添付すると、現在のGemini画像解析モデルが全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。HEIC/HEIFは解析用コピーだけJPEGへ変換し、保存時の原本は変更しません。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
+    <p class="kn-note">日付を空欄にすると「常時有効」として全期間の売上分析に参照されます（グランドメニュー・マニュアル向け）。画像・PDF・Excel・Word・テキスト・CSV・Markdownを添付すると、現在のGemini画像解析モデルが全自動でAI解析し、メニュー名・価格・要約・文字起こし本文・タグを抽出し取り込みます。HEIC/HEIFはJPEGへ変換し、解析・資料保存の両方に変換後JPEGを使用します。解析結果は確認ポップアップで手動修正・追記も可能です。</p>
     <div class="kn-actions">
       <button id="knSaveBtn" class="btn btn-primary">保存</button>
       <button id="knResetBtn" class="btn btn-secondary">クリア</button>
@@ -15525,6 +15525,8 @@ let knowledgeEditingId = null;
 let knowledgeCache = { storeKey: '', loadedAt: 0, items: [] };
 let knowledgeLoadState = { status: 'idle', truncated: false, error: '' };
 let knowledgeImageAnalysisState = { category: '', needsReview: false, menuItemCount: 0, pricedItemCount: 0, warnings: [] };
+let knowledgePreparedUploadFile = null;
+let knowledgeFileSelectionGeneration = 0;
 
 function knowledgeEl(id) { return document.getElementById(id); }
 
@@ -15562,6 +15564,8 @@ function resetKnowledgeForm() {
   if (category) category.value = '施策';
   const file = knowledgeEl('knFile');
   if (file) file.value = '';
+  knowledgePreparedUploadFile = null;
+  knowledgeFileSelectionGeneration += 1;
   knowledgeImageAnalysisState = { category: '', needsReview: false, menuItemCount: 0, pricedItemCount: 0, warnings: [] };
   const btn = knowledgeEl('knSaveBtn');
   if (btn) btn.textContent = '保存';
@@ -15847,7 +15851,14 @@ async function saveKnowledgeForm() {
   const bodyText = (knowledgeEl('knBody')?.value || '').trim();
   if (!title) { setKnowledgeStatus('タイトルを入力してください。', true); return; }
   if (!summary && !bodyText) { setKnowledgeStatus('概要または内容を入力してください。', true); return; }
-  const selectedFile = knowledgeEl('knFile')?.files?.[0];
+  const sourceFile = knowledgeEl('knFile')?.files?.[0];
+  const selectedFile = sourceFile && isKnowledgeHeicFile(sourceFile)
+    ? knowledgePreparedUploadFile
+    : sourceFile;
+  if (sourceFile && isKnowledgeHeicFile(sourceFile) && !selectedFile) {
+    setKnowledgeStatus('HEIC/HEIFのJPEG変換が完了していません。ファイルを選び直して変換完了後に保存してください。', true);
+    return;
+  }
   const selectedCategory = knowledgeEl('knCategory')?.value || 'その他';
   if (selectedFile && selectedCategory === 'メニュー' && countKnowledgePriceMentionsInBrowser(bodyText) === 0) {
     setKnowledgeStatus('メニュー資料には価格付きの商品一覧が必要です。AI解析結果を確認し、商品名と価格を「内容」へ追記してください。', true);
@@ -16456,6 +16467,8 @@ ${endMarker}`;
 /** テキストまたは画像ファイルを添付した際の全自動判定処理 */
 async function handleKnowledgeFileChange(file) {
   if (!file) return;
+  const selectionGeneration = ++knowledgeFileSelectionGeneration;
+  knowledgePreparedUploadFile = null;
   const fileNameEl = knowledgeEl('knDropFileName');
   if (fileNameEl) fileNameEl.textContent = `選択中: ${file.name} (${Math.round(file.size / 1024)} KB)`;
 
@@ -16478,7 +16491,7 @@ async function handleKnowledgeFileChange(file) {
   const isText = /^(text\/|application\/csv)/.test(type) || /\.(txt|csv|md|markdown)$/.test(name);
 
   if (isImage || isPdf || isSheet || isDoc || isText) {
-    await analyzeKnowledgeFileWithGemini(file);
+    await analyzeKnowledgeFileWithGemini(file, selectionGeneration);
   }
 }
 
@@ -16559,12 +16572,12 @@ async function convertKnowledgeHeicToJpeg(file) {
 
 async function prepareKnowledgeFileForAnalysis(file) {
   if (!isKnowledgeHeicFile(file)) return file;
-  setKnowledgeStatus('HEICをAI解析用JPEGへ変換しています…（保存する原本は変更しません）', false, true);
+  setKnowledgeStatus('HEICをJPEGへ変換しています…（解析・資料保存ともJPEGを使用します）', false, true);
   return await convertKnowledgeHeicToJpeg(file);
 }
 
 /** 現在のGemini画像解析モデルを使用して添付ファイル（画像・PDF・Excel・Word・テキスト）を全自動解析 */
-async function analyzeKnowledgeFileWithGemini(file) {
+async function analyzeKnowledgeFileWithGemini(file, selectionGeneration = knowledgeFileSelectionGeneration) {
   if (!file || !getAdminToken()) {
     setKnowledgeStatus('AI解析には管理トークンの接続が必要です。', true);
     return;
@@ -16572,12 +16585,17 @@ async function analyzeKnowledgeFileWithGemini(file) {
   setKnowledgeStatus('AI解析中… ✨ Geminiがメニュー名や価格を自動抽出しています（ページ数の多いPDFは1〜2分かかります）', false, true);
   try {
     const analysisFile = await prepareKnowledgeFileForAnalysis(file);
+    if (selectionGeneration !== knowledgeFileSelectionGeneration) return;
+    knowledgePreparedUploadFile = analysisFile;
     if (analysisFile !== file) {
-      setKnowledgeStatus('HEIC変換完了。Geminiがメニュー名と価格を解析しています…', false, true);
+      const fileNameEl = knowledgeEl('knDropFileName');
+      if (fileNameEl) {
+        fileNameEl.textContent = `保存対象: ${analysisFile.name} (${Math.round(analysisFile.size / 1024)} KB・HEICからJPEGへ変換済み)`;
+      }
+      setKnowledgeStatus('HEICをJPEGへ変換しました。Geminiがメニュー名と価格を解析しています…', false, true);
     }
     const form = new FormData();
-    // AIには互換性の高い解析用コピーを渡す。選択中の原本fileは置き換えず、
-    // 保存操作ではHEIC/HEIF原本と元のファイル名を維持する。
+    // HEIC/HEIFは互換性の高いJPEGへ一度だけ変換し、AI解析と資料保存で同じFileを使う。
     form.append('file', analysisFile, analysisFile.name);
     form.append('store_key', STORE_KEY);
     form.append('category_hint', knowledgeEl('knCategory')?.value || 'その他');
@@ -16591,7 +16609,7 @@ async function analyzeKnowledgeFileWithGemini(file) {
     });
 
     const result = response.result || {};
-    const previewUrl = URL.createObjectURL(file);
+    const previewUrl = URL.createObjectURL(analysisFile);
     showKnImageModal(result, previewUrl);
     if (result.needs_review === true) {
       setKnowledgeStatus('解析結果に商品名・価格の不足があります。ポップアップの警告に従って修正してください。', true);

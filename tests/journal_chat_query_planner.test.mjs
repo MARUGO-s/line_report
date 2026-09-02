@@ -2008,7 +2008,12 @@ test('menu-image knowledge requires structured names and prices before RAG save'
   assert.match(html, /async function convertKnowledgeHeicToJpeg/);
   assert.match(html, /\.\.\/vendor\/heic2any\.min\.js/);
   assert.match(html, /form\.append\('file', analysisFile, analysisFile\.name\)/);
-  assert.match(html, /保存する原本は変更しません/);
+  assert.match(html, /let knowledgePreparedUploadFile = null/);
+  assert.match(html, /let knowledgeFileSelectionGeneration = 0/);
+  assert.match(html, /knowledgePreparedUploadFile = analysisFile/);
+  assert.match(html, /const selectedFile = sourceFile && isKnowledgeHeicFile\(sourceFile\)/);
+  assert.match(html, /解析・資料保存ともJPEGを使用します/);
+  assert.match(html, /form\.append\('file', file\)/);
   assert.match(html, /form\.append\('category_hint'/);
   assert.match(html, /form\.append\('title_hint'/);
   assert.match(html, /id="knModalQuality"[^>]*aria-live="polite"/);
