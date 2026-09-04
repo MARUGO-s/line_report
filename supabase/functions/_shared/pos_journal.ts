@@ -1025,6 +1025,31 @@ export function resolvePosJournalStore(
   return POS_JOURNAL_STORE_CODE_MAP[String(storeCode || "").trim()] ?? null;
 }
 
+/**
+ * 店舗キーから、その店舗のレジ店舗コード（複数可）と表示名を引く。
+ *
+ * `resolvePosJournalStore` の逆引き。LZH原本が1件も無い月・店舗でも
+ * 「マルゴエス（店舗コード1022）」のように正しい店名とコードを出せるようにする。
+ * 照合は小文字化して行う（DBの store_partition_key は marugoS のような
+ * 大文字表記があるが、電子ジャーナル系APIは一貫して小文字で扱う）。
+ */
+export function resolvePosJournalStoreByKey(
+  storeKey: string,
+): { storeKey: string; storeName: string; storeCodes: string[] } | null {
+  const key = String(storeKey || "").trim().toLowerCase();
+  if (!key) return null;
+  const storeCodes: string[] = [];
+  let storeName = "";
+  for (const [code, store] of Object.entries(POS_JOURNAL_STORE_CODE_MAP)) {
+    if (store.storeKey.trim().toLowerCase() !== key) continue;
+    storeCodes.push(code);
+    if (!storeName) storeName = store.storeName;
+  }
+  if (!storeCodes.length) return null;
+  storeCodes.sort();
+  return { storeKey: key, storeName, storeCodes };
+}
+
 const POS_JOURNAL_REPORT_WEEKDAYS = [
   "日",
   "月",

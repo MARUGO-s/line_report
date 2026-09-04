@@ -199,8 +199,10 @@ import {
   mergePosJournalDaysPreferPrimary,
   pickBestJournalSavedReportDays,
   POS_JOURNAL_REPORT_PARSER_VERSION,
+  POS_JOURNAL_STORE_CODE_MAP,
   posJournalDayNeedsWeather,
   resolvePosJournalStore,
+  resolvePosJournalStoreByKey,
   type PosJournalDay,
 } from "../_shared/pos_journal.ts"
 import {
@@ -1450,7 +1452,7 @@ Deno.serve(async (req, info) => {
       path === "/pos-journals/upload" ||
       // M-talk の「ジャーナル検索」から電子ジャーナルAIへ質問する。
       // 同じく storeScope は null で通すが、resolvePosJournalAiStore が
-      // 対応店舗（現状 Bistro CAVACAVA のみ）以外を必ず弾く。
+      // レジ店舗コード未登録の店舗を必ず弾く。
       path === "/pos-journals/ai-ask"
     )
   ) {
@@ -1656,6 +1658,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
       "/pos-journals",
+      "/pos-journals/stores",
       "/pos-journals/product-search",
       "/pos-journals/product-cohort",
       "/pos-journals/cohort-compare",
@@ -2103,6 +2106,9 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "GET" && path === "/pos-journals") {
       return json(await fetchPosJournalState(supabase, url), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/stores") {
+      return json(await fetchPosJournalStoreDirectory(supabase, storeScope), 200)
     }
     if (req.method === "GET" && path === "/pos-journals/product-search") {
       return json(await searchPosJournalProducts(supabase, url), 200)
@@ -12236,12 +12242,21 @@ async function fetchPosJournalState(
     mergedDays,
   )
   const storeCode = toSafeString(rows[0]?.store_code)
-  const knownStore = resolvePosJournalStore(storeCode) ??
-    (storeKey.toLowerCase() === "bistrocavacava"
-      ? resolvePosJournalStore("1015")
-      : null)
-  const resolvedStoreCode = storeCode || (knownStore ? "1015" : "")
+  // 店舗コードは「この月の原本」由来を最優先しつつ、原本が1件も無い
+  // （Journal Report共有参照だけの）月でも店舗キーから逆引きして補う。
+  // Bistro CAVACAVA 固定だった旧実装ではマルゴエス等が店舗キーのまま表示されていた。
+  const mappedStore = resolvePosJournalStoreByKey(storeKey)
+  const knownStore = resolvePosJournalStore(storeCode) ?? mappedStore ??
+    await lookupPosJournalStoreCodeByKey(supabase, storeKey)
+  const resolvedStoreCode = storeCode || mappedStore?.storeCodes[0] || ""
   const storeName = knownStore?.storeName || storeKey
+  const storeCodes = Array.from(
+    new Set([
+      ...(mappedStore?.storeCodes ?? []),
+      ...rows.map((row) => toSafeString(row.store_code)).filter(Boolean),
+      ...(resolvedStoreCode ? [resolvedStoreCode] : []),
+    ]),
+  ).sort()
   const categoryOverrides = await fetchPosJournalCategoryOverrides(
     supabase,
     storeKey,
@@ -12281,10 +12296,12 @@ async function fetchPosJournalState(
     : shared.days.length
     ? "shared_reports"
     : "empty"
+  summary.meta.store_codes = storeCodes
   return {
     ok: true,
     store_key: storeKey,
     store_name: storeName,
+    store_codes: storeCodes,
     month,
     files: rows.map(({ parsed_data: _parsedData, ...row }) => row),
     shared_reference: {
@@ -14527,11 +14544,10 @@ async function upsertPosJournalAutoReports(
       // 保存済みレポートが月全体を持つ場合は、それを土台にし、
       // 今回存在するLZH原本の日だけ正本として差し替える。部分原本で月を縮めない。
       const days = mergePosJournalDaysPreferPrimary(storedDays, savedDays)
-      const storeCode = toSafeString(rows[0]?.store_code) || "1015"
-      const knownStore = resolvePosJournalStore(storeCode) ??
-        (storeKey.toLowerCase() === "bistrocavacava"
-          ? resolvePosJournalStore("1015")
-          : null)
+      const mappedStore = resolvePosJournalStoreByKey(storeKey)
+      const storeCode = toSafeString(rows[0]?.store_code) ||
+        mappedStore?.storeCodes[0] || ""
+      const knownStore = resolvePosJournalStore(storeCode) ?? mappedStore
       const reports = buildJournalSavedReportsFromPosDays({
         storeKey,
         storeName: knownStore?.storeName || storeKey,
@@ -14761,6 +14777,235 @@ async function lookupPosJournalStoreCode(
     console.error("lookupPosJournalStoreCode threw:", e instanceof Error ? e.message : String(e))
     return null
   }
+}
+
+/**
+ * `lookupPosJournalStoreCode` の逆引き。店舗キーから店名と割当コードを引く。
+ * コード内定数に無い店舗（pos_journal_store_codes へ後から insert しただけの店舗）でも
+ * 電子ジャーナル画面に正しい店名・店舗コードを出せるようにする。
+ */
+async function lookupPosJournalStoreCodeByKey(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+): Promise<{ storeKey: string; storeName: string; storeCodes: string[] } | null> {
+  const key = String(storeKey || "").trim().toLowerCase()
+  // 大文字小文字ゆらぎ(marugoS)を吸収するため ilike で引くが、LIKEのワイルドカード
+  // (% _ *)を含むキーは他店舗まで巻き込むため、英数字キー以外は照合しない。
+  if (!/^[a-z0-9]+$/.test(key)) return null
+  try {
+    const { data, error } = await supabase
+      .from("pos_journal_store_codes")
+      .select("store_code, store_partition_key, store_name")
+      .ilike("store_partition_key", key)
+    if (error) {
+      console.error("lookupPosJournalStoreCodeByKey failed:", error.message)
+      return null
+    }
+    const rows = (Array.isArray(data) ? data : [])
+      .map((value) => isRecord(value) ? value : null)
+      .filter((row): row is Record<string, unknown> => row !== null)
+      .filter((row) =>
+        toSafeString(row.store_partition_key).trim().toLowerCase() === key
+      )
+    if (!rows.length) return null
+    const storeCodes = Array.from(
+      new Set(rows.map((row) => toSafeString(row.store_code)).filter(Boolean)),
+    ).sort()
+    const storeName = toSafeString(rows.find((row) =>
+      toSafeString(row.store_name)
+    )?.store_name) || key
+    return { storeKey: key, storeName, storeCodes }
+  } catch (e) {
+    console.error(
+      "lookupPosJournalStoreCodeByKey threw:",
+      e instanceof Error ? e.message : String(e),
+    )
+    return null
+  }
+}
+
+/**
+ * store_partition_key の distinct 値を、PostgREST の GROUP BY 無しで数クエリだけ読む。
+ * 「1件だけ昇順で読み、次は直前のキーより大きいものを1件」を繰り返す loose index scan。
+ * 行数ではなく店舗数に比例するため、原本が何万件になっても軽いまま。
+ */
+async function listDistinctPosJournalStoreKeys(
+  supabase: ReturnType<typeof createClient>,
+  table: "pos_journal_files" | "saved_reports",
+  maxStores = 60,
+): Promise<string[]> {
+  const keys: string[] = []
+  let cursor = ""
+  for (let i = 0; i < maxStores; i++) {
+    const base = supabase.from(table).select("store_partition_key")
+    let query = table === "saved_reports"
+      ? base.is("deleted_at", null)
+      : base.is("storage_deleted_at", null)
+    if (cursor) query = query.gt("store_partition_key", cursor)
+    const { data, error } = await query
+      .order("store_partition_key", { ascending: true })
+      .limit(1)
+    if (error) {
+      console.error(
+        "listDistinctPosJournalStoreKeys failed:",
+        table,
+        error.message,
+      )
+      break
+    }
+    const row = Array.isArray(data) && isRecord(data[0]) ? data[0] : null
+    const key = toSafeString(row?.store_partition_key).trim()
+    if (!key) break
+    keys.push(key)
+    cursor = key
+  }
+  return keys
+}
+
+/** 保存済みレポート1行から、そのレポートが対象にしている年月を取り出す */
+function savedReportMonths(row: Record<string, unknown>): string[] {
+  const months = new Set<string>()
+  const sourceMonths = Array.isArray(row.sourceMonths) ? row.sourceMonths : []
+  for (const value of sourceMonths) {
+    const month = toSafeString(value).trim()
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) months.add(month)
+  }
+  const text = `${toSafeString(row.title)} ${toSafeString(row.period)}`
+    .normalize("NFKC")
+  for (const match of text.matchAll(/(\d{4})[-\/年](\d{1,2})/g)) {
+    const monthNumber = Number(match[2])
+    if (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) {
+      continue
+    }
+    months.add(`${match[1]}-${String(monthNumber).padStart(2, "0")}`)
+  }
+  return Array.from(months)
+}
+
+/**
+ * 電子ジャーナル画面の店舗プルダウン用。LZH原本（pos_journal_files）と
+ * Journal Reportの保存済みレポート（saved_reports）の「どちらかにデータがある」店舗を
+ * 1つの一覧にまとめて返す。片側だけに保存された店舗も必ず選べるようにするための正本。
+ */
+async function fetchPosJournalStoreDirectory(
+  supabase: ReturnType<typeof createClient>,
+  storeScope: string | null,
+) {
+  const scope = String(storeScope ?? "").trim().toLowerCase()
+  const candidates = new Map<string, { storeName: string; storeCodes: Set<string> }>()
+  const addCandidate = (rawKey: unknown, storeName: unknown, storeCode?: unknown) => {
+    const key = toSafeString(rawKey).trim().toLowerCase()
+    if (!key || key === "__all__") return
+    if (scope && key !== scope) return
+    const entry = candidates.get(key) ??
+      { storeName: "", storeCodes: new Set<string>() }
+    const name = toSafeString(storeName).trim()
+    if (name && !entry.storeName) entry.storeName = name
+    const code = toSafeString(storeCode).trim()
+    if (/^\d{4}$/.test(code)) entry.storeCodes.add(code)
+    candidates.set(key, entry)
+  }
+
+  for (const [code, store] of Object.entries(POS_JOURNAL_STORE_CODE_MAP)) {
+    addCandidate(store.storeKey, store.storeName, code)
+  }
+  const { data: codeRows, error: codeError } = await supabase
+    .from("pos_journal_store_codes")
+    .select("store_code, store_partition_key, store_name")
+  if (codeError) {
+    console.error("pos journal store code list failed:", codeError.message)
+  }
+  for (const row of Array.isArray(codeRows) ? codeRows : []) {
+    if (!isRecord(row)) continue
+    addCandidate(row.store_partition_key, row.store_name, row.store_code)
+  }
+  // レジ店舗コードが未登録でも、Journal Report側だけにデータがある店舗は拾う。
+  for (
+    const table of ["pos_journal_files", "saved_reports"] as const
+  ) {
+    for (const key of await listDistinctPosJournalStoreKeys(supabase, table)) {
+      addCandidate(key, "", "")
+    }
+  }
+
+  const stores: Record<string, unknown>[] = []
+  for (const [storeKey, entry] of candidates) {
+    const [fileCountResult, reportCountResult, monthRowsResult, reportRowsResult] =
+      await Promise.all([
+      supabase
+        .from("pos_journal_files")
+        .select("id", { count: "exact", head: true })
+        .eq("store_partition_key", storeKey)
+        .is("storage_deleted_at", null),
+      supabase
+        .from("saved_reports")
+        .select("id", { count: "exact", head: true })
+        .eq("store_partition_key", storeKey)
+        .is("deleted_at", null),
+      supabase
+        .from("pos_journal_files")
+        .select("year_month, store_code")
+        .eq("store_partition_key", storeKey)
+        .is("storage_deleted_at", null)
+        .order("business_date", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("saved_reports")
+        .select("title, period, sourceMonths:data->sourceMonths")
+        .eq("store_partition_key", storeKey)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(500),
+    ])
+    if (fileCountResult.error) {
+      console.error(
+        "pos journal store file count failed:",
+        storeKey,
+        fileCountResult.error.message,
+      )
+    }
+    if (reportRowsResult.error) {
+      console.error(
+        "pos journal store saved report scan failed:",
+        storeKey,
+        reportRowsResult.error.message,
+      )
+    }
+    const journalFileCount = Number(fileCountResult.count ?? 0) || 0
+    const months = new Set<string>()
+    const storeCodes = new Set<string>(entry.storeCodes)
+    for (const row of Array.isArray(monthRowsResult.data) ? monthRowsResult.data : []) {
+      if (!isRecord(row)) continue
+      const month = toSafeString(row.year_month).trim()
+      if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) months.add(month)
+      const code = toSafeString(row.store_code).trim()
+      if (/^\d{4}$/.test(code)) storeCodes.add(code)
+    }
+    const reportRows = (Array.isArray(reportRowsResult.data) ? reportRowsResult.data : [])
+      .filter((row): row is Record<string, unknown> => isRecord(row))
+    for (const row of reportRows) {
+      for (const month of savedReportMonths(row)) months.add(month)
+    }
+    // 件数は count で正確に、月の一覧は直近500件の走査で得る（保存件数が
+    // 増えても一覧APIが重くならないようにするための上限）。
+    const savedReportCount = Number(reportCountResult.count ?? 0) || reportRows.length
+    if (!journalFileCount && !savedReportCount) continue
+    const mapped = resolvePosJournalStoreByKey(storeKey)
+    const monthList = Array.from(months).sort().reverse()
+    stores.push({
+      store_key: storeKey,
+      store_name: entry.storeName || mapped?.storeName || storeKey,
+      store_codes: Array.from(storeCodes).sort(),
+      journal_file_count: journalFileCount,
+      saved_report_count: savedReportCount,
+      months: monthList,
+      latest_month: monthList[0] ?? "",
+    })
+  }
+  stores.sort((a, b) =>
+    String(a.store_name).localeCompare(String(b.store_name), "ja")
+  )
+  return { ok: true, stores }
 }
 
 async function uploadPosJournalFiles(
@@ -15391,10 +15636,13 @@ async function fetchPosJournalDownloadUrl(
   return { ok: true, id, signed_url: signedUrl }
 }
 
-function resolvePosJournalAiStore(
+async function resolvePosJournalAiStore(
+  supabase: ReturnType<typeof createClient>,
   body: Record<string, unknown>,
   storeScope: string | null,
-): { storeKey: string; storeName: string; storeCode: string; month: string } {
+): Promise<
+  { storeKey: string; storeName: string; storeCode: string; month: string }
+> {
   const requestedStore = String(body.store_key ?? body.store ?? "").trim()
   const storeKey = storeScope || requestedStore
   if (!storeKey) {
@@ -15409,17 +15657,31 @@ function resolvePosJournalAiStore(
       message: "他店舗のデータにはアクセスできません。",
     } satisfies AppError
   }
-  const mapped = resolvePosJournalStore("1015")
-  if (!mapped || mapped.storeKey.toLowerCase() !== storeKey.toLowerCase()) {
+  // 電子ジャーナルAIは「レジ店舗コードが割り当て済みの店舗」だけを対象にする。
+  // 旧実装はBistro CAVACAVA固定で、マルゴエスなど他店舗のAI分析・質問を必ず400にしていた。
+  const mapped = resolvePosJournalStoreByKey(storeKey) ??
+    await lookupPosJournalStoreCodeByKey(supabase, storeKey)
+  if (!mapped) {
     throw {
       status: 400,
-      message: "現在、電子ジャーナルAI分析はBistro CAVACAVAのみ対応しています。",
+      message:
+        "この店舗はレジ店舗コードが未登録のため、電子ジャーナルAI分析を利用できません。",
+    } satisfies AppError
+  }
+  // AI分析履歴は store_code の4桁形式をDB側でも必須にしている。
+  // 対応表が壊れている場合はDB制約違反ではなく、この時点で理由を返す。
+  const storeCode = mapped.storeCodes.find((code) => /^\d{4}$/.test(code)) ?? ""
+  if (!storeCode) {
+    throw {
+      status: 400,
+      message:
+        "この店舗のレジ店舗コードが不正です。管理者へ連絡してください。",
     } satisfies AppError
   }
   return {
     storeKey: mapped.storeKey,
     storeName: mapped.storeName,
-    storeCode: "1015",
+    storeCode,
     month: normalizeYearMonth(body.month),
   }
 }
@@ -15594,7 +15856,7 @@ async function analyzePosJournalWithAi(
   body: Record<string, unknown>,
   storeScope: string | null,
 ) {
-  const expected = resolvePosJournalAiStore(body, storeScope)
+  const expected = await resolvePosJournalAiStore(supabase, body, storeScope)
   let summary
   try {
     summary = await resolvePosJournalAiSummary(supabase, body, expected)
@@ -15645,7 +15907,7 @@ async function askPosJournalAi(
   body: Record<string, unknown>,
   storeScope: string | null,
 ) {
-  const expected = resolvePosJournalAiStore(body, storeScope)
+  const expected = await resolvePosJournalAiStore(supabase, body, storeScope)
   let summary
   let question
   let history
