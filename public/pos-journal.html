@@ -578,7 +578,7 @@
       <div class="pj-content">
         <div class="pj-inner">
           <h1 class="pj-h1">電子ジャーナル（POS取込）</h1>
-          <p class="pj-sub"><strong>Bistro CAVACAVA</strong>（店舗コード1015・1020）のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。</p>
+          <p class="pj-sub" id="pjSubtitle"><strong>Bistro CAVACAVA</strong>（店舗コード1015・1020）のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。</p>
           <div class="pj-src" id="srcInfo"></div>
 
           <section class="card pj-auth" id="authCard" hidden>
@@ -592,8 +592,8 @@
 
           <div class="pj-toolbar">
             <div class="pj-field">
-              <label>店舗</label>
-              <select id="storeSel"></select>
+              <label for="storeSel">店舗</label>
+              <select id="storeSel" aria-label="表示する店舗"></select>
             </div>
             <div class="pj-field">
               <label>対象月</label>
@@ -618,7 +618,7 @@
             <div class="pj-upload-head">
               <div>
                 <div class="pj-upload-title">LZHジャーナルをアップロード</div>
-                <div class="pj-upload-note">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015・1020をBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。未解析の不完全行は再アップロードで修復できます（正常解析済みの0円日は対象外）。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
+                <div class="pj-upload-note" id="uploadStoreNote">フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、コード1015・1020をBistro CAVACAVAへ保存します。取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。同じ内容は重複スキップ。未解析の不完全行は再アップロードで修復できます（正常解析済みの0円日は対象外）。登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。</div>
               </div>
               <span class="chip gray">非公開Storage保管</span>
             </div>
@@ -788,10 +788,26 @@
   (function () {
     var PAGES = window.LINE_REPORT_PAGES || {};
     var AUTH = window.LINE_REPORT_AUTH || null;
-    var STORE_KEY = 'bistrocavacava';
+    /**
+     * 店舗はここで固定せず、admin-api の GET /pos-journals/stores から取得する。
+     * LZH原本（pos_journal_files）とJournal Reportの保存済みレポート（saved_reports）の
+     * 「どちらかにデータがある店舗」が返るため、片側だけに保存した店舗もこの画面へ出る。
+     */
+    var DEFAULT_STORE_KEY = 'bistrocavacava';
+    var STORE_STORAGE_KEY = 'pos_journal_store';
+    /** admin-api の POS_JOURNAL_STORE_CODE_MAP と同じ内容。未接続・API未到達時だけ使う予備一覧 */
+    var FALLBACK_STORES = [
+      { store_key: 'bistrocavacava', store_name: 'Bistro CAVACAVA', store_codes: ['1015', '1020'], months: [] },
+      { store_key: 'marugos', store_name: 'マルゴエス', store_codes: ['1022'], months: [] }
+    ];
+    var storeDirectory = FALLBACK_STORES.slice();
+    var STORE_KEY = DEFAULT_STORE_KEY;
     var STORE_CODE = '1015・1020';
-    var STORE_NAME = (PAGES.getPreferredStoreDisplayLabel && PAGES.getPreferredStoreDisplayLabel(STORE_KEY)) || 'Bistro CAVACAVA';
+    var STORE_NAME = 'Bistro CAVACAVA';
+    /** 2026-06のCAVACAVA分だけを持つ静的スナップショット。未接続時の暫定表示に使う */
     var LEGACY_DATA_URL = './pos-journal-202606.json';
+    var LEGACY_DATA_STORE_KEY = 'bistrocavacava';
+    var LEGACY_DATA_MONTH = '2026-06';
     var WD = ['日','月','火','水','木','金','土'];
     var trendChart = null;
     var currentFiles = [];
@@ -883,15 +899,130 @@
         el('tokenInput').value = '';
         setMessage(el('authMsg'), '', '');
         setAuth(true);
+        await refreshStoreDirectory();
         await loadCurrent();
       } catch (error) {
         setMessage(el('authMsg'), error && error.message ? error.message : String(error), 'err');
       } finally { el('saveTokenBtn').disabled = false; }
     }
 
+    function savedStoreKey() {
+      try { return String(localStorage.getItem(STORE_STORAGE_KEY) || '').trim().toLowerCase(); }
+      catch (_) { return ''; }
+    }
+    function storeEntry(key) {
+      var wanted = String(key || '').trim().toLowerCase();
+      for (var i = 0; i < storeDirectory.length; i++) {
+        if (String(storeDirectory[i].store_key || '').toLowerCase() === wanted) return storeDirectory[i];
+      }
+      return null;
+    }
+    /** 画面表記は共通の店舗マスター（pages-config.js）を優先し、無ければAPIの店名を使う */
+    function storeLabel(entry) {
+      var key = entry && entry.store_key ? entry.store_key : '';
+      var preferred = '';
+      if (key && PAGES.getPreferredStoreDisplayLabel) {
+        try { preferred = PAGES.getPreferredStoreDisplayLabel(key) || ''; } catch (_) { preferred = ''; }
+      }
+      return preferred || (entry && entry.store_name) || key;
+    }
+    function storeCodeLabel(entry) {
+      var codes = entry && Array.isArray(entry.store_codes) ? entry.store_codes.filter(Boolean) : [];
+      return codes.join('・');
+    }
+    function storeMonths(entry) {
+      return entry && Array.isArray(entry.months) ? entry.months.filter(Boolean) : [];
+    }
+    /** 選択店舗にその月のデータが無いときは、データのある最新月へ寄せる */
+    function monthWithDataFor(key, month) {
+      var months = storeMonths(storeEntry(key));
+      if (!months.length) return month;
+      return months.indexOf(month) >= 0 ? month : months[0];
+    }
+    function describeStore(entry) {
+      var name = storeLabel(entry);
+      var codes = storeCodeLabel(entry);
+      var subtitle = el('pjSubtitle');
+      if (subtitle) {
+        subtitle.innerHTML = '<strong>' + esc(name) + '</strong>'
+          + (codes ? '（店舗コード' + esc(codes) + '）' : '')
+          + 'のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。'
+          + 'Journal Reportに保存済みのレポートも同じ店舗・同じ月であれば自動で取り込んで表示します。';
+      }
+      var uploadNote = el('uploadStoreNote');
+      if (uploadNote) {
+        uploadNote.textContent = 'フォルダごとドロップできます。ファイル名の先頭4桁から店舗コードを検証し、'
+          + (codes ? 'コード' + codes + 'を' + name + 'へ保存します。' : '選択中の店舗へ保存します。')
+          + '取り込み先の月はファイル名の日付から判定するため、上の「対象月」と違う月のファイルでもそのまま取り込めます。'
+          + '同じ内容は重複スキップ。未解析の不完全行は再アップロードで修復できます（正常解析済みの0円日は対象外）。'
+          + '登録・修復後は、Journal Reportの保存済みレポート（日別・月間）も同じ月の全原本から自動作成・更新します。';
+      }
+    }
+    function renderStoreOptions() {
+      var select = el('storeSel');
+      if (!select) return;
+      select.innerHTML = storeDirectory.map(function (entry) {
+        var codes = storeCodeLabel(entry);
+        return '<option value="' + esc(entry.store_key) + '">' + esc(storeLabel(entry))
+          + (codes ? '（コード' + esc(codes) + '）' : '') + '</option>';
+      }).join('');
+      select.value = STORE_KEY;
+      if (select.value !== STORE_KEY && storeDirectory.length) {
+        // 保存済みの店舗が一覧から消えた場合は先頭へ戻す
+        applyStore(storeDirectory[0].store_key, { silent: true });
+        select.value = STORE_KEY;
+      }
+      select.disabled = storeDirectory.length <= 1;
+      select.title = select.disabled
+        ? 'この管理セッションで表示できる電子ジャーナルはこの店舗だけです'
+        : '店舗を切り替えると、その店舗の電子ジャーナルとJournal Reportの保存済みレポートを表示します';
+    }
+    /** 表示対象の店舗を切り替える（データ再読込は呼び出し側が行う） */
+    function applyStore(key, options) {
+      var opts = options || {};
+      var wanted = String(key || '').trim().toLowerCase();
+      var entry = storeEntry(wanted) || storeEntry(STORE_KEY) || storeDirectory[0] || null;
+      STORE_KEY = entry ? String(entry.store_key).toLowerCase() : (wanted || DEFAULT_STORE_KEY);
+      STORE_NAME = entry ? storeLabel(entry) : STORE_KEY;
+      STORE_CODE = entry ? storeCodeLabel(entry) : '';
+      if (!opts.silent) {
+        try { localStorage.setItem(STORE_STORAGE_KEY, STORE_KEY); } catch (_) {}
+      }
+      describeStore(entry || { store_key: STORE_KEY, store_name: STORE_NAME, store_codes: [] });
+      var select = el('storeSel');
+      if (select && select.value !== STORE_KEY) select.value = STORE_KEY;
+      return STORE_KEY;
+    }
+    /** 「どちらかに保存されていれば表示する」ための店舗一覧をAPIから取り直す */
+    async function refreshStoreDirectory() {
+      var next = FALLBACK_STORES.slice();
+      if (getToken()) {
+        try {
+          var body = await apiFetch('/pos-journals/stores', { method: 'GET' });
+          if (body && Array.isArray(body.stores) && body.stores.length) next = body.stores;
+        } catch (_) { /* 一覧APIが使えない環境では予備一覧のまま続行する */ }
+      }
+      storeDirectory = next;
+      applyStore(savedStoreKey() || STORE_KEY || DEFAULT_STORE_KEY, { silent: true });
+      renderStoreOptions();
+      return storeDirectory;
+    }
+    async function changeStore(key) {
+      var previous = STORE_KEY;
+      applyStore(key);
+      if (STORE_KEY === previous) return;
+      var month = monthWithDataFor(STORE_KEY, el('monthSel').value || savedMonth());
+      if (month && month !== el('monthSel').value) {
+        el('monthSel').value = month;
+        try { localStorage.setItem('pos_journal_month', month); } catch (_) {}
+      }
+      resetAiForDataChange();
+      setMessage(el('uploadMsg'), '', '');
+      await loadCurrent();
+    }
     function populateControls() {
-      el('storeSel').innerHTML = '<option value="' + STORE_KEY + '">' + esc(STORE_NAME) + '（コード' + STORE_CODE + '）</option>';
-      el('storeSel').disabled = true;
+      applyStore(savedStoreKey() || DEFAULT_STORE_KEY, { silent: true });
+      renderStoreOptions();
       el('monthSel').value = savedMonth();
     }
     function weatherIcon(w) {
@@ -1399,14 +1530,24 @@
       var storageFiles = Number(m.storage_file_count != null ? m.storage_file_count : m.file_count)||0;
       var sharedDays = Number(m.shared_day_count)||0;
       var sharedAdded = Number(m.shared_only_day_count)||0;
+      // サーバが返した店舗コードを優先し、選択中の店舗表記より実データを正とする
+      var metaCodes = Array.isArray(m.store_codes) ? m.store_codes.filter(Boolean).join('・') : '';
+      var storeHead = (m.store_name || STORE_NAME) + ((metaCodes || STORE_CODE) ? '（店舗コード' + (metaCodes || STORE_CODE) + '）' : '');
       if (m.storage_mode === 'legacy_static') {
-        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / 既存取込データ ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分 / 原本は未保管のため上のアップロードから保存してください';
+        el('srcInfo').textContent = storeHead + ' / 既存取込データ ' + (m.file_count||0) + '件 / 解析 ' + (m.day_count||0) + '日分 / 原本は未保管のため上のアップロードから保存してください';
       } else if (m.storage_mode === 'shared_reports') {
-        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Journal Report共有参照 ' + sharedDays + '日分 / LZH原本 0件';
+        el('srcInfo').textContent = storeHead + ' / Journal Report共有参照 ' + sharedDays + '日分 / LZH原本 0件';
       } else if (m.storage_mode === 'storage_and_shared') {
-        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管 ' + storageFiles + '件 + Journal Report補完 ' + sharedAdded + '日 / 解析 ' + (m.day_count||0) + '日分';
+        el('srcInfo').textContent = storeHead + ' / Storage保管 ' + storageFiles + '件 + Journal Report補完 ' + sharedAdded + '日 / 解析 ' + (m.day_count||0) + '日分';
       } else {
-        el('srcInfo').textContent = STORE_NAME + '（店舗コード' + STORE_CODE + '） / Storage保管ファイル ' + storageFiles + '件 / 解析 ' + (m.day_count||0) + '日分';
+        el('srcInfo').textContent = storeHead + ' / Storage保管ファイル ' + storageFiles + '件 / 解析 ' + (m.day_count||0) + '日分';
+      }
+      if (!days.length) {
+        // 店舗を切り替えた直後に空表示だけを見せないよう、データのある月を案内する
+        var availableMonths = storeMonths(storeEntry(STORE_KEY));
+        el('srcInfo').textContent += availableMonths.length
+          ? ' / この月のデータはありません（データのある月: ' + availableMonths.slice(0, 6).join('・') + (availableMonths.length > 6 ? ' ほか' : '') + '）'
+          : ' / この月のデータはありません';
       }
       el('rangeBadge').textContent = '営業日 ' + openDays.length + '日（記録 ' + days.length + '日）';
       var chargeGuest=monthChargeGuest(days,data.item_ranking,t);
@@ -1633,7 +1774,8 @@
       }
     }
     async function loadLegacy(month, preserveFiles) {
-      if (month!=='2026-06') { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]});await loadAnalysisHistory();return; }
+      // 静的スナップショットはCAVACAVAの2026-06分だけ。他店舗・他月へは絶対に流用しない。
+      if (month!==LEGACY_DATA_MONTH||STORE_KEY!==LEGACY_DATA_STORE_KEY) { if(!preserveFiles)renderFiles([]); render({meta:{file_count:0,day_count:0},totals:{},days:[],item_ranking:[]});await loadAnalysisHistory();return; }
       try { var response=await fetch(LEGACY_DATA_URL,{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);var data=await response.json();data.meta=data.meta||{};data.meta.store_key=STORE_KEY;data.meta.store_name=STORE_NAME;data.meta.storage_mode='legacy_static';render(data);if(!preserveFiles)renderFiles([]);await loadAnalysisHistory(); }
       catch(error){el('mainWrap').hidden=true;el('emptyState').hidden=false;el('emptyState').textContent='データ読込エラー: '+error.message;if(el('pagePdfBtn'))el('pagePdfBtn').disabled=true;}
     }
@@ -1768,6 +1910,7 @@
         var jumpTo=monthsWithData.indexOf(selectedMonth)>=0?selectedMonth:monthsWithData[0];
         if(jumpTo&&jumpTo!==el('monthSel').value){el('monthSel').value=jumpTo;parts.push('表示を'+jumpTo+'に切り替えました');}
         setMessage(el('uploadMsg'),parts.join(' / ')+(failures.length?'\n'+failures.join('\n'):''),(totals.failed||reportTotals.failed)?'warn':'ok');
+        await refreshStoreDirectory();
         await loadCurrent();
       }
       catch(error){setMessage(el('uploadMsg'),error.message,'err');}
@@ -1779,7 +1922,7 @@
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
-    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();setupProductRankingTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('reloadBtn').addEventListener('click',loadCurrent);el('pagePdfBtn').addEventListener('click',savePagePdf);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await loadCurrent();});
+    document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();setupProductRankingTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('storeSel').addEventListener('change',function(){changeStore(this.value);});el('reloadBtn').addEventListener('click',async function(){await refreshStoreDirectory();await loadCurrent();});el('pagePdfBtn').addEventListener('click',savePagePdf);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await refreshStoreDirectory();var startMonth=monthWithDataFor(STORE_KEY,el('monthSel').value||savedMonth());if(startMonth&&startMonth!==el('monthSel').value)el('monthSel').value=startMonth;await loadCurrent();});
   })();
   </script>
 

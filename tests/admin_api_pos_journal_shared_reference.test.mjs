@@ -12,6 +12,10 @@ const journalReport = await readFile(
   new URL("public/jnm/jnl2txt.html", root),
   "utf8",
 );
+const posJournal = await readFile(
+  new URL("supabase/functions/_shared/pos_journal.ts", root),
+  "utf8",
+);
 
 test("POS journal state shares Journal Report saved reports without double counting dates", () => {
   assert.match(adminApi, /fetchSharedJournalReportState/);
@@ -60,7 +64,61 @@ test("POS journal summary shows food/drink mix and daily majority icons", () => 
 test("POS journal page shows both verified CAVACAVA store codes", () => {
   assert.match(page, /店舗コード1015・1020/);
   assert.match(page, /コード1015・1020をBistro CAVACAVAへ保存/);
-  assert.match(page, /var STORE_CODE = '1015・1020'/);
+  assert.match(page, /store_codes: \['1015', '1020'\]/);
+});
+
+test("POS journal store directory unions LZH originals and Journal Report saves", () => {
+  assert.match(adminApi, /async function fetchPosJournalStoreDirectory\(/);
+  assert.match(adminApi, /path === "\/pos-journals\/stores"/);
+  // 片側だけに保存された店舗も候補へ入れる
+  assert.match(adminApi, /listDistinctPosJournalStoreKeys\(supabase, table\)/);
+  assert.match(adminApi, /for \(\s*const table of \["pos_journal_files", "saved_reports"\] as const\s*\)/);
+  // どちらの件数も0の店舗だけを一覧から外す
+  assert.match(adminApi, /if \(!journalFileCount && !savedReportCount\) continue/);
+  assert.match(adminApi, /months: monthList/);
+});
+
+test("POS journal store list is scoped and never bypasses store login limits", () => {
+  const start = adminApi.indexOf("async function fetchPosJournalStoreDirectory(");
+  assert.notEqual(start, -1);
+  const body = adminApi.slice(start, start + 3000);
+  assert.match(body, /const scope = String\(storeScope \?\? ""\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(body, /if \(scope && key !== scope\) return/);
+  assert.match(adminApi, /"\/pos-journals\/stores",/);
+});
+
+test("POS journal page picks its store list from the API, not a fixed store", () => {
+  assert.match(page, /async function refreshStoreDirectory\(/);
+  assert.match(page, /apiFetch\('\/pos-journals\/stores', \{ method: 'GET' \}\)/);
+  assert.match(page, /function changeStore\(key\)/);
+  assert.match(page, /el\('storeSel'\)\.addEventListener\('change'/);
+  // 単一店舗の固定selectに戻っていないこと
+  assert.doesNotMatch(page, /el\('storeSel'\)\.disabled = true;/);
+  assert.match(page, /select\.disabled = storeDirectory\.length <= 1/);
+  assert.match(page, /store_key: 'marugos'/);
+});
+
+test("POS journal page keeps the CAVACAVA static snapshot out of other stores", () => {
+  assert.match(page, /var LEGACY_DATA_STORE_KEY = 'bistrocavacava'/);
+  assert.match(page, /month!==LEGACY_DATA_MONTH\|\|STORE_KEY!==LEGACY_DATA_STORE_KEY/);
+});
+
+test("POS journal store name and codes resolve for stores without LZH originals", () => {
+  assert.match(posJournal, /export function resolvePosJournalStoreByKey\(/);
+  assert.match(adminApi, /const mappedStore = resolvePosJournalStoreByKey\(storeKey\)/);
+  assert.match(adminApi, /store_codes: storeCodes/);
+  assert.match(adminApi, /summary\.meta\.store_codes = storeCodes/);
+  // 旧実装の「見つからなければ1015」固定を残していないこと
+  assert.doesNotMatch(adminApi, /storeKey\.toLowerCase\(\) === "bistrocavacava"\s*\n?\s*\? resolvePosJournalStore\("1015"\)/);
+});
+
+test("POS journal AI accepts every store that has a register store code", () => {
+  const start = adminApi.indexOf("async function resolvePosJournalAiStore(");
+  assert.notEqual(start, -1);
+  const body = adminApi.slice(start, start + 1800);
+  assert.match(body, /resolvePosJournalStoreByKey\(storeKey\)/);
+  assert.match(body, /lookupPosJournalStoreCodeByKey\(supabase, storeKey\)/);
+  assert.doesNotMatch(adminApi, /電子ジャーナルAI分析はBistro CAVACAVAのみ対応/);
 });
 
 test("successfully parsed zero-sales journals are not shown as incomplete", () => {
