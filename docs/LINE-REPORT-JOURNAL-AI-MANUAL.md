@@ -758,7 +758,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - Edge Functions: 20件
 - 共有TypeScriptモジュール: 98件
 - 補助・運用・レガシーコード: 40件
-- admin-api静的ルート: 142件
+- admin-api静的ルート: 143件
 - SQL migrations: 299件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 89件
 
@@ -1085,6 +1085,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/pos-journals/saved-reports/html-offload` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/saved-reports/item` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/store-ops` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
+| `/pos-journals/stores` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/upload` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/receipts/analysis-prompt` | SAL-05 / SAL-06 / ADM-01 / DEV-02 |
 | `/receipts/competitors` | REV-02 / DEV-02 |
