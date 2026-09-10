@@ -6,6 +6,8 @@ export type ManualDaySalesRecord = {
   gross_sales_yen: number | null
   party_count: number | null
   guest_count: number | null
+  tax_amount_yen?: number | null
+  source?: string | null
   updated_at?: string | null
 }
 
@@ -49,6 +51,8 @@ export function manualDaySalesFromRow(
     gross_sales_yen: gross,
     party_count: party,
     guest_count: guest,
+    tax_amount_yen: parseOptionalNonNegativeInt(row.tax_amount_yen),
+    source: row.source != null ? String(row.source) : null,
     updated_at: row.updated_at != null ? String(row.updated_at) : null,
   }
 }
@@ -68,7 +72,7 @@ export async function fetchManualDaySalesMapForStore(
 
   const { data, error } = await supabase
     .from("line_sales_manual_day")
-    .select("sales_date, gross_sales_yen, party_count, guest_count, updated_at")
+    .select("sales_date, gross_sales_yen, party_count, guest_count, tax_amount_yen, source, updated_at")
     .eq("store_partition_key", key)
     .gte("sales_date", from)
     .lt("sales_date", to)
