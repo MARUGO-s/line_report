@@ -2,6 +2,8 @@
 
 ## 2026-09-11 Journal → 売上分析の連携
 
+- PR #228を本番反映済み。MARUGO SのONと過去分反映を確定し、日次/月次の原本不一致0・再実行不変・他店データ/設定不変・Safariの4月集計を確認した。表示追補では、レシート0件のJournal日次も曜日・天候グラフへ含める。未入力の0円と明示実績を混同しない。
+
 - 同期は `journal_sales_sync.ts`。大容量レポートの `posJournalDays` 日計を優先し、`sales` と二重加算しない。欠損を0円へ変換せず、不正・矛盾した日計では同期前に拒否する。
 - `store_operation_profiles` はJournal側の小文字キー。日次・月次売上表は正式キー（MARUGO Sは `marugoS`）。両者を混同しない。他店は明示ON以外に広げない。
 - MARUGO Sの過去分取り込みはユーザー承認済み。固定範囲・原本照合・再実行可能なDML手順: `scripts/backfill-marugos-journal-sales-20260911.sql`。生データのバックアップは実チェックアウトの `.local/backups/restore-work/` のみ。GitやGraphifyへ入れない。
