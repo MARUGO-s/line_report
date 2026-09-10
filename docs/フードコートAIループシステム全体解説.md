@@ -1,5 +1,7 @@
 # フードコート AIループシステム 全体解説
 
+> 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
+
 MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の分析基盤に組み込まれた、
 **2つの「自己改善ループ」** の全体像を解説する。
 
@@ -127,14 +129,14 @@ FOODCOURT_LOOP_PASS_TOTAL=70
 FOODCOURT_LOOP_PASS_EACH=65
 FOODCOURT_LOOP_MAX_ASK=2
 FOODCOURT_LOOP_MAX_DAILY=2
-FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude
+FOODCOURT_EVALUATOR_PROVIDER=groq
 FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 ```
 
 管理画面の合格ライン設定 `foodcourt_evolution_passing_score` が存在する場合は、その整数値が
 総合点・各評価軸の両方へ優先適用される。2026-07-22時点の本番値は70点。
 
-反証AI④は全 surface で Claude Haiku（→ Gemini → Groq）を使う。専門AI①は Groq 上の `openai/gpt-oss-120b` を全 surface 共通で使う。
+反証AI④は全surfaceでGemini 3.5 Flash（→ Groq）、評価AI⑥はGroq GPT-OSS（→ Gemini）が標準。統合はOpenAI→Gemini→Groq。旧Claude設定は新しい役割設定へ自動継承しない。Moonshotは構成外。
 
 **キャッシュ挙動**: 現行の通常版・loop版はどちらも `foodcourt-analysis-ai-v16-loop-learning`
 であり、日次ループをOFFにしてもキャッシュバージョンは変わらない。
@@ -182,5 +184,5 @@ AI使用料ページに合算される。
       確認日は次回月曜9時台（JST）を目安にし、以下を確認する:
       - `foodcourt_weekly_reports` に対象週の新規レポートが作成されていること
       - `foodcourt_ai_loop_runs.surface='weekly_report'` に新規runがあり、`status='completed'`、`final_score`、`final_loop_index`、`returned_reason` が記録されていること
-      - `ai_usage_events` に `claude-haiku-4-5`（反証AI・評価AI）と `openai/gpt-oss-120b`（専門AI①）が記録されていること
+      - `ai_usage_events` に `gemini-3.5-flash`（反証AI）と `openai/gpt-oss-120b`（専門AI①・評価AI）が記録されていること
       - `final_loop_index` が毎回2に張り付かず、コストが想定内であること

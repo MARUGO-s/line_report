@@ -16,25 +16,25 @@ test('Moonshot client remains available but is not the preferred critic', () => 
   )
 })
 
-test('all four surfaces use Claude Haiku for critic④', () => {
+test('all four surfaces use the reliable role resolver for critic④', () => {
   assert.match(
     source,
     /preferred === 'claude'[\s\S]{0,80}return \['claude',\s*'gemini',\s*'groq'\]/,
   )
   const deepCritics = source.match(
-    /criticRes = await foodCourtAiChat\([^\n]*,\s*(?:650|550|500),\s*'claude',[^\n]*perProviderMs:\s*25000/g,
+    /criticRes = await foodCourtAiChat\([^\n]*,\s*(?:650|550|500),\s*resolveFoodCourtCriticProvider\(\),[^\n]*perProviderMs:\s*25000/g,
   ) ?? []
   assert.equal(deepCritics.length, 3) // ask / period / weekly
   const dailyCritics = source.match(
-    /criticRes = await foodCourtAiChat\([^\n]*,\s*550,\s*'claude',[^\n]*perProviderMs:\s*15000/g,
+    /criticRes = await foodCourtAiChat\([^\n]*,\s*550,\s*resolveFoodCourtCriticProvider\(\),[^\n]*perProviderMs:\s*15000/g,
   ) ?? []
   assert.equal(dailyCritics.length, 1)
 })
 
-test('quality evaluator⑥ remains Claude by default', () => {
-  assert.match(source, /evaluatorProvider[\s\S]{0,250}:\s*'claude'/)
-  // model_version は全 surface で Claude のみを記録する。
-  assert.match(source, /const criticLabel = resolveFoodCourtClaudeModel\(\)/)
+test('quality evaluator⑥ uses role-specific routing and rejects malformed evaluations', () => {
+  assert.match(source, /foodCourtRoleProvider\('evaluator', Deno\.env\.get\('FOODCOURT_EVALUATOR_PROVIDER'\)\)/)
+  assert.match(source, /const criticLabel = resolveFoodCourtCriticProvider\(\)/)
+  assert.match(source, /validateContent: \(content\) => parseLoopEvaluationJson\(content\) !== null/)
   assert.doesNotMatch(source, /resolveFoodCourtMoonshotModel\(\)\}->\$\{resolveFoodCourtClaudeModel/)
 })
 
@@ -65,8 +65,9 @@ test('Groq gpt-oss keeps reasoning low so specialist① does not empty-out', () 
   assert.match(source, /max_completion_tokens:\s*completionTokens/)
 })
 
-test('tenant extract falls back to Gemini only when Azure table is unusable', () => {
-  assert.match(source, /Azure が表として成立しないときだけ Gemini/)
+test('tenant extract uses stable Gemini and independently verifies conflicting classification', () => {
+  assert.match(source, /FOODCOURT_TENANT_GEMINI_MODEL/)
+  assert.match(source, /foodCourtTenantNeedsFallback\(diagnostic, markerMatched\)/)
   assert.match(source, /ok: !!tenants/)
   assert.doesNotMatch(source, /tenants\.length >= minOk/)
 })
@@ -81,7 +82,7 @@ test('specialists and integrators have production-safe timeout budgets', () => {
   // 統合AI⑤: Luna が 25秒で繰り返し timeout → 35秒へ。後続 gemini 用に foodCourtAiChat が予約する。
   const integrators = source.match(/perProviderMs:\s*35000,\s*fallbackLog:\s*\{[^}]*role:\s*'integrator'/g) ?? []
   assert.equal(integrators.length, 4)
-  // 日次の反証AI(Claude Haiku)は定型処理なので15秒のまま。
+  // 日次の反証AIは低推論量の定型処理なので15秒。
   const dailyCritic = source.match(/perProviderMs:\s*15000,\s*fallbackLog:\s*\{[^}]*role:\s*'critic'/g) ?? []
   assert.equal(dailyCritic.length, 1)
 })
@@ -95,5 +96,6 @@ test('evaluator keeps provider fallbacks without extending the shared request de
   assert.doesNotMatch(source, /Math\.max\(minBudget, sharedDeadlineAt\)/)
   assert.match(source, /deadlineAt:\s*foodCourtEvalDeadlineAt\(params\.deadlineAt\)/)
   assert.match(source, /perProviderMs:\s*18000/)
-  assert.match(source, /FALLBACK_SLOT_MS\s*=\s*10_000/)
+  assert.match(source, /foodCourtProviderTimeout\(remaining/)
+  assert.match(source, /foodCourtStageDeadline\(options.deadlineAt/)
 })

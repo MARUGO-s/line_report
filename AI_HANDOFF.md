@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-09-10 フードコートAIの安定化
+
+- 現行モデル・設定・検証の正本: [FOODCOURT-AI-RELIABILITY.md](./docs/FOODCOURT-AI-RELIABILITY.md)。反証Gemini、評価Groq、画像Gemini→Azure。統合OpenAIは維持。
+- Claude HTTP 400の反復は確認したが、課金・設定などの詳細原因は未確定。画像の過去全滅も旧ログから詳細は復元できない。ゼロ障害や長期精度改善を保証しない。
+- 新設定は `FOODCOURT_CRITIC_PROVIDER` / `FOODCOURT_EVALUATOR_PROVIDER` / `FOODCOURT_TENANT_GEMINI_MODEL`。旧 `FOODCOURT_LOOP_EVALUATOR_PROVIDER` を復活させない。通常レシート・Journalのモデルは別。
+- 後続段階の時間確保、同じ期限内の一時HTTP再試行1回、本文受信の期限、表／非表・途中切れ・MIME・5軸JSON検査を追加。履歴の自動確認済み化や削除は禁止。
+
 ## 2026-09-10 数値予測の本番反映と文書整合
 
 - 現行正本: [事前予測台帳・5方式・評価](./docs/FOODCOURT-FORECAST-AUDIT.md)。[PR #225](https://github.com/MARUGO-s/line_report/pull/225) はマージ済み。main `f9b3a809620ed12e9914e8f4691fb0162e43749d` のEdge/Pages反映を確認済み。
