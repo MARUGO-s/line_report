@@ -1,5 +1,7 @@
 # AIループエンジニアリング機能 設計図
 
+> 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
+
 対象PDF: `/Users/yoshito/Downloads/AIループエンジニアリング機能 実装仕様.pdf`
 対象実装: `supabase/functions/_shared/foodcourt_compare.ts`、`supabase/functions/admin-api/index.ts`
 作成日: 2026-07-07
@@ -384,8 +386,8 @@ FOODCOURT_LOOP_ENABLED=true
 FOODCOURT_LOOP_MAX_ASK=2
 FOODCOURT_LOOP_PASS_TOTAL=70
 FOODCOURT_LOOP_PASS_EACH=65
-FOODCOURT_LOOP_EVALUATOR_PROVIDER=claude
-FOODCOURT_LOOP_EVALUATOR_MODEL=claude-haiku-4-5
+FOODCOURT_EVALUATOR_PROVIDER=groq
+# Groq既定モデル: openai/gpt-oss-120b
 FOODCOURT_LOOP_APPLY_TO_ASK=true
 FOODCOURT_LOOP_APPLY_TO_DAILY=true
 FOODCOURT_LOOP_APPLY_TO_PERIOD=true
@@ -393,7 +395,7 @@ FOODCOURT_LOOP_APPLY_TO_WEEKLY=true
 FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 ```
 
-2026-08-07時点の本番はQ&A・日次・期間・週次の全surfaceをONにしている。管理画面の合格ライン設定が存在する場合は、環境変数より優先する。反証AI④は**全 surface で Claude Haiku**（→ Gemini → Groq）を使い、評価AI⑥も Claude Haiku を維持する。専門AI①は Groq `openai/gpt-oss-120b`（失敗時 Gemini）。**Qwen／Kimi（Moonshot）は情報流出対策で構成外**（旧 env に残っていても GPT-OSS／Claude へ強制退避）。
+反証AI④は全surfaceでGemini 3.5 Flash（→ Groq）、評価AI⑥はGroq GPT-OSS（→ Gemini）が標準。統合はOpenAI→Gemini→Groq。旧Claude設定は新しい役割設定へ自動継承しない。Moonshotは構成外。
 
 ## 10. 評価AIプロンプト設計
 
@@ -625,7 +627,7 @@ Phase 2以降で部分再実行を追加。
 
 1. DB2テーブル追加
 2. Q&Aだけループ化
-3. 評価AIはClaudeまたはOpenAI/Gemini fallback
+3. 評価AIはGroq GPT-OSS、失敗時はGemini（2026-09-10標準構成）
 4. 再ループは統合AIのみ
 5. 全ログ保存
 6. 環境変数でOFF可能

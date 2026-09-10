@@ -1,5 +1,7 @@
 # フードコート AI 分析システム 設計解説
 
+> 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
+
 > 数値予測の更新: 2026-09-10、本番反映済み。現行の詳細正本は [FOODCOURT-FORECAST-AUDIT.md](./FOODCOURT-FORECAST-AUDIT.md)。AI回答・RAGの品質設定とは別の評価系統です。数値予測以外のモデル名・運用設定・件数は各節の確認日時点の記録で、今回の再監査対象ではありません。
 
 MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売上・客数データを解析する
@@ -110,7 +112,7 @@ MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売
                      ▼                                       │
            [反証AI④]                                        │
            品質管理・反証                                     │
-           Claude (claude-haiku-4-5)                        │
+           Gemini (gemini-3.5-flash)                        │
            批判的思考・論理検証に特化                         │
            最大650トークン出力                                │
                      │                                       │
@@ -293,20 +295,20 @@ X の最新トレンドは後者が担当し、その結果を統合AIの材料�
 
 ---
 
-### 反証AI④ ── 品質管理・反証専門（Claude）
+### 反証AI④ ── 品質管理・反証専門（Gemini）
 
 | 項目 | 内容 |
 |---|---|
-| 全 surface（Q&A・日次・期間・週次） | Claude `claude-haiku-4-5` → Gemini → Groq |
-| モデル設定 | `FOODCOURT_CLAUDE_MODEL` / `CLAUDE_MODEL`（既定 `claude-haiku-4-5`） |
-| APIキー変数 | `claude_haiku` / `CLAUDE_HAIKU` / `ANTHROPIC_API_KEY` |
+| 全 surface | Gemini gemini-3.5-flash → Groq |
+| モデル設定 | `FOODCOURT_GEMINI_MODEL`（既定 `gemini-3.5-flash`） |
+| APIキー変数 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `VISION_API_KEY` |
 | 最大出力 | 550〜650トークン（日次は timeout 15秒、他 surface は 25秒） |
 | 出力用途 | 統合AIへの「反証メモ」 |
 
-**Claude Haiku を全 surface で使う理由:**
-- 言い過ぎ・因果断定・日付ずれの検出に、Anthropic API の Claude Haiku を統一する。
+**Geminiを反証に使う理由:**
+- ClaudeのHTTP 400が繰り返されたため、本番で成功実績のあるGeminiを標準にした。言い過ぎ・因果断定・日付ずれの検査を継続する。
 - 日次は定型の単日サマリーのため timeout を短めに、Q&A・期間・週次はコンテキストが厚いため timeout を長めにする。
-- 評価AI⑥も Claude Haiku のため、反証と採点の基準が揃う。
+- 評価AI⑥は別モデルのGroq。共通の5軸基準とコードによる数値監査は維持する。
 - 反証メモは統合AIへの編集指示であり、最終回答そのものではない。
 
 **担当する分析タスク:**
@@ -358,9 +360,9 @@ X の最新トレンドは後者が担当し、その結果を統合AIの材料�
 | 専門AI② イベント・天気 | Google | gemini-3.5-flash | アーティスト・スポーツ等の世界知識が最も豊富 |
 | **専門AI③ 運営改善** | **xAI** | **grok-3-mini** | 現場で明日打てる施策の具体化。Chat Completions 経由のため **X検索は行わない**（学習済み知識のみ） |
 | **③' Xトレンドブリーフ** | **xAI** | **grok-4.5** (`x_search`) | **Responses API で X を実際に検索**。指定期間の話題を引用URL付きで取得し統合AIへ渡す。検索証跡が無い応答は破棄 |
-| 反証AI④ 品質管理 | Anthropic | claude-haiku-4-5 | 全 surface で統一。言い過ぎ・因果断定の監査 |
+| 反証AI④ 品質管理 | Google | gemini-3.5-flash | 成功実績のある経路で矛盾・根拠不足を監査 |
 | 統合AI⑤ 最終生成 | OpenAI | gpt-5.6-luna | 複数AIメモの矛盾解消・統合整形を担当 |
-| 評価AI⑥ 品質採点 | Anthropic | claude-haiku-4-5 | 5軸JSON採点。合否はコード側で再判定 |
+| 評価AI⑥ 品質採点 | Groq | openai/gpt-oss-120b | 5軸JSON採点。合否はコード側で再判定 |
 
 ---
 
@@ -479,8 +481,10 @@ APIは既存の認証・店舗スコープを維持して `/foodcourt/evolution-
 | `GROK_X_SEARCH_MAX_OUTPUT_TOKENS` | ブリーフの出力上限。grok-4.5 は reasoning も算入されるため小さすぎると本文が出ない | 未設定（デフォルト: `3000`、下限600/上限8000） |
 | `FOODCOURT_X_SEARCH_TOPIC` | **Xで何を検索するか**。デプロイせずに調整できる | 未設定（デフォルト: 下記の食トレンド4観点） |
 | `FOODCOURT_X_SEARCH_ASK_INTENT_GATE` | Q&Aで、トレンドと無関係な質問はX検索を省く | 未設定（デフォルト: **有効**） |
-| `claude_haiku` | Claude API認証（反証AI④・評価AI⑥） | 設定済み |
-| `FOODCOURT_CLAUDE_MODEL` | 反証AI④／評価AI⑥のClaudeモデル名 | 未設定（デフォルト: `claude-haiku-4-5`） |
+| `FOODCOURT_CRITIC_PROVIDER` | 反証AIの任意設定 | 既定 `gemini` |
+| `FOODCOURT_EVALUATOR_PROVIDER` | 評価AIの任意設定 | 既定 `groq`。旧LOOP設定は使わない |
+| `FOODCOURT_TENANT_GEMINI_MODEL` | テナント画像抽出専用 | 既定 `gemini-3.5-flash` |
+| `FOODCOURT_CLAUDE_MODEL` | 明示的な復旧・比較時のみ使用 | 既定 `claude-haiku-4-5`。標準経路では呼ばない |
 | `OPENAI_API_KEY` | OpenAI API認証（統合AI⑤） | 設定済み |
 | `FOODCOURT_OPENAI_MODEL` | 統合AI⑤のモデル名 | `gpt-5.6-luna` |
 
@@ -501,10 +505,10 @@ APIは既存の認証・店舗スコープを維持して `/foodcourt/evolution-
 ```
 統合AI⑤（openai preferred）: openai → gemini → groq
 専門AI②（gemini preferred）: gemini → groq
-反証AI④（claude preferred）: claude(claude-haiku-4-5) → gemini → groq
+反証AI④（gemini preferred）: gemini → groq
 専門AI③（grok preferred）  : grok → gemini → groq
 専門AI①（groq preferred）  : groq(openai/gpt-oss-120b) → gemini
-評価AI⑥（claude preferred）: claude → gemini → groq（評価専用 deadline あり）
+評価AI⑥（groq preferred）: groq → gemini（共有期限内）
 Xトレンドブリーフ③'        : grok(x_search) → フォールバック無し（取得できなければブロックごと省略）
 ```
 
@@ -514,7 +518,7 @@ Xトレンドブリーフだけはフォールバック先を持たない。他�
 
 ---
 
-## 10. コスト概算（2026年7月時点）
+## 10. 旧構成のコスト概算（履歴専用）（2026年7月時点）
 
 ### モデル単価
 

@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-09-10 - フードコートAIのフォールバック頻発対策
+
+- 本番の反証・評価でClaudeのHTTP 400反復を確認。詳細内訳は取得権限がなく未確定。画像抽出の旧ログは失敗理由が一律で、9月8日の「全滅」の個別原因は復元不能。
+- 反証をGemini 3.5 Flash、採点をGroq GPT-OSSへ分担。画像はGemini 3.5 Flash主系→Azure予備とし、通常レシート設定から分離。旧評価provider環境変数は継承せず、新しい役割別設定を使う。
+- 共有期限・段階別予約・短すぎる主系枠を修正。明示的な一時HTTPエラーのみ1回再試行。本文受信も期限内に含め、画像出力枠・MIME・JSON途中切れ・非テナント画像の分類を修正。
+- 5軸採点と数値監査は維持。不正応答の費用も記録。過去の障害履歴は消去／自動確認済みにせず、今後の実障害も記録する。
+- 検証: フードコート108件通過、変更した共通モジュール2本の `deno check` 通過。ライブの正常経路は旧本番の成功履歴で確認したが、新構成の長期品質・失敗率は今後の実行で確認する。
+- 正本: [モデル構成と障害対策](./docs/FOODCOURT-AI-RELIABILITY.md)。数値予測の5方式・台帳とJournal専用モデルは変更しない。
+
 ### 2026-09-10 - 予測システムの本番確認と関連Markdownの現行化
 
 - 本番反映: [PR #225](https://github.com/MARUGO-s/line_report/pull/225) をマージ。main `f9b3a809620ed12e9914e8f4691fb0162e43749d` の [Edge](https://github.com/MARUGO-s/line_report/actions/runs/34475509493) は21:18:30 JST、[Pages](https://github.com/MARUGO-s/line_report/actions/runs/34475509514) は21:18:48 JSTに成功。

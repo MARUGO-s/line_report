@@ -471,6 +471,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 分析モードは自由質問（Q&A）、日次サマリー、期間サマリー、週次報告です。Q&Aは表示日で時間軸を固定し、会話履歴と日報を参照できます。
 - Journalの任意深掘りは通常Q&Aとは別のマルゴエス専用経路です。Journalが確定した期間だけを使い、会話履歴とフードコートQ&A履歴保存を行わず、Journalの確定数値を正本にして最後に統合します。
 - 各AIが本来のモデルを使えず別モデルへ切り替わった場合は、フォールバック事象として記録し画面で確認できます。
+- 2026-09-10から反証はGemini 3.5 Flash、品質評価はGroq GPT-OSS、テナント画像はGemini 3.5 Flashを標準にしています。統合はOpenAI Lunaを維持し、各役割の応答時間と推論量を調整します。
+- 一時的なHTTPエラーのみ同じ期限内で1回再試行します。画像がテナント表ではないと正常に判定できた場合と、本当の通信失敗・出力途中切れを分けて記録します。過去の全滅・切替履歴は消えません。非常時の予備モデルは残し、ゼロ障害や精度向上を保証するものではありません。
 
 **検索語:** 複数ai / 5+1 / 専門ai / 反証ai / 統合ai / 評価ai / q&a / 日次サマリー / 期間サマリー / 週次 / オーケストレーション / 数字を作らない
 
@@ -758,11 +760,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 41件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 99件
+- 共有TypeScriptモジュール: 100件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 143件
 - SQL migrations: 300件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 91件
+- テストファイル: 92件
 
 ### 公開画面・ブラウザコード
 
@@ -855,6 +857,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/clear_store_sheet_budget_tabs.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/competitor_review_context.ts` | REV-01 / REV-02 / DEV-02 |
 | `supabase/functions/_shared/daily_sales_import.ts` | SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_ai_reliability.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_attendance.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_compare.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_distillation.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |

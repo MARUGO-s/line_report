@@ -1,5 +1,7 @@
 # フードコートAI学習・自己進化システム 完全設計書
 
+> 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
+
 > 数値予測の更新: 2026-09-10、本番反映済み。現行の詳細正本は [FOODCOURT-FORECAST-AUDIT.md](./FOODCOURT-FORECAST-AUDIT.md)。AI回答・RAGの品質設定とは別の評価系統です。数値予測以外のモデル名・運用設定・件数は各節の確認日時点の記録で、今回の再監査対象ではありません。
 
 > 対象: MARUGO S / FOOD STADIUM TOKYO 売上・来客分析基盤
@@ -296,12 +298,12 @@ MARUGO Sと他店の日次売上のピアソン相関を計算する。
 | 専門AI 1 | 他店比較、時系列、要因分解、相関、異常値 | Groq / `openai/gpt-oss-120b` | 数値統計、競合業態、予測、日報効果対照 |
 | 専門AI 2 | イベント、会場、動員、天気 | Gemini / `gemini-3.1-pro-preview` | イベント相関、予定、天気相関、日別実績 |
 | 専門AI 3 | 現場施策、運営改善 | xAI / `grok-3-mini` | 日報、実績、予測、次のイベント |
-| 反証AI | 捏造、因果断定、日付ずれ、根拠不足の監査 | Claude / `claude-haiku-4-5`（全 surface） | 3専門メモと計算済み根拠 |
+| 反証AI | 捏造・因果断定・日付ずれの監査 | Gemini / gemini-3.5-flash | 3専門メモと計算済み根拠 |
 | 統合AI | 最終回答の構成と矛盾解消 | OpenAI / `gpt-5.6-luna` | 全専門メモ、反証、統計、RAG |
 | 改善再生成 | 評価指摘を反映した改稿 | OpenAI / `gpt-5.6-luna` | 前回答全文と改善指示 |
-| 評価AI | 5軸採点 | Claude既定 | 実データ、専門メモ、最終回答 |
+| 評価AI | 5軸採点 | Groq / openai/gpt-oss-120b | 実データ、専門メモ、最終回答 |
 
-専門AI①は失敗時に Gemini へ、②③は失敗時に Gemini / Groq へフォールバックする。反証AI④は全 surface で Claude Haiku（→ Gemini → Groq）。統合AI⑤は OpenAI → Gemini → Groq の順。評価AI⑥は Claude 既定を維持する。
+反証AI④は全surfaceでGemini 3.5 Flash（→ Groq）、評価AI⑥はGroq GPT-OSS（→ Gemini）が標準。統合はOpenAI→Gemini→Groq。旧Claude設定は新しい役割設定へ自動継承しない。Moonshotは構成外。
 
 ## 9. 回答品質ループ
 
