@@ -663,13 +663,17 @@ export async function fetchReceiptSalesState(
   const series = dayKeys.map((dateKey) => {
     const daily = selectedDailyMap.get(dateKey)
     const receiptCount = daily?.receipt_count ?? 0
-    const netSalesYen = daily?.net_sales_yen ?? 0
-    const taxAmountYen = daily?.tax_amount_yen ?? 0
+    let netSalesYen = daily?.net_sales_yen ?? 0
+    let taxAmountYen = daily?.tax_amount_yen ?? 0
     const receiptGross = daily?.gross_sales_yen ?? 0
     const receiptParty = daily?.party_count ?? 0
     const receiptGuest = daily?.guest_count ?? 0
     const md = manualDayMap.get(dateKey) ?? null
     const grossSalesYen = md?.gross_sales_yen != null ? md.gross_sales_yen : receiptGross
+    if (md?.source === 'journal' && md.gross_sales_yen != null && md.tax_amount_yen != null) {
+      taxAmountYen = md.tax_amount_yen
+      netSalesYen = Math.max(0, md.gross_sales_yen - taxAmountYen)
+    }
     const partyCount = md?.party_count != null ? md.party_count : receiptParty
     const guestCount = md?.guest_count != null ? md.guest_count : receiptGuest
     return {
@@ -781,8 +785,8 @@ export async function fetchReceiptSalesState(
     ? {
       receipt_count: receiptCountTotal,
       total_gross_sales_yen: seriesGrossTotal,
-      total_net_sales_yen: selectedStore?.total_net_sales_yen ?? 0,
-      total_tax_amount_yen: selectedStore?.total_tax_amount_yen ?? 0,
+      total_net_sales_yen: series.reduce((a, r) => a + r.net_sales_yen, 0),
+      total_tax_amount_yen: series.reduce((a, r) => a + r.tax_amount_yen, 0),
       total_party_count: seriesPartyTotal,
       total_guest_count: seriesGuestTotal,
       avg_gross_sales_yen: receiptCountTotal > 0 ? Math.round(seriesGrossTotal / receiptCountTotal) : null,
@@ -936,12 +940,14 @@ export async function fetchReceiptDailyAggForRange(
     const agg = dailyMap.get(d) ?? null
     const md = manualMap.get(d) ?? null
     const receiptCount = agg?.receipt_count ?? 0
+    const journalTax = md?.source === 'journal' && md.gross_sales_yen != null
+      ? md.tax_amount_yen ?? null : null
     out.push({
       date: d,
       receipt_count: receiptCount,
       gross_sales_yen: md?.gross_sales_yen != null ? md.gross_sales_yen : (agg?.gross ?? 0),
-      net_sales_yen: agg?.net ?? 0,
-      tax_amount_yen: agg?.tax ?? 0,
+      net_sales_yen: journalTax != null ? Math.max(0, md!.gross_sales_yen! - journalTax) : agg?.net ?? 0,
+      tax_amount_yen: journalTax ?? agg?.tax ?? 0,
       party_count: md?.party_count != null ? md.party_count : (agg?.party ?? 0),
       guest_count: md?.guest_count != null ? md.guest_count : (agg?.guest ?? 0),
       manual_gross: md?.gross_sales_yen != null,
@@ -1025,7 +1031,7 @@ export async function fetchAnalyticsMonthly(
 
   const storeSet = new Map<string, string>()
   // 日次手入力の差分計算用に日別レシート集計を保持（store絞り込み時のみ使用）
-  const perDayReceipt = new Map<string, { gross: number; party: number; guest: number }>()
+  const perDayReceipt = new Map<string, { gross: number; net: number; party: number; guest: number }>()
 
   for (const row of rows) {
     const dateStr = toSafeString(row.receipt_date)
@@ -1041,8 +1047,9 @@ export async function fetchAnalyticsMonthly(
     bucket.party_count += rowParty
     bucket.guest_count += rowGuest
     bucket.receipt_count += 1
-    const pd = perDayReceipt.get(dateStr) ?? { gross: 0, party: 0, guest: 0 }
+    const pd = perDayReceipt.get(dateStr) ?? { gross: 0, net: 0, party: 0, guest: 0 }
     pd.gross += rowGross
+    pd.net += toNonNegativeInteger(row.net_sales_yen)
     pd.party += rowParty
     pd.guest += rowGuest
     perDayReceipt.set(dateStr, pd)
@@ -1065,6 +1072,10 @@ export async function fetchAnalyticsMonthly(
       if (!bucket) continue
       const rd = perDayReceipt.get(date)
       if (md.gross_sales_yen != null) bucket.gross_sales_yen += md.gross_sales_yen - (rd?.gross ?? 0)
+      // Journalは税込だけでなく確定税額を持つ。税抜も同日のレシートと置換する。
+      if (md.source === 'journal' && md.gross_sales_yen != null && md.tax_amount_yen != null) {
+        bucket.net_sales_yen += Math.max(0, md.gross_sales_yen - md.tax_amount_yen) - (rd?.net ?? 0)
+      }
       if (md.party_count != null) bucket.party_count += md.party_count - (rd?.party ?? 0)
       if (md.guest_count != null) bucket.guest_count += md.guest_count - (rd?.guest ?? 0)
       monthsWithDayManual.add(monthKey)

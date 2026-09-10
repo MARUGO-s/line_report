@@ -51,16 +51,16 @@ function normalizeDate(value: unknown): string {
 }
 
 /**
- * 保存済みレポートの data.sales（会計単位の明細）を日付で集計する。
- * 合算レポートを渡しても日付単位の値は変わらないため冪等。
+ * 会計明細を日付で集計し、存在する日はPOS確定日計で置換する。
+ * 大容量レポートは sales=[] でも posJournalDays に日計を保持する。
+ * 両形式を加算しない。同日の矛盾した日計は同期前に拒否する。
  */
 export function extractDailyTotalsFromReport(
   reportData: unknown,
 ): Map<string, DailyTotals> {
   const out = new Map<string, DailyTotals>()
   if (!isRecord(reportData)) return out
-  const sales = reportData.sales
-  if (!Array.isArray(sales)) return out
+  const sales = Array.isArray(reportData.sales) ? reportData.sales : []
 
   for (const entry of sales) {
     if (!isRecord(entry)) continue
@@ -73,6 +73,30 @@ export function extractDailyTotalsFromReport(
     current.groups += toFiniteNumber(entry.groups)
     out.set(date, current)
   }
+  const days = Array.isArray(reportData.posJournalDays) ? reportData.posJournalDays : []
+  const seen = new Map<string, DailyTotals>()
+  for (const day of days) {
+    if (!isRecord(day)) continue
+    const date = normalizeDate(day.business_date)
+    if (!date) continue
+    const values = [day.gross_sales, day.tax, day.guests, day.groups]
+    if (values.some((v) =>
+      (typeof v !== "number" && typeof v !== "string") ||
+      String(v).trim() === "" || !Number.isSafeInteger(Number(v)) || Number(v) < 0
+    ) || Number(day.tax) > Number(day.gross_sales)) {
+      throw new Error(`Invalid POS journal daily totals: ${date}`)
+    }
+    const totals = {
+      gross: Number(day.gross_sales), tax: Number(day.tax),
+      guests: Number(day.guests), groups: Number(day.groups),
+    }
+    const previous = seen.get(date)
+    if (previous && Object.keys(totals).some((key) =>
+      previous[key as keyof DailyTotals] !== totals[key as keyof DailyTotals]
+    )) throw new Error(`Conflicting POS journal daily totals: ${date}`)
+    seen.set(date, totals)
+    out.set(date, totals)
+  }
   return out
 }
 
@@ -81,7 +105,9 @@ export async function isJournalSalesSyncEnabled(
   supabase: SupabaseClient,
   storePartitionKey: string,
 ): Promise<boolean> {
-  const key = canonicalStorePartitionKeyForDb(storePartitionKey)
+  // Journalプロフィールは小文字、売上テーブルは正式キー（marugoS）。
+  // 売上用のキーをそのまま使うと、ONでもプロフィールを取得できない。
+  const key = canonicalStorePartitionKeyForDb(storePartitionKey).toLowerCase()
   if (!key) return false
   const { data, error } = await supabase
     .from("store_operation_profiles")
