@@ -17,13 +17,14 @@ export type NormalizedReceiptRow = {
 const RECEIPT_SELECT =
   'store_name, receipt_date, created_at, gross_sales_yen, net_sales_yen, tax_amount_yen, party_count, guest_count'
 
-export async function loadStoreRegistry(supabase: SupabaseClient): Promise<StoreRegistryRow[]> {
+export async function loadStoreRegistry(supabase: SupabaseClient, strict = false): Promise<StoreRegistryRow[]> {
   const { data, error } = await supabase
     .from('store_webhook_tables')
     .select('store_partition_key, display_name, webhook_raw_table, receipt_table, receipt_phones')
     .order('display_name', { ascending: true })
 
   if (error) {
+    if (strict) throw new Error(`Store registry unavailable: ${error.message}`)
     console.error('loadStoreRegistry failed:', error.message)
     return []
   }
@@ -59,25 +60,33 @@ async function queryOneStoreTable(
     receiptTo?: string
     limit?: number
     orderByCreatedAt?: boolean
+    strict?: boolean
   },
 ): Promise<NormalizedReceiptRow[]> {
+  const out: NormalizedReceiptRow[] = []
+  const pageSize = 1000
+  for (let offset = 0; ; offset += pageSize) {
   let query = supabase.from(entry.receipt_table).select(RECEIPT_SELECT)
   if (filters.createdFrom) query = query.gte('created_at', filters.createdFrom)
   if (filters.createdTo) query = query.lt('created_at', filters.createdTo)
   if (filters.receiptFrom) query = query.gte('receipt_date', filters.receiptFrom)
   if (filters.receiptTo) query = query.lt('receipt_date', filters.receiptTo)
   query = query.order(filters.orderByCreatedAt ? 'created_at' : 'receipt_date', { ascending: true })
-  query = query.limit(filters.limit ?? 20000)
+  query = filters.strict ? query.order('id', { ascending: true }).range(offset, offset + pageSize - 1) : query.limit(filters.limit ?? 20000)
 
   const { data, error } = await query
   if (error) {
+    if (filters.strict) throw new Error(`Receipt sales unavailable: ${error.message}`)
     console.error(`query ${entry.receipt_table} failed:`, error.message)
     return []
   }
 
-  return (Array.isArray(data) ? data : []).map((row) =>
+  const page = (Array.isArray(data) ? data : []).map((row) =>
     normalizeReceiptRow(row as Record<string, unknown>, entry)
   )
+  out.push(...page)
+  if (!filters.strict || page.length < pageSize) return out
+  }
 }
 
 export async function queryStoreReceiptRows(
@@ -90,10 +99,14 @@ export async function queryStoreReceiptRows(
     receiptTo?: string
     limit?: number
     orderByCreatedAt?: boolean
+    strict?: boolean
   },
 ): Promise<NormalizedReceiptRow[]> {
-  const registry = await loadStoreRegistry(supabase)
-  if (registry.length === 0) return []
+  const registry = await loadStoreRegistry(supabase, opts.strict)
+  if (registry.length === 0) {
+    if (opts.strict) throw new Error('Store registry unavailable')
+    return []
+  }
 
   const registryKeys = registry.map((entry) => entry.store_partition_key)
   const resolvedKey = opts.storeKey
@@ -104,7 +117,10 @@ export async function queryStoreReceiptRows(
     ? registry.filter((entry) => entry.store_partition_key === resolvedKey)
     : registry
 
-  if (resolvedKey && targets.length === 0) return []
+  if (opts.storeKey && (!resolvedKey || targets.length === 0)) {
+    if (opts.strict) throw new Error('Unknown sales store')
+    return []
+  }
 
   const chunks = await Promise.all(
     targets.map((entry) => queryOneStoreTable(supabase, entry, opts)),

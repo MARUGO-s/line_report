@@ -133,6 +133,10 @@ export function buildReceiptFlexMessage(
     kvRow('客単価', formatYenOrDash(unitPrice)),
   ]
 
+  if (context.salesSourceLabel || context.salesReconciliationNotice) {
+    bodyContents.push({type:'text',text:context.salesSourceLabel ?? '統一売上',size:'xs',wrap:true,color:'#666666'})
+    if (context.salesReconciliationNotice) bodyContents.push({type:'text',text:context.salesReconciliationNotice,size:'sm',wrap:true,color:'#b45309'})
+  }
   if (showExecutiveDetail) {
     bodyContents.push(
       { type: 'separator', margin: 'md' },
@@ -314,6 +318,13 @@ export function buildReceiptChatCard(
       field('客単価', formatYenOrDash(unitPrice)),
     ],
   }]
+
+  if (context.salesSourceLabel || context.salesReconciliationNotice) {
+    sections.push({ type: 'fields', rows: [
+      field('採用データ', context.salesSourceLabel ?? '統一売上'),
+      ...(context.salesReconciliationNotice ? [field('要確認', context.salesReconciliationNotice, '#b45309')] : []),
+    ] })
+  }
 
   if (showExecutiveDetail) {
     sections.push(

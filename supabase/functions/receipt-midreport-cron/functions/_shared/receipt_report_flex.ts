@@ -1,6 +1,7 @@
-import { fetchManualMonthSales } from "./manual_month_sales.ts";
-import { isFullCalendarMonthPeriod, loadReceiptReportAggregateForStoreByReceiptDate, shiftIsoDateByYears } from "./receipt_report_aggregate.ts";
+import { fetchManualMonthSales } from "../../../_shared/manual_month_sales.ts";
+import { isFullCalendarMonthPeriod, loadReceiptReportAggregateForStoreByReceiptDate, shiftIsoDateByYears } from "../../../_shared/receipt_report_aggregate.ts";
 import { buildReceiptBudgetComparisonRows } from "./receipt_budget_comparison.ts";
+import { buildReceiptAnalyticsDashboardUrlForLine } from "../../../_shared/receipt_reply_context.ts";
 function formatYoyPercentChange(current, prior) {
   if (!Number.isFinite(prior) || prior <= 0) return null;
   const pct = (current - prior) / prior * 100;
@@ -57,7 +58,7 @@ function calendarDaysInMonth(yyyyMm) {
   // 【方針】前年同期間に実レシートデータ（Excel一括取込で登録した合成レシートを含む）があれば、
   // それを最優先で前年比に使う。手入力の月次合計（途中期間は日割り）は、前年にレシートが
   // 1円も無い期間のフォールバックに限定する。
-  const priorHasReceiptData = (priorAggregate?.totalGrossSalesYen ?? 0) > 0;
+  const priorHasReceiptData = (priorAggregate?.recordedDayCount ?? 0) > 0 || (priorAggregate?.totalGrossSalesYen ?? 0) > 0;
   if (manual && !priorHasReceiptData) {
     // 過去売上が登録されている月は、手入力に無い組数・客数へレシート集計を混ぜない
     // （総売上のみ登録時に昨年レシートや誤日付行で組数・客数の前年比が出るのを防ぐ）
@@ -343,11 +344,10 @@ function flexSectionDivider() {
   };
 }
 function receiptCountMatchesOperatingDays(aggregate) {
-  return aggregate.receiptCount === aggregate.operatingDayCount;
+  return aggregate.recordedDayCount === 0 || (aggregate.journalDayCount ?? 0) > 0 || aggregate.receiptCount === aggregate.operatingDayCount;
 }
 export async function buildReceiptReportFlexMessages(supabase, aggregate, opts) {
-  const adminToken = Deno.env.get("ADMIN_DASHBOARD_TOKEN") ?? "";
-  const dashboardUri = `https://marugo-s.github.io/line_report/analytics.html${adminToken ? `?t=${encodeURIComponent(adminToken)}` : ""}`;
+  const dashboardUri = await buildReceiptAnalyticsDashboardUrlForLine(supabase, opts.storePartitionKey, opts.periodStartDate.slice(0,7));
   const avgUnit = aggregate.avgGrossSalesYen == null ? null : aggregate.totalGuestCount > 0 ? Math.round(aggregate.totalGrossSalesYen / aggregate.totalGuestCount) : null;
   const altText = `【${opts.reportTitle}】${opts.periodStartDate}〜${opts.periodEndDate} 総売上: ${formatYenAmount(aggregate.totalGrossSalesYen)}`;
   const countMismatch = !receiptCountMatchesOperatingDays(aggregate);
@@ -363,6 +363,8 @@ export async function buildReceiptReportFlexMessages(supabase, aggregate, opts) 
       wrap: true
     });
   }
+  bodyContents.push({type:"text",text:"統一売上（日別修正→ジャーナル→レシート）",size:"xs",wrap:true,color:"#666666"});
+  if (aggregate.reconciliationNotice) bodyContents.push({type:"text",text:aggregate.reconciliationNotice,size:"sm",wrap:true,color:"#b45309"});
   bodyContents.push(flexBaselineRow("総売上", formatYenAmount(aggregate.totalGrossSalesYen)), flexBaselineRow("組数合計", formatTotalWithDailyAverage(aggregate.totalPartyCount, aggregate.avgPartyCount, "組", "組/日")), flexBaselineRow("客数合計", formatTotalWithDailyAverage(aggregate.totalGuestCount, aggregate.avgGuestCount, "名", "名/日")));
   if (avgUnit != null) {
     bodyContents.push(flexBaselineRow("客単価", formatYenAmount(avgUnit)));

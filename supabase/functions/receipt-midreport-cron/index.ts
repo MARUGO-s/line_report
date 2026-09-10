@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
-import { loadReceiptReportAggregateForRoom } from "./functions/_shared/receipt_report_aggregate.ts";
+import { loadReceiptReportAggregateForRoom } from "../_shared/receipt_report_aggregate.ts";
 import { buildReceiptReportFlexMessages } from "./functions/_shared/receipt_report_flex.ts";
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts";
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts";

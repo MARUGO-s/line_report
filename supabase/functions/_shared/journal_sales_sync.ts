@@ -7,7 +7,7 @@ import { canonicalStorePartitionKeyForDb } from "./receipt_sheets_store_catalog.
  * 設計上の要点:
  * - 月次は「アップロードされたレポート」ではなく「日次テーブル全体」から再計算する。
  *   1日分だけ読み込んだときに完全な月が1日分へ縮む事故を構造的に防ぐため。
- * - ジャーナルを正とするが、上書きした非ジャーナル行は結果に含めて呼び出し側へ返す。
+ * - 日別の手修正を保持し、その下のジャーナル原本だけを更新する。
  * - 店舗ごとに store_operation_profiles.profile.journalSalesSync で有効化する。既定はOFF。
  */
 
@@ -15,8 +15,9 @@ export type JournalSalesSyncResult = {
   enabled: boolean
   daysWritten: number
   monthsWritten: number
-  /** ジャーナル以外の出所だった行を上書きした日付（監査用） */
+  /** 後方互換用。手修正を上書きしないため常に空。保持した日付は preservedManualDates。 */
   overwrittenNonJournal: string[]
+  preservedManualDates?: string[]
   months: string[]
 }
 
@@ -251,9 +252,9 @@ export async function syncJournalSalesFromReport(
     }
   })
 
-  const { error: dayError } = await supabase
-    .from("line_sales_manual_day")
-    .upsert(payload, { onConflict: "store_partition_key,sales_date" })
+  const { error: dayError } = await supabase.rpc('write_daily_sales_source', {
+    p_store_key: key, p_kind: 'journal', p_rows: payload,
+  })
   if (dayError) throw new Error(dayError.message)
 
   const months = [...new Set(dates.map((d) => d.slice(0, 7)))].sort()
@@ -263,7 +264,8 @@ export async function syncJournalSalesFromReport(
     enabled: true,
     daysWritten: payload.length,
     monthsWritten,
-    overwrittenNonJournal: overwrittenNonJournal.sort(),
+    overwrittenNonJournal: [],
+    preservedManualDates: overwrittenNonJournal.sort(),
     months,
   }
 }

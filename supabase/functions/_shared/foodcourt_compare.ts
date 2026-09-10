@@ -113,13 +113,14 @@ async function checkFoodCourtReceiptConsistency(
   try {
     const rows = await fetchReceiptDailyAggForRange(supabase, storeKey, salesDate, salesDate)
     const row = rows.find((r) => r.date === salesDate)
-    if (!row || row.receipt_count <= 0) return null
+    if (!row || (!row.manual_gross && row.receipt_count <= 0)) return null
+    if (!row.net_sales_known) return '⚠ 統一売上の税抜が未確定のため、画像との金額照合はできません。税額を確認してください。'
     const diff = imageSales - row.net_sales_yen
     if (diff === 0) return null
-    return `⚠ レシート集計(税抜${fcYen(row.net_sales_yen)})と画像の売上(税抜${fcYen(imageSales)})に差があります（差額${fcYen(diff)}）。日付や抽出結果をご確認ください。`
+    return `⚠ 統一売上(税抜${fcYen(row.net_sales_yen)})と画像の売上(税抜${fcYen(imageSales)})に差があります（差額${fcYen(diff)}）。日付や抽出結果をご確認ください。`
   } catch (e) {
     console.error('checkFoodCourtReceiptConsistency failed:', e instanceof Error ? e.message : String(e))
-    return null
+    return '⚠ 統一売上の取得に失敗したため、画像との金額照合は未確認です。'
   }
 }
 

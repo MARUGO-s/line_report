@@ -60,7 +60,18 @@ function fakeDb(enabled: unknown = true, profileError = false) {
     line_sales_manual_day: [], line_sales_manual_month_gross: [],
   };
   const writes: string[] = [];
-  const client = { from(table: string) {
+  const client = {
+    async rpc(name: string, args: {p_store_key:string;p_rows:Record<string,unknown>[]}) {
+      assert.equal(name,'write_daily_sales_source');
+      writes.push('line_sales_manual_day');
+      for(const payload of args.p_rows){
+        const index=rows.line_sales_manual_day.findIndex(r=>r.store_partition_key===args.p_store_key&&r.sales_date===payload.sales_date);
+        const next={...payload,store_partition_key:args.p_store_key};
+        if(index<0)rows.line_sales_manual_day.push(next);else rows.line_sales_manual_day[index]={...rows.line_sales_manual_day[index],...next};
+      }
+      return {data:{applied:args.p_rows.length},error:null};
+    },
+    from(table: string) {
     const predicates: ((r: Record<string, unknown>) => boolean)[] = [];
     const result = () => ({ data: rows[table].filter(r => predicates.every(p => p(r))), error: null });
     const q = {

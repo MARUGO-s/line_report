@@ -1,5 +1,14 @@
 # LINE Report Project Progress
 
+### 2026-09-11 - 統一売上と差異通知
+
+- 反映状態: ローカル実装・検証完了、本番未反映。公開GitHub `MARUGO-s/line_report` への送信/PR作成が自動安全審査で停止し、公開・デプロイ承認待ち。作業ブランチは `codex/unified-sales-reconciliation-20260911`。
+
+- 日別修正→同期済みジャーナル→レシートを項目別に採用。原本と手修正を独立保持し、再同期で手修正を消さない。
+- 管理画面、LINE/M-talkの定型返信・定期報告、シート出力を共通集計へ接続。電子ジャーナル/Journal Reportに統一値と差異欄を追加。原本・保存済み報告は保持。
+- 生成AIへの統一DBデータ送信は安全審査により保留（利用者の送信範囲承認待ち）。AI本文まで統一済みとは案内しない。
+- 検証: test:ci 702件、knowledge 7件、PC1440px/スマホ390pxで差異・税額修正・503時の旧金額消去を確認。共通集計6モジュールの型チェック成功。シート全体の既存型エラー18件は変更前と同一。実装・反映手順の正本: [UNIFIED-SALES-SOURCE-POLICY.md](./docs/UNIFIED-SALES-SOURCE-POLICY.md)。本番反映の結果はこの変更のPRとDeploy Edge Functions/Deploy Pages実行記録を参照。
+
 ### 2026-09-11 - MARUGO Sのジャーナルを売上分析へ同期
 
 - 本番: [PR #228](https://github.com/MARUGO-s/line_report/pull/228) を反映。2026-09-11 00:19:56 JSTにEdge、00:20:16 JSTにPages成功。同期ON・過去分取り込み後、原本との日次/月次不一致0・再実行不変・他店設定/売上不変を確認。Safariでも4月の日次・月間が原本と一致。

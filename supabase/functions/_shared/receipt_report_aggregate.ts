@@ -1,9 +1,14 @@
+import { fetchUnifiedDailySales, salesReconciliationNotice } from './sales_reconciliation.ts'
+import { fetchManualMonthSales } from './manual_month_sales.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { findBestStoreNameInText, normalizeStoreToken } from "./receipt_store_name_resolve.ts"
 
 export const RECEIPT_STORE_PARTITION_UNKNOWN = "unknown_store"
 
 export type ReceiptReportAggregate = {
+  reconciliationNotice?: string | null
+  journalDayCount?: number
+  recordedDayCount?: number
   receiptCount: number
   totalGrossSalesYen: number
   totalPartyCount: number
@@ -194,64 +199,6 @@ export async function resolveStorePartitionKeyForRoom(
   return bestKey
 }
 
-function buildJstMonthCreatedAtRange(month: string): { startIso: string; endIso: string } | null {
-  const matched = month.match(/^(\d{4})-(\d{2})$/)
-  if (!matched) return null
-  const year = Number(matched[1])
-  const monthNumber = Number(matched[2])
-  if (!Number.isInteger(year) || !Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) {
-    return null
-  }
-  const startUtc = Date.UTC(year, monthNumber - 1, 1, -9, 0, 0)
-  const endUtc = Date.UTC(year, monthNumber, 1, -9, 0, 0)
-  return {
-    startIso: new Date(startUtc).toISOString(),
-    endIso: new Date(endUtc).toISOString(),
-  }
-}
-
-function rowReceiptDateInPeriod(
-  row: Record<string, unknown>,
-  periodStartDate: string,
-  periodEndDate: string,
-): boolean {
-  const receiptDate = receiptDateIsoFromValue(row.receipt_date)
-  if (!receiptDate) return false
-  return receiptDate >= periodStartDate && receiptDate <= periodEndDate
-}
-
-/** 売上分析 `/receipts/sales` と同系統の取り込み窓（created_at）＋レシート日付で期間内を数える */
-async function loadReceiptRowsAnalyticsAligned(
-  supabase: ReturnType<typeof createClient>,
-  storePartitionKey: string,
-  periodStartDate: string,
-  periodEndDate: string,
-): Promise<Array<Record<string, unknown>>> {
-  const key = String(storePartitionKey ?? "").trim().toLowerCase()
-  const month = periodStartDate.slice(0, 7)
-  const createdRange = buildJstMonthCreatedAtRange(month)
-  if (!createdRange) return []
-
-  const { data, error } = await supabase
-    .from("line_receipt_entries")
-    .select("gross_sales_yen, party_count, guest_count, receipt_date, created_at")
-    .eq("store_partition_key", key)
-    .gte("created_at", createdRange.startIso)
-    .lt("created_at", createdRange.endIso)
-    .limit(20000)
-
-  if (error) {
-    console.error(
-      `loadReceiptRowsAnalyticsAligned failed (store=${key}, month=${month}):`,
-      error.message,
-    )
-    return []
-  }
-
-  const rows = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
-  return rows.filter((row) => rowReceiptDateInPeriod(row, periodStartDate, periodEndDate))
-}
-
 /** 店舗 × レシート日付（inclusive）で集計。売上分析と揃えるため analytics 互換取得を優先する。 */
 export async function loadReceiptReportAggregateForStoreByReceiptDate(
   supabase: ReturnType<typeof createClient>,
@@ -259,34 +206,26 @@ export async function loadReceiptReportAggregateForStoreByReceiptDate(
   periodStartDate: string,
   periodEndDate: string,
 ): Promise<ReceiptReportAggregate | null> {
-  const key = String(storePartitionKey ?? "").trim().toLowerCase()
-  if (!key || key === RECEIPT_STORE_PARTITION_UNKNOWN) return null
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStartDate) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEndDate)) {
-    return null
+  const days = await fetchUnifiedDailySales(supabase, storePartitionKey, periodStartDate, periodEndDate)
+  if (!days.length) {
+    if (!isFullCalendarMonthPeriod(periodStartDate, periodEndDate)) return null
+    const manual = await fetchManualMonthSales(supabase, storePartitionKey, periodStartDate.slice(0,7))
+    if (!manual) return null
+    const n = manual.operating_days_count ?? 0
+    return { receiptCount:0, recordedDayCount:0, totalGrossSalesYen:manual.gross_sales_yen,
+      totalPartyCount:manual.party_count ?? 0, totalGuestCount:manual.guest_count ?? 0,
+      avgGrossSalesYen:n ? Math.round(manual.gross_sales_yen/n) : null,
+      avgPartyCount:n ? (manual.party_count ?? 0)/n : null, avgGuestCount:n ? (manual.guest_count ?? 0)/n : null,
+      operatingDayCount:n, avgDailyGrossSalesYen:n ? Math.round(manual.gross_sales_yen/n) : null,
+      reconciliationNotice:'月次登録値（日別データなし）', journalDayCount:0 }
   }
-
-  let rows = await loadReceiptRowsAnalyticsAligned(supabase, key, periodStartDate, periodEndDate)
-
-  if (rows.length === 0) {
-    const { data, error } = await supabase
-      .from("line_receipt_entries")
-      .select("gross_sales_yen, party_count, guest_count, receipt_date")
-      .eq("store_partition_key", key)
-      .gte("receipt_date", periodStartDate)
-      .lte("receipt_date", periodEndDate)
-      .limit(20000)
-
-    if (error) {
-      console.error(
-        `loadReceiptReportAggregateForStoreByReceiptDate failed (store=${key}, ${periodStartDate}..${periodEndDate}):`,
-        error.message,
-      )
-      return null
-    }
-    rows = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
-  }
-
-  return buildReceiptReportAggregateFromRows(rows)
+  const gross = days.reduce((n,d)=>n+d.gross_sales_yen,0), party = days.reduce((n,d)=>n+d.party_count,0), guest = days.reduce((n,d)=>n+d.guest_count,0)
+  const count = days.filter(d=>d.gross_sales_yen>0).length
+  return { receiptCount:days.reduce((n,d)=>n+d.receipt_count,0), recordedDayCount:days.length,
+    totalGrossSalesYen:gross,totalPartyCount:party,totalGuestCount:guest,
+    avgGrossSalesYen:count?Math.round(gross/count):null,avgPartyCount:count?party/count:null,avgGuestCount:count?guest/count:null,
+    operatingDayCount:count,avgDailyGrossSalesYen:count?Math.round(gross/count):null,
+    reconciliationNotice:salesReconciliationNotice(days), journalDayCount:days.filter(d=>d.manual_gross).length }
 }
 
 export async function loadReceiptReportAggregateForRoom(

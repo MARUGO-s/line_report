@@ -1,4 +1,5 @@
 -- Authorized one-time repair: MARUGO S only. No schema changes or raw data.
+-- HISTORICAL ONLY: after unified_daily_sales_sources, use write_daily_sales_source.
 -- Before running: privately back up its profile/day/month rows; deploy the
 -- compact-report + profile-key fix. Keep all original journals and receipts.
 -- One transaction. Re-running with unchanged input does not change row counts/values.
@@ -11,6 +12,10 @@ declare
   source_count integer;
   unique_count integer;
 begin
+  if exists(select 1 from information_schema.columns where table_schema='public'
+      and table_name='line_sales_manual_day' and column_name='manual_values') then
+    raise exception 'Historical backfill retired; use write_daily_sales_source to preserve manual corrections';
+  end if;
   perform 1 from public.store_operation_profiles
     where store_partition_key = 'marugos' for update;
   if not found then raise exception 'MARUGO S journal profile missing'; end if;

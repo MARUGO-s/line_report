@@ -181,6 +181,7 @@ export async function fetchManualMonthSalesMapForStore(
   supabase: any,
   storePartitionKey: string,
   salesMonths: string[],
+  strict = false,
 ): Promise<Map<string, ManualMonthSalesRecord>> {
   const key = canonicalStorePartitionKeyForDb(storePartitionKey)
   const months = [...new Set(
@@ -196,6 +197,7 @@ export async function fetchManualMonthSalesMapForStore(
     .in("sales_month", months)
 
   if (error) {
+    if (strict) throw new Error(`Monthly sales source unavailable: ${error.message}`)
     console.error(`fetchManualMonthSalesMapForStore failed (store=${key}):`, error.message)
     return out
   }

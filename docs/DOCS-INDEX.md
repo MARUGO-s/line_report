@@ -1,5 +1,7 @@
 # ドキュメント索引（line_report）
 
+- [統一売上・出所・差異通知](./UNIFIED-SALES-SOURCE-POLICY.md): 日別修正→ジャーナル→レシート、原本との区別、定型報告の共通集計、税額確認。
+
 本リポジトリの Markdown 一覧と、**用語の定義**・**読む順番**です。内容の矛盾を防ぐため、他ドキュメントもこの用語に揃えています。
 
 **本番:** Supabase `hocbnifuactbvmyjraxy`（hocbn）／GitHub Pages `https://marugo-s.github.io/line_report/`

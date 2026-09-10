@@ -1,3 +1,4 @@
+import { emptyUnifiedSalesDay, fetchUnifiedDailySales, nextSalesDate, reconcileDailySales, summarizeSalesReconciliation, type UnifiedSalesDay } from './sales_reconciliation.ts'
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import {
   allocateDailyBudgetsForMonth,
@@ -517,185 +518,50 @@ export async function fetchReceiptSalesState(
   const selectedStoreKeyRaw = toSafeString(url.searchParams.get('store_key'))
   const range = buildJstMonthRange(month)
   const dayKeys = buildJstDateKeysForMonth(month)
-  const dayKeySet = new Set(dayKeys)
-
-  const registry = await loadStoreRegistry(supabase)
-  const registryKeys = registry.map((entry) => entry.store_partition_key)
+  const monthFirstDay = dayKeys[0]
+  const monthEndExclusive = nextSalesDate(dayKeys[dayKeys.length - 1])
+  const registry = await loadStoreRegistry(supabase, true)
   const resolvedStoreKey = selectedStoreKeyRaw
-    ? resolveStorePartitionKey(selectedStoreKeyRaw, registryKeys)
-    : ''
-
-  // 売上は「レシート日付（営業日）」基準で集計する。
-  // created_at（アップロード/取込時刻）で絞ると、過去日を後から取り込んだ／別経路で
-  // 同期したレシートが当月の取得窓から外れ、receipt_date が当月でも表示されない不具合になる。
-  // そのため receipt_date の範囲で取得する（レシート返信カードの月間集計と同じ基準）。
-  const receiptFrom = dayKeys.length > 0 ? dayKeys[0] : `${month}-01`
-  let receiptToExclusive: string | undefined
-  const monthMatch = /^(\d{4})-(\d{2})$/.exec(month)
-  if (monthMatch) {
-    const y = Number(monthMatch[1])
-    const mo = Number(monthMatch[2])
-    const ny = mo === 12 ? y + 1 : y
-    const nmo = mo === 12 ? 1 : mo + 1
-    receiptToExclusive = `${String(ny).padStart(4, '0')}-${String(nmo).padStart(2, '0')}-01`
-  }
+    ? resolveStorePartitionKey(selectedStoreKeyRaw, registry.map(r => r.store_partition_key)) : ''
+  const targets = selectedStoreKeyRaw ? registry.filter(r => r.store_partition_key === resolvedStoreKey) : registry
+  if (selectedStoreKeyRaw && !targets.length) throw { status: 400, message: 'Unknown sales store' }
   const rows = await queryStoreReceiptRows(supabase, {
-    storeKey: resolvedStoreKey || undefined,
-    receiptFrom,
-    receiptTo: receiptToExclusive,
-    limit: 20000,
+    storeKey: resolvedStoreKey || undefined, receiptFrom: monthFirstDay, receiptTo: monthEndExclusive, strict: true,
   })
-
-  type StoreTotal = {
-    store_key: string
-    store_name: string
-    receipt_count: number
-    total_gross_sales_yen: number
-    total_net_sales_yen: number
-    total_tax_amount_yen: number
-    total_party_count: number
-    total_guest_count: number
-  }
-
-  type DailyTotal = {
-    date: string
-    receipt_count: number
-    gross_sales_yen: number
-    net_sales_yen: number
-    tax_amount_yen: number
-    party_count: number
-    guest_count: number
-  }
-
-  const storeTotals = new Map<string, StoreTotal>()
-  const byStoreByDate = new Map<string, Map<string, DailyTotal>>()
-
-  for (const row of rows) {
-    const storeKey = toSafeString(row.store_partition_key) || 'unknown_store'
-    const storeNameRaw = toSafeString(row.store_name) || storeKey
-    const dayKey = resolveReceiptEntryDateKeyForMonth(row.receipt_date, month)
-    if (!dayKey || !dayKeySet.has(dayKey)) continue
-
-    const grossSalesYen = toNonNegativeInteger(row.gross_sales_yen)
-    const netSalesYen = toNonNegativeInteger(row.net_sales_yen)
-    const taxAmountYen = toNonNegativeInteger(row.tax_amount_yen)
-    const partyCount = sanitizeReceiptCountFromDb(row.party_count)
-    const guestCount = sanitizeReceiptCountFromDb(row.guest_count, 99_999)
-
-    const existingStore = storeTotals.get(storeKey)
-    if (!existingStore) {
-      storeTotals.set(storeKey, {
-        store_key: storeKey,
-        store_name: storeNameRaw,
-        receipt_count: 1,
-        total_gross_sales_yen: grossSalesYen,
-        total_net_sales_yen: netSalesYen,
-        total_tax_amount_yen: taxAmountYen,
-        total_party_count: partyCount,
-        total_guest_count: guestCount,
-      })
-    } else {
-      if (existingStore.store_name === existingStore.store_key && storeNameRaw !== storeKey) {
-        existingStore.store_name = storeNameRaw
-      }
-      existingStore.receipt_count += 1
-      existingStore.total_gross_sales_yen += grossSalesYen
-      existingStore.total_net_sales_yen += netSalesYen
-      existingStore.total_tax_amount_yen += taxAmountYen
-      existingStore.total_party_count += partyCount
-      existingStore.total_guest_count += guestCount
-    }
-
-    if (!byStoreByDate.has(storeKey)) {
-      byStoreByDate.set(storeKey, new Map<string, DailyTotal>())
-    }
-    const dailyMap = byStoreByDate.get(storeKey)!
-    const existingDaily = dailyMap.get(dayKey)
-    if (!existingDaily) {
-      dailyMap.set(dayKey, {
-        date: dayKey,
-        receipt_count: 1,
-        gross_sales_yen: grossSalesYen,
-        net_sales_yen: netSalesYen,
-        tax_amount_yen: taxAmountYen,
-        party_count: partyCount,
-        guest_count: guestCount,
-      })
-    } else {
-      existingDaily.receipt_count += 1
-      existingDaily.gross_sales_yen += grossSalesYen
-      existingDaily.net_sales_yen += netSalesYen
-      existingDaily.tax_amount_yen += taxAmountYen
-      existingDaily.party_count += partyCount
-      existingDaily.guest_count += guestCount
-    }
-  }
-
-  const collator = new Intl.Collator('ja-JP', { sensitivity: 'base', usage: 'sort' })
-  const storeOptions = [...storeTotals.values()].sort((a, b) => {
-    if (a.total_gross_sales_yen !== b.total_gross_sales_yen) {
-      return b.total_gross_sales_yen - a.total_gross_sales_yen
-    }
-    const byName = collator.compare(a.store_name, b.store_name)
-    if (byName !== 0) return byName
-    return collator.compare(a.store_key, b.store_key)
-  })
-
-  const selectedStoreKey = selectedStoreKeyRaw
-    ? resolvedStoreKey
-    : (storeOptions[0]?.store_key ?? '')
-  const selectedStore = selectedStoreKey ? storeTotals.get(selectedStoreKey) ?? null : null
-  const selectedDailyMap = selectedStoreKey
-    ? (byStoreByDate.get(selectedStoreKey) ?? new Map<string, DailyTotal>())
-    : new Map<string, DailyTotal>()
-
-  // 日次手入力（売上分析の日次表からの直接編集）。値のある列はその日のレシート集計より優先。
-  const storeKeyForManual = normalizeBudgetStoreKey(selectedStoreKeyRaw || selectedStoreKey || '')
-  const [manualMonthYear, manualMonthNum] = month.split('-').map(Number)
-  const monthFirstDay = `${month}-01`
-  const monthEndExclusive = `${manualMonthNum === 12 ? manualMonthYear + 1 : manualMonthYear}-${
-    String(manualMonthNum === 12 ? 1 : manualMonthNum + 1).padStart(2, '0')
-  }-01`
-  const manualDayMap = selectedStoreKey
-    ? await fetchManualDaySalesMapForStore(supabase, storeKeyForManual, monthFirstDay, monthEndExclusive)
-    : new Map<string, ManualDaySalesRecord>()
-
-  const series = dayKeys.map((dateKey) => {
-    const daily = selectedDailyMap.get(dateKey)
-    const receiptCount = daily?.receipt_count ?? 0
-    let netSalesYen = daily?.net_sales_yen ?? 0
-    let taxAmountYen = daily?.tax_amount_yen ?? 0
-    const receiptGross = daily?.gross_sales_yen ?? 0
-    const receiptParty = daily?.party_count ?? 0
-    const receiptGuest = daily?.guest_count ?? 0
-    const md = manualDayMap.get(dateKey) ?? null
-    const grossSalesYen = md?.gross_sales_yen != null ? md.gross_sales_yen : receiptGross
-    if (md?.source === 'journal' && md.gross_sales_yen != null && md.tax_amount_yen != null) {
-      taxAmountYen = md.tax_amount_yen
-      netSalesYen = Math.max(0, md.gross_sales_yen - taxAmountYen)
-    }
-    const partyCount = md?.party_count != null ? md.party_count : receiptParty
-    const guestCount = md?.guest_count != null ? md.guest_count : receiptGuest
+  const manualMaps = new Map<string, Map<string, ManualDaySalesRecord>>()
+  const byStoreByDate = new Map<string, Map<string, UnifiedSalesDay>>()
+  const storeOptions = await Promise.all(targets.map(async entry => {
+    const key = entry.store_partition_key
+    const overrides = await fetchManualDaySalesMapForStore(supabase, key, monthFirstDay, monthEndExclusive)
+    manualMaps.set(key, overrides)
+    const days = reconcileDailySales(rows.filter(r => r.store_partition_key === key) as unknown as Record<string, unknown>[], overrides)
+    byStoreByDate.set(key, new Map(days.map(d => [d.date, d])))
     return {
-      date: dateKey,
-      receipt_count: receiptCount,
-      gross_sales_yen: grossSalesYen,
-      net_sales_yen: netSalesYen,
-      tax_amount_yen: taxAmountYen,
-      party_count: partyCount,
-      guest_count: guestCount,
-      avg_gross_sales_yen: receiptCount > 0 ? Math.round(grossSalesYen / receiptCount) : null,
-      avg_party_count: receiptCount > 0 ? roundToScale(partyCount / receiptCount, 2) : null,
-      avg_guest_count: receiptCount > 0 ? roundToScale(guestCount / receiptCount, 2) : null,
-      avg_unit_price_yen: guestCount > 0 ? Math.round(grossSalesYen / guestCount) : null,
-      manual_gross: md?.gross_sales_yen != null,
-      manual_party: md?.party_count != null,
-      manual_guest: md?.guest_count != null,
+      store_key: key, store_name: entry.display_name, receipt_count: days.reduce((n,d) => n+d.receipt_count,0),
+      total_gross_sales_yen: days.reduce((n,d) => n+d.gross_sales_yen,0),
+      total_net_sales_yen: days.reduce((n,d) => n+d.net_sales_yen,0),
+      total_tax_amount_yen: days.reduce((n,d) => n+d.tax_amount_yen,0),
+      total_party_count: days.reduce((n,d) => n+d.party_count,0),
+      total_guest_count: days.reduce((n,d) => n+d.guest_count,0),
+    }
+  }))
+  storeOptions.sort((a,b) => b.total_gross_sales_yen-a.total_gross_sales_yen || a.store_name.localeCompare(b.store_name,'ja'))
+  const selectedStoreKey = selectedStoreKeyRaw ? resolvedStoreKey : storeOptions[0]?.store_key ?? ''
+  const selectedStore = storeOptions.find(s => s.store_key === selectedStoreKey) ?? null
+  const selectedDailyMap = byStoreByDate.get(selectedStoreKey) ?? new Map<string, UnifiedSalesDay>()
+  const storeKeyForManual = normalizeBudgetStoreKey(selectedStoreKey)
+  const manualDayMap = manualMaps.get(selectedStoreKey) ?? new Map<string, ManualDaySalesRecord>()
+  const series = dayKeys.map(date => {
+    const d = selectedDailyMap.get(date) ?? emptyUnifiedSalesDay(date)
+    return { ...d,
+      avg_gross_sales_yen: d.receipt_count > 0 ? Math.round(d.gross_sales_yen / d.receipt_count) : null,
+      avg_party_count: d.receipt_count > 0 ? roundToScale(d.party_count / d.receipt_count,2) : null,
+      avg_guest_count: d.receipt_count > 0 ? roundToScale(d.guest_count / d.receipt_count,2) : null,
+      avg_unit_price_yen: d.guest_count > 0 ? Math.round(d.gross_sales_yen / d.guest_count) : null,
     }
   })
-
-  const monthStartDate = dayKeys.length > 0 ? dayKeys[0] : `${month}-01`
-  const monthEndDate = dayKeys.length > 0 ? dayKeys[dayKeys.length - 1] : `${month}-01`
+  const monthStartDate = monthFirstDay
+  const monthEndDate = dayKeys[dayKeys.length - 1]
 
   const budgetRow = await fetchSalesBudgetRow(
     supabase,
@@ -849,114 +715,18 @@ export async function fetchReceiptSalesState(
     series,
     available_store_count: storeOptions.length,
     source_row_count: rows.length,
+    reconciliation: summarizeSalesReconciliation([...selectedDailyMap.values()]),
     generated_at: new Date().toISOString(),
   }
 }
 
-export type ReceiptDailyAggRow = {
-  date: string
-  receipt_count: number
-  gross_sales_yen: number
-  net_sales_yen: number
-  tax_amount_yen: number
-  party_count: number
-  guest_count: number
-  manual_gross: boolean
-  manual_party: boolean
-  manual_guest: boolean
-}
+export type ReceiptDailyAggRow = UnifiedSalesDay
 
-function addDaysIsoUtc(iso: string, days: number): string {
-  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
-/**
- * 店舗の日次集計（受領レシート集計＋日次手入力上書き）を [fromInclusive, toInclusive] で返す。
- * 売上分析(/receipts/sales = fetchReceiptSalesState)の日次系列と同一ロジックを使う唯一の正本：
- *  - 受領レシートは receipt_date 基準で集計し、count は sanitizeReceiptCountFromDb、売上は toNonNegativeInteger。
- *  - 日次手入力(line_sales_manual_day)は値のある列（売上/組数/客数）をその日のレシート集計より優先。
- * 受領レシートも手入力も無い日（休業等）は行を出さない＝呼び出し側で「データ無し」と扱える。
- */
+/** Compatibility export: all daily consumers share the same source resolver. */
 export async function fetchReceiptDailyAggForRange(
-  supabase: SupabaseClient,
-  storeKey: string,
-  fromInclusive: string,
-  toInclusive: string,
+  supabase: SupabaseClient, storeKey: string, fromInclusive: string, toInclusive: string,
 ): Promise<ReceiptDailyAggRow[]> {
-  const from = String(fromInclusive).slice(0, 10)
-  const toIncl = String(toInclusive).slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(toIncl)) return []
-
-  const registry = await loadStoreRegistry(supabase)
-  const registryKeys = registry.map((entry) => entry.store_partition_key)
-  const resolvedStoreKey = storeKey ? resolveStorePartitionKey(storeKey, registryKeys) : ''
-  if (!resolvedStoreKey) return []
-
-  // receipt_date 基準で集計（売上分析と同じ。created_at で絞ると後追い取込が窓から外れる）。
-  const rows = await queryStoreReceiptRows(supabase, {
-    storeKey: resolvedStoreKey,
-    receiptFrom: from,
-    receiptTo: addDaysIsoUtc(toIncl, 1), // receiptTo は排他なので終端の翌日まで
-    limit: 50000,
-  })
-
-  type Agg = { receipt_count: number; gross: number; net: number; tax: number; party: number; guest: number }
-  const dailyMap = new Map<string, Agg>()
-  for (const row of rows) {
-    const d = toSafeString(row.receipt_date).slice(0, 10)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d < from || d > toIncl) continue
-    const gross = toNonNegativeInteger(row.gross_sales_yen)
-    const net = toNonNegativeInteger(row.net_sales_yen)
-    const tax = toNonNegativeInteger(row.tax_amount_yen)
-    const party = sanitizeReceiptCountFromDb(row.party_count)
-    const guest = sanitizeReceiptCountFromDb(row.guest_count, 99_999)
-    const cur = dailyMap.get(d)
-    if (!cur) {
-      dailyMap.set(d, { receipt_count: 1, gross, net, tax, party, guest })
-    } else {
-      cur.receipt_count += 1
-      cur.gross += gross
-      cur.net += net
-      cur.tax += tax
-      cur.party += party
-      cur.guest += guest
-    }
-  }
-
-  // 日次手入力（売上分析の日次表からの直接編集）。値のある列はその日のレシート集計より優先（売上分析と同一規則）。
-  const manualMap = await fetchManualDaySalesMapForStore(
-    supabase,
-    normalizeBudgetStoreKey(storeKey),
-    from,
-    addDaysIsoUtc(toIncl, 1),
-  )
-
-  const allDates = new Set<string>([...dailyMap.keys(), ...manualMap.keys()])
-  const out: ReceiptDailyAggRow[] = []
-  for (const d of allDates) {
-    if (d < from || d > toIncl) continue
-    const agg = dailyMap.get(d) ?? null
-    const md = manualMap.get(d) ?? null
-    const receiptCount = agg?.receipt_count ?? 0
-    const journalTax = md?.source === 'journal' && md.gross_sales_yen != null
-      ? md.tax_amount_yen ?? null : null
-    out.push({
-      date: d,
-      receipt_count: receiptCount,
-      gross_sales_yen: md?.gross_sales_yen != null ? md.gross_sales_yen : (agg?.gross ?? 0),
-      net_sales_yen: journalTax != null ? Math.max(0, md!.gross_sales_yen! - journalTax) : agg?.net ?? 0,
-      tax_amount_yen: journalTax ?? agg?.tax ?? 0,
-      party_count: md?.party_count != null ? md.party_count : (agg?.party ?? 0),
-      guest_count: md?.guest_count != null ? md.guest_count : (agg?.guest ?? 0),
-      manual_gross: md?.gross_sales_yen != null,
-      manual_party: md?.party_count != null,
-      manual_guest: md?.guest_count != null,
-    })
-  }
-  out.sort((a, b) => a.date.localeCompare(b.date))
-  return out
+  return await fetchUnifiedDailySales(supabase, storeKey, fromInclusive, toInclusive)
 }
 
 export async function fetchAnalyticsMonthly(
@@ -993,121 +763,43 @@ export async function fetchAnalyticsMonthly(
   const nextMonth = lastMonthNum === 12 ? 1 : lastMonthNum + 1
   const endDateStr = `${String(nextYear).padStart(4, '0')}-${String(nextMonth).padStart(2, '0')}-01`
 
-  const registry = await loadStoreRegistry(supabase)
-  const registryKeys = registry.map((entry) => entry.store_partition_key)
-  const resolvedStoreKey = storeKeyRaw
-    ? resolveStorePartitionKey(storeKeyRaw, registryKeys)
-    : ''
-
-  const rows = await queryStoreReceiptRows(supabase, {
-    storeKey: resolvedStoreKey || undefined,
-    receiptFrom: startDateStr,
-    receiptTo: endDateStr,
-    limit: 50000,
-  })
-
-  type MonthlyRow = {
-    month: string
-    gross_sales_yen: number
-    net_sales_yen: number
-    party_count: number
-    guest_count: number
-    receipt_count: number
-    avg_unit_price_yen: number | null
-  }
-
-  const monthMap = new Map<string, MonthlyRow>()
-  for (const key of monthKeys) {
-    monthMap.set(key, {
-      month: key,
-      gross_sales_yen: 0,
-      net_sales_yen: 0,
-      party_count: 0,
-      guest_count: 0,
-      receipt_count: 0,
-      avg_unit_price_yen: null,
-    })
-  }
-
-  const storeSet = new Map<string, string>()
-  // 日次手入力の差分計算用に日別レシート集計を保持（store絞り込み時のみ使用）
-  const perDayReceipt = new Map<string, { gross: number; net: number; party: number; guest: number }>()
-
-  for (const row of rows) {
-    const dateStr = toSafeString(row.receipt_date)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue
-    const monthKey = dateStr.slice(0, 7)
-    const bucket = monthMap.get(monthKey)
-    if (!bucket) continue
-    const rowGross = toNonNegativeInteger(row.gross_sales_yen)
-    const rowParty = sanitizeReceiptCountFromDb(row.party_count)
-    const rowGuest = sanitizeReceiptCountFromDb(row.guest_count, 99_999)
-    bucket.gross_sales_yen += rowGross
-    bucket.net_sales_yen += toNonNegativeInteger(row.net_sales_yen)
-    bucket.party_count += rowParty
-    bucket.guest_count += rowGuest
-    bucket.receipt_count += 1
-    const pd = perDayReceipt.get(dateStr) ?? { gross: 0, net: 0, party: 0, guest: 0 }
-    pd.gross += rowGross
-    pd.net += toNonNegativeInteger(row.net_sales_yen)
-    pd.party += rowParty
-    pd.guest += rowGuest
-    perDayReceipt.set(dateStr, pd)
-    const sk = toSafeString(row.store_partition_key)
-    if (sk && !storeSet.has(sk)) storeSet.set(sk, toSafeString(row.store_name) || sk)
-  }
-
-  if (resolvedStoreKey) {
-    // 日次手入力: その日のレシート集計を手入力で置換（差分を月バケットへ反映）
-    const manualDayMap = await fetchManualDaySalesMapForStore(
-      supabase,
-      resolvedStoreKey,
-      startDateStr,
-      endDateStr,
-    )
-    const monthsWithDayManual = new Set<string>()
-    for (const [date, md] of manualDayMap.entries()) {
-      const monthKey = date.slice(0, 7)
-      const bucket = monthMap.get(monthKey)
-      if (!bucket) continue
-      const rd = perDayReceipt.get(date)
-      if (md.gross_sales_yen != null) bucket.gross_sales_yen += md.gross_sales_yen - (rd?.gross ?? 0)
-      // Journalは税込だけでなく確定税額を持つ。税抜も同日のレシートと置換する。
-      if (md.source === 'journal' && md.gross_sales_yen != null && md.tax_amount_yen != null) {
-        bucket.net_sales_yen += Math.max(0, md.gross_sales_yen - md.tax_amount_yen) - (rd?.net ?? 0)
-      }
-      if (md.party_count != null) bucket.party_count += md.party_count - (rd?.party ?? 0)
-      if (md.guest_count != null) bucket.guest_count += md.guest_count - (rd?.guest ?? 0)
-      monthsWithDayManual.add(monthKey)
+  const registry = await loadStoreRegistry(supabase, true)
+  const resolvedStoreKey = storeKeyRaw ? resolveStorePartitionKey(storeKeyRaw, registry.map(r => r.store_partition_key)) : ''
+  const targets = storeKeyRaw ? registry.filter(r => r.store_partition_key === resolvedStoreKey) : registry
+  if (storeKeyRaw && !targets.length) throw { status: 400, message: 'Unknown sales store' }
+  const monthMap = new Map(monthKeys.map(month => [month, {
+    month, gross_sales_yen: 0, net_sales_yen: 0, tax_amount_yen: 0, party_count: 0, guest_count: 0,
+    receipt_count: 0, avg_unit_price_yen: null as number | null, discrepancy_days: 0,
+  }]))
+  const allDays: UnifiedSalesDay[] = []
+  await Promise.all(targets.map(async entry => {
+    const days = await fetchUnifiedDailySales(supabase, entry.store_partition_key, startDateStr,
+      new Date(new Date(endDateStr+'T00:00:00Z').getTime()-86400000).toISOString().slice(0,10))
+    allDays.push(...days)
+    const recordedMonths = new Set(days.map(d => d.date.slice(0,7)))
+    for (const day of days) {
+      const b = monthMap.get(day.date.slice(0,7))
+      if (!b) continue
+      b.gross_sales_yen += day.gross_sales_yen; b.net_sales_yen += day.net_sales_yen
+      b.tax_amount_yen += day.tax_amount_yen; b.party_count += day.party_count
+      b.guest_count += day.guest_count; b.receipt_count += day.receipt_count
+      if (day.source_differences.length) b.discrepancy_days++
     }
-    // 月次手入力(whole-month): レシートも日次手入力も無い月だけ適用（[[option-a]]と整合）
-    const manualByMonth = await fetchManualMonthSalesMapForStore(supabase, resolvedStoreKey, monthKeys)
-    for (const [monthKey, manual] of manualByMonth.entries()) {
-      const bucket = monthMap.get(monthKey)
-      if (!bucket) continue
-      if (bucket.receipt_count > 0) continue
-      if (monthsWithDayManual.has(monthKey)) continue
-      bucket.gross_sales_yen = manual.gross_sales_yen
-      if (manual.net_sales_yen != null) bucket.net_sales_yen = manual.net_sales_yen
-      if (manual.tax_amount_yen != null) {
-        bucket.net_sales_yen = manual.net_sales_yen ?? Math.max(0, manual.gross_sales_yen - manual.tax_amount_yen)
-      }
-      if (manual.party_count != null) bucket.party_count = manual.party_count
-      if (manual.guest_count != null) bucket.guest_count = manual.guest_count
+    const manualMonths = await fetchManualMonthSalesMapForStore(supabase, entry.store_partition_key, monthKeys, true)
+    for (const [month, manual] of manualMonths) {
+      const b = monthMap.get(month)
+      if (!b || recordedMonths.has(month)) continue
+      b.gross_sales_yen += manual.gross_sales_yen
+      b.net_sales_yen += manual.net_sales_yen ?? (manual.tax_amount_yen != null ? Math.max(0, manual.gross_sales_yen-manual.tax_amount_yen) : 0)
+      b.tax_amount_yen += manual.tax_amount_yen ?? 0
+      b.party_count += manual.party_count ?? 0; b.guest_count += manual.guest_count ?? 0
     }
-  }
-
-  for (const bucket of monthMap.values()) {
-    bucket.avg_unit_price_yen = bucket.guest_count > 0
-      ? Math.round(bucket.gross_sales_yen / bucket.guest_count)
-      : null
-  }
-
+  }))
+  for (const b of monthMap.values()) b.avg_unit_price_yen = b.guest_count > 0 ? Math.round(b.gross_sales_yen/b.guest_count) : null
   return {
-    months: monthKeys.length,
-    store_key: resolvedStoreKey || null,
-    series: [...monthMap.values()],
-    available_stores: [...storeSet.entries()].map(([k, v]) => ({ store_key: k, store_name: v })),
+    months: monthKeys.length, store_key: resolvedStoreKey || null, series: [...monthMap.values()],
+    reconciliation: summarizeSalesReconciliation(allDays),
+    available_stores: targets.map(r => ({store_key:r.store_partition_key,store_name:r.display_name})),
     generated_at: new Date().toISOString(),
   }
 }

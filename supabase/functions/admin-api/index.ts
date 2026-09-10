@@ -1,3 +1,4 @@
+import { fetchUnifiedSalesSummary, validSalesDate } from '../_shared/sales_reconciliation.ts'
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 // deploy re-trigger marker (2026-07-09)
 import {
@@ -296,6 +297,7 @@ const STORE_LINK_ALLOWED_REQUESTS: Readonly<Record<string, ReadonlySet<string>>>
     "GET /foodcourt/weekly-report",
   ]),
   [CHAT_JOURNAL_AI_SCOPE]: new Set([
+    "GET /pos-journals/sales-summary",
     "GET /pos-journals/saved-reports",
     "GET /pos-journals/saved-reports/item",
     "GET /pos-journals/product-search",
@@ -990,7 +992,9 @@ async function loadBaseDailyForReports(
   const base = rows.map((r) => ({
     date: r.date,
     guests: (r.manual_guest || r.receipt_count > 0) ? r.guest_count : null,
-    sales: r.receipt_count > 0 ? r.net_sales_yen : null,
+    sales: r.net_sales_known ? r.net_sales_yen : null,
+    source_differences: r.source_differences, tax_needs_review: r.tax_needs_review,
+    sales_source: r.sales_source, source_by_field: r.source_by_field, journal_values: r.journal_values, receipt_values: r.receipt_values,
     party: (r.manual_party || r.receipt_count > 0) ? r.party_count : null,
     has_manual: r.manual_guest || r.manual_party || r.manual_gross,
     attendance: null as number | null,
@@ -1658,6 +1662,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
       "/pos-journals",
+      "/pos-journals/sales-summary",
       "/pos-journals/stores",
       "/pos-journals/product-search",
       "/pos-journals/product-cohort",
@@ -2103,6 +2108,14 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/documents") {
       const documentState = await fetchDocumentState(supabase, url)
       return json(documentState, 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/sales-summary") {
+      const from = url.searchParams.get('from') ?? ''
+      const to = url.searchParams.get('to') ?? ''
+      if (!validSalesDate(from) || !validSalesDate(to) || from > to || Date.parse(to)-Date.parse(from)>3660*86400000 || !url.searchParams.get('store_key')) {
+        return json({error:'Invalid sales period'},400)
+      }
+      return json(await fetchUnifiedSalesSummary(supabase, normalizePosJournalStoreKey(url.searchParams.get('store_key')), from, to),200)
     }
     if (req.method === "GET" && path === "/pos-journals") {
       return json(await fetchPosJournalState(supabase, url), 200)
@@ -10993,6 +11006,7 @@ async function upsertManualDayEntries(
   const upsertPayload: Array<{
     sales_date: string
     gross_sales_yen?: number | null
+    tax_amount_yen?: number | null
     party_count?: number | null
     guest_count?: number | null
   }> = []
@@ -11004,6 +11018,7 @@ async function upsertManualDayEntries(
     upsertPayload.push({
       sales_date,
       gross_sales_yen: resolveField(entry, "gross_sales_yen"),
+      tax_amount_yen: resolveField(entry, "tax_amount_yen"),
       party_count: resolveField(entry, "party_count"),
       guest_count: resolveField(entry, "guest_count"),
     })
@@ -12314,6 +12329,9 @@ async function fetchPosJournalState(
     ? "shared_reports"
     : "empty"
   summary.meta.store_codes = storeCodes
+  const [year, monthNumber] = month.split('-').map(Number)
+  const monthEnd = new Date(Date.UTC(year,monthNumber,0)).toISOString().slice(0,10)
+  const unifiedSales = await fetchUnifiedSalesSummary(supabase,storeKey,month+'-01',monthEnd)
   return {
     ok: true,
     store_key: storeKey,
@@ -12327,6 +12345,7 @@ async function fetchPosJournalState(
       added_day_count: sharedOnlyDays.length,
       error: shared.error,
     },
+    unified_sales: unifiedSales,
     recovery_report: recoveryReport
       ? {
         id: recoveryReport.id,

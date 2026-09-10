@@ -528,16 +528,9 @@ export async function importDailyReceiptsOverwrite(
     }
   }
 
-  // 3) 同じ日の手入力上書き(manual_day)も対象日ぶんクリア
-  let clearedManualDay = 0
-  try {
-    const { error: delErr, count } = await supabase
-      .from("line_sales_manual_day")
-      .delete({ count: "exact" })
-      .eq("store_partition_key", key)
-      .in("sales_date", clearDates)
-    if (!delErr && typeof count === "number") clearedManualDay = count
-  } catch (_e) { /* best-effort */ }
+  // レシート相当の再取込では、優先する日別修正とジャーナル原本を消さない。
+  // 上書き解除は日別セルの明示解除、全消去は別の確認付き削除操作で行う。
+  const clearedManualDay = 0
 
   return { ok: true, applied: rows.length, cleared_dates: clearDates.length, receipt_table: receiptTable, cleared_manual_day: clearedManualDay, store_partition_key: key }
 }
