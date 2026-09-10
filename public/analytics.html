@@ -1790,7 +1790,7 @@ function renderReceiptDailyTable(data) {
     const tr = document.createElement('tr');
     for (let bi = 0; bi < numBlocks; bi++) {
       const row = chunks[bi][ri];
-      if (row && Number(row.receipt_count || 0) === 0) {
+      if (row && !hasRecordedDailySales(row)) {
         tr.classList.add(`receipt-daily-block${bi}-empty`);
       }
     }
@@ -3908,14 +3908,16 @@ async function loadAll() {
     dom.kpiGuest.textContent = num(totals?.total_guest_count) + ' 名';
     dom.kpiGuestAvg.textContent = totals?.avg_guest_count ? `1日平均 ${totals.avg_guest_count} 名` : '';
     dom.kpiUnit.textContent = yen(totals?.avg_unit_price_yen);
-    const receiptActiveDays = dailySeries.filter(d => d.receipt_count > 0).length;
+    const receiptActiveDays = dailySeries.filter(d => hasRecordedDailySales(d) && Number(d.gross_sales_yen) > 0).length;
     const manualOpDays = salesData?.manual_month_operating_days_count;
     const activeDays = receiptActiveDays > 0
       ? receiptActiveDays
       : (manualOpDays != null && Number.isFinite(Number(manualOpDays)) ? Math.round(Number(manualOpDays)) : 0);
     dom.kpiDays.textContent = activeDays > 0 ? activeDays + ' 日' : '0 日';
     const receiptHint = totals?.receipt_count ? `レシート ${totals.receipt_count} 件` : '';
-    const manualHint = salesData?.manual_month_has_entry ? '月計は手入力' : '';
+    const syncedDays = dailySeries.filter(d => d.manual_gross === true).length;
+    const manualHint = syncedDays ? `日次上書き ${syncedDays}日（ジャーナル連携・手入力）`
+      : (salesData?.manual_month_has_entry ? '月計は手入力' : '');
     dom.kpiReceipts.textContent = [receiptHint, manualHint].filter(Boolean).join(' · ');
 
     state.lastGrossYen = totals?.total_gross_sales_yen ?? null;
@@ -3967,8 +3969,8 @@ async function loadAll() {
     if (isSingleMonth) applyKpiBadges(displayMonth, state.monthlySeries);
     else applyKpiBadges(null, state.monthlySeries);
 
-    const manualMeta = salesData?.manual_month_has_entry ? ' / 月計手入力あり' : '';
-    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name ?? '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件 / API生データ ${salesData.source_row_count ?? 0}件${manualMeta}`;
+    const manualMeta = manualHint ? ` / ${manualHint}` : '';
+    dom.filterMeta.textContent = `対象: ${salesData.selected_store_name || lineLockedStoreDisplayName(state.storeKey) || '-'} / ${months.length === 1 ? displayMonth : months[0] + '〜' + displayMonth} / レシート ${totals?.receipt_count ?? 0}件${manualMeta}`;
     dom.lastRefresh.textContent = '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
 
     renderAllCharts();
@@ -4385,9 +4387,14 @@ function syncDailyCsvBtn() {
 if (dom.dailyCsvBtn) dom.dailyCsvBtn.addEventListener('click', downloadDailyChartCsv);
 
 /* ── Chart 2: weekday avg ── */
+function hasRecordedDailySales(row) {
+  // Journal同期は日次上書きでありレシート件数は0のまま。未入力の0とは区別する。
+  return Number(row?.receipt_count) > 0 || row?.manual_gross === true;
+}
+
 function renderWeekdayChart() {
   destroyChart('weekday');
-  const series = state.dailySeries.filter(d => d.receipt_count > 0);
+  const series = state.dailySeries.filter(hasRecordedDailySales);
   if (!series.length) return;
   const { gridColor, tickColor, legendColor } = chartDefaults();
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
@@ -4485,7 +4492,7 @@ function showNoData(canvasId, message = 'データなし') {
 function renderTempScatter() {
   destroyChart('tempScatter');
   const pts = state.dailySeries
-    .filter(d => d.receipt_count > 0 && state.weather[d.date]?.temp != null)
+    .filter(d => hasRecordedDailySales(d) && state.weather[d.date]?.temp != null)
     .map(d => ({ x: state.weather[d.date].temp, y: d.gross_sales_yen, date: d.date }));
   if (!pts.length) { showNoData('chartTempScatter', '天候データなし'); return; }
   const { gridColor, tickColor, legendColor } = chartDefaults();
@@ -4522,7 +4529,7 @@ function renderTempScatter() {
 function renderRainScatter() {
   destroyChart('rainScatter');
   const pts = state.dailySeries
-    .filter(d => d.receipt_count > 0 && state.weather[d.date]?.rain != null)
+    .filter(d => hasRecordedDailySales(d) && state.weather[d.date]?.rain != null)
     .map(d => ({ x: state.weather[d.date].rain, y: d.gross_sales_yen, date: d.date }));
   if (!pts.length) { showNoData('chartRainScatter', '天候データなし'); return; }
   const { gridColor, tickColor } = chartDefaults();
@@ -4621,7 +4628,7 @@ function renderWeatherCrossTable() {
   const container = document.getElementById('weatherCrossTable');
   if (!container) return;
 
-  const series = state.dailySeries.filter(d => d.receipt_count > 0);
+  const series = state.dailySeries.filter(hasRecordedDailySales);
   if (!series.length) { container.innerHTML = '<p style="color:var(--sub);font-size:0.85rem;padding:12px">データなし</p>'; return; }
 
   const DAYS = ['月', '火', '水', '木', '金', '土', '日'];
