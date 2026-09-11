@@ -106,6 +106,7 @@ const SHARED_MODULE_RULES: SharedModuleRule[] = [
 ]
 
 export function helpCodesForSharedModule(filename: string): string[] {
+  if (filename === 'usage_metrics.ts') return ['ADM-02', 'SEC-01', 'DEV-02']
   const name = String(filename ?? '').trim()
   const match = SHARED_MODULE_RULES.find((rule) => rule.pattern.test(name))
   return match?.codes ?? []

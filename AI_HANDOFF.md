@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-09-11 利用状況
+
+- 正本: [USAGE-METRICS.md](./docs/USAGE-METRICS.md)。migration `20260911120000_usage_accuracy.sql`。配信ログ≠LINE利用枠。固定200残量計算へ戻さない。
+- `get_usage_monthly`はSQL一括集計、成功未確認の送信予約記録を明示。M-talk専用を除外。公式quotaは管理者の手動取得のみ、60秒キャッシュ、秘密非露出。未取得/失敗を0にしない。
+- 容量はpublic全実体を計上。他機能のpublic表も含むので「LINE Reportだけの容量」と呼ばない。本番状態はPR/Actionsを参照。
+
 ## 2026-09-11 統一売上・差異通知
 
 - 2026-09-11に利用者が公開GitHub/本番配備と既存OpenAI/Anthropic/Groqへの統一集計連携を承認。[PR #230](https://github.com/MARUGO-s/line_report/pull/230)を統合しEdge配備成功。既存1,014行の金額・更新日時不変とRPC権限を本番確認。追補 `20260911110000` は予測ビューの部分欠損税額/税抜を未確認扱いへ統一。作業ブランチ `codex/unified-sales-reconciliation-20260911`。最新本番状態はPR/Actionsで確認。
