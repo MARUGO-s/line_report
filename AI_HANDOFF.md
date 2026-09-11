@@ -2,7 +2,7 @@
 
 ## 2026-09-11 統一売上・差異通知
 
-- 2026-09-11に利用者が公開GitHub `MARUGO-s/line_report` へのpush/PR・本番デプロイと既存OpenAI/Anthropic/Groqへの統一集計連携を承認し作業再開。作業場所 `/private/tmp/line-report-unified-sales-20260911`、ブランチ `codex/unified-sales-reconciliation-20260911`。本番状態はPR/Actionsで確認。
+- 2026-09-11に利用者が公開GitHub/本番配備と既存OpenAI/Anthropic/Groqへの統一集計連携を承認。[PR #230](https://github.com/MARUGO-s/line_report/pull/230)を統合しEdge配備成功。既存1,014行の金額・更新日時不変とRPC権限を本番確認。追補 `20260911110000` は予測ビューの部分欠損税額/税抜を未確認扱いへ統一。作業ブランチ `codex/unified-sales-reconciliation-20260911`。最新本番状態はPR/Actionsで確認。
 
 - 現行仕様: [UNIFIED-SALES-SOURCE-POLICY.md](./docs/UNIFIED-SALES-SOURCE-POLICY.md)。日別修正→ジャーナル→レシートの項目別採用。JSON出所を独立保持し、書込みはロック付き `write_daily_sales_source`。直接日別upsertへ戻さない。
 - 定型報告/画面/シート/新規AIは共通集計、原本・保存済みAI/PDFは区別。AIの店舗・期間はサーバー検証し、原本内訳を修正額へ按分しない。提供元とモデルは既存のまま。
