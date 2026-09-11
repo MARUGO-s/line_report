@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-09-11 LINE予約リンクのM-talk統一（先のM-talk内変換への追補）
+
+- 利用者承認済み。共通URLビルダーは `chat.html?calendar=reservations&store_key=...&month=...`。Gmail/当日予約/「予約確認」は予約用管理トークンを発行しない。
+- `startSession` はルーム取得成功後に `openRequestedReservationCalendar`。本人のcan_view付き店舗固定ルームだけを一意に選び、APIの既存認可を使う。URLの店舗キーは資格ではない。読み込み失敗や曖昧な店舗を別ルームで補わない。
+- `reservation.html` は旧LINEマーカー付きURLから旧lt等を破棄してM-talkへ。通常の管理予約表は維持。DBや旧通知は書き換えない。
+- 回帰: reservation_calendar_link_command / chat_file_links / chat_web_push。PWA v65。正本は `docs/RESERVATION-GMAIL-GUIDE.md`、本番反映は対応PRとPages/Edgeの記録で確認。
+
 ## 2026-09-11 M-talk予約カードのリンク先
 
 - `public/chat/rooms.js` の `resolveMtalkCardScheduleLink` が旧 `reservation.html` をメッセージの所属ルームの `mtalk_schedule.html` 予約タブへ変換する。描画時の変換なので過去カードも対象。DBやLINE用リンク生成を変更しない。

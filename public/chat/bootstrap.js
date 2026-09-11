@@ -432,6 +432,9 @@ function consumeAuthRedirectUrl() {
     await afterSignIn();
   } else {
     applySavedCredentials();
+    if (new URLSearchParams(location.search).get('calendar') === 'reservations') {
+      showNotice('予約カレンダーを開くには、M-talkにログインしてください。対象店舗の所属・閲覧権限が必要です。');
+    }
     try {
       if (sessionStorage.getItem(INVITE_KEY)) {
         showNotice('ログインまたは新規登録すると、招待されたトークに参加できます。');

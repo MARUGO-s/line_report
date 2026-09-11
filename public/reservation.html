@@ -2,13 +2,27 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
   <base href="/line_report/">
   <script>
-    /* LINE経由（店舗）アクセスは通常は売上分析へリダイレクト。
-       ただし line_page=reservation 付きの使い捨て認証リンクだけは予約カレンダーを許可する。 */
+    /* 送信済みLINE予約リンクもM-talkへ。旧認証情報は使わず、店舗閲覧権限を再確認する。 */
     (function(){
       try {
         var p = new URLSearchParams(location.search);
+        if (p.get('from') === 'line' || p.get('line_page') === 'reservation') {
+          var target = new URL('chat.html', location.href);
+          target.search = '';
+          target.hash = '';
+          target.searchParams.set('calendar', 'reservations');
+          var storeKey = String(p.get('store_key') || '').trim();
+          var month = String(p.get('month') || '').trim();
+          if (/^[a-z][a-z0-9_-]{0,63}$/i.test(storeKey)) target.searchParams.set('store_key', storeKey);
+          if (/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(month)) target.searchParams.set('month', month);
+          window.__mtalkReservationRedirect = true;
+          history.replaceState(null, '', location.pathname);
+          location.replace(target.href);
+          return;
+        }
         var isLine = (p.get('from') === 'line') || /Line\//i.test(String(navigator.userAgent || ''));
         var allowReservationLinePage = (p.get('line_page') === 'reservation');
         if (!isLine || allowReservationLinePage) return;
@@ -19,7 +33,6 @@
     })();
   </script>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://hocbnifuactbvmyjraxy.supabase.co https://jhpmzqxqvapdkyvvhyra.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
   <meta name="theme-color" content="#0b2035">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2456,6 +2469,7 @@
     }
 
     (async function init() {
+      if (window.__mtalkReservationRedirect) return;
       const hadLoginTicketAtOpen = /[?&]lt=/.test(String(location.search || ''));
       if (window.LINE_REPORT_AUTH) {
         try {

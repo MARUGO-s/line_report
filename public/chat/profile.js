@@ -212,7 +212,8 @@ function startSession() {
   void flushPushDiagnostics();
   void resumePendingPushTest();
   syncGlobalCapabilityUi();
-  loadGroups().then(async () => {
+  loadGroups().then(async (groupsLoaded) => {
+    if (openRequestedReservationCalendar(groupsLoaded === true)) return;
     await consumeInvite();
     await openRequestedGroup();
   });

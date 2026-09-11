@@ -23,6 +23,34 @@ async function openRequestedGroup() {
   if (group) await selectGroup(group);
 }
 
+// Resolve only a unique store room in this user's loaded, viewable memberships.
+// A store key in a LINE URL is a destination hint, never an authorization token.
+function findMtalkCalendarStoreGroup(storeKey) {
+  const key = String(storeKey || '').trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(key)) return null;
+  const matches = myGroups.filter((group) => group.is_store_room === true
+    && !group.trashed_at
+    && String(group.store_key || '').toLowerCase() === key
+    && roomCapability(group, 'can_view'));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function openRequestedReservationCalendar(groupsLoaded = true) {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('calendar') !== 'reservations') return false;
+  if (!groupsLoaded) {
+    alert('店舗の閲覧権限を確認できませんでした。通信状態を確認して、もう一度開いてください。');
+    return true;
+  }
+  const group = findMtalkCalendarStoreGroup(url.searchParams.get('store_key'));
+  if (!group) {
+    alert('この店舗のM-talk予約カレンダーを閲覧できません。店舗への所属・閲覧権限を管理者に確認してください。');
+    return true;
+  }
+  openReservationSchedule(group.id, 'reservations', mtalkScheduleMonth(url.searchParams.get('month')));
+  return true;
+}
+
 async function attachDirectPeers(groups) {
   const dms = (groups || []).filter((g) => g.is_direct);
   if (!dms.length) return;
@@ -540,8 +568,15 @@ function resolveMtalkCardScheduleLink(value, messageGroupId) {
     if (!['http:', 'https:'].includes(source.protocol) || source.username || source.password) return null;
     const bases = [new URL('./', window.location.href), new URL('https://marugo-s.github.io/line_report/')];
     const base = bases.find((candidate) => source.origin === candidate.origin
-      && [candidate.pathname + 'reservation.html', candidate.pathname + 'mtalk_schedule.html'].includes(source.pathname));
+      && [candidate.pathname + 'reservation.html', candidate.pathname + 'mtalk_schedule.html', candidate.pathname + 'chat.html'].includes(source.pathname));
     if (!base) return null;
+    if (source.pathname === base.pathname + 'chat.html') {
+      if (source.searchParams.get('calendar') !== 'reservations') return null;
+      const group = findMtalkCalendarStoreGroup(source.searchParams.get('store_key'));
+      const groupId = group ? Number(group.id) : 0;
+      const month = mtalkScheduleMonth(source.searchParams.get('month'));
+      return { groupId, tab: 'reservations', month, url: buildMtalkScheduleUrl(groupId, 'reservations', month) };
+    }
     const legacy = source.pathname === base.pathname + 'reservation.html';
     const groupId = Number(legacy ? messageGroupId
       : (source.searchParams.get('group_id') || source.searchParams.get('group') || messageGroupId));

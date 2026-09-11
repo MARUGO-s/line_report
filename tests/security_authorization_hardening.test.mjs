@@ -95,12 +95,19 @@ test("login links are endpoint-bound and every store link has an explicit purpos
   const issuers = [
     ["supabase/functions/_shared/foodcourt_compare.ts", "FOODCOURT_DASHBOARD_SCOPE"],
     ["supabase/functions/_shared/petty_cash_flow.ts", "PETTY_CASH_SCOPE"],
-    ["supabase/functions/_shared/reservation_calendar_link_request.ts", "RESERVATION_CALENDAR_SCOPE"],
     ["supabase/functions/_shared/budget_entry_flow.ts", "RECEIPT_ANALYTICS_SCOPE"],
-    ["supabase/functions/reservation-today-cron/index.ts", "RESERVATION_CALENDAR_SCOPE"],
-    ["supabase/functions/gmail-alert-cron/index.ts", "RESERVATION_CALENDAR_SCOPE"],
   ]
   for (const [file, scope] of issuers) assert.match(await read(file), new RegExp(`scope: ${scope}`))
+  // Reservation notifications now require the recipient's M-talk Auth + store membership.
+  for (const file of [
+    "supabase/functions/_shared/reservation_calendar_link_request.ts",
+    "supabase/functions/reservation-today-cron/index.ts",
+    "supabase/functions/gmail-alert-cron/index.ts",
+  ]) {
+    const source = await read(file)
+    assert.doesNotMatch(source, /issueAdminDashboardLoginLinkToken/)
+    assert.match(source, /buildReservationCalendarPageUrl/)
+  }
 })
 
 test("store link method matrix keeps staff links out of administrator mutations", async () => {

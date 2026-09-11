@@ -1,5 +1,14 @@
 # Gmail 予約 → LINE 通知・予約表 運用ガイド
 
+## LINEから開く予約カレンダー（2026-09-11）
+
+- Gmail予約通知・本日の予約・「予約確認」のボタンは、M-talkの店舗予約カレンダーへ統一する。
+- `chat.html?calendar=reservations&store_key=店舗キー&month=YYYY-MM` を入口とし、M-talkログイン後、本人の閲覧可能な店舗固定ルームを一意に確認して `mtalk_schedule.html` の予約タブを開く。対象月がない場合は当月。
+- M-talkのアカウント・店舗所属・閲覧権限が必要。権限不足や通信失敗では別店舗へ移動せず案内する。URLを転送しても閲覧権限は付与されない。
+- 送信済みの `reservation.html?from=line` / `line_page=reservation` も同じ入口へ転送する。旧 `lt` は交換・転送せず、店舗と妥当な対象月だけを使う。新規の予約リンクでは使い捨て管理トークンを発行しない。
+- 管理者が直接開く予約表、DBの予約データ、保存済み通知は変更しない。APIの認証・店舗範囲・`can_view` / `can_manage` 検証は維持する。
+- 検証: `tests/reservation_calendar_link_command.test.ts`、`tests/chat_file_links.test.mjs`。本番反映状態は対応PRとPages/EdgeのActionsを確認する。
+
 ## Journal Report AI向け日次予約キャッシュ（2026-08-04）
 
 > **分析対象範囲（2026-08-13時点）:** 予約を加味した集客構造（予約 vs 飛び込み）は、
@@ -31,7 +40,7 @@ Journal Report AIの予約回答は、過去予約を毎回イベント表から
 - 「明日の予約」「来週の予約」「売上未保存月の予約」に予約DBだけで回答可能
 - `reservation_ai_cache_coverage`で生成済み範囲を保持し、予約0件の日次キャッシュ行は保存しない
 
-Gmail で届く食べログ／一休の予約メールを取り込み、**LINE グループへ通知**し、**予約表**（`reservation.html`）で参照するための仕様・DB・デプロイ手順です。
+Gmailで届く食べログ／一休の予約メールを取り込み、LINEへ通知し、M-talkの予約カレンダー（管理者は従来の `reservation.html` も利用可能）で参照する仕様・DB・デプロイ手順です。
 
 **関連ドキュメント**
 

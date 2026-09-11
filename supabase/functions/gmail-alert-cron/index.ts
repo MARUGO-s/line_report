@@ -1,9 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
-import {
-  issueAdminDashboardLoginLinkToken,
-  RESERVATION_CALENDAR_SCOPE,
-} from "../_shared/admin_dashboard_link_auth.ts";
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts";
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts";
 import { pilotStorePartitionKeysMatch } from "../_shared/receipt_sheets_store_catalog.ts";
@@ -2191,7 +2187,7 @@ function resolveAlertTargetMonth(alert: GmailMessageAlert): string | null {
 }
 
 async function buildReservationCalendarUrlsForAlerts(
-  supabase: ReturnType<typeof createClient>,
+  _supabase: ReturnType<typeof createClient>,
   alerts: GmailMessageAlert[],
 ): Promise<Map<string, string>> {
   const urls = new Map<string, string>();
@@ -2201,28 +2197,7 @@ async function buildReservationCalendarUrlsForAlerts(
     const storeKey = resolveAlertStorePartitionKey(alert);
     if (!storeKey) continue;
     const targetMonth = resolveAlertTargetMonth(alert);
-    try {
-      const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-        source: "line_gmail_reservation_alert",
-        store_partition_key: storeKey,
-        target_month: targetMonth,
-        gmail_message_id: alertId,
-        scope: RESERVATION_CALENDAR_SCOPE,
-      });
-      urls.set(
-        alertId,
-        buildReservationCalendarPageUrl(storeKey, {
-          loginToken: issued.token,
-          targetMonth,
-        }),
-      );
-    } catch (error) {
-      console.error("buildReservationCalendarUrlsForAlerts failed:", error);
-      urls.set(
-        alertId,
-        buildReservationCalendarPageUrl(storeKey, { targetMonth }),
-      );
-    }
+    urls.set(alertId, buildReservationCalendarPageUrl(storeKey, { targetMonth }));
   }
   return urls;
 }

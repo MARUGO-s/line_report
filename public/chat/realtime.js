@@ -250,7 +250,7 @@ function handleIncomingMessage(msg) {
 }
 
 async function loadGroups() {
-  if (!currentUser) return;
+  if (!currentUser) return false;
   try {
     const [mineRes, allRes] = await Promise.all([
       sb.from('chat_group_members')
@@ -293,7 +293,9 @@ async function loadGroups() {
     renderGroups();
     loadUnread();
     syncGlobalCapabilityUi();
+    return true;
   } catch (error) {
     console.error('Load groups error:', error);
+    return false;
   }
 }
