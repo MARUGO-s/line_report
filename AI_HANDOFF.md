@@ -5,7 +5,7 @@
 - 正本: `docs/THREE-APP-DATA-INTEGRATION-AUDIT.md`。現行3アプリは同一hocbn。SQLiteは別の旧Express用途であり、移行・削除しない。
 - 保存後同期失敗は`ok:false,saved:true,code:journal_sales_sync_failed`。設定取得エラーをOFFにしない。再保存/同一原本再取込で再試行。0円補完migrationは既存日次行を更新しない。
 - Journalは共通JSを一度だけ読み、期限切れ一覧・詳細を失敗時に返さず、updated_at/画面復帰/AI検索で再確認する。
-- M-talk AIへの営業プロフィール・メモ・施策カレンダー送信の追加は安全確認で停止し、ユーザー承認待ち。許可前にAPI allowlistやAI送信範囲を広げない。未取得は初期値で埋めない。
+- 利用者が送信先OpenAI／Anthropicと対象を明示承認済み。`journal_store_context.ts`をai-analyzeの認可後へ接続。毎回同じ店舗を8秒以内に取得し、期間内カレンダー・共有メモ・ワイン換算をprivacy処理後に既存統合AIへ付与。検索引数・個人メモ・他店・設定API allowlistは拡張しない。共有情報/統一売上の失敗時はUIも安全停止。
 - 回帰はthree_app_integration、zero_journal_backfill、journal_sales_sync_runtime。実運用値は公開fixtureに含めない。配備完了の根拠は対応PR/Pages/Edge履歴。
 
 ## 2026-09-11 LINE予約リンクのM-talk統一（先のM-talk内変換への追補）

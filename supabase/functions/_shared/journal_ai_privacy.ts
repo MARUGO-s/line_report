@@ -144,7 +144,9 @@ function sanitizeText(
 
   // メールと電話は予約API側で除外済みだが、多層防御として自由入力からも落とす。
   text = text.replace(
-    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
+    // Start only at the beginning of a candidate: a long non-email token otherwise
+    // retries the same suffix at every character (quadratic time before AI starts).
+    /(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
     "[メール非送信]",
   );
   text = text.replace(

@@ -135,7 +135,7 @@ test('foodcourt boost finalizer uses a fixed trust policy and skips duplicate ex
   assert.match(ai, /wineVolumeAnalysis[\s\S]{0,180}0点・0mlへ読み替えてはいけません/);
   assert.match(ai, /最大36件の詳細一覧長を総件数として扱いません/);
   assert.match(ai, /重複のない1本の完成分析に統合します/);
-  assert.match(ai, /const safeIntegrationReports = privacySafe\.integrationReports/);
+  assert.match(ai, /let safeIntegrationReports = privacySafe\.integrationReports/);
   assert.match(ai, /function boundJournalFoodcourtIntegrationReports/);
   assert.match(ai, /integrationReports: boundedRawIntegrationReports/);
   assert.match(ai, /requested_ranges:\s*requestedRanges/);
@@ -196,7 +196,7 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
     'utf8',
   );
   for (const source of [html]) {
-    assert.match(source, /src="journal-ai-privacy\.js"/);
+    assert.match(source, /src="journal-ai-privacy\.js(?:\?v=[^"]+)?"/);
     assert.match(source, /src="journal-ai-client\.js(?:\?v=[^"]+)?"/);
     assert.equal(
       [...source.matchAll(/AI_CLIENT\.request\(AI_ENDPOINT,/g)].length,
@@ -218,7 +218,7 @@ test('Journal AI privacy layer is loaded before the network client', async () =>
     new URL('../public/jnm/jnl2txt.html', import.meta.url),
     'utf8',
   );
-  const privacyIndex = appHtml.indexOf('src="journal-ai-privacy.js"');
+  const privacyIndex = appHtml.indexOf('src="journal-ai-privacy.js');
   const clientIndex = appHtml.indexOf('src="journal-ai-client.js');
   assert.ok(privacyIndex >= 0);
   assert.ok(clientIndex > privacyIndex);

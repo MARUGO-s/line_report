@@ -78,7 +78,8 @@
     var text = String(value == null ? '' : value);
     Object.keys(aliases).sort(function (a, b) { return b.length - a.length; })
       .forEach(function (name) { text = replaceNameOccurrences(text, name, aliases[name] || '予約客'); });
-    text = text.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[メール非送信]');
+    // Candidate boundary avoids quadratic retries on long non-email tokens.
+    text = text.replace(/(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[メール非送信]');
     text = text.replace(/(?<!\d)(?:\+?81[-\s]?)?(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4})(?!\d)/g, '[電話非送信]');
     text = text.replace(/([/／]\s*)アレルギー\s+(?!記載|あり|なし)[^/／\n]+/gu, '$1アレルギーあり');
     text = text.replace(/アレルギー(?:内容)?\s*[:：]\s*(?!あり|なし)[^/／\n、。]+/gu, 'アレルギーあり');

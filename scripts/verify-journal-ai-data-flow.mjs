@@ -218,9 +218,15 @@ core(
     "ensureStoreOpsProfileForAi",
     "formatStoreOpsBlockForAi",
     "integrated.storeOpsBlock",
+  ]) && containsAll(aiAnalyze, [
+    "loadJournalStoreContext(supabase, canonicalStoreKey",
+    "attachJournalStoreContext(trustedSales, storeContext)",
+    "salesData: enrichedSales",
+    "JOURNAL_STORE_CONTEXT_POLICY",
+    "shared_store_context_unavailable",
   ]),
   "store_operation_profiles → 定休・昼夜・特別営業 → AI",
-  "通常Journalはクラウドを確認し、失敗・未登録は未確認扱い。M-talk埋め込みは店舗情報APIの権限外であり、初期値を事実として渡しません。共有情報の追加送信は承認待ちです。",
+  "通常JournalとM-talkは認可後にai-analyzeが同一DBの最新共有情報を再取得し、privacy処理後に承認済みOpenAI/Claudeへ渡します。設定API権限は増やさず、未登録は未知、取得失敗は安全停止です。",
 );
 
 const foodcourtBriefStart = adminApi.indexOf('path === "/foodcourt/journal-brief"');

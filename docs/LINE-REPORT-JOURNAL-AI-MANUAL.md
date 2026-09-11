@@ -210,6 +210,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - Web検索は「調べて」等の明示的な依頼か、疑問形かつ外部情報が要る話題のときだけ動きます。ふだんの雑談・使い方の質問では検索しません。売上・客数はWeb検索の対象外で、従来どおり「ジャーナルに聞く」が担当します。
 - Web検索のモデルは同じ設定画面で「標準（sonar）」と「高精度（sonar-pro）」から選べます。高精度は料金が上がるため、通常は標準のままで足ります。
 - M-talkの「ジャーナルに聞く」は、本部管理者がその利用者へ「電子ジャーナルAIを利用できる」を明示付与した場合だけ表示・実行できます。許可は店舗別の売上・商品分析に限られ、予約者情報、資料管理、店舗設定、削除・取込等の管理操作には広がりません。権限停止やルーム退出は次の操作から直ちに反映されます。
+- Journalでクラウド保存した営業ルール・共有店舗メモ・対象期間の施策カレンダー・ワイン換算設定も、同じ店舗の情報をサーバーで毎回確認してAIへ渡します。送信先は承認済みのOpenAI／Claudeで、電話・メール等は送信前に除去します。個人メモや他店は対象外です。回答末尾に登録状態と更新日時を示し、未登録を初期値で補わず、取得失敗時は古い情報へ切り替えず停止します。
 - M-talkルームはゴミ箱へ移動して復元でき、完全削除は権限と再入力確認が必要です。店舗固定ルームは通常の完全削除対象外です。
 
 **検索語:** ルーム設定 / 権限 / 機能設定 / ai返信完全無し / 予算登録を許可 / レシート解析結果 / セルフ設定 / パスワード / ワンパス / ゴミ箱 / 復元 / web検索 / ウェブ検索 / ネット検索 / 検索して答える / 出典 / モデル / 料金
@@ -765,11 +766,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 42件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 103件
+- 共有TypeScriptモジュール: 104件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
 - SQL migrations: 304件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 101件
+- テストファイル: 103件
 
 ### 公開画面・ブラウザコード
 
@@ -881,6 +882,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/journal_ai_privacy.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/journal_product_index.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/journal_sales_sync.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
+| `supabase/functions/_shared/journal_store_context.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/knowledge_file_extract.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
 | `supabase/functions/_shared/knowledge_memo_tag.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
 | `supabase/functions/_shared/knowledge_menu_extract.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |

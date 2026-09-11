@@ -26,6 +26,7 @@ import {
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
 import { fetchUnifiedSalesSummary } from "../_shared/sales_reconciliation.ts";
 import { buildTrustedAiSalesData, resolveAiSalesPeriods, UNIFIED_SALES_AI_POLICY } from "../_shared/sales_reconciliation_ai.ts";
+import { attachJournalStoreContext, JOURNAL_STORE_CONTEXT_POLICY, loadJournalStoreContext } from "../_shared/journal_store_context.ts";
 
 const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
@@ -616,7 +617,7 @@ function buildJournalAiServerPolicy(
   const integrationPolicy = action === "integrate_foodcourt"
     ? `\n\n${JOURNAL_FOODCOURT_INTEGRATION_POLICY}`
     : "";
-  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}${integrationPolicy}\n\n${UNIFIED_SALES_AI_POLICY}`;
+  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}${integrationPolicy}\n\n${UNIFIED_SALES_AI_POLICY}\n\n${JOURNAL_STORE_CONTEXT_POLICY}`;
 }
 
 function buildJournalAiEvidenceMessage(options: {
@@ -1609,12 +1610,12 @@ Deno.serve(async (req: Request, info) => {
       clarificationContext,
       integrationReports: boundedRawIntegrationReports,
     });
-    const safeMessage = privacySafe.message;
-    const safeChatHistory = privacySafe.chatHistory;
-    const safeSystemInstruction = privacySafe.systemInstruction;
+    let safeMessage = privacySafe.message;
+    let safeChatHistory = privacySafe.chatHistory;
+    let safeSystemInstruction = privacySafe.systemInstruction;
     const safeSalesData = privacySafe.salesData;
     const safeClarificationContext = privacySafe.clarificationContext;
-    const safeIntegrationReports = privacySafe.integrationReports;
+    let safeIntegrationReports = privacySafe.integrationReports;
     const requestedStore = String(storeKey || "").trim().toLowerCase();
     const scopedStore = String(authResult.storeScope || "").trim()
       .toLowerCase();
@@ -1770,20 +1771,48 @@ Deno.serve(async (req: Request, info) => {
     } catch (error) {
       return jsonResponse({ error: error instanceof Error ? error.message : "分析期間が不正です。" }, 400);
     }
-    let salesContext: string;
+    // 2026-09-11: user explicitly approved these store fields to existing OpenAI/Anthropic.
+    // Personal notes/documents/settings access are not added. Both Journal entry points
+    // perform this exact read after current session/member/store authorization.
+    let storeContext: Awaited<ReturnType<typeof loadJournalStoreContext>>;
     try {
-      salesContext = JSON.stringify(await buildTrustedAiSalesData(
-        safeSalesData, canonicalStoreKey,
+      storeContext = await loadJournalStoreContext(supabase, canonicalStoreKey, safeSalesData, { signal: req.signal });
+    } catch {
+      return jsonResponse({ error: "共有の店舗営業情報を確認できませんでした。古い設定では分析せず停止しました。時間をおいて再試行してください。", code: "shared_store_context_unavailable" }, 503);
+    }
+    let trustedSales: Awaited<ReturnType<typeof buildTrustedAiSalesData>>;
+    try {
+      trustedSales = await buildTrustedAiSalesData(
+        salesData, canonicalStoreKey,
         (store, from, to) => fetchUnifiedSalesSummary(supabase, store, from, to),
-      ));
+      );
     } catch {
       return jsonResponse({ error: "統一売上を確認できませんでした。再読み込みしてからお試しください。", code: "unified_sales_unavailable" }, 503);
     }
+    // One combined privacy pass also covers freshly fetched notes/calendar text.
+    // The store payload goes to the existing OpenAI/Claude synthesizer only, not Web search.
+    let enrichedSales: ReturnType<typeof attachJournalStoreContext>;
+    try {
+      enrichedSales = attachJournalStoreContext(trustedSales, storeContext);
+    } catch {
+      return jsonResponse({ error: "ワイン換算の分析期間が不正です。期間を絞って再試行してください。", code: "shared_ai_input_invalid" }, 400);
+    }
+    const finalPrivacySafe = sanitizeJournalAiPayload({
+      message, chatHistory, systemInstruction,
+      salesData: enrichedSales,
+      integrationReports: boundedRawIntegrationReports,
+    });
+    safeMessage = finalPrivacySafe.message;
+    safeChatHistory = finalPrivacySafe.chatHistory;
+    safeSystemInstruction = finalPrivacySafe.systemInstruction;
+    safeIntegrationReports = finalPrivacySafe.integrationReports;
+    const salesContext = JSON.stringify(finalPrivacySafe.salesData);
 
     if (salesContext.length > 100000) {
       return new Response(
         JSON.stringify({
           error: "データが大きすぎます。期間を絞ってください。",
+          code: "shared_ai_input_invalid",
         }),
         {
           status: 400,
@@ -1792,6 +1821,7 @@ Deno.serve(async (req: Request, info) => {
       );
     }
 
+    if (req.signal.aborted) return jsonResponse({ error: "分析を中止しました。", code: "shared_store_context_unavailable" }, 499);
     const requestDeadlineAt = Date.now() + JOURNAL_AI_REQUEST_DEADLINE_MS;
     let contents: ChatContent[] = [];
     let intent: JournalChatIntent = "data";
@@ -1998,7 +2028,10 @@ Deno.serve(async (req: Request, info) => {
         : action === "chat"
         ? orchestrationNote(intent, briefs)
         : `モード: 分析レポート（${synth.model}）`;
-      const note = `${baseNote}${fallbackNote}`;
+      const storeNote = storeContext.status === "registered"
+        ? `共有店舗情報: 確認済み（更新 ${new Date(storeContext.updated_at!).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })} JST）`
+        : "共有店舗情報: 未登録（初期値では補完しません）";
+      const note = `${baseNote}${fallbackNote} / ${storeNote}`;
       const providers = [
         synth.provider,
         ...briefs.filter((b) => b.ok).map((b) => b.provider),
@@ -2011,6 +2044,13 @@ Deno.serve(async (req: Request, info) => {
           providers,
           mode: action === "integrate_foodcourt" ? "journal_foodcourt" : action === "chat" ? intent : "analyze",
           note,
+          store_context: {
+            source: storeContext.source,
+            status: storeContext.status,
+            store_key: storeContext.store_key,
+            updated_at: storeContext.updated_at,
+            checked_at: storeContext.checked_at,
+          },
           orchestration: {
             synthesizer: synth.provider,
             model: synth.model,
