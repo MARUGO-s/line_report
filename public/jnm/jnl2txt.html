@@ -36,10 +36,8 @@
 <script src="../app-theme.js"></script>
 <script src="app-theme.js"></script>
 <script src="../pages-config.js"></script>
-<script src="pages-config.js"></script>
 <script src="../auth-session.js"></script>
 <script src="../access-log.js?v=20260817"></script>
-<script src="auth-session.js"></script>
 <script src="../sales-source-notice.js?v=20260911"></script>
 <script src="journal-ai-privacy.js"></script>
 <script src="journal-ai-client.js?v=20260830-1552"></script>
@@ -3021,7 +3019,13 @@ async function adminApiFetch(path, options) {
       const body = await response.json().catch(() => ({}));
       if (response.status === 401 || response.status === 403) setAuthUiState(false);
       if (response.status >= 500 || response.status === 429) retriable = true;
-      if (!response.ok || body.error) throw new Error(body.error || ('HTTP ' + response.status));
+      if (!response.ok || body.error) {
+        const error = new Error(body.error || ('HTTP ' + response.status));
+        // 保存後の同期失敗は「原本も保存されていない」と誤表示しない。
+        error.saved = body.saved === true;
+        error.code = String(body.code || '');
+        throw error;
+      }
       return body;
     } catch (err) {
       lastError = err;
@@ -4908,8 +4912,7 @@ function pickDefinedSummary(r) {
 let savedReportsLoadError = null;
 
 // 保存レポート一覧・詳細のセッション内キャッシュ（正本はクラウドのまま）。
-// 直近に成功した取得結果を保持し、瞬間的な通信断やサーバー混雑の間も
-// AI チャットが「最後に確認できた全データ」で回答を継続できるようにする。
+// 有効期限内のみ再利用する。取得失敗を古い値で隠さない。
 const savedReportsIndexCache = new Map();   // key: STORE_KEY|kind|limit -> { time, rows }
 const savedReportDetailCache = new Map();   // key: STORE_KEY|id -> { time, report }
 const monthSalesDrilldownCache = new Map(); // key: store|month|source revision -> { time, result }
@@ -4924,6 +4927,11 @@ function invalidateSavedReportsCache() {
   monthSalesDrilldownCache.clear();
   posJournalMonthRecoveryCache.clear();
 }
+// 別アプリで保存した変更は、この画面に戻った時点で再確認する。
+window.addEventListener('focus', invalidateSavedReportsCache);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') invalidateSavedReportsCache();
+});
 
 async function fetchSupabaseReports(options = {}) {
   const requestedStoreKey = String(options.storeKey || STORE_KEY || '').trim().toLowerCase();
@@ -4939,13 +4947,14 @@ async function fetchSupabaseReports(options = {}) {
         title: row.title || '売上レポート',
         period: row.period || '',
         createdAt: row.created_at || '',
+        updatedAt: row.updated_at || '',
         ...pickDefinedSummary(row)
       };
     }).filter(r => r.id && !isCategoryOverridesReportId(r.id) && r.title !== '商品分類ルール');
 
     const fetchKind = async (k, lim) => {
       const cacheKey = `${requestedStoreKey}|${k}|${lim}`;
-      const cached = savedReportsIndexCache.get(cacheKey);
+      const cached = options.forceRefresh ? null : savedReportsIndexCache.get(cacheKey);
       if (cached && (Date.now() - cached.time) < SAVED_REPORTS_INDEX_TTL_MS) return cached.rows;
       try {
         const qs = new URLSearchParams({
@@ -4961,16 +4970,18 @@ async function fetchSupabaseReports(options = {}) {
         });
         if (options.signal?.aborted) throw Object.assign(new Error('AIチャット処理は中止されました'), { name: 'AbortError' });
         const rows = mapRows(body.items);
+        for (const row of rows) {
+          const detailKey = `${requestedStoreKey}|${row.id}`;
+          const detail = savedReportDetailCache.get(detailKey);
+          if (detail && (!row.updatedAt || detail.report.updatedAt !== row.updatedAt)) {
+            savedReportDetailCache.delete(detailKey);
+          }
+        }
         savedReportsIndexCache.set(cacheKey, { time: Date.now(), rows });
         return rows;
       } catch (err) {
         if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
-        // 取得失敗時は、期限切れでも直近に成功した一覧で回答を継続する。
-        // （保存・削除時はキャッシュを無効化するため、古い一覧で上書きされる心配はない）
-        if (cached) {
-          console.warn('saved-reports fetch failed; using last successful index:', err);
-          return cached.rows;
-        }
+        savedReportsIndexCache.delete(cacheKey);
         throw err;
       }
     };
@@ -5029,17 +5040,14 @@ async function fetchSupabaseReportById(id, options = {}) {
       title: row.title || d.title,
       period: row.period || d.period,
       createdAt: row.created_at || d.createdAt,
-      ...d
+      ...d,
+      updatedAt: row.updated_at || ''
     };
     savedReportDetailCache.set(cacheKey, { time: Date.now(), report });
     return { ...report };
   } catch (e) {
     if (e?.name === 'AbortError' || options.signal?.aborted) throw e;
-    // 詳細取得の一時失敗時も、直近に成功した内容があればそれで回答を継続する。
-    if (cached) {
-      console.warn('fetchSupabaseReportById failed; using cached detail:', e);
-      return { ...cached.report };
-    }
+    savedReportDetailCache.delete(cacheKey);
     console.error('fetchSupabaseReportById error:', e);
     if (!options.signal?.aborted && requestedStoreKey === String(STORE_KEY || '').toLowerCase()) {
       savedReportsLoadError = e instanceof Error ? e : new Error(String(e));
@@ -5195,13 +5203,15 @@ async function readSavedReports(options = {}) {
         storeKey: requestedStoreKey,
         signal: options.signal,
         timeoutMs: options.timeoutMs,
-        maxAttempts: options.maxAttempts
+        maxAttempts: options.maxAttempts,
+        forceRefresh: options.forceRefresh
       });
       if (remoteReports === null) return [];
       return remoteReports;
     }
 
     const requestOptions = {
+      forceRefresh: options.forceRefresh,
       timeoutMs: options.timeoutMs,
       maxAttempts: options.maxAttempts,
       storeKey: requestedStoreKey,
@@ -5216,7 +5226,7 @@ async function readSavedReports(options = {}) {
         ? fetchSupabaseReports({ ...requestOptions, kind: 'daily', limit: options.dailyLimit || 1000 })
         : Promise.resolve([])
     ]);
-    if (monthly === null) return [];
+    if (monthly === null || dailyResult === null) return [];
     const daily = dailyResult || [];
 
     // 月間がある月は月間を正本にし、月間が無い月だけ全日別レポートで補完する。
@@ -5271,7 +5281,7 @@ async function writeSavedReports(reports, newRecords) {
             htmlBytes = Number(uploaded.file_size_bytes) || fullHtml.length;
           }
         }
-        await adminApiFetch('/pos-journals/saved-reports', {
+        const result = await adminApiFetch('/pos-journals/saved-reports', {
           method: 'POST',
           body: JSON.stringify({
             id,
@@ -5282,7 +5292,11 @@ async function writeSavedReports(reports, newRecords) {
           })
         });
         uploaded++;
+        if (result?.ok !== true) {
+          throw new Error(result?.error || 'レポート保存・共通売上同期を確認できませんでした。再保存してください。');
+        }
       } catch (err) {
+        if (err?.saved === true) uploaded++;
         failed++;
         lastErr = err;
         console.warn('admin-api write error:', err);
@@ -8865,9 +8879,9 @@ function saveCategorySettings(){
     other:otherCodesInput.value.trim(), charge:chargeCodesInput.value.trim()
   };
   try{ localStorage.setItem(CATEGORY_SETTINGS_KEY+'__'+STORE_KEY,JSON.stringify(categorySettings)); }catch(_){ }
-  categorySettingsStatus.textContent='保存しました。読み込み済みデータにも適用しました。';
+  categorySettingsStatus.textContent='この端末の変換設定を保存し、読み込み中データに適用しました。他アプリ・クラウドの分類ルールは変更されません。';
   reprocess();
-  setTimeout(()=>{ categorySettingsStatus.textContent=''; },3000);
+  // 端末限定の設定であることを消さずに表示する。
 }
 function resetCategorySettings(){
   categorySettings={...DEFAULT_CATEGORY_SETTINGS};
@@ -10059,22 +10073,16 @@ async function requestFoodcourtJournalDeepAnalysis(question, verifiedData, optio
 }
 
 /**
- * AI分析の直前に店舗営業情報を必ずクラウド→ローカル→初期値の順で確定する。
+ * JournalのAI分析前にクラウドを確認する。M-talkは権限外の店舗情報を渡さない。
  * タブを開いていなくても、分析時に最新の店舗情報を読む。
  */
 async function ensureStoreOpsProfileForAi(storeKey = STORE_KEY, options = {}) {
-  if (MTALK_EMBED) {
-    return normalizeStoreOpsProfile(defaultStoreOpsProfile(storeKey));
-  }
-  let profile = readStoreOpsProfile(storeKey);
-  const cloud = await loadStoreOpsProfileFromCloud(storeKey, options);
+  if (MTALK_EMBED) return null;
+  const cloud = await loadStoreOpsProfileFromCloud(storeKey, { ...options, required: true });
   if (cloud) {
-    profile = writeStoreOpsProfileLocal(cloud, storeKey);
-  } else if (!localStorage.getItem(storeOpsStorageKey(storeKey))) {
-    // 未保存なら店舗初期値（サヴァサヴァ定休など）をローカルへ確定
-    profile = writeStoreOpsProfileLocal(defaultStoreOpsProfile(storeKey), storeKey);
+    return writeStoreOpsProfileLocal(cloud, storeKey);
   }
-  return normalizeStoreOpsProfile(profile);
+  return null;
 }
 
 /**
@@ -10098,7 +10106,8 @@ async function buildIntegratedAnalysisContext({
     maxAttempts: 1,
     signal
   });
-  const storeOpsBlock = formatStoreOpsBlockForAi(profile, verifiedData);
+  const storeOpsBlock = profile ? formatStoreOpsBlockForAi(profile, verifiedData)
+    : '\n【店舗営業情報】未取得または未登録。端末の初期値を店舗の事実として扱わず、定休日等を推測しない。\n';
 
   let range = periodRange || resolveKnowledgePeriodRange(verifiedData);
   let query = queryText || '売上分析 施策 メニュー';
@@ -10177,7 +10186,7 @@ async function buildIntegratedAnalysisContext({
     && /【今回の分析で参照する店舗資料・根拠/.test(knowledgeBlock);
   const hasCatalog = knowledgeCount > 0
     && /【登録資料目次/.test(knowledgeBlock);
-  const hasStoreOps = !!(storeOpsBlock && /【店舗営業情報/.test(storeOpsBlock));
+  const hasStoreOps = !!profile;
   const isMarugoS = isMarugoSStoreKey(requestedStoreKey);
   const hasFoodcourt = !!(foodcourtBlock && /【東京ドーム・フードコート背景/.test(foodcourtBlock));
   const foodcourtState = !isMarugoS
@@ -10214,7 +10223,7 @@ async function buildIntegratedAnalysisContext({
 1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
 2. 店舗資料一覧: ${listState}
    今回の根拠資料: ${evidenceState}
-3. 店舗営業情報（定休・ランチ・カレンダー施策・ワインml換算等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析・カレンダー背景・ワイン提供量(ml)に反映' : '添付なし（異常）'}${isMarugoS ? `
+3. 店舗営業情報（定休・ランチ・カレンダー施策・ワインml換算等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析・カレンダー背景・ワイン提供量(ml)に反映' : '未取得または未登録。定休日・換算値を推測しない'}${isMarugoS ? `
 4. 東京ドーム・フードコート背景（マルゴエス専用）: ${foodcourtState}` : ''}
 統合ルール: 数値は①、②は「今回の根拠資料」だけ、定休／特別営業／カレンダー施策／ワインml換算の解釈は③。「登録資料目次」を期間内施策や因果の根拠にしないこと。③を読まずに日曜・月曜の低売上を弱点としないこと。${isMarugoS ? '④は会場・コート内比較の背景のみ。コート日報の売上とジャーナルが食い違うときは両方を併記し、店舗売上の正本は①。' : ''}`;
 
@@ -10662,7 +10671,10 @@ function fillStoreOpsForm(profile) {
 }
 
 async function loadStoreOpsProfileFromCloud(storeKey = STORE_KEY, options = {}) {
-  if (!getAdminToken()) return null;
+  if (!getAdminToken()) {
+    if (options.required) throw new Error('店舗営業情報の確認にはログインが必要です。');
+    return null;
+  }
   try {
     const body = await adminApiFetch(
       '/pos-journals/store-ops?store_key=' + encodeURIComponent(storeKey),
@@ -10677,7 +10689,7 @@ async function loadStoreOpsProfileFromCloud(storeKey = STORE_KEY, options = {}) 
       return normalizeStoreOpsProfile(body.profile);
     }
   } catch (err) {
-    if (err?.name === 'AbortError') throw err;
+    if (err?.name === 'AbortError' || options.required) throw err;
     console.warn('店舗営業情報のクラウド取得をスキップ:', err);
   }
   return null;
@@ -10709,7 +10721,8 @@ async function saveStoreOpsForm() {
   fillStoreOpsForm(profile);
   if (status) status.textContent = 'ローカル保存しました…';
   try {
-    await saveStoreOpsProfileToCloud(profile);
+    const result = await saveStoreOpsProfileToCloud(profile);
+    if (result?.ok !== true) throw new Error('未ログインのためクラウドへ保存されていません。');
     if (status) status.textContent = '保存しました（クラウド同期済み）';
   } catch (err) {
     if (status) status.textContent = 'ローカル保存済み（クラウド同期失敗: ' + (err.message || err) + '）';
@@ -17685,10 +17698,11 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
   }
 
   // 対話中の一覧照会は、通信断時に3回×45秒待つよりも早く明示的に失敗させる。
-  // 既に得たキャッシュは fetchSupabaseReports 側でそのまま使用される。
+  // AI開始時は他画面での保存も反映するため一覧を再取得する。
   const reports = Array.isArray(prefetchedReports)
     ? prefetchedReports
     : await readSavedReports({
+      forceRefresh: true,
       timeoutMs: 15000,
       maxAttempts: 1,
       storeKey: requestedStoreKey,
@@ -19190,10 +19204,10 @@ ${verifiedData.detailRangeLimited ? '- 商品明細範囲: 新しい36か月分�
     }
     console.warn('統合コンテキストの構築に失敗:', err);
     integrated = {
-      storeOpsBlock: formatStoreOpsBlockForAi(readStoreOpsProfile(chatRun.storeKey), verifiedData),
+      storeOpsBlock: '\n【店舗営業情報】取得できませんでした。定休日等を端末初期値から推測しないでください。\n',
       foodcourtBlock: '',
       knowledgeBlock: '\n\n【店舗資料取得状態】取得に失敗したため登録状況は未確認です。「資料なし」と断定せず、店舗資料を根拠にした説明は行わないでください。',
-      checklist: '\n\n【データ統合チェック】店舗情報／資料の取得でエラーが発生しました。資料件数は未確認です。数値は確定集計のみを使い、定休前提はローカル店舗情報があれば参照してください。'
+      checklist: '\n\n【データ統合チェック】店舗情報／資料の取得でエラーが発生しました。資料件数・定休前提は未確認です。端末初期値を事実とせず、数値はサーバーの統一売上と原本参考値を区別してください。'
     };
   }
 

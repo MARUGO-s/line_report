@@ -197,6 +197,8 @@
     var params = new URLSearchParams(global.location.search);
     var loginToken = String(params.get('lt') || '').trim();
     if (!loginToken) return false;
+    var targetScopeKind = String(options.targetScopeKind || params.get('scope_kind') || '').trim();
+    var targetDelegationId = String(options.targetDelegationId || params.get('delegation_id') || '').trim();
 
     // 既に unexpired なセッションがあり、かつアクセス対象の店舗/ルームスコープと一致していれば、
     // 使い捨ての lt を重複消費せず、既存セッションを再利用して速やかにログイン状態に入る。
@@ -221,10 +223,13 @@
 
           var isStoreMatched = !targetStore || !verifyBody.storeScope || verifyBody.storeScope === targetStore;
           var isRoomMatched = !targetRoom || !verifyBody.roomScope || verifyBody.roomScope === targetRoom;
+          var isScopeMatched = !targetScopeKind || verifyBody.scopeKind === targetScopeKind;
+          var currentAuthority = verifyBody && verifyBody.chatAdminAuthority || {};
+          var isDelegationMatched = !targetDelegationId || currentAuthority.delegation_id === targetDelegationId;
 
-          if (isStoreMatched && isRoomMatched) {
+          if (isStoreMatched && isRoomMatched && isScopeMatched && isDelegationMatched) {
             // 既存セッションが有効でスコープも一致！新しい lt の消費（とそれに伴う失敗・クリア）をスキップ
-            stripUrlParams(['lt']);
+            stripUrlParams(['lt', 'scope_kind', 'delegation_id']);
             return true;
           }
         }
@@ -249,7 +254,7 @@
       // URLから lt を除去して通常のログイン画面へフォールバックする(別端末での再タップ対策)。
       // LINE導線では、端末に残っている古い/期限切れセッションを温存すると、その後のAPI呼び出しが
       // 401 のまま走って「画面は開くが何も操作できない」状態になる。lt が無効なら一旦セッションも消す。
-      stripUrlParams(['lt']);
+      stripUrlParams(['lt', 'scope_kind', 'delegation_id']);
       if (response.status >= 400 && response.status < 500) {
         if (isLineEntryUrl()) {
           clearTokenStorage();
@@ -265,7 +270,7 @@
       throw new Error('自動ログインに失敗しました。session_token がありません。');
     }
     setToken(sessionToken, { persistCurrentScope: true });
-    stripUrlParams(['lt']);
+    stripUrlParams(['lt', 'scope_kind', 'delegation_id']);
     return true;
   }
 

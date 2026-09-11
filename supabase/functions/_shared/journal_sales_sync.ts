@@ -115,7 +115,9 @@ export async function isJournalSalesSyncEnabled(
     .select("profile")
     .eq("store_partition_key", key)
     .maybeSingle()
-  if (error || !data) return false
+  // A failed read is not an explicit OFF setting. Let callers surface a retryable failure.
+  if (error) throw new Error("店舗の売上同期設定を確認できませんでした。")
+  if (!data) return false
   const profile = (data as Record<string, unknown>).profile
   if (!isRecord(profile)) return false
   return profile.journalSalesSync === true

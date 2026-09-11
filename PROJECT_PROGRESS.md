@@ -1,5 +1,11 @@
 # LINE Report Project Progress
 
+### 2026-09-11 - 3アプリのDB・共通データ連携監査
+
+- LINE Report / Journal Report / M-talkは同じhocbn。別DBではなく、同期失敗の黙殺・期限切れキャッシュ・認証JS二重読込・端末設定の誤表示を修正。確認済み0円日だけ安全に補完するmigrationを追加。
+- 原本・手修正・通知履歴・店舗権限は保持。M-talk AIへの店舗メモ等の送信追加は承認待ちで未実装。全情報の無条件共有はしない。
+- 詳細と検証入口: [3アプリ連携監査](./docs/THREE-APP-DATA-INTEGRATION-AUDIT.md)。配備状態は対応PR/Actionsを参照。
+
 ### 2026-09-11 - LINE側もM-talk予約カレンダーへ統一
 
 - 利用者がM-talkログイン・店舗閲覧権限へ切り替える方式を明示承認。Gmail予約通知、本日の予約、「予約確認」の3経路を共通のM-talk入口へ変更。

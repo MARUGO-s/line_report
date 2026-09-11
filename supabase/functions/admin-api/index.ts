@@ -14614,6 +14614,8 @@ async function upsertPosJournalAutoReports(
             month,
             error instanceof Error ? error.message : String(error),
           )
+          result.ok = false
+          result.failures.push({ month, error: "レポートは保存済みですが、共通売上への同期に失敗しました。同じファイルを再取込してください。" })
         }
       }
     } catch (error) {
@@ -16126,7 +16128,7 @@ async function fetchSavedReportsList(
   // 伝票明細・HTML本文を含む data JSONB 全体は読まず、サマリー数値のみ JSON パス指定で取得する。
   // 保存件数が増えてもレスポンスが肥大せず、タイムアウトで AI がデータ参照不能になることを防ぐ。
   const summarySelect = [
-    "id", "title", "period", "created_at", "deleted_at",
+    "id", "title", "period", "created_at", "updated_at", "deleted_at",
     "total:data->total",
     "totalSales:data->totalSales",
     "foodTotal:data->foodTotal",
@@ -16270,7 +16272,7 @@ async function saveSavedReport(
   storeScope: string | null,
 ) {
   const requestedStore = toSafeString(body.store_key)
-  const storeKey = storeScope || requestedStore
+  const storeKey = (storeScope || requestedStore).toLowerCase()
   if (!storeKey) {
     throw { status: 400, message: "store_key is required." } satisfies AppError
   }
@@ -16330,8 +16332,13 @@ async function saveSavedReport(
     salesSync = await syncJournalSalesFromReport(supabase, storeKey, sanitizedData)
   } catch (e) {
     console.error("journal sales sync failed:", storeKey, id, String(e))
+    return {
+      ok: false, saved: true, id, salesSync: null,
+      code: "journal_sales_sync_failed",
+      error: "レポートは保存済みですが、共通売上への同期に失敗しました。同じレポートを再保存してください。",
+    }
   }
-  return { ok: true, id, salesSync }
+  return { ok: true, saved: true, id, salesSync }
 }
 
 async function deleteSavedReportItem(
