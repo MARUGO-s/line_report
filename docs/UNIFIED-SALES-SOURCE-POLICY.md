@@ -42,6 +42,8 @@ AI接続は `_shared/sales_reconciliation_ai.ts`。区分内の連続月だけ�
 
 `line_sales_manual_day` は互換用の採用値列と、独立した `journal_values` / `manual_values` を持つ。migration `20260911100000` は既存金額・更新日時を変えず、出所メタデータを補う。過去に上書きされ既に失われた値の復元は行わない。
 
+追補migration `20260911110000` は予測用ビューのSQL集計も共通採用に揃える。税/税抜の一部欠損をSQLのSUMで無視して確定値にせずnullにする。元の保存値は変更しない。
+
 書込みは service-role 限定 `write_daily_sales_source` RPC。店舗ごとのトランザクションロックと項目別パッチで、再同期とセル編集の取りこぼしを防ぐ。バッチ内不正値は全体をロールバック。同じ原本の再同期では `updated_at` も変えない。ストア一覧から正式キーを解決し、未登録店舗を拒否する。
 
 `GET /pos-journals/sales-summary?store_key=…&from=YYYY-MM-DD&to=YYYY-MM-DD` は既存の管理認証・店舗スコープを適用。公開Pagesは業務テーブルを直接読まない。範囲上限3,660日。保存済み原本と現在の統一値は別フィールド。

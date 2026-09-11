@@ -2,7 +2,7 @@
 
 ### 2026-09-11 - 統一売上と差異通知
 
-- 反映状態: 2026-09-11に利用者が公開GitHub `MARUGO-s/line_report` への送信/PR・本番デプロイと既存AI連携を明示承認。作業ブランチは `codex/unified-sales-reconciliation-20260911`。反映結果は当該PRとmainのActions記録を参照。
+- 反映状態: 利用者が公開GitHub・本番配備・既存AI連携を明示承認。[PR #230](https://github.com/MARUGO-s/line_report/pull/230)を統合し、[Edge配備](https://github.com/MARUGO-s/line_report/actions/runs/34547201972)成功。migration後の既存1,014行は金額・更新日時のハッシュ一致、出所欠落0、書込RPCはservice-role限定を確認。追補migration `20260911110000` は予測用ビューの部分欠損税/税抜も共通集計と揃える。反映結果は当該PRとmainのActions記録を参照。
 
 - 日別修正→同期済みジャーナル→レシートを項目別に採用。原本と手修正を独立保持し、再同期で手修正を消さない。
 - 管理画面、LINE/M-talkの定型返信・定期報告、シート出力を共通集計へ接続。電子ジャーナル/Journal Reportに統一値と差異欄を追加。原本・保存済み報告は保持。

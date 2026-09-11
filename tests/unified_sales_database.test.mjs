@@ -29,6 +29,7 @@ test("real SQL: source preservation, atomic patching, reset, idempotency, permis
         "utf8",
       ),
     );
+    await db.exec(readFileSync(new URL('../supabase/migrations/20260911110000_unified_sales_view_missing_fields.sql', import.meta.url), 'utf8'));
     const run = async (kind, rows, store = "marugos") =>
       db.query("select write_daily_sales_source($1,$2,$3::jsonb)", [
         store,
@@ -123,6 +124,16 @@ test("real SQL: source preservation, atomic patching, reset, idempotency, permis
     await run("manual", [{ sales_date: "2026-01-01", guest_count: 7 }]);
     await db.exec("reset role");
     assert.equal((await row()).guest_count, 7);
+    await db.exec(`insert into "line_receipt__marugoS" values
+      ('2026-01-10',1100,1000,100,2,1), ('2026-01-10',550,null,null,null,1);`);
+    await run('manual', [{ sales_date: '2026-01-10', gross_sales_yen: 2000 }]);
+    const incomplete = (await db.query("select * from foodcourt_base_daily where business_date='2026-01-10'")).rows[0];
+    assert.equal(incomplete.sales_gross, 2000);
+    assert.equal(incomplete.sales, null, 'partial receipt tax must not become a confirmed net value');
+    assert.equal(incomplete.guests, 0, 'incomplete field must use the shared resolver representation, not a partial count');
+    assert.equal(incomplete.party, 2);
+    await run('manual', [{ sales_date: '2026-01-10', gross_sales_yen: null }]);
+    assert.equal((await db.query("select sales from foodcourt_base_daily where business_date='2026-01-10'")).rows[0].sales, null, 'partial receipt net is unknown');
   } finally {
     await db.close();
   }
