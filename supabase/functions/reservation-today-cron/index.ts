@@ -7,10 +7,6 @@ import { type ChatCard, postChatCardIndependent, resolveChatGroupId } from "../_
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 import { resolveReceiptNamePartitionKey } from "../_shared/receipt_store_name_resolve.ts"
-import {
-  issueAdminDashboardLoginLinkToken,
-  RESERVATION_CALENDAR_SCOPE,
-} from "../_shared/admin_dashboard_link_auth.ts"
 import { buildReservationCalendarPageUrl } from "../_shared/reservation_calendar_link.ts"
 import {
   constantTimeEqualSecret,
@@ -839,26 +835,12 @@ function formatTargetMonth(today: { year: number; month: number }): string {
 }
 
 async function buildTodayReservationCalendarUrl(
-  supabase: DbClient,
+  _supabase: DbClient,
   storeKey: string,
   today: { year: number; month: number },
 ): Promise<string | null> {
   const key = String(storeKey ?? "").trim()
   if (!key) return null
   const targetMonth = formatTargetMonth(today)
-  try {
-    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-      source: "line_today_reservation",
-      store_partition_key: key,
-      target_month: targetMonth,
-      scope: RESERVATION_CALENDAR_SCOPE,
-    })
-    return buildReservationCalendarPageUrl(key, {
-      loginToken: issued.token,
-      targetMonth,
-    })
-  } catch (error) {
-    console.error("buildTodayReservationCalendarUrl failed:", error)
-    return buildReservationCalendarPageUrl(key, { targetMonth })
-  }
+  return buildReservationCalendarPageUrl(key, { targetMonth })
 }

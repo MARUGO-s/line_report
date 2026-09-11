@@ -1,10 +1,8 @@
-// 予約カレンダー再ログイン導線。
-// LINEの予約通知に含まれるログインリンクは短期・単一使用のため、使い切りや期限切れ後は
-// 同じ店舗のLINEルームで「予約確認」と送ると、新しい店舗固定のリンクを返信する。
+// LINEの「予約確認」からM-talkの店舗予約カレンダーを開く導線。
+// URL自体は認証情報を持たず、M-talkのログインと店舗閲覧権限で認可する。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
-import { issueAdminDashboardLoginLinkToken, RESERVATION_CALENDAR_SCOPE } from './admin_dashboard_link_auth.ts'
 import { buildReservationCalendarPageUrl } from './reservation_calendar_link.ts'
 
 // 完全一致だけで起動し、通常会話中の「予約確認」を含む文章では誤作動させない。
@@ -13,7 +11,7 @@ const TRIGGER_WORDS = new Set(['予約確認'])
 function buildReservationCalendarLinkFlex(uri: string): Record<string, unknown> {
   return {
     type: 'flex',
-    altText: '予約カレンダーを開くログインリンクを発行しました',
+    altText: 'M-talkの予約カレンダーを開く',
     contents: {
       type: 'bubble',
       body: {
@@ -23,8 +21,8 @@ function buildReservationCalendarLinkFlex(uri: string): Record<string, unknown> 
         paddingAll: '16px',
         contents: [
           { type: 'text', text: '予約カレンダーを開く', weight: 'bold', size: 'lg', wrap: true, color: '#1F6FEB' },
-          { type: 'text', text: '下のボタンから、この店舗の予約カレンダーへログインできます。', size: 'sm', wrap: true, color: '#444444' },
-          { type: 'text', text: 'このリンクは24時間・1回のみ有効です。もう一度必要になったら、このルームで「予約確認」と送ってください。', size: 'xs', wrap: true, color: '#6B7280' },
+          { type: 'text', text: '下のボタンから、M-talkのこの店舗の予約カレンダーを開けます。', size: 'sm', wrap: true, color: '#444444' },
+          { type: 'text', text: 'M-talkへのログインと、この店舗の閲覧権限が必要です。未ログインの場合は、ログイン後に予約カレンダーを開きます。', size: 'xs', wrap: true, color: '#6B7280' },
         ],
       },
       footer: {
@@ -43,11 +41,11 @@ function buildReservationCalendarLinkFlex(uri: string): Record<string, unknown> 
 }
 
 /**
- * 同じLINEルームで「予約確認」と送ると、その店舗に限定した新しい予約カレンダー用ログインリンクを返す。
- * 既存リンクと同じ短期・単一使用トークンを再発行するため、失効済みリンクを復活させない。
+ * 同じLINEルームで「予約確認」と送ると、M-talkの店舗予約カレンダーへのリンクを返す。
+ * 閲覧権限は遷移先のM-talkとAPIで検証する。URLで権限を付与しない。
  */
 export async function handleReservationCalendarLinkTextMessage(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   registry: StoreRegistryRow,
   params: { roomId: string; replyToken: string; text: string },
 ): Promise<{ handled: boolean; replied: boolean }> {
@@ -63,13 +61,7 @@ export async function handleReservationCalendarLinkTextMessage(
   }
 
   try {
-    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-      source: 'line_reservation_calendar_request',
-      store_partition_key: storeKey,
-      room_id: roomId,
-      scope: RESERVATION_CALENDAR_SCOPE,
-    })
-    const uri = buildReservationCalendarPageUrl(storeKey, { loginToken: issued.token })
+    const uri = buildReservationCalendarPageUrl(storeKey)
     const result = await replyLineMessages(
       replyToken,
       [buildReservationCalendarLinkFlex(uri)],

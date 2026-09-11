@@ -119,3 +119,41 @@ test('calendar navigation still blocks unknown rooms, revoked viewing and stoppe
     assert.equal(ctx.alerts.length, 1);
   }
 });
+
+const calendarStoreRoom = { id: 42, store_key: 'synthetic', is_store_room: true, membership: { can_view: true } };
+
+test('LINE calendar entry resolves only its unique viewable store room and preserves month', () => {
+  const ctx = calendarContext({ myGroups: [calendarStoreRoom] });
+  const url = 'https://marugo-s.github.io/line_report/chat.html?calendar=reservations&store_key=Synthetic&month=2026-10&group_id=99&lt=old';
+  ctx.window.location.href = url;
+  assert.equal(ctx.resolveMtalkCardScheduleLink(url, 41).groupId, 42);
+  assert.equal(ctx.openRequestedReservationCalendar(true), true);
+  assert.equal(ctx.window.location.href, 'https://marugo-s.github.io/line_report/mtalk_schedule.html?from=chat&group_id=42&tab=reservations&month=2026-10');
+  assert.equal(ctx.alerts.length, 0);
+});
+
+test('LINE entry fails closed for unavailable memberships, ambiguous stores and stopped users', () => {
+  for (const overrides of [
+    { myGroups: [] },
+    { myGroups: [{ ...calendarStoreRoom, membership: { can_view: false } }] },
+    { myGroups: [{ ...calendarStoreRoom, is_store_room: false }] },
+    { myGroups: [{ ...calendarStoreRoom, trashed_at: '2026-09-01' }] },
+    { myGroups: [calendarStoreRoom, { ...calendarStoreRoom, id: 43 }] },
+    { myGroups: [calendarStoreRoom], currentChatAccess: { access_enabled: false } },
+  ]) {
+    const ctx = calendarContext(overrides);
+    const before = 'https://marugo-s.github.io/line_report/chat.html?calendar=reservations&store_key=synthetic';
+    ctx.window.location.href = before;
+    assert.equal(ctx.openRequestedReservationCalendar(true), true);
+    assert.equal(ctx.window.location.href, before);
+    assert.equal(ctx.alerts.length, 1);
+  }
+  const ctx = calendarContext({ myGroups: [calendarStoreRoom] });
+  assert.equal(ctx.openRequestedReservationCalendar(), false);
+  ctx.window.location.href += '?calendar=reservations&store_key=synthetic';
+  const before = ctx.window.location.href;
+  ctx.openRequestedReservationCalendar(false);
+  assert.equal(ctx.window.location.href, before);
+  assert.match(ctx.alerts[0], /通信状態/);
+  assert.ok(chat.includes('if (openRequestedReservationCalendar(groupsLoaded === true)) return;'));
+});

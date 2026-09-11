@@ -1,5 +1,7 @@
 # セキュリティ概要（line_report）
 
+2026-09-11 LINE予約リンク追補: 利用者承認により、Gmail予約・本日の予約・「予約確認」はM-talk本人ログイン＋店舗閲覧権限へ統一。URLのstore_keyは遷移先の候補であり資格ではない。本人の閲覧可能な店舗固定ルームを一意に解決し、既存chat-schedule APIが現在の所属・利用状態・ルーム/Bot・can_view/can_manageを再検査する。旧LINE予約ページはlt等を交換せず破棄してM-talkへ転送。他用途の管理リンクと認可は維持する。[仕様](./RESERVATION-GMAIL-GUIDE.md)。
+
 2026-09-11 利用状況追補: `get_usage_monthly(text)`/`get_storage_usage_stats()`はservice_role限定・固定search_pathの読取専用RPC。`/usage/line-quota`を限定セッションのallowlistへ追加しない。既存LINEトークンはサーバーから公式HTTPSへだけ送付し、応答/ログへ出さない。[仕様](./USAGE-METRICS.md)。
 
 2026-09-11追補: 統一売上の `write_daily_sales_source` はservice-role限定・固定search_path・店舗解決/ロック付き。新しい `/pos-journals/sales-summary` も管理認証と店舗スコープで保護する。定期売上報告URLは店舗限定ログインリンクを使用し、管理者固定トークンを含めない。利用者承認済みの既存OpenAI/Anthropic/Groq連携は認証済み店舗・指定期間の金融集計に限定し、新規の個人情報・他店舗・別提供元は追加しない。DB取得失敗時はAI呼出し前に停止する。[仕様・AI送信範囲](./UNIFIED-SALES-SOURCE-POLICY.md)。
