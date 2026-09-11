@@ -922,7 +922,7 @@ function renderCardSection(section) {
   return '';
 }
 
-function renderCardAction(action) {
+function renderCardAction(action, groupId) {
   if (!action || typeof action !== 'object') return '';
   const label = escapeHtml(action.label || '開く');
   const command = String(action.command || '').trim();
@@ -930,12 +930,17 @@ function renderCardAction(action) {
   if (command) {
     return `<button type="button" class="${actionClass}" data-card-command="${escapeHtml(command)}">${label}</button>`;
   }
+  const schedule = resolveMtalkCardScheduleLink(action.url, groupId);
+  if (schedule) {
+    if (!schedule.url) return `<button type="button" class="${actionClass}" disabled title="M-talkのルームから開いてください">${label}</button>`;
+    return `<a class="${actionClass}" href="${escapeHtml(schedule.url)}">${label}</a>`;
+  }
   const url = safeHttpUrl(action.url);
   if (!url) return '';
   return `<a class="${actionClass}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
 }
 
-function renderCard(card) {
+function renderCard(card, groupId) {
   if (!card || typeof card !== 'object') return '';
   const header = card.header || {};
   const sections = (Array.isArray(card.sections) ? card.sections : [])
@@ -944,7 +949,7 @@ function renderCard(card) {
   const actions = Array.isArray(card.actions) && card.actions.length
     ? card.actions
     : (card.action ? [card.action] : []);
-  const actionHtml = actions.map(renderCardAction).filter(Boolean).join('');
+  const actionHtml = actions.map((action) => renderCardAction(action, groupId)).filter(Boolean).join('');
   const lineLike = card.variant === 'line';
   const title = String(header.title || '');
   return `<div class="msg-card${lineLike ? ' msg-card-line' : ''}">

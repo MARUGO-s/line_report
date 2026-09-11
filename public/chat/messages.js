@@ -468,7 +468,7 @@ function buildMessageNode(msg) {
 
   let bodyHtml;
   if (cards) {
-    bodyHtml = cards.map(renderCard).join('');
+    bodyHtml = cards.map((card) => renderCard(card, msg.group_id)).join('');
   } else if (image) {
     bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像" loading="lazy" decoding="async">`;
   } else if (file) {

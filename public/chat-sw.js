@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v63';
+const CHAT_CACHE = 'line-report-chat-v64';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20260902-menu-knowledge-1',
@@ -10,11 +10,11 @@ const CHAT_SHELL = [
   './chat/profile.js',
   './chat/realtime.js',
   './chat/notifications.js',
-  './chat/rooms.js',
-  './chat/messages.js',
-  './chat/attachments.js?v=20260902-menu-knowledge-1',
+  './chat/rooms.js?v=20260911-calendar-links-1',
+  './chat/messages.js?v=20260911-calendar-links-1',
+  './chat/attachments.js?v=20260911-calendar-links-1',
   './chat/composer.js',
-  './chat/bootstrap.js',
+  './chat/bootstrap.js?v=20260911-calendar-links-1',
   './chat.webmanifest',
   './pages-config.js',
   './vendor/supabase/supabase-2.110.9.min.js',

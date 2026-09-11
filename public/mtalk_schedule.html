@@ -266,7 +266,8 @@
     const groupId = Number(params.get('group_id') || params.get('group') || '');
     const $ = (id) => document.getElementById(id);
     let tab = params.get('tab') === 'events' ? 'events' : 'reservations';
-    let month = currentMonth();
+    const requestedMonth = params.get('month') || '';
+    let month = /^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(requestedMonth) ? requestedMonth : currentMonth();
     let payload = null;
     let selectedDay = '';
     let editing = null;

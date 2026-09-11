@@ -517,19 +517,51 @@ function openJournalAi() {
   window.location.href = url.href;
 }
 
-function openReservationSchedule(groupId, tab) {
-  const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
-  if (!Number.isSafeInteger(id) || id <= 0) return;
-  if (!canCurrentUserManage(findMineGroup(id))) {
-    alert('予定・予約を管理する権限がありません');
-    return;
-  }
-  closeTalkContextMenu();
+function mtalkScheduleMonth(value) {
+  return /^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(String(value || '')) ? String(value) : '';
+}
+
+function buildMtalkScheduleUrl(groupId, tab, month) {
+  const id = Number(groupId);
+  if (!Number.isSafeInteger(id) || id <= 0) return '';
   const url = new URL('mtalk_schedule.html', window.location.href);
   url.searchParams.set('from', 'chat');
   url.searchParams.set('group_id', String(id));
   if (tab === 'events' || tab === 'reservations') url.searchParams.set('tab', tab);
-  window.location.href = url.href;
+  if (mtalkScheduleMonth(month)) url.searchParams.set('month', month);
+  return url.href;
+}
+
+// 保存済みのLINE用カードも、M-talkで表示するときだけ遷移先を置き換える。
+// 同名の外部ページは対象外。LINEの資格・店舗キーをM-talkへ引き継がない。
+function resolveMtalkCardScheduleLink(value, messageGroupId) {
+  try {
+    const source = new URL(String(value || ''), window.location.href);
+    if (!['http:', 'https:'].includes(source.protocol) || source.username || source.password) return null;
+    const bases = [new URL('./', window.location.href), new URL('https://marugo-s.github.io/line_report/')];
+    const base = bases.find((candidate) => source.origin === candidate.origin
+      && [candidate.pathname + 'reservation.html', candidate.pathname + 'mtalk_schedule.html'].includes(source.pathname));
+    if (!base) return null;
+    const legacy = source.pathname === base.pathname + 'reservation.html';
+    const groupId = Number(legacy ? messageGroupId
+      : (source.searchParams.get('group_id') || source.searchParams.get('group') || messageGroupId));
+    const tab = !legacy && source.searchParams.get('tab') === 'events' ? 'events' : 'reservations';
+    const month = mtalkScheduleMonth(source.searchParams.get('month'));
+    return { groupId, tab, month, url: buildMtalkScheduleUrl(groupId, tab, month) };
+  } catch (_) {
+    return null;
+  }
+}
+
+function openReservationSchedule(groupId, tab, month) {
+  const id = Number(groupId || (talkMenuGroup && talkMenuGroup.id) || currentGroupId);
+  if (!Number.isSafeInteger(id) || id <= 0) return;
+  if (chatAccessIsBlocked(currentChatAccess) || !roomCapability(findMineGroup(id), 'can_view')) {
+    alert('予定・予約を閲覧する権限がありません');
+    return;
+  }
+  closeTalkContextMenu();
+  window.location.href = buildMtalkScheduleUrl(id, tab, month);
 }
 
 async function openInvite() {
