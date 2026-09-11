@@ -108,14 +108,16 @@ Deno.test("profile lookup uses journal lowercase but sales writes use canonical 
   assert.equal(db.rows.line_sales_manual_month_gross[0].net_sales_yen, 1000);
 });
 
-Deno.test("sync is opt-in; no profile, false, string true and query errors do not write", async () => {
+Deno.test("sync is opt-in; OFF and missing differ from an unavailable profile", async () => {
   for (const flag of [false, "true", null]) {
     const db = fakeDb(flag);
     await syncJournalSalesFromReport(db.client, "marugos", { posJournalDays: [day()] });
     assert.equal(db.writes.length, 0);
   }
   const db = fakeDb(true, true);
-  assert.equal(await isJournalSalesSyncEnabled(db.client, "marugoS"), false);
+  await assert.rejects(() => isJournalSalesSyncEnabled(db.client, "marugoS"), /同期設定/);
+  await assert.rejects(() => syncJournalSalesFromReport(db.client, "marugos", { posJournalDays: [day()] }));
+  assert.equal(db.writes.length, 0);
   assert.equal(await isJournalSalesSyncEnabled(fakeDb().client, "sauvage"), false);
 });
 

@@ -10,7 +10,7 @@
   'use strict';
 
   const PROJECT_URL = 'https://hocbnifuactbvmyjraxy.supabase.co';
-  /** @deprecated Gmail も hocbn。互換のため jhpm URL を残す */
+  /** @deprecated Gmail も hocbn。旧変数名を互換用に保持（別DBへは接続しない） */
   const GMAIL_SHARED_PROJECT_URL = PROJECT_URL;
   /** LINE Webhook 受信先（新 DB） */
   const WEBHOOK_PROJECT_URL = PROJECT_URL;

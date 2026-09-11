@@ -220,7 +220,7 @@ core(
     "integrated.storeOpsBlock",
   ]),
   "store_operation_profiles → 定休・昼夜・特別営業 → AI",
-  "曜日の低売上を定休日の弱点と誤判定しないため、毎回統合します。",
+  "通常Journalはクラウドを確認し、失敗・未登録は未確認扱い。M-talk埋め込みは店舗情報APIの権限外であり、初期値を事実として渡しません。共有情報の追加送信は承認待ちです。",
 );
 
 const foodcourtBriefStart = adminApi.indexOf('path === "/foodcourt/journal-brief"');

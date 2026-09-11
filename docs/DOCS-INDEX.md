@@ -27,6 +27,8 @@
 
 ## ドキュメント一覧
 
+- [3アプリのデータ連携監査](./THREE-APP-DATA-INTEGRATION-AUDIT.md): LINE Report / Journal Report / M-talkのDB、共通売上、原本・履歴の違い、同期失敗・キャッシュ・権限と保留事項。
+
 | ファイル | 読者 | 内容 |
 |----------|------|------|
 | [README-PAGES.md](./README-PAGES.md) | 運用・開発 | **入口** — Pages URL、hocbn、デプロイ、関連ガイドへのリンク |

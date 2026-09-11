@@ -8,9 +8,9 @@ Generated from `knowledge/system-architecture.json` and the current Graphify gra
 - Repository: MARUGO-s/line_report
 - Production: https://marugo-s.github.io/line_report/
 - Supabase: hocbnifuactbvmyjraxy
-- Graphify: 5541 nodes / 12189 relationships / 533 communities
-- SQL coverage: 306 files / 901 nodes
-- Generated: 2026-09-11T03:59:36.271Z
+- Graphify: 5555 nodes / 12267 relationships / 532 communities
+- SQL coverage: 307 files / 902 nodes
+- Generated: 2026-09-11T05:15:57.066Z
 
 ## Required workflow
 1. Read `AGENTS.md`, `PROJECT_PROGRESS.md`, `AI_HANDOFF.md`, `docs/AI_KNOWLEDGE_SYSTEM.md`, and Obsidian `70_AI作業環境/00_AI_START_HERE.md`.
