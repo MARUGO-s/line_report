@@ -2,12 +2,12 @@
 
 ### 2026-09-11 - 統一売上と差異通知
 
-- 反映状態: ローカル実装・検証完了、本番未反映。公開GitHub `MARUGO-s/line_report` への送信/PR作成が自動安全審査で停止し、公開・デプロイ承認待ち。作業ブランチは `codex/unified-sales-reconciliation-20260911`。
+- 反映状態: 2026-09-11に利用者が公開GitHub `MARUGO-s/line_report` への送信/PR・本番デプロイと既存AI連携を明示承認。作業ブランチは `codex/unified-sales-reconciliation-20260911`。反映結果は当該PRとmainのActions記録を参照。
 
 - 日別修正→同期済みジャーナル→レシートを項目別に採用。原本と手修正を独立保持し、再同期で手修正を消さない。
 - 管理画面、LINE/M-talkの定型返信・定期報告、シート出力を共通集計へ接続。電子ジャーナル/Journal Reportに統一値と差異欄を追加。原本・保存済み報告は保持。
-- 生成AIへの統一DBデータ送信は安全審査により保留（利用者の送信範囲承認待ち）。AI本文まで統一済みとは案内しない。
-- 検証: test:ci 702件、knowledge 7件、PC1440px/スマホ390pxで差異・税額修正・503時の旧金額消去を確認。共通集計6モジュールの型チェック成功。シート全体の既存型エラー18件は変更前と同一。実装・反映手順の正本: [UNIFIED-SALES-SOURCE-POLICY.md](./docs/UNIFIED-SALES-SOURCE-POLICY.md)。本番反映の結果はこの変更のPRとDeploy Edge Functions/Deploy Pages実行記録を参照。
+- 新規Journal分析/チャット/POS AIは認証済み店舗・指定期間の統一値をサーバー取得し、既存OpenAI/Anthropic/Groqへ渡す。複数期間を保持し、原本内訳や過去文章は書き換えない。取得失敗は503、未確認を0円にしない。モデル変更なし。
+- 検証: test:ci 710件（Node512/Deno198）、knowledge 7件、PC1440px/スマホ390pxで差異・税額修正・503時の旧金額消去を確認。共通集計6モジュールとai-analyze/POS AIの型チェック成功。シート全体の既存型エラー18件は変更前と同一。実装・反映手順の正本: [UNIFIED-SALES-SOURCE-POLICY.md](./docs/UNIFIED-SALES-SOURCE-POLICY.md)。本番反映の結果はこの変更のPRとDeploy Edge Functions/Deploy Pages実行記録を参照。
 
 ### 2026-09-11 - MARUGO Sのジャーナルを売上分析へ同期
 

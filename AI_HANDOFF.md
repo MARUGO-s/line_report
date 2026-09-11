@@ -2,10 +2,10 @@
 
 ## 2026-09-11 統一売上・差異通知
 
-- ローカル検証完了、本番未反映。公開GitHub `MARUGO-s/line_report` へのpush/PRも安全審査で停止。利用者の公開・デプロイ承認を得てから再開する。作業場所 `/private/tmp/line-report-unified-sales-20260911`、ブランチ `codex/unified-sales-reconciliation-20260911`。
+- 2026-09-11に利用者が公開GitHub `MARUGO-s/line_report` へのpush/PR・本番デプロイと既存OpenAI/Anthropic/Groqへの統一集計連携を承認し作業再開。作業場所 `/private/tmp/line-report-unified-sales-20260911`、ブランチ `codex/unified-sales-reconciliation-20260911`。本番状態はPR/Actionsで確認。
 
 - 現行仕様: [UNIFIED-SALES-SOURCE-POLICY.md](./docs/UNIFIED-SALES-SOURCE-POLICY.md)。日別修正→ジャーナル→レシートの項目別採用。JSON出所を独立保持し、書込みはロック付き `write_daily_sales_source`。直接日別upsertへ戻さない。
-- 定型報告/画面/シートは共通集計、原本・保存済みAI/PDFは区別。生成AI向けDB追加送信は安全審査で保留。明示承認前に別経路で回避しない。
+- 定型報告/画面/シート/新規AIは共通集計、原本・保存済みAI/PDFは区別。AIの店舗・期間はサーバー検証し、原本内訳を修正額へ按分しない。提供元とモデルは既存のまま。
 - 過去復旧用 `backfill-marugos-journal-sales-20260911.sql` は新RPC前の手順。手修正を壊すため再実行しない。
 
 ## 2026-09-11 Journal → 売上分析の連携

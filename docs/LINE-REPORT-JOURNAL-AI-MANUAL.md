@@ -310,7 +310,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 店舗情報タブには定休日、ランチ／ディナー有無、特別営業ルール、営業メモ、施策・イベントカレンダーを店舗別に保存します。
 - AIは定休日の売上ゼロを弱点扱いせず、分析期間と重なる施策・イベントを優先して解釈します。
 - 過去売上同期は店舗ごとの明示ONでのみ動き、他店舗へ自動的に広げません。
-- 電子ジャーナル/Journal Reportの統一売上欄は現在の採用値と差異を表示します。原本明細・保存済みAI文章とは区別してください。生成AI本文の追加DB連携は送信承認待ちです。
+- 電子ジャーナル/Journal Reportの統一売上欄と新規AI分析は同じ採用値を使います。原本明細・保存済みAI文章とは区別してください。AIは指定店舗・期間だけを確認し、商品や時間帯の原本内訳を修正額へ配分しません。
 - ワイン量は、分類のグラス（赤／白／ロゼ／泡／オレンジ）・デキャンタ・ボトル（赤／白／ロゼ／泡／オレンジ）、または名称の Glass Wine / デキャンタ / Bottle Wine / ペアリングの点数からml換算します。大分類「飲料」のままの銘柄名は自動換算しません。
 - 「どれくらいワインが出たか」が曖昧な場合は、点数・総ml・両方のどれを見たいか確認してから回答します。
 
@@ -763,7 +763,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 42件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 101件
+- 共有TypeScriptモジュール: 102件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 144件
 - SQL migrations: 301件（全件の構文・関係はGraphify/knowledge:checkで監査）
@@ -939,6 +939,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/room_hard_delete.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/sales_budget_allocation.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/sales_reconciliation.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/sales_reconciliation_ai.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/search_help_guide.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
 | `supabase/functions/_shared/store_receipt.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/store_receipt_phones.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |

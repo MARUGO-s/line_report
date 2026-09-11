@@ -6,13 +6,17 @@
 import { GROQ_TEXT_PRIMARY_MODEL, resolveGroqTextModel } from "./groq_model.ts";
 import { buildStoreLocationPromptBlock } from "./marugo_group_stores.ts";
 import {
+  unifiedSalesFacts,
+  type UnifiedSalesSummary,
+} from "./sales_reconciliation_ai.ts";
+import {
   buildPosJournalSummary,
   isPosJournalAdjustmentItem,
-  resolvePosJournalReceiptPayments,
   type PosJournalDay,
   type PosJournalReceipt,
   type PosJournalReceiptItem,
   type PosJournalSummary,
+  resolvePosJournalReceiptPayments,
 } from "./pos_journal.ts";
 
 const MAX_REQUEST_JSON_CHARS = 900_000;
@@ -46,8 +50,8 @@ export type PosJournalAiFacts = {
   };
   totals: {
     grossSales: number;
-    netSales: number;
-    tax: number;
+    netSales: number | null;
+    tax: number | null;
     groups: number;
     guests: number;
     averageSpend: number;
@@ -88,6 +92,7 @@ export type PosJournalAiFacts = {
     note: string;
   };
   dataNotes: string[];
+  salesReconciliation?: UnifiedSalesSummary["reconciliation"];
 };
 
 type PosJournalAiDayFact = {
@@ -394,13 +399,33 @@ function aggregateGroups(
 }
 
 export function buildPosJournalAiFacts(
-  summary: PosJournalSummary,
+  summary: PosJournalSummary & { unified_sales?: UnifiedSalesSummary },
 ): PosJournalAiFacts {
-  const dayFacts = summary.days.map(makeDayFact);
+  const unified = summary.unified_sales;
+  const adopted = unified ? unifiedSalesFacts(unified) : null;
+  const originals = new Map(
+    summary.days.map((d) => [d.business_date, makeDayFact(d)]),
+  );
+  const dayFacts: PosJournalAiDayFact[] = unified
+    ? unified.series.map((d) => ({
+      date: d.date,
+      weekday: weekdayName(d.date),
+      grossSales: d.gross_sales_yen,
+      guests: d.guest_count,
+      groups: d.party_count,
+      averageSpend: d.guest_count
+        ? Math.round(d.gross_sales_yen / d.guest_count)
+        : 0,
+      weather: originals.get(d.date)?.weather ?? null,
+      temperatureC: originals.get(d.date)?.temperatureC ?? null,
+      receipts: originals.get(d.date)?.receipts ?? 0,
+    }))
+    : summary.days.map(makeDayFact);
   const activeDays = dayFacts.filter((day) => day.grossSales > 0);
   const activeSales = activeDays.map((day) => day.grossSales);
-  const grossSales = activeSales.reduce((sum, value) => sum + value, 0);
-  const averageSales = activeDays.length ? grossSales / activeDays.length : 0;
+  const dailySales = activeSales.reduce((sum, value) => sum + value, 0);
+  const grossSales = unified ? unified.totals.gross_sales_yen : dailySales;
+  const averageSales = activeDays.length ? dailySales / activeDays.length : 0;
   const variance = activeDays.length
     ? activeSales.reduce(
       (sum, value) => sum + ((value - averageSales) ** 2),
@@ -432,15 +457,18 @@ export function buildPosJournalAiFacts(
     0,
   );
   const explicitAdjustments = summary.days.reduce(
-    (daySum, day) => daySum + (day.receipts || []).reduce(
-      (receiptSum, receipt) => receiptSum + (receipt.items || []).reduce(
-        (itemSum, item) => itemSum + (isPosJournalAdjustmentItem(item)
-          ? boundedSignedInteger(item.amount)
-          : 0),
+    (daySum, day) =>
+      daySum + (day.receipts || []).reduce(
+        (receiptSum, receipt) =>
+          receiptSum + (receipt.items || []).reduce(
+            (itemSum, item) =>
+              itemSum + (isPosJournalAdjustmentItem(item)
+                ? boundedSignedInteger(item.amount)
+                : 0),
+            0,
+          ),
         0,
       ),
-      0,
-    ),
     0,
   );
   const netCapturedSales = Math.max(0, itemSales + explicitAdjustments);
@@ -453,9 +481,31 @@ export function buildPosJournalAiFacts(
       ? Math.round((boundedInteger(item.amount) / itemSales) * 1000) / 10
       : 0,
   }));
-  const groups = boundedInteger(totals.groups, MAX_COUNT);
-  const guests = boundedInteger(totals.guests, MAX_COUNT);
+  const groups = unified
+    ? unified.totals.party_count
+    : boundedInteger(totals.groups, MAX_COUNT);
+  const guests = unified
+    ? unified.totals.guest_count
+    : boundedInteger(totals.guests, MAX_COUNT);
   const dataNotes: string[] = [];
+  if (unified) {
+    dataNotes.push(
+      "総売上・税額・客数・組数・日別は画面と同じ統一値（明示手修正 > 同期済みジャーナル > レシート）。商品・決済の内訳は原本参考値で、修正額を按分しない。",
+    );
+    dataNotes.push(
+      `原本総売上${
+        boundedInteger(totals.gross_sales)
+      }円、採用総売上${grossSales}円。ジャーナル対レシート差異${unified.reconciliation.discrepancy_days}日、税額要確認${unified.reconciliation.tax_review_days}日。`,
+    );
+    if (!unified.totals.net_sales_known) {
+      dataNotes.push("税抜売上は未確認。0円や推定税率で補完しない。");
+    }
+    if (unified.monthly_fallbacks.length) {
+      dataNotes.push(
+        "日別の無い月は登録月計を使用。日別・曜日・天候傾向へ月計を配分しない。",
+      );
+    }
+  }
   if (activeDays.length < 7) {
     dataNotes.push("営業日が7日未満のため曜日・天候傾向の確度は低い。");
   }
@@ -485,11 +535,18 @@ export function buildPosJournalAiFacts(
   }
   if (netCapturedSales > grossSales) {
     dataNotes.push(
-      `値引調整後の商品明細が総売上を${netCapturedSales - grossSales}円上回るため、捕捉率は100%を上限表示している。`,
+      `値引調整後の商品明細が総売上を${
+        netCapturedSales - grossSales
+      }円上回るため、捕捉率は100%を上限表示している。`,
     );
   }
-  if (!activeDays.length) dataNotes.push("売上が1円以上の日がない。");
+  if (!activeDays.length) {
+    dataNotes.push(
+      "日別データに売上が1円以上の日がない（月計がある場合も日別傾向は不明）。",
+    );
+  }
   return {
+    ...(unified ? { salesReconciliation: unified.reconciliation } : {}),
     store: {
       key: boundedText(summary.meta.store_key, 80),
       name: boundedText(summary.meta.store_name, 120),
@@ -497,7 +554,7 @@ export function buildPosJournalAiFacts(
       month: normalizeYearMonth(summary.meta.month),
     },
     coverage: {
-      recordedDays: summary.days.length,
+      recordedDays: dayFacts.length,
       activeDays: activeDays.length,
       zeroSalesDates: dayFacts.filter((day) => day.grossSales === 0).map((
         day,
@@ -508,14 +565,18 @@ export function buildPosJournalAiFacts(
     },
     totals: {
       grossSales,
-      netSales: boundedInteger(totals.net_sales),
-      tax: boundedInteger(totals.tax),
+      netSales: adopted
+        ? adopted.totals?.net_sales_yen ?? null
+        : boundedInteger(totals.net_sales),
+      tax: adopted
+        ? adopted.totals?.tax_amount_yen ?? null
+        : boundedInteger(totals.tax),
       groups,
       guests,
       averageSpend: guests ? Math.round(grossSales / guests) : 0,
       averageGroupSize: groups ? Math.round((guests / groups) * 10) / 10 : null,
       salesPerActiveDay: activeDays.length
-        ? Math.round(grossSales / activeDays.length)
+        ? Math.round(dailySales / activeDays.length)
         : 0,
     },
     trend: {
@@ -944,9 +1005,9 @@ export async function answerPosJournalAiQuestion(
     // 「表に挙げた項目の合計比率」と読み違え、100から引いた値を未捕捉率として
     // 提示したことがある。未捕捉は必ず専用の値を使わせる。
     "商品の構成比(sharePct / topFiveSharePctOfCapturedItemSales)の分母は" +
-      "capturedItemSales であり、総売上ではありません。" +
-      "未捕捉の売上について述べるときは uncapturedSales と uncapturedPctOfGrossSales " +
-      "だけを使い、構成比を100から引いて未捕捉率を求めてはいけません。",
+    "capturedItemSales であり、総売上ではありません。" +
+    "未捕捉の売上について述べるときは uncapturedSales と uncapturedPctOfGrossSales " +
+    "だけを使い、構成比を100から引いて未捕捉率を求めてはいけません。",
   ].join("\n");
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: system },

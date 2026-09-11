@@ -18,6 +18,15 @@ import {
 } from "../supabase/functions/_shared/admin_receipt_sales.ts";
 import { loadMonthAggUpToDate } from "../supabase/functions/_shared/receipt_reply_context.ts";
 import { loadReceiptReportAggregateForStoreByReceiptDate } from "../supabase/functions/_shared/receipt_report_aggregate.ts";
+import {
+  buildTrustedAiSalesData,
+  resolveAiSalesPeriods,
+  unifiedSalesFacts,
+} from "../supabase/functions/_shared/sales_reconciliation_ai.ts";
+import {
+  buildPosJournalAiFacts,
+  normalizePosJournalAiSummary,
+} from "../supabase/functions/_shared/pos_journal_ai.ts";
 
 const receipt = {
   receipt_date: "2026-01-01",
@@ -243,6 +252,174 @@ Deno.test("daily screen, monthly graph, receipt reply and scheduled report use i
   assert.equal(sheetMonths.get("2026-01")!.gross_sales_yen, expected);
   assert.equal(screen.reconciliation.discrepancy_days, 1);
   assert.match(report!.reconciliationNotice!, /差異 1日/);
+});
+
+Deno.test("trusted AI facts use the same database values as the screen and discard forged client totals", async () => {
+  const { db } = dbFixture();
+  const input = {
+    period: "2026-01-01 〜 2026-01-31",
+    totalSales: 999999,
+    store_key: "other",
+    unified_sales: { totals: 1 },
+  };
+  const before = JSON.stringify(input);
+  const result = await buildTrustedAiSalesData(
+    input,
+    "marugos",
+    (store, from, to) => fetchUnifiedSalesSummary(db, store, from, to),
+  );
+  assert.equal(
+    result.unified_sales.periods[0].ranges[0].totals?.gross_sales_yen,
+    2100,
+  );
+  assert.equal(
+    result.unified_sales.periods[0].ranges[0].reconciliation.discrepancy_days,
+    1,
+  );
+  assert.equal("unified_sales" in result.original_reference, false);
+  assert.equal(JSON.stringify(input), before);
+});
+
+Deno.test("AI comparisons preserve separate non-contiguous months and merge only adjacent ranges", async () => {
+  const { db } = dbFixture();
+  const calls: string[] = [];
+  const periods = [{
+    label: "比較",
+    ranges: [{ from: "2025-06-01", to: "2025-06-30" }, {
+      from: "2026-06-01",
+      to: "2026-06-30",
+    }],
+  }];
+  const result = await buildTrustedAiSalesData(
+    { salesPeriods: periods },
+    "marugoS",
+    (s, f, t) => {
+      calls.push(f + "/" + t);
+      return fetchUnifiedSalesSummary(db, s, f, t);
+    },
+  );
+  assert.deepEqual(calls, ["2025-06-01/2025-06-30", "2026-06-01/2026-06-30"]);
+  assert.equal(result.unified_sales.periods[0].ranges[0].totals, null);
+  assert.equal(result.unified_sales.periods[0].ranges[0].status, "no_records");
+  assert.deepEqual(
+    resolveAiSalesPeriods({
+      salesPeriods: [{
+        ranges: [{ from: "2026-01-01", to: "2026-01-31" }, {
+          from: "2026-02-01",
+          to: "2026-02-28",
+        }],
+      }],
+    })[0].ranges,
+    [{ from: "2026-01-01", to: "2026-02-28" }],
+  );
+});
+
+Deno.test("AI scope validation rejects invalid dates, overlaps, excess ranges and wrong-store results", async () => {
+  for (
+    const periods of [
+      [{ ranges: [{ from: "2026-02-30", to: "2026-03-01" }] }],
+      [{
+        ranges: [{ from: "2026-01-01", to: "2026-01-31" }, {
+          from: "2026-01-01",
+          to: "2026-01-02",
+        }],
+      }],
+      Array(25).fill({ ranges: [] }),
+    ]
+  ) {
+    assert.throws(() => resolveAiSalesPeriods({ salesPeriods: periods }));
+  }
+  const { db } = dbFixture();
+  const source = await fetchUnifiedSalesSummary(
+    db,
+    "marugoS",
+    "2026-01-01",
+    "2026-01-31",
+  );
+  await assert.rejects(() =>
+    buildTrustedAiSalesData(
+      { period: "2026-01-01 〜 2026-01-31" },
+      "other",
+      async () => source,
+    )
+  );
+  await assert.rejects(() =>
+    buildTrustedAiSalesData({}, "", async () => source)
+  );
+  const unresolved = await buildTrustedAiSalesData(
+    { period: "あいまいな期間" },
+    "marugoS",
+    async () => {
+      throw new Error("must not fetch");
+    },
+  );
+  assert.equal(unresolved.unified_sales.status, "period_not_provided");
+});
+
+Deno.test("AI database read errors do not silently fall back to original figures", async () => {
+  const { db, errors } = dbFixture();
+  errors.add("line_sales_manual_day");
+  await assert.rejects(() =>
+    buildTrustedAiSalesData(
+      { period: "2026-01-01" },
+      "marugoS",
+      (s, f, t) => fetchUnifiedSalesSummary(db, s, f, t),
+    )
+  );
+});
+
+Deno.test("AI month-only and unknown-tax facts stay distinguishable from invented daily or zero tax", async () => {
+  const { db, rows } = dbFixture();
+  rows.fixture_receipts = [];
+  rows.line_sales_manual_day = [];
+  const month = unifiedSalesFacts(
+    await fetchUnifiedSalesSummary(db, "marugoS", "2026-01-01", "2026-01-31"),
+  );
+  assert.equal(month.totals?.gross_sales_yen, 999999);
+  assert.equal(month.totals?.tax_amount_yen, null);
+  assert.equal(month.totals?.net_sales_yen, null);
+  assert.equal(month.daily.length, 0);
+  assert.equal(month.monthly_fallbacks.length, 1);
+});
+
+Deno.test("POS AI uses adopted totals and trends without rewriting original product detail", async () => {
+  const { db, rows } = dbFixture();
+  rows.line_sales_manual_day[0].manual_values = {
+    gross_sales_yen: 1200,
+    guest_count: 0,
+  };
+  const unified_sales = await fetchUnifiedSalesSummary(
+    db,
+    "marugoS",
+    "2026-01-01",
+    "2026-01-31",
+  );
+  const raw = normalizePosJournalAiSummary({
+    days: [{
+      business_date: "2026-01-01",
+      gross_sales: 1000,
+      guests: 4,
+      groups: 2,
+      receipts: [{
+        no: "1",
+        total: 1000,
+        items: [{ name: "合成商品", qty: 1, amount: 1000 }],
+      }],
+    }],
+  }, {
+    storeKey: "marugos",
+    storeName: "fixture",
+    storeCode: "1016",
+    month: "2026-01",
+  });
+  const before = JSON.stringify(raw);
+  const facts = buildPosJournalAiFacts({ ...raw, unified_sales });
+  assert.equal(facts.totals.grossSales, 2200);
+  assert.equal(facts.totals.guests, 4);
+  assert.equal(facts.trend.bestDay?.grossSales, 1200);
+  assert.equal(facts.products.capturedItemSales, 1000);
+  assert.equal(facts.salesReconciliation?.tax_review_days, 1);
+  assert.equal(JSON.stringify(raw), before);
 });
 Deno.test("source fetch failure fails closed instead of silently reporting receipt-only or zero", async () => {
   for (

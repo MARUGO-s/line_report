@@ -4,6 +4,37 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 const read = (p) => readFileSync(new URL("../" + p, import.meta.url), "utf8");
 
+test('AI client serializes exact periods without mixing comparisons or reservation-only facts', () => {
+  const html = read('public/jnm/jnl2txt.html');
+  const fn = html.slice(html.indexOf('function buildUnifiedAiPeriods('), html.indexOf('function buildSalesDataForAI('));
+  const resolve = vm.runInNewContext(fn + '\n buildUnifiedAiPeriods');
+  const plain = v => JSON.parse(JSON.stringify(v));
+  assert.deepEqual(plain(resolve({ period: '2026-01-05 〜 2026-01-10' })), [{ label: '2026-01-05 〜 2026-01-10', ranges: [{ from: '2026-01-05', to: '2026-01-10' }] }]);
+  const result = plain(resolve({ multiPeriod: true, periods: [
+    { label: '前年', monthlyBreakdown: [{ key: '2025-06' }] },
+    { label: '今年', monthlyBreakdown: [{ key: '2026-06' }] },
+  ] }));
+  assert.equal(result.length, 2);
+  assert.equal(result[0].ranges[0].to, '2025-06-30');
+  assert.equal(result[1].ranges[0].from, '2026-06-01');
+  assert.deepEqual(plain(resolve({ reservationOnly: true, period: '2026-01-01' })), []);
+  assert.deepEqual(plain(resolve({ journalProductSearchOnly: true, period: '2026-01-01' })), []);
+  assert.deepEqual(plain(resolve({ period: '不明', dailyBreakdown: [{ date: '2026-01-01' }, { date: '2026-12-31' }] })), []);
+  assert.match(html, /salesPeriods: \[\{ label, ranges: \[\{ from: fromIso, to: toIso \}\] \}\]/);
+});
+
+test('AI financial enrichment follows authentication, store validation and rate limits before provider calls', () => {
+  const code = read('supabase/functions/ai-analyze/index.ts');
+  const handler = code.slice(code.indexOf('Deno.serve('));
+  const enrich = handler.indexOf('await buildTrustedAiSalesData(');
+  for (const guard of ['authenticateAdminDashboardSessionToken(', 'requestedStore !== scopedStore', 'await consumeAiRateLimit(']) assert.ok(handler.indexOf(guard) < enrich);
+  assert.ok(enrich < handler.indexOf('if (action === "analyze")'));
+  assert.match(handler, /unified_sales_unavailable.*\}, 503/s);
+  assert.match(code, /JOURNAL_AI_SERVER_TRUST_POLICY.*UNIFIED_SALES_AI_POLICY/);
+  const admin = read('supabase/functions/admin-api/index.ts');
+  assert.match(admin, /gross_sales: toNonNegativeInteger\(facts\.totals\.grossSales\)/);
+});
+
 test("sales screens share the notice renderer and journal summary stays store-scoped", () => {
   for (
     const file of [

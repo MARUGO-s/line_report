@@ -15776,12 +15776,22 @@ async function resolvePosJournalAiSummary(
     expected.month,
     mergePosJournalDaysPreferPrimary(storedDays, shared.days),
   )
+  const [year, monthNumber] = expected.month.split('-').map(Number)
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10)
+  let unified_sales
+  try {
+    unified_sales = await fetchUnifiedSalesSummary(
+      supabase, expected.storeKey, `${expected.month}-01`, monthEnd,
+    )
+  } catch {
+    throw { status: 503, message: "統一売上を確認できませんでした。再読み込みしてお試しください。" } satisfies AppError
+  }
   if (combinedDays.length) {
     const categoryOverrides = await fetchPosJournalCategoryOverrides(
       supabase,
       expected.storeKey,
     )
-    return buildPosJournalSummary({
+    return { ...buildPosJournalSummary({
       storeKey: expected.storeKey,
       storeName: expected.storeName,
       storeCode: expected.storeCode,
@@ -15789,9 +15799,9 @@ async function resolvePosJournalAiSummary(
       days: combinedDays,
       fileCount: rows.length + shared.reportCount,
       categoryOverrides,
-    })
+    }), unified_sales }
   }
-  return normalizePosJournalAiSummary(body.summary, expected)
+  return { ...normalizePosJournalAiSummary(body.summary, expected), unified_sales }
 }
 
 type PosJournalAiHistoryListRow = {
@@ -15849,7 +15859,7 @@ async function savePosJournalAiAnalysis(
   | { saved: false; error: string }
 > {
   const analysisText = String(result.text ?? "").trim()
-  if (!analysisText || !summary.days.length) {
+  if (!analysisText) {
     return { saved: false, error: "分析本文または分析対象データが空のため履歴を保存しませんでした。" }
   }
   try {
@@ -15867,9 +15877,9 @@ async function savePosJournalAiAnalysis(
         facts_snapshot: facts,
         source_file_count: toNonNegativeInteger(summary.meta.file_count),
         source_day_count: summary.days.length,
-        gross_sales: toNonNegativeInteger(summary.totals.gross_sales),
-        guests_count: toNonNegativeInteger(summary.totals.guests),
-        average_spend: toNonNegativeInteger(summary.totals.avg_spend),
+        gross_sales: toNonNegativeInteger(facts.totals.grossSales),
+        guests_count: toNonNegativeInteger(facts.totals.guests),
+        average_spend: toNonNegativeInteger(facts.totals.averageSpend),
       })
       .select(
         "id, store_partition_key, store_code, year_month, ai_generated, provider, model, warning, source_file_count, source_day_count, gross_sales, guests_count, average_spend, created_at",
@@ -15897,18 +15907,19 @@ async function analyzePosJournalWithAi(
   try {
     summary = await resolvePosJournalAiSummary(supabase, body, expected)
   } catch (error) {
+    if (isRecord(error) && error.status === 503) throw error
     throw {
       status: 400,
       message: error instanceof Error ? error.message : "分析データが不正です。",
     } satisfies AppError
   }
-  if (!summary.days.length) {
+  if (!summary.unified_sales.series.length && !summary.unified_sales.monthly_fallbacks.length) {
     return {
       ok: true,
       analysis: null,
       ai_generated: false,
       model: null,
-      warning: "分析対象の電子ジャーナルデータがありません。",
+      warning: "分析対象の統一売上データがありません。同期状態と対象月を確認してください。",
       facts: buildPosJournalAiFacts(summary),
     }
   }
@@ -15952,15 +15963,16 @@ async function askPosJournalAi(
     question = normalizePosJournalAiQuestion(body.question)
     history = normalizePosJournalAiHistory(body.history)
   } catch (error) {
+    if (isRecord(error) && error.status === 503) throw error
     throw {
       status: 400,
       message: error instanceof Error ? error.message : "質問データが不正です。",
     } satisfies AppError
   }
-  if (!summary.days.length) {
+  if (!summary.unified_sales.series.length && !summary.unified_sales.monthly_fallbacks.length) {
     return {
       ok: true,
-      answer: "分析対象の電子ジャーナルデータがありません。対象月を確認するか、LZHファイルをアップロードしてください。",
+      answer: "分析対象の統一売上データがありません。同期状態と対象月を確認してください。",
       ai_generated: false,
       model: null,
       warning: "データが空です。",

@@ -10994,6 +10994,23 @@ function mealCategoryTotalsFromSales(sales) {
   return out;
 }
 
+// Only scope travels from the browser; the API resolves the adopted financial values.
+function buildUnifiedAiPeriods(data) {
+  if (!data || data.reservationOnly || data.journalProductSearchOnly) return [];
+  if (data.multiPeriod) return (data.periods || []).flatMap(buildUnifiedAiPeriods);
+  if (Array.isArray(data.salesPeriods)) return data.salesPeriods;
+  const label = String(data.label || data.period || '対象期間');
+  const range = String(data.period || '').match(/^(\d{4}[-/]\d{2}[-/]\d{2})(?:\s*[〜～~]\s*(\d{4}[-/]\d{2}[-/]\d{2}))?$/);
+  if (range) return [{ label, ranges: [{ from: range[1].replaceAll('/', '-'), to: (range[2] || range[1]).replaceAll('/', '-') }] }];
+  const months = [...new Set((data.monthlyBreakdown || []).map(m => m.key).filter(m => /^\d{4}-(0[1-9]|1[0-2])$/.test(m)))].sort();
+  if (months.length) return [{ label, ranges: months.map(month => {
+    const [y, m] = month.split('-').map(Number);
+    return { from: month + '-01', to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) };
+  }) }];
+  // Unknown/ambiguous ranges are deliberately not expanded from the first to last saved day.
+  return [];
+}
+
 function buildSalesDataForAI(reportData = currentReport) {
   if (!reportData) return {};
   const d = reportData;
@@ -11011,6 +11028,7 @@ function buildSalesDataForAI(reportData = currentReport) {
     return {
       title: d.title || '売上レポート',
       period: d.period || '',
+      salesPeriods: buildUnifiedAiPeriods(d),
       totalSales: totSales,
       salesCount: d.salesCount || 0,
       totalGroups: d.totalGroups || d.salesCount || 0,
@@ -11130,6 +11148,7 @@ function buildSalesDataForAI(reportData = currentReport) {
   return {
     title: d.title,
     period: d.period,
+    salesPeriods: buildUnifiedAiPeriods(d),
     totalSales: d.total,
     salesCount: d.salesCount,
     totalGroups: totalGroups,
@@ -18407,6 +18426,7 @@ async function searchSavedReportsByQuery(query, chatHistory = [], prefetchedRepo
       sourceCount: targets.length,
       monthlyBreakdown: [],
       dailyBreakdown: agg.dailyBreakdown,
+      salesPeriods: [{ label, ranges: [{ from: fromIso, to: toIso }] }],
       weekdayBreakdown: agg.weekdayBreakdown,
       hourlyBreakdown: agg.hourlyBreakdown,
       topProducts: wantsItemBreakdown(q)
@@ -19061,6 +19081,7 @@ async function sendAiChat() {
   const salesDataForAi = verifiedData
     ? {
         title: '保存済みレポート検索結果',
+        salesPeriods: buildUnifiedAiPeriods(verifiedData),
         period: verifiedData.multiPeriod
           ? verifiedData.periods.map(period => period.label).join(' / ')
           : verifiedData.label,
