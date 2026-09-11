@@ -39,8 +39,8 @@
 <script src="../auth-session.js"></script>
 <script src="../access-log.js?v=20260817"></script>
 <script src="../sales-source-notice.js?v=20260911"></script>
-<script src="journal-ai-privacy.js"></script>
-<script src="journal-ai-client.js?v=20260830-1552"></script>
+<script src="journal-ai-privacy.js?v=20260911-shared-store-1"></script>
+<script src="journal-ai-client.js?v=20260911-shared-store-1"></script>
 <style>
   :root {
     /* ===== Classical design system — light (default) ===== */
@@ -10073,7 +10073,7 @@ async function requestFoodcourtJournalDeepAnalysis(question, verifiedData, optio
 }
 
 /**
- * JournalのAI分析前にクラウドを確認する。M-talkは権限外の店舗情報を渡さない。
+ * JournalのAI分析前にクラウドを確認する。M-talkの共有情報はai-analyzeが認可後に取得する。
  * タブを開いていなくても、分析時に最新の店舗情報を読む。
  */
 async function ensureStoreOpsProfileForAi(storeKey = STORE_KEY, options = {}) {
@@ -10106,7 +10106,9 @@ async function buildIntegratedAnalysisContext({
     maxAttempts: 1,
     signal
   });
-  const storeOpsBlock = profile ? formatStoreOpsBlockForAi(profile, verifiedData)
+  const storeOpsBlock = MTALK_EMBED
+    ? '\n【店舗営業情報】共有DBの最新値をai-analyzeが認可後に付与します。sales_data.store_contextを参照し、端末の初期値は使いません。\n'
+    : profile ? formatStoreOpsBlockForAi(profile, verifiedData)
     : '\n【店舗営業情報】未取得または未登録。端末の初期値を店舗の事実として扱わず、定休日等を推測しない。\n';
 
   let range = periodRange || resolveKnowledgePeriodRange(verifiedData);
@@ -10223,7 +10225,7 @@ async function buildIntegratedAnalysisContext({
 1. ジャーナル／保存レポート（数値の正本）: ${hasJournal ? '添付あり → 金額・客数・比率はここだけを使う' : '今回は確定集計ブロックなし（画面上のsalesDataまたは未照会）'}
 2. 店舗資料一覧: ${listState}
    今回の根拠資料: ${evidenceState}
-3. 店舗営業情報（定休・ランチ・カレンダー施策・ワインml換算等）: ${hasStoreOps ? '添付あり → 必ず先に読んで曜日分析・カレンダー背景・ワイン提供量(ml)に反映' : '未取得または未登録。定休日・換算値を推測しない'}${isMarugoS ? `
+3. 店舗営業情報（定休・ランチ・カレンダー施策・ワインml換算等）: ${MTALK_EMBED ? 'サーバー側で最新の共有情報を取得 → sales_data.store_contextを優先。取得失敗時は分析停止' : hasStoreOps ? '添付あり → サーバー側で再確認するsales_data.store_contextを優先' : 'サーバー側で登録状態を再確認。定休日・換算値を推測しない'}${isMarugoS ? `
 4. 東京ドーム・フードコート背景（マルゴエス専用）: ${foodcourtState}` : ''}
 統合ルール: 数値は①、②は「今回の根拠資料」だけ、定休／特別営業／カレンダー施策／ワインml換算の解釈は③。「登録資料目次」を期間内施策や因果の根拠にしないこと。③を読まずに日曜・月曜の低売上を弱点としないこと。${isMarugoS ? '④は会場・コート内比較の背景のみ。コート日報の売上とジャーナルが食い違うときは両方を併記し、店舗売上の正本は①。' : ''}`;
 
@@ -11256,7 +11258,8 @@ async function aiAnalyze() {
     const result = aiResponse.body;
     if (!res.ok) throw new Error(result.error || ('AI analysis failed: ' + res.status));
     
-    const replyText = result.reply || result.text || result.message || '結果がありません';
+    const answerText = result.reply || result.text || result.message || '結果がありません';
+    const replyText = result.note ? `${answerText}\n\n---\n_${result.note}_` : answerText;
     assertCurrentAiReportRun(analysisRun);
     renderAiAnalysis(replyText, true, data.title, data.period);
     assertCurrentAiReportRun(analysisRun);
@@ -11278,7 +11281,7 @@ async function aiAnalyze() {
     }
     area.hidden = false;
     area.innerHTML = `<button class="ai-analysis-close" onclick="document.getElementById('aiAnalysisArea').hidden=true">✕</button>
-                      <p style="color:#a33a2b;text-align:center;">エラーが発生しました: ${err.message}</p>`;
+                      <p style="color:#a33a2b;text-align:center;">エラーが発生しました: ${esc(err.message)}</p>`;
   } finally {
     clearInterval(stepInterval);
     if (isCurrentAiReportRun(analysisRun)) {
@@ -19329,7 +19332,7 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
           });
           assertCurrentAiChatRun(chatRun);
         } catch (integrationError) {
-          if (integrationError?.name === 'AbortError' || integrationError?.code === 'AI_CHAT_CANCELLED') throw integrationError;
+          if (integrationError?.name === 'AbortError' || integrationError?.code === 'AI_CHAT_CANCELLED' || integrationError?.code === 'AI_SHARED_DATA_UNAVAILABLE') throw integrationError;
           console.warn('Journal＋フードコート最終統合に失敗:', integrationError);
         }
         const integratedResult = integrationResponse?.body || {};
@@ -19378,6 +19381,7 @@ _上記は未統合の2レポートです。店舗売上・客数・商品数値
         aiChatHistory.push({ role: 'assistant', content: journalReply });
       } else {
         removeAiChatLoading(loadingId);
+        if (journalSettled.status === 'rejected' && journalSettled.reason?.code === 'AI_SHARED_DATA_UNAVAILABLE') throw journalSettled.reason;
         const journalError = journalSettled.status === 'rejected'
           ? String(journalSettled.reason?.message || journalSettled.reason || '不明なエラー')
           : String(journalResult?.error || `HTTP ${journalResponse?.response?.status || 'error'}`);
@@ -19431,6 +19435,13 @@ ${localReply}`;
     }
   } catch(err) {
     if (!isCurrentAiChatRun(chatRun) || err?.name === 'AbortError' || err?.code === 'AI_CHAT_CANCELLED') {
+      return;
+    }
+    if (err?.code === 'AI_SHARED_DATA_UNAVAILABLE') {
+      removeAiChatLoading(loadingId);
+      const reply = `### ⚠️ 共有データを確認できませんでした\n\n${String(err.message || '')}\n\n処理は安全に停止しました。保存データは失われていません。時間をおいて再試行してください。`;
+      appendAiChatMessage('ai', reply, { question: msg, provider: 'shared-data-guard' });
+      aiChatHistory.push({ role: 'assistant', content: reply });
       return;
     }
     console.warn('AI Chat remote error, fallback to local advisor:', err);

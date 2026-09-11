@@ -55,6 +55,11 @@
         body: JSON.stringify(safePayload)
       });
       var body = await response.json().catch(function () { return {}; });
+      if (body.code === 'shared_store_context_unavailable' || body.code === 'unified_sales_unavailable' || body.code === 'shared_ai_input_invalid') {
+        var sharedDataError = new Error(body.error || '共有データを確認できないため、分析を停止しました。');
+        sharedDataError.code = 'AI_SHARED_DATA_UNAVAILABLE';
+        throw sharedDataError;
+      }
       return { response: response, body: body };
     } catch (error) {
       if (timedOut) {
