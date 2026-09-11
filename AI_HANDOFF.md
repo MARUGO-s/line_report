@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-09-11 M-talk予約カードのリンク先
+
+- `public/chat/rooms.js` の `resolveMtalkCardScheduleLink` が旧 `reservation.html` をメッセージの所属ルームの `mtalk_schedule.html` 予約タブへ変換する。描画時の変換なので過去カードも対象。DBやLINE用リンク生成を変更しない。
+- 自アプリのorigin/pathだけを受け、対象月以外のLINEパラメータを破棄する。M-talk予定リンクは明示ルーム/予定タブを維持。閲覧can_view、変更はAPIのcan_manageを維持。
+- 回帰テストは `tests/chat_file_links.test.mjs`、手順は `docs/CHAT-TALK-GUIDE.md`。配備状態は対応PR/Pagesの記録を確認。
+
 ## 2026-09-11 利用状況
 
 - 正本: [USAGE-METRICS.md](./docs/USAGE-METRICS.md)。migration `20260911120000_usage_accuracy.sql`。配信ログ≠LINE利用枠。固定200残量計算へ戻さない。

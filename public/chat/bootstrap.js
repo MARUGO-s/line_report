@@ -164,18 +164,12 @@ $('messages').addEventListener('click', (e) => {
 
   const cardLink = e.target.closest('a.msg-card-action[href]');
   if (cardLink) {
-    try {
-      const url = new URL(cardLink.getAttribute('href'), window.location.href);
-      const path = url.pathname.replace(/\/+$/, '');
-      if (path.endsWith('/mtalk_schedule.html') || path.endsWith('mtalk_schedule.html')) {
-        const id = Number(url.searchParams.get('group_id') || url.searchParams.get('group') || '');
-        if (Number.isSafeInteger(id) && id > 0) {
-          e.preventDefault();
-          openReservationSchedule(id, url.searchParams.get('tab'));
-          return;
-        }
-      }
-    } catch (_err) { /* 通常のリンクとして開く */ }
+    const schedule = resolveMtalkCardScheduleLink(cardLink.getAttribute('href'), currentGroupId);
+    if (schedule) {
+      e.preventDefault();
+      if (schedule.url) openReservationSchedule(schedule.groupId, schedule.tab, schedule.month);
+      return;
+    }
   }
 
   const img = e.target.closest('img.msg-image');
