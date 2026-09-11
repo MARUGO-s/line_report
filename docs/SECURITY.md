@@ -1,5 +1,7 @@
 # セキュリティ概要（line_report）
 
+2026-09-11 利用状況追補: `get_usage_monthly(text)`/`get_storage_usage_stats()`はservice_role限定・固定search_pathの読取専用RPC。`/usage/line-quota`を限定セッションのallowlistへ追加しない。既存LINEトークンはサーバーから公式HTTPSへだけ送付し、応答/ログへ出さない。[仕様](./USAGE-METRICS.md)。
+
 2026-09-11追補: 統一売上の `write_daily_sales_source` はservice-role限定・固定search_path・店舗解決/ロック付き。新しい `/pos-journals/sales-summary` も管理認証と店舗スコープで保護する。定期売上報告URLは店舗限定ログインリンクを使用し、管理者固定トークンを含めない。利用者承認済みの既存OpenAI/Anthropic/Groq連携は認証済み店舗・指定期間の金融集計に限定し、新規の個人情報・他店舗・別提供元は追加しない。DB取得失敗時はAI呼出し前に停止する。[仕様・AI送信範囲](./UNIFIED-SALES-SOURCE-POLICY.md)。
 
 LINE 売上／レシート／予約管理システム（約22店舗）の**セキュリティ構造・監査結果・是正内容・運用規約**をまとめた中核ドキュメント。

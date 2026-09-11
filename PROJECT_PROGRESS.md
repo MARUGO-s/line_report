@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-09-11 - 利用状況の集計・UI監査
+
+- 旧8表の容量集計をpublic全実テーブル/実体ビューへ変更。索引・TOAST込み、物理パーティションの重複なし。Storage原本/DB全体/契約上限と区別する。
+- ログ件数をLINE利用枠と混同する200件固定の残数表示を廃止。SQL集計でAPI行上限を回避し、M-talk専用/イベント0件を除外。成功未確認予約行・未割当・失敗を可視化。
+- 公式利用量APIの手動照会、Bot設定ごとの上限/概算残数、更新日時、全容量一覧、日本語ラベル、割合バーを追加。元データ・送信処理・期限は変更しない。
+- 仕様と検証範囲: [USAGE-METRICS.md](./docs/USAGE-METRICS.md)。本番反映状態は対応PR/Actionsを確認する。
+
 ### 2026-09-11 - 統一売上と差異通知
 
 - 反映状態: 利用者が公開GitHub・本番配備・既存AI連携を明示承認。[PR #230](https://github.com/MARUGO-s/line_report/pull/230)を統合し、[Edge配備](https://github.com/MARUGO-s/line_report/actions/runs/34547201972)成功。migration後の既存1,014行は金額・更新日時のハッシュ一致、出所欠落0、書込RPCはservice-role限定を確認。追補migration `20260911110000` は予測用ビューの部分欠損税/税抜も共通集計と揃える。反映結果は当該PRとmainのActions記録を参照。

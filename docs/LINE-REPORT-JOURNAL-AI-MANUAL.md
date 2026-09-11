@@ -594,7 +594,9 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 **要点:** AI利用コストと、管理者向けシステム構造・利用量画面を説明する。
 
 - AI使用量ページでは、記録された実測トークンと概算費用を用途・期間等で確認し、フードコート分析の使用量も区分して表示します。
-- 管理画面の利用状況ではDB容量、LINE Pushの種類別・店舗別・ルーム別送信量等を確認できます。
+- 管理画面の利用状況ではpublic全実テーブル・実体ビューの索引込み容量、DB全体容量、当月JSTの種類別・店舗別・ルーム別配信記録を確認できます。Storage画像原本の容量は別です。
+- PUSH配信記録はLINE利用枠の消費数ではありません。M-talk専用記録は除外し、送信前に予約した成功未確認の記録は明示します。保存済みログのため未記録・削除・分割送信・重複の影響を受けます。
+- 「LINE公式利用量を取得」でBot設定ごとの当月概算使用量・上限・残量を表示します（最大60秒キャッシュ）。同一トークンはまとめ、全店舗合算から無料枠200を差し引く計算はしません。グループ配信は人数分、返信は枠外。確定値はLINE Official Account Managerで確認してください。取得失敗は0と区別します。
 - システムマップはGraphifyのコード・SQL関係図と、実行環境・業務AI・知識循環の構成を表示します。
 - AI使用量とシステムマップは本部の全体管理者向けです。店舗・ルーム限定セッションでは利用できません。
 - 公開システムマップにはコード・SQL構造だけを載せ、顧客情報、投稿本文、レシート、添付等の実データは含めません。
@@ -763,11 +765,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 42件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 102件
+- 共有TypeScriptモジュール: 103件
 - 補助・運用・レガシーコード: 40件
-- admin-api静的ルート: 144件
-- SQL migrations: 302件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 98件
+- admin-api静的ルート: 145件
+- SQL migrations: 303件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 99件
 
 ### 公開画面・ブラウザコード
 
@@ -945,6 +947,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/store_receipt_phones.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/store_receipt_query.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/tokyo_dome_schedule.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/usage_metrics.ts` | ADM-02 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/weather_daily.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/web_push.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 
@@ -1139,6 +1142,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/settings/rooms/` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
 | `/state` | ADM-01 / ADM-03 / OPS-01 / DEV-02 |
 | `/usage/ai-cost` | ADM-02 / DEV-02 |
+| `/usage/line-quota` | ADM-02 / DEV-02 |
 | `/usage/push-monthly` | ADM-02 / DEV-02 |
 | `/weather/daily` | FCT-01 / FCT-06 / DEV-02 |
 

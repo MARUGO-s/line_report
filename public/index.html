@@ -5112,6 +5112,22 @@
   /* ナビリンク */
   body[data-theme='dark'] .app-v2-nav-link { background: var(--accent-soft) !important; border-color: transparent !important; color: var(--accent) !important; }
 </style>
+<style>
+  #appPanel-global .usage-quota-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap:12px; }
+  #appPanel-global .usage-quota-item { padding:14px; border:1px solid var(--border,#526176); border-radius:12px; overflow-wrap:anywhere; }
+  #appPanel-global .usage-quota-item[data-warning="true"] { border-color:#dd9f39; }
+  #appPanel-global .usage-quota-item p { margin:6px 0; }
+  #appPanel-global .usage-all-tables { max-height:360px; overflow:auto; }
+  #appPanel-global .usage-table-row { display:flex; justify-content:space-between; gap:18px; padding:9px; border-bottom:1px solid var(--border,#526176); }
+  #appPanel-global .usage-table-row span:first-child, #appPanel-global .storage-rank-name { overflow-wrap:anywhere; min-width:0; }
+  #appPanel-global .usage-table-row span:last-child { white-space:nowrap; }
+  #appPanel-global button, #appPanel-global summary { min-height:44px; }
+  #appPanel-global button { padding:10px 16px; background:#2163d5; color:white; border:0; border-radius:10px; font:inherit; font-weight:600; cursor:pointer; }
+  #appPanel-global button:disabled { opacity:0.6; cursor:wait; }
+  #appPanel-global button:focus-visible, #appPanel-global summary:focus-visible { outline:3px solid #d69316; outline-offset:3px; }
+  #appPanel-global [role="status"] { overflow-wrap:anywhere; }
+  #appPanel-global .storage-rank-bar { overflow:hidden; }
+</style>
 </head>
 <body>
 
@@ -5251,34 +5267,43 @@
       <div class="app">
         <div class="v2-panel-head">
           <h1>利用状況</h1>
-          <p>データベース容量と LINE push 送信量の概況です。</p>
+          <p>DB容量・配信記録・LINE公式の利用量を、集計元ごとに確認できます。</p>
+          <button type="button" id="usageRefresh">利用状況を更新</button>
+          <p id="usageUpdatedAt" role="status" aria-live="polite">取得待ち</p>
         </div>
 
         <!-- KPI cards -->
         <div class="v2-kpi-grid">
           <div class="v2-kpi-card" data-accent="blue">
-            <div class="v2-kpi-label">DB使用容量（対象）</div>
+            <div class="v2-kpi-label">業務テーブル容量（public）</div>
             <div class="v2-kpi-value" id="kpiDbManaged">-</div>
             <div class="v2-kpi-sub" id="kpiDbManagedSub">対象テーブル合計</div>
           </div>
           <div class="v2-kpi-card" data-accent="neutral">
             <div class="v2-kpi-label">DB全体容量</div>
             <div class="v2-kpi-value" id="kpiDbTotal">-</div>
-            <div class="v2-kpi-sub">データベース全体</div>
+            <div class="v2-kpi-sub">全スキーマ・索引等を含む。画像原本のStorage容量は別。</div>
           </div>
           <div class="v2-kpi-card" data-accent="green">
-            <div class="v2-kpi-label">LINE PUSH（当月・枠消費）</div>
+            <div class="v2-kpi-label">PUSH配信記録（当月）</div>
             <div class="v2-kpi-value" id="kpiPushTotal">-<span class="unit">件</span></div>
             <div class="v2-kpi-sub" id="kpiPushSub">定期・予約・レシート等の送信合計</div>
           </div>
           <div class="v2-kpi-card" data-accent="amber">
-            <div class="v2-kpi-label">返信（当月・枠を消費しない）</div>
+            <div class="v2-kpi-label">返信成功記録（当月）</div>
             <div class="v2-kpi-value" id="kpiPushWebhook">-<span class="unit">件</span></div>
             <div class="v2-kpi-sub">メッセージ受信による自動返信</div>
           </div>
         </div>
 
         <main class="grid">
+          <section class="card global">
+            <h2>LINE公式の当月利用量</h2>
+            <p class="meta">配信記録の件数と利用枠は別です。グループ配信は受信人数分を消費し、返信は枠外です。公式APIの値も概算のため、確定値はLINE Official Account Managerで確認してください。</p>
+            <button type="button" id="usageQuotaRefresh">LINE公式利用量を取得</button>
+            <p id="usageQuotaStatus" role="status" aria-live="polite">未取得。店舗ごとの設定済みBotを照会します。</p>
+            <div id="usageQuotaList" class="usage-quota-list"></div>
+          </section>
           <section class="card global">
             <h2>テーブル容量の内訳<span class="v2-card-badge" id="storageUsageBadge">DB</span></h2>
             <div class="storage-chart">
@@ -5292,11 +5317,13 @@
             </div>
             <!-- 既存JSの出力先（KPIと重複するため非表示。JSの textContent 代入は維持） -->
             <div id="storageUsageSummary" class="meta usage-summary" hidden></div>
-            <div id="storageUsageDetails" class="meta usage-details" hidden></div>
+            <div id="storageUsageDetails" class="meta usage-details" role="status"></div>
+            <details><summary>全テーブルの容量を見る</summary><div id="usageAllTables" class="usage-all-tables"></div></details>
           </section>
 
           <section class="card global">
-            <h2>LINE push 内訳（種類別・上位）<span class="v2-card-badge" id="pushUsageBadge">PUSH</span></h2>
+            <h2>PUSH配信記録の内訳（種類別）<span class="v2-card-badge" id="pushUsageBadge">LOG</span></h2>
+            <p id="usageLogNotice" class="meta" role="status">保存済みログの集計です。未記録・削除済み・分割送信や重複記録により実際の配信回数とは一致しない場合があります。</p>
             <div id="pushBreakdownList" class="pushlist"><div class="meta">取得待ち…</div></div>
             <div id="pushUsageSummary" class="meta usage-summary" hidden></div>
             <div id="pushUsageDetails" class="meta usage-details" hidden></div>
@@ -5306,7 +5333,7 @@
             <section class="card global">
               <h2>店舗別 送信量（当月）<span class="v2-card-badge">STORE</span></h2>
               <div class="legend-note">
-                <span class="lk push"><i></i>PUSH（送信枠を消費）</span>
+                <span class="lk push"><i></i>PUSH配信記録（利用枠ではありません）</span>
                 <span class="lk reply"><i></i>返信（消費しない）</span>
               </div>
               <div id="pushByStoreList" class="utable"><div class="meta">取得待ち…</div></div>
@@ -6478,6 +6505,10 @@
       } else {
         setToken('');
       }
+      renderStorageUsage(null, null, null);
+      renderPushUsage(null);
+      document.getElementById('usageQuotaList').replaceChildren();
+      document.getElementById('usageQuotaStatus').textContent = '未取得。ログインして取得してください。';
     }
 
     function normalizeTheme(value) {
@@ -9203,6 +9234,56 @@
       return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
+    function usageTableLabel(name) {
+      const labels = { line_webhook_delivery_logs:'LINE送受信ログ', line_message_media:'LINEメディア情報',
+        line_search_documents:'会話検索データ', line_messages:'LINEメッセージ', summary_delivery_logs:'定期要約ログ',
+        room_summary_settings:'ルーム設定', calendar_pending_confirmations:'予定の確認待ち',
+        pos_journal_entries:'電子ジャーナル明細', chat_messages:'M-talkメッセージ', others:'その他（合算）' };
+      return labels[name] || name;
+    }
+
+    async function loadUsageQuota() {
+      const requestToken = getToken();
+      const btn = document.getElementById('usageQuotaRefresh');
+      const status = document.getElementById('usageQuotaStatus');
+      const list = document.getElementById('usageQuotaList');
+      btn.disabled = true;
+      status.textContent = 'LINE公式APIへ照会中…';
+      list.replaceChildren();
+      try {
+        const data = await api('/usage/line-quota');
+        if (getToken() !== requestToken) return; // Do not restore data after logout/account switch.
+        if (!Array.isArray(data.channels)) throw new Error('invalid_response');
+        const ready = data.channels.filter(function(r) { return r.status === 'ok'; }).length;
+        status.textContent = data.month_jst + ' JST ／ 取得日時 ' + formatDate(data.generated_at) + ' ／ ' + ready + '/' + data.channels.length + '設定グループ取得（最大60秒キャッシュ）';
+        data.channels.forEach(function(row) {
+          const card = document.createElement('div'); card.className = 'usage-quota-item';
+          const heading = document.createElement('strong'); heading.textContent = (row.labels || []).join(' / '); card.append(heading);
+          const body = document.createElement('p');
+          if (row.status !== 'ok') {
+            body.textContent = row.status === 'not_configured' ? 'Bot未設定（利用量不明）' : '取得失敗（利用量不明）';
+            card.dataset.warning = 'true';
+          } else {
+            const used = Number(row.used), limit = row.limit;
+            body.textContent = '使用 ' + used.toLocaleString('ja-JP') + '通 ／ ' + (limit === null ? '上限設定なし' : '上限 ' + Number(limit).toLocaleString('ja-JP') + '通・残り約 ' + Number(row.remaining).toLocaleString('ja-JP') + '通');
+            if (limit !== null && (limit === 0 || used >= limit * 0.8)) {
+              card.dataset.warning = 'true';
+              body.textContent += used >= limit ? '【上限到達】' : '【80%以上使用】';
+            }
+          }
+          card.append(body); list.append(card);
+        });
+      } catch (_) { if (getToken() === requestToken) status.textContent = '公式利用量の取得に失敗しました。0件ではありません。再度取得してください。'; }
+      finally { btn.disabled = false; }
+    }
+    document.getElementById('usageQuotaRefresh').addEventListener('click', loadUsageQuota);
+    document.getElementById('usageRefresh').addEventListener('click', async function() {
+      this.disabled = true;
+      try { await safeLoadState(); }
+      catch (_) { document.getElementById('usageUpdatedAt').textContent = '更新失敗：前回表示は最新ではありません。再読込してください。'; }
+      finally { this.disabled = false; }
+    });
+
     function renderStorageUsageChart(tableRows, centerValueText) {
       const rows = Array.isArray(tableRows) ? tableRows : [];
       dom.storageUsagePieCenterValue.textContent = centerValueText || '-';
@@ -9239,7 +9320,6 @@
         });
       }
       const total = topRows.reduce(function(sum, row) { return sum + row.size_bytes; }, 0);
-      const maxBytes = topRows[0].size_bytes || total || 1;
       let current = 0;
       const segments = [];
       const legends = [];
@@ -9251,11 +9331,11 @@
         segments.push(color + ' ' + current.toFixed(2) + 'deg ' + end.toFixed(2) + 'deg');
         const label = row.table_name === 'others' ? 'その他' : row.table_name;
         const percentage = (ratio * 100).toFixed(1);
-        const barW = Math.max(2, Math.round(row.size_bytes / maxBytes * 100));
+        const barW = ratio * 100;
         legends.push(
           '<div class="storage-rank">' +
           '<span class="storage-rank-sw" style="background:' + color + ';"></span>' +
-          '<span class="storage-rank-name mono">' + escapeHtml(label) + '</span>' +
+          '<span class="storage-rank-name" title="' + escapeHtml(label) + '">' + escapeHtml(usageTableLabel(label)) + '</span>' +
           '<span class="storage-rank-size">' + escapeHtml(row.size_pretty) + '</span>' +
           '<span class="storage-rank-pct">' + percentage + '%</span>' +
           '<div class="storage-rank-bar"><i style="width:' + barW + '%;background:' + color + ';"></i></div>' +
@@ -10629,6 +10709,7 @@
           lastStateLoadedAt = Date.now();
         } catch (e) {
           if (opts.silent && hydrateFromSiteCache()) {
+            document.getElementById('usageUpdatedAt').textContent = '更新失敗・キャッシュ表示：表示中の日時以降の変化は未確認です。';
             if (dom.lastRefresh) {
               dom.lastRefresh.textContent = dom.lastRefresh.textContent.replace(/（キャッシュ表示・更新中…）?$/, '') + '（更新失敗・キャッシュ表示）';
             }
@@ -10636,6 +10717,7 @@
             return;
           }
           if (!opts.silent) throw e;
+          document.getElementById('usageUpdatedAt').textContent = '更新失敗：表示中の値は最新ではありません。';
           console.error(e);
         } finally {
           isStateLoading = false;
@@ -10686,19 +10768,7 @@
       const webhookLogs = Array.isArray(st.webhook_delivery_logs) ? st.webhook_delivery_logs : [];
       const usage = st.push_usage_monthly && typeof st.push_usage_monthly === 'object' ? st.push_usage_monthly : null;
       if (dom.webhookQuotaSummary) {
-        if (!usage) {
-          dom.webhookQuotaSummary.textContent = 'Webhook無料枠（200）残り: 取得待ち';
-        } else {
-          const month = String(usage.month_jst || '').trim() || '-';
-          const limit = Number(usage.free_quota_limit || 200);
-          // 無料枠を消費するのは PUSH（返信は消費しない）。使用=PUSH数に揃え、残り(200-PUSH)と整合させる。
-          const used = Number(usage.total_push_rows || 0);
-          const remaining = Math.max(0, Number(usage.free_quota_remaining != null ? usage.free_quota_remaining : (limit - used)));
-          const replies = Number(usage.webhook_reply_rows || 0);
-          dom.webhookQuotaSummary.textContent =
-            'LINE PUSH無料枠（' + month + ' JST / 上限' + limit + '） 残り: '
-            + remaining + '回（PUSH使用: ' + used + '回 ／ 返信: ' + replies + '回＝枠外）';
-        }
+        dom.webhookQuotaSummary.textContent = '送信ログ件数から無料枠の残数は計算できません。利用状況タブの「LINE公式利用量」でBotごとに確認してください。';
       }
       if (dom.deliveryLogTable) {
         dom.deliveryLogTable.className = 'log-table log-table--webhook';
@@ -10765,6 +10835,9 @@
     }
 
     function renderStorageUsage(storageUsage, storageUsageError, generatedAt) {
+      document.getElementById('usageUpdatedAt').textContent = generatedAt ? 'DB・配信記録の取得日時：' + formatDate(generatedAt) + '（JST）' : '取得待ち';
+      document.getElementById('usageAllTables').replaceChildren();
+      setV2KpiSub('kpiDbManagedSub', '集計範囲を確認中');
       if (storageUsageError) {
         dom.storageUsageSummary.textContent = 'DB使用容量: 取得失敗';
         dom.storageUsageDetails.textContent = storageUsageError;
@@ -10791,36 +10864,49 @@
       setV2Kpi('kpiDbTotal', dbPretty);
 
       const tableRows = Array.isArray(storageUsage.managed_tables) ? storageUsage.managed_tables : [];
-      setV2KpiSub('kpiDbManagedSub', '対象テーブル ' + tableRows.length + ' 件の合計');
+      const isFullScope = storageUsage.scope === 'public_relations';
+      setV2KpiSub('kpiDbManagedSub', (isFullScope ? 'publicの全実テーブル・実体ビュー ' : '旧集計・一部テーブル ') + tableRows.length + ' 件（索引込み）');
+      const allTables = document.getElementById('usageAllTables');
+      tableRows.forEach(function(row) {
+        const line = document.createElement('div'); line.className = 'usage-table-row';
+        const label = document.createElement('span'); label.textContent = usageTableLabel(row.table_name) + '（' + row.table_name + '）';
+        const size = document.createElement('span'); size.textContent = formatBytes(row.size_bytes);
+        line.append(label,size); allTables.append(line);
+      });
       renderStorageUsageChart(tableRows, managedPretty);
       if (tableRows.length === 0) {
         dom.storageUsageDetails.textContent = '';
         return;
       }
 
-      dom.storageUsageDetails.textContent = '';
+      dom.storageUsageDetails.textContent = (isFullScope ? 'public全体を集計（同じDBを使う他機能も含む）。' : '旧APIの一部集計です。更新を確認してください。') + '割合・バーは上記テーブル合計が分母です。DB全体との差には認証・システム領域等が含まれます。Storage原本や契約上のディスク上限とは別です。';
     }
 
     function renderPushUsage(pushUsageMonthly) {
       const usage = pushUsageMonthly && typeof pushUsageMonthly === 'object' ? pushUsageMonthly : null;
-      if (!usage) {
+      if (!usage || usage.status === 'unavailable') {
+        const stateLabel = usage ? '取得失敗' : '取得待ち';
         dom.pushUsageSummary.textContent = 'LINE push概算（当月）: 取得待ち';
         dom.pushUsageDetails.textContent = '';
-        setV2Kpi('kpiPushTotal', '取得待ち');
-        setV2Kpi('kpiPushWebhook', '取得待ち');
+        setV2Kpi('kpiPushTotal', stateLabel);
+        setV2Kpi('kpiPushWebhook', stateLabel);
+        setV2KpiSub('kpiPushSub', stateLabel);
+        document.getElementById('usageLogNotice').textContent = stateLabel + '：0件ではありません。更新してください。';
+        ['pushBreakdownList','pushByStoreList','pushByRoomList'].forEach(function(id) { document.getElementById(id).textContent = stateLabel; });
         return;
       }
       const month = String(usage.month_jst || '').trim() || '-';
-      const total = Number(usage.total_push_rows || 0);   // LINE PUSH（枠を消費）
-      const replyRows = Number(usage.webhook_push_rows || 0); // 返信（枠を消費しない）
+      const total = Number(usage.total_push_rows || 0);
+      const replyRows = Number(usage.webhook_reply_rows || 0);
       dom.pushUsageSummary.textContent =
-        'LINE push（' + month + ' JST）: ' + total + '件（枠消費）／ 返信: ' + replyRows + '件';
+        'PUSH配信記録（' + month + ' JST）: ' + total + '件／ 返信成功記録: ' + replyRows + '件';
       setV2Kpi('kpiPushTotal', total.toLocaleString('ja-JP'), '<span class="unit">件</span>');
       setV2Kpi('kpiPushWebhook', replyRows.toLocaleString('ja-JP'), '<span class="unit">件</span>');
-      setV2KpiSub('kpiPushSub', month + ' JST ／ 定期・予約・レシート等の送信合計');
+      setV2KpiSub('kpiPushSub', month + ' JST ／ ログ件数。利用枠の消費数ではありません');
+      document.getElementById('usageLogNotice').textContent = '保存済みログの集計（M-talk専用・イベント0件の配信予約は除外）。うち送信成功未確認の予約記録 ' + Number(usage.unverified_push_rows || 0).toLocaleString('ja-JP') + '件。店舗未割当 ' + Number(usage.unassigned_rows || 0).toLocaleString('ja-JP') + '件。未記録・削除済み・分割送信や重複記録により実際の配信回数とは一致しない場合があります。';
 
       // 種類別（上位）= type badge + monoキー + 比率バー + 件数
-      const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context.slice(0, 8) : [];
+      const topItems = Array.isArray(usage.by_source_context) ? usage.by_source_context : [];
       const breakdownEl = document.getElementById('pushBreakdownList');
       if (breakdownEl) {
         const maxN = topItems.reduce(function(m, r) { return Math.max(m, Number(r && r.count || 0)); }, 0) || 1;
@@ -10889,7 +10975,7 @@
         const push = Number(r.push || 0);
         const reply = Number(r.reply || 0);
         const pv = isPush ? push : reply;
-        const w = pv === 0 ? 100 : Math.max(2, Math.round(pv / max * 100));
+        const w = pv === 0 ? 0 : Math.max(2, Math.round(pv / max * 100));
         const name = String(r.name || '（不明）');
         const mp = isPush
           ? '<span class="mp' + (push === 0 ? ' dim' : '') + '">' + push.toLocaleString('ja-JP') + '<small>PUSH</small></span>'
