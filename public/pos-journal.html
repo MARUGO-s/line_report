@@ -580,6 +580,7 @@
           <h1 class="pj-h1">電子ジャーナル（POS取込）</h1>
           <p class="pj-sub" id="pjSubtitle"><strong>Bistro CAVACAVA</strong>（店舗コード1015・1020）のレジ電子ジャーナル（.lzh）を取り込み、原本を非公開で保管し、日計精算レポート・会計明細・天候を集計して表示します。</p>
           <div class="pj-src" id="srcInfo"></div>
+          <div id="unifiedSalesNotice" aria-live="polite"></div>
 
           <section class="card pj-auth" id="authCard" hidden>
             <label for="tokenInput">管理トークン（本部）／またはLINEの最新リンクから開いてください</label>
@@ -778,6 +779,7 @@
   <div id="pagePrintReport" class="print-report" aria-hidden="true"></div>
 
   <script src="pages-config.js?v=20260610"></script>
+  <script src="sales-source-notice.js?v=20260911"></script>
   <script src="auth-session.js?v=20260624"></script>
   <script src="access-log.js?v=20260817"></script>
   <script src="menu-logout.js?v=20260702"></script>
@@ -1346,14 +1348,14 @@
       var month = (el('monthSel') && el('monthSel').value) || m.month || '';
       var chargeGuest = monthChargeGuest(days, data.item_ranking, t);
       var chargePct = chargeGuest.guests ? Math.round(chargeGuest.chargeQty / chargeGuest.guests * 100) : null;
-      var src = el('srcInfo') ? el('srcInfo').textContent : '';
+      var src = (el('unifiedSalesNotice') ? el('unifiedSalesNotice').innerText + '\n' : '') + (el('srcInfo') ? el('srcInfo').textContent : '');
       var chartSrc = '';
       try {
         var canvas = el('trendChart');
         if (canvas && canvas.toDataURL && openDays.length) chartSrc = canvas.toDataURL('image/png');
       } catch (_) {}
       var kpis = [
-        {l:'総売上', v:yen(t.gross_sales), s:'純売上 '+yen(t.net_sales)},
+        {l:'原本総売上', v:yen(t.gross_sales), s:'純売上 '+yen(t.net_sales)},
         {l:'消費税', v:yen(t.tax), s:'内税'},
         {l:'客数', v:num(t.guests)+' 名', s:(t.groups||0)+' 組'},
         {l:'チャージ取得', v:chargePct!=null?chargePct+'%':'—', s:num(chargeGuest.chargeQty)+' / '+num(chargeGuest.guests)+'名'},
@@ -1553,7 +1555,7 @@
       var chargeGuest=monthChargeGuest(days,data.item_ranking,t);
       var chargePct=chargeGuest.guests?Math.round(chargeGuest.chargeQty/chargeGuest.guests*100):null;
       var kpis = [
-        { l:'総売上',v:yen(t.gross_sales),s:'純売上 '+yen(t.net_sales),accent:true },
+        { l:'原本総売上',v:yen(t.gross_sales),s:'純売上 '+yen(t.net_sales),accent:true },
         { l:'消費税',v:yen(t.tax),s:'内税' }, { l:'客数',v:num(t.guests)+' 名',s:(t.groups||0)+' 組' },
         { l:'チャージ取得',v:chargePct!=null?chargePct+'%':'—',s:'チャージ '+num(chargeGuest.chargeQty)+'名 / 客数 '+num(chargeGuest.guests)+'名' },
         { l:'客単価',v:yen(t.avg_spend),s:'総売上 ÷ 客数' }, { l:'営業日数',v:openDays.length+' 日',s:'記録 '+days.length+' 日' },
@@ -1749,17 +1751,22 @@
     function cssVar(name){return getComputedStyle(document.body).getPropertyValue(name).trim()||'#3f7bea';}
     function drawTrend(openDays){if(!window.Chart)return;var ctx=el('trendChart').getContext('2d');if(trendChart)trendChart.destroy();var accent=cssVar('--accent'),ok=cssVar('--ok'),grid=cssVar('--border'),text=cssVar('--text-2');trendChart=new Chart(ctx,{data:{labels:openDays.map(function(d){return Number(d.business_date.slice(8,10))+'日';}),datasets:[{type:'bar',label:'総売上',data:openDays.map(function(d){return d.gross_sales||0;}),backgroundColor:accent,borderRadius:4,yAxisID:'y',order:2},{type:'line',label:'客数',data:openDays.map(function(d){return d.guests||0;}),borderColor:ok,backgroundColor:ok,tension:.3,yAxisID:'y1',order:1,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},layout:{padding:{top:0,right:2,bottom:0,left:0}},plugins:{legend:{labels:{color:text,boxWidth:10,padding:8}},tooltip:{callbacks:{label:function(c){return c.dataset.label==='総売上'?'総売上: ¥'+c.parsed.y.toLocaleString('ja-JP'):'客数: '+c.parsed.y+'名';}}}},scales:{x:{ticks:{color:text,maxRotation:0,autoSkip:true},grid:{color:grid}},y:{position:'left',beginAtZero:true,grace:'0%',ticks:{color:text,callback:function(v){return '¥'+(v/1000)+'k';}},grid:{color:grid}},y1:{position:'right',beginAtZero:true,grace:'0%',ticks:{color:text,precision:0},grid:{drawOnChartArea:false}}}}});if(trendChart){requestAnimationFrame(function(){if(trendChart)trendChart.resize();});}}
 
+    var unifiedSalesLoadSequence=0;
     async function loadCurrent() {
+      var loadSequence=++unifiedSalesLoadSequence;
+      el('unifiedSalesNotice').textContent='統一売上と差異を確認中…';
       var month=el('monthSel').value||savedMonth();
       try { localStorage.setItem('pos_journal_month',month); } catch (_) {}
-      if (!getToken()) { setAuth(false); renderFiles([]); renderSharedReference(null); await loadLegacy(month); return; }
+      if (!getToken()) { el('unifiedSalesNotice').textContent='統一売上は未確認です。ログインしてください。'; setAuth(false); renderFiles([]); renderSharedReference(null); await loadLegacy(month); return; }
       setAuth(true);
       try {
         var state=await apiFetch('/pos-journals?store_key='+encodeURIComponent(STORE_KEY)+'&month='+encodeURIComponent(month),{method:'GET'});
+        if(loadSequence!==unifiedSalesLoadSequence)return;
         renderFiles(state.files||[]);
         renderSharedReference(state);
         var sharedError=state.shared_reference&&state.shared_reference.error;
         var sharedDays=state.summary&&Array.isArray(state.summary.days)?state.summary.days.length:0;
+        window.LINE_REPORT_SALES.render(el('unifiedSalesNotice'),state.unified_sales||{series:[]});
         if ((state.files||[]).length || sharedDays) render(state.summary||{});
         else if (sharedError) {
           render({meta:{month:month,file_count:0,day_count:0,storage_mode:'empty'},totals:{},days:[],item_ranking:[]});
@@ -1767,6 +1774,8 @@
         } else await loadLegacy(month,true);
         await loadAnalysisHistory();
       } catch(error) {
+        if(loadSequence!==unifiedSalesLoadSequence)return;
+        el('unifiedSalesNotice').textContent='統一売上を確認できませんでした。以下は原本/保存時点の値であり、現在の統一値とは区別してください。';
         if (/認証|ログイン|トークン|Unauthorized|Forbidden/i.test(String(error.message||''))) {
           renderFiles([]); renderSharedReference(null); await loadLegacy(month,true); return;
         }

@@ -18,7 +18,7 @@ Deno.test("monthly analytics replaces overlapping journal day, including tax, an
     assert.ok(table in rows, `unexpected table: ${table}`);
     const filters: ((r: Record<string, unknown>) => boolean)[] = [];
     const q = {
-      select(_s: string) { return q; }, order() { return q; }, limit() { return q; },
+      select(_s: string) { return q; }, order() { return q; }, limit() { return q; }, range() { return q; },
       eq(k: string, v: unknown) { filters.push(r => r[k] === v); return q; },
       in(k: string, v: unknown[]) { filters.push(r => v.includes(r[k])); return q; },
       gte(k: string, v: string) { filters.push(r => String(r[k]) >= v); return q; },

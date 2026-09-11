@@ -1,3 +1,4 @@
+import { fetchUnifiedDailySales, salesReconciliationNotice, type UnifiedSalesDay } from './sales_reconciliation.ts'
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
 import {
@@ -62,9 +63,12 @@ export type ReceiptReplyContext = {
   yoyBusinessDaysDiff: number | null
   lineMessageId: string
   targetMonth: string
+  salesSourceLabel?: string
+  salesReconciliationNotice?: string | null
 }
 
 type MonthAgg = {
+  days?: UnifiedSalesDay[]
   gross: number
   net: number
   tax: number
@@ -181,7 +185,7 @@ function mergePriorAggWithManualMonth(
   // 前年同期間に実レシートデータ（Excel一括取込で登録した合成レシートを含む）があれば、
   // それを最優先で前年値に使う。手入力の月次合計の日割りは、前年にレシートが1円も無い場合の
   // フォールバックに限定する（レシートがある時はレシートから前年比を計算する）。
-  if ((priorAgg.gross ?? 0) > 0) return priorAgg
+  if (priorAgg.byDate.size > 0) return priorAgg
   const ratio = computeComparableMonthProgressRatio(priorMonth, priorEndDate)
   return {
     gross: prorateManualWholeMonthValue(manualMonth.gross_sales_yen, ratio) ?? priorAgg.gross,
@@ -244,7 +248,7 @@ async function fetchBudgetForStoreMonth(
   }
 }
 
-async function buildReceiptAnalyticsDashboardUrlForLine(
+export async function buildReceiptAnalyticsDashboardUrlForLine(
   supabase: SupabaseClient,
   storePartitionKey: string,
   targetMonth: string,
@@ -265,71 +269,16 @@ async function buildReceiptAnalyticsDashboardUrlForLine(
   }
 }
 
-async function loadMonthAggUpToDate(
-  supabase: SupabaseClient,
-  receiptTable: string,
-  month: string,
-  endDateIso: string,
+export async function loadMonthAggUpToDate(
+  supabase: SupabaseClient, storeKey: string, month: string, endDateIso: string,
 ): Promise<MonthAgg> {
-  const empty: MonthAgg = { gross: 0, net: 0, tax: 0, party: 0, guest: 0, businessDays: 0, byDate: new Map() }
-  const startDateStr = `${month}-01`
-  const endParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(endDateIso)
-  if (!endParts) return empty
-  const y = Number(endParts[1])
-  const mo = Number(endParts[2])
-  const d = Number(endParts[3])
-  const next = new Date(Date.UTC(y, mo - 1, d + 1))
-  const endDateStr = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`
-
-  const { data, error } = await supabase
-    .from(receiptTable)
-    .select('receipt_date, net_sales_yen, tax_amount_yen, gross_sales_yen, party_count, guest_count')
-    .gte('receipt_date', startDateStr)
-    .lt('receipt_date', endDateStr)
-    .limit(20000)
-
-  if (error || !Array.isArray(data)) return empty
-
-  const byDate = new Map<string, { gross: number; net: number; tax: number; party: number; guest: number }>()
-  let gross = 0
-  let net = 0
-  let tax = 0
-  let party = 0
-  let guest = 0
-
-  for (const row of data) {
-    const dateKey = String((row as { receipt_date?: unknown }).receipt_date ?? '').trim().slice(0, 10)
-    if (!dateKey.startsWith(month)) continue
-    const g = Number((row as { gross_sales_yen?: unknown }).gross_sales_yen)
-    const gVal = Number.isFinite(g) ? g : 0
-    const n = Number((row as { net_sales_yen?: unknown }).net_sales_yen)
-    const nVal = Number.isFinite(n) ? n : 0
-    const t = Number((row as { tax_amount_yen?: unknown }).tax_amount_yen)
-    const tVal = Number.isFinite(t) ? t : 0
-    const pVal = sanitizeReceiptCountFromDb((row as { party_count?: unknown }).party_count)
-    const guVal = sanitizeReceiptCountFromDb((row as { guest_count?: unknown }).guest_count, 99_999)
-    gross += gVal
-    net += nVal
-    tax += tVal
-    party += pVal
-    guest += guVal
-    const prev = byDate.get(dateKey) ?? { gross: 0, net: 0, tax: 0, party: 0, guest: 0 }
-    prev.gross += gVal
-    prev.net += nVal
-    prev.tax += tVal
-    prev.party += pVal
-    prev.guest += guVal
-    byDate.set(dateKey, prev)
-  }
-
+  const days = await fetchUnifiedDailySales(supabase, storeKey, month+'-01', endDateIso)
+  const byDate = new Map(days.map(d => [d.date, {gross:d.gross_sales_yen,net:d.net_sales_yen,
+    tax:d.tax_amount_yen,party:d.party_count,guest:d.guest_count}]))
   return {
-    gross,
-    net,
-    tax,
-    party,
-    guest,
-    businessDays: byDate.size,
-    byDate,
+    days, byDate, gross: days.reduce((n,d)=>n+d.gross_sales_yen,0), net: days.reduce((n,d)=>n+d.net_sales_yen,0),
+    tax: days.reduce((n,d)=>n+d.tax_amount_yen,0), party: days.reduce((n,d)=>n+d.party_count,0),
+    guest: days.reduce((n,d)=>n+d.guest_count,0), businessDays: days.filter(d=>d.gross_sales_yen>0).length,
   }
 }
 
@@ -419,7 +368,7 @@ export async function loadReceiptReplyContext(
   )
   const monthAgg = await loadMonthAggUpToDate(
     supabase,
-    params.receiptTable,
+    params.storePartitionKey,
     month,
     params.receiptDateIso,
   )
@@ -460,7 +409,7 @@ export async function loadReceiptReplyContext(
   )
   const priorReceiptAgg = await loadMonthAggUpToDate(
     supabase,
-    params.receiptTable,
+    params.storePartitionKey,
     priorMonth,
     priorEndDate,
   )
@@ -531,6 +480,8 @@ export async function loadReceiptReplyContext(
     yoyBusinessDaysDiff,
     lineMessageId: params.lineMessageId,
     targetMonth: month,
+    salesSourceLabel: '統一売上（日別修正→ジャーナル→レシート）',
+    salesReconciliationNotice: salesReconciliationNotice(monthAgg.days ?? []),
   }
 }
 

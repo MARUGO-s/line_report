@@ -1,3 +1,4 @@
+import { fetchUnifiedDailySales, emptyUnifiedSalesDay } from './sales_reconciliation.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import {
   fetchManualMonthSalesMapForStore,
@@ -2227,38 +2228,23 @@ async function buildClosedDatesExportFromDb(
   }
 }
 
-/** store_webhook_tables からレシートテーブル名を取得して月次集計を返す
- * DB の store_partition_key と catalog のキーで大文字小文字が異なる場合があるため
- * DB 側の集計関数へ寄せて取得する */
-async function fetchReceiptMonthlyAggregatesForStore(
+/** 共通の日別採用値を月次集計する。日別実績がある月は月次入力を重ねない。 */
+export async function fetchReceiptMonthlyAggregatesForStore(
   supabase: ReturnType<typeof createClient>,
   storePartitionKey: string,
-): Promise<Map<string, { gross_sales_yen: number; party_count: number; guest_count: number }>> {
+): Promise<Map<string, { gross_sales_yen: number; party_count: number; guest_count: number; operating_days_count: number }>> {
   const threeYearsAgo = new Date()
   threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3)
-  const fromDate = threeYearsAgo.toISOString().slice(0, 10)
+  const fromDate = threeYearsAgo.toISOString().slice(0, 7)+'-01'
 
-  const byMonth = new Map<string, { gross_sales_yen: number; party_count: number; guest_count: number }>()
-  const { data, error } = await supabase.rpc("aggregate_store_receipt_monthly_sales", {
-    p_store_partition_key: storePartitionKey,
-    p_from_date: fromDate,
-  })
-  if (error) {
-    console.error(`fetchReceiptMonthlyAggregatesForStore rpc failed (store=${storePartitionKey}):`, error.message)
-    return byMonth
-  }
-
-  for (const row of Array.isArray(data) ? data : []) {
-    const r = row as Record<string, unknown>
-    const month = String(r.sales_month ?? "").trim().slice(0, 7)
-    if (!/^\d{4}-\d{2}$/.test(month)) continue
-    const gross = Number(r.gross_sales_yen)
-    if (!Number.isFinite(gross) || gross <= 0) continue
-    byMonth.set(month, {
-      gross_sales_yen: Math.round(gross),
-      party_count: parseOptionalPastSalesInt(r.party_count) ?? 0,
-      guest_count: parseOptionalPastSalesInt(r.guest_count) ?? 0,
-    })
+  const byMonth = new Map<string, { gross_sales_yen: number; party_count: number; guest_count: number; operating_days_count: number }>()
+  const days = await fetchUnifiedDailySales(supabase, storePartitionKey, fromDate, new Date().toISOString().slice(0,10))
+  for (const day of days) {
+    const month = day.date.slice(0,7)
+    const old = byMonth.get(month) ?? { gross_sales_yen:0,party_count:0,guest_count:0,operating_days_count:0 }
+    old.gross_sales_yen += day.gross_sales_yen; old.party_count += day.party_count; old.guest_count += day.guest_count
+    if (day.gross_sales_yen > 0) old.operating_days_count++
+    byMonth.set(month, old)
   }
   return byMonth
 }
@@ -2361,7 +2347,7 @@ async function buildPastSalesSheetUpdatesFromDb(
         continue
       }
     }
-    if (manual) {
+    if (manual && !receiptByMonth.has(month)) {
       updates.push({
         row: monthToRow.get(month),
         sales_month: month,
@@ -2377,9 +2363,9 @@ async function buildPastSalesSheetUpdatesFromDb(
         row: monthToRow.get(month),
         sales_month: month,
         gross_sales_yen: agg.gross_sales_yen,
-        party_count: agg.party_count > 0 ? agg.party_count : null,
-        guest_count: agg.guest_count > 0 ? agg.guest_count : null,
-        operating_days_count: null,
+        party_count: agg.party_count,
+        guest_count: agg.guest_count,
+        operating_days_count: agg.operating_days_count,
         from_receipt: true,
       })
     }
@@ -2796,54 +2782,15 @@ type DailySeriesRow = {
   receipt_count: number
 }
 
-async function buildDailySeriesForStoreMonth(
+export async function buildDailySeriesForStoreMonth(
   supabase: ReturnType<typeof createClient>,
   storePartitionKey: string,
   month: string,
 ): Promise<DailySeriesRow[]> {
   const dayKeys = buildJstDateKeysForMonth(month)
-  const dayKeySet = new Set(dayKeys)
-
-  // 抽出は receipt_date（売上の日付）で行う。created_at（登録時刻）で月を切ると、
-  // 閉店後 0 時をまたいで登録された月末日のレシートが当月にも翌月にも入らず消える。
-  const rows = await queryStoreReceiptRows(supabase, {
-    storeKey: storePartitionKey,
-    receiptFrom: dayKeys[0],
-    receiptTo: buildNextMonthFirstDateKey(month),
-    limit: 20000,
-  })
-
-  const dailyMap = new Map<string, DailySeriesRow>()
-  for (const row of rows) {
-    const dayKey = resolveReceiptEntryDateKeyForMonth(row.receipt_date, month)
-    if (!dayKey || !dayKeySet.has(dayKey)) continue
-    const gross = parseNonNegativeInt(row.gross_sales_yen)
-    const party = parseNonNegativeInt(row.party_count)
-    const guest = parseNonNegativeInt(row.guest_count)
-    const existing = dailyMap.get(dayKey)
-    if (!existing) {
-      dailyMap.set(dayKey, {
-        date: dayKey,
-        gross_sales_yen: gross,
-        party_count: party,
-        guest_count: guest,
-        receipt_count: 1,
-      })
-    } else {
-      existing.gross_sales_yen += gross
-      existing.party_count += party
-      existing.guest_count += guest
-      existing.receipt_count += 1
-    }
-  }
-
-  return dayKeys.map((date) => dailyMap.get(date) ?? {
-    date,
-    gross_sales_yen: 0,
-    party_count: 0,
-    guest_count: 0,
-    receipt_count: 0,
-  })
+  const days = await fetchUnifiedDailySales(supabase,storePartitionKey,dayKeys[0],dayKeys[dayKeys.length-1])
+  const dailyMap = new Map(days.map(d=>[d.date,d]))
+  return dayKeys.map(date=>dailyMap.get(date) ?? emptyUnifiedSalesDay(date))
 }
 
 type BudgetRow = {

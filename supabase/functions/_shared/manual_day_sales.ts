@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { canonicalStorePartitionKeyForDb } from "./receipt_sheets_store_catalog.ts"
 
-/** 日次売上の手入力上書き（売上分析画面の日次表から直接編集）。null 列はレシート集計へフォールバック。 */
+/** 日次売上の採用値。日別修正→ジャーナル→レシートの順に項目別採用。 */
 export type ManualDaySalesRecord = {
   gross_sales_yen: number | null
   party_count: number | null
@@ -9,12 +9,14 @@ export type ManualDaySalesRecord = {
   tax_amount_yen?: number | null
   source?: string | null
   updated_at?: string | null
+  journal_values?: Record<string, unknown> | null
+  manual_values?: Record<string, unknown>
 }
 
 /**
  * 1日分の上書き入力。各フィールドは
  *  - undefined: 変更しない（既存値を保持）
- *  - null: その列の上書きを解除（レシート集計へ戻す）
+ *  - null: 手修正を解除（保存済みジャーナル、なければレシートへ戻す）
  *  - number: その値で上書き
  */
 export type ManualDaySalesUpsertEntry = {
@@ -22,6 +24,7 @@ export type ManualDaySalesUpsertEntry = {
   gross_sales_yen?: number | null
   party_count?: number | null
   guest_count?: number | null
+  tax_amount_yen?: number | null
 }
 
 function parseOptionalNonNegativeInt(value: unknown): number | null {
@@ -46,7 +49,7 @@ export function manualDaySalesFromRow(
   const gross = parseOptionalNonNegativeInt(row.gross_sales_yen)
   const party = parseOptionalNonNegativeInt(row.party_count)
   const guest = parseOptionalNonNegativeInt(row.guest_count)
-  if (gross == null && party == null && guest == null) return null
+  if (gross == null && party == null && guest == null && parseOptionalNonNegativeInt(row.tax_amount_yen) == null) return null
   return {
     gross_sales_yen: gross,
     party_count: party,
@@ -54,6 +57,8 @@ export function manualDaySalesFromRow(
     tax_amount_yen: parseOptionalNonNegativeInt(row.tax_amount_yen),
     source: row.source != null ? String(row.source) : null,
     updated_at: row.updated_at != null ? String(row.updated_at) : null,
+    journal_values: row.journal_values && typeof row.journal_values === 'object' ? row.journal_values as Record<string, unknown> : null,
+    manual_values: row.manual_values && typeof row.manual_values === 'object' ? row.manual_values as Record<string, unknown> : undefined,
   }
 }
 
@@ -70,16 +75,18 @@ export async function fetchManualDaySalesMapForStore(
   const out = new Map<string, ManualDaySalesRecord>()
   if (!key || !from || !to) return out
 
+  for (let offset = 0; ; offset += 1000) {
   const { data, error } = await supabase
     .from("line_sales_manual_day")
-    .select("sales_date, gross_sales_yen, party_count, guest_count, tax_amount_yen, source, updated_at")
+    .select("sales_date, gross_sales_yen, party_count, guest_count, tax_amount_yen, source, updated_at, journal_values, manual_values")
     .eq("store_partition_key", key)
     .gte("sales_date", from)
     .lt("sales_date", to)
+    .order('sales_date', { ascending: true })
+    .range(offset, offset + 999)
 
   if (error) {
-    console.error(`fetchManualDaySalesMapForStore failed (store=${key}):`, error.message)
-    return out
+    throw new Error(`Daily sales source unavailable: ${error.message}`)
   }
 
   for (const row of Array.isArray(data) ? data : []) {
@@ -88,12 +95,14 @@ export async function fetchManualDaySalesMapForStore(
     const parsed = manualDaySalesFromRow(r)
     if (date && parsed) out.set(date, parsed)
   }
+  if (!data || data.length < 1000) break
+  }
   return out
 }
 
 /**
- * 日次手入力を upsert。各エントリは read-modify-write で既存値とマージする
- *（単一セル編集でも他列を保持）。マージ後に3列すべて null なら行ごと削除し、その日をレシート集計へ戻す。
+ * 店舗単位のDBロック付きRPCで手修正だけを更新する。原本と他列の手修正を保持し、
+ * 解除時もジャーナルを削除しない。原本も手修正もない場合だけ上書き行を削除する。
  */
 export async function upsertManualDaySalesEntries(
   supabase: SupabaseClient,
@@ -102,65 +111,12 @@ export async function upsertManualDaySalesEntries(
 ): Promise<number> {
   const key = canonicalStorePartitionKeyForDb(storePartitionKey)
   if (!key) return 0
-  let applied = 0
-
-  for (const entry of entries) {
-    const salesDate = normalizeDateInput(entry.sales_date)
-    if (!salesDate) continue
-
-    const { data: existingRow, error: fetchErr } = await supabase
-      .from("line_sales_manual_day")
-      .select("gross_sales_yen, party_count, guest_count")
-      .eq("store_partition_key", key)
-      .eq("sales_date", salesDate)
-      .maybeSingle()
-    if (fetchErr) throw new Error(fetchErr.message)
-    const existing = (existingRow as Record<string, unknown> | null) ?? null
-
-    const resolveField = (
-      provided: number | null | undefined,
-      current: unknown,
-    ): number | null => {
-      if (provided === undefined) return parseOptionalNonNegativeInt(current)
-      if (provided === null) return null
-      return parseOptionalNonNegativeInt(provided)
-    }
-
-    const gross = resolveField(entry.gross_sales_yen, existing?.gross_sales_yen)
-    const party = resolveField(entry.party_count, existing?.party_count)
-    const guest = resolveField(entry.guest_count, existing?.guest_count)
-
-    if (gross == null && party == null && guest == null) {
-      if (existing) {
-        const { error } = await supabase
-          .from("line_sales_manual_day")
-          .delete()
-          .eq("store_partition_key", key)
-          .eq("sales_date", salesDate)
-        if (error) throw new Error(error.message)
-      }
-      applied += 1
-      continue
-    }
-
-    const { error } = await supabase
-      .from("line_sales_manual_day")
-      .upsert(
-        {
-          store_partition_key: key,
-          sales_date: salesDate,
-          gross_sales_yen: gross,
-          party_count: party,
-          guest_count: guest,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "store_partition_key,sales_date" },
-      )
-    if (error) throw new Error(error.message)
-    applied += 1
-  }
-
-  return applied
+  // Atomic patches preserve simultaneous edits and the journal underneath them.
+  const { data, error } = await supabase.rpc('write_daily_sales_source', {
+    p_store_key: key, p_kind: 'manual', p_rows: entries,
+  })
+  if (error) throw new Error(error.message)
+  return Number(data?.applied ?? 0)
 }
 
 /** 日別予算の直接入力（手動上書き）を [日付→円] で取得。 */

@@ -24,6 +24,8 @@ import {
   STORE_LOCATION_PROFILES,
 } from "../_shared/marugo_group_stores.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0";
+import { fetchUnifiedSalesSummary } from "../_shared/sales_reconciliation.ts";
+import { buildTrustedAiSalesData, resolveAiSalesPeriods, UNIFIED_SALES_AI_POLICY } from "../_shared/sales_reconciliation_ai.ts";
 
 const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
@@ -614,7 +616,7 @@ function buildJournalAiServerPolicy(
   const integrationPolicy = action === "integrate_foodcourt"
     ? `\n\n${JOURNAL_FOODCOURT_INTEGRATION_POLICY}`
     : "";
-  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}${integrationPolicy}`;
+  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}${integrationPolicy}\n\n${UNIFIED_SALES_AI_POLICY}`;
 }
 
 function buildJournalAiEvidenceMessage(options: {
@@ -1755,9 +1757,28 @@ Deno.serve(async (req: Request, info) => {
       );
     }
 
-    const salesContext = typeof safeSalesData === "string"
+    const originalSalesContext = typeof safeSalesData === "string"
       ? safeSalesData
       : JSON.stringify(safeSalesData);
+
+    if (originalSalesContext.length > 100000) {
+      return jsonResponse({ error: "データが大きすぎます。期間を絞ってください。" }, 400);
+    }
+    if (!canonicalStoreKey) return jsonResponse({ error: "分析対象の店舗を指定してください。" }, 400);
+    try {
+      resolveAiSalesPeriods(safeSalesData);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : "分析期間が不正です。" }, 400);
+    }
+    let salesContext: string;
+    try {
+      salesContext = JSON.stringify(await buildTrustedAiSalesData(
+        safeSalesData, canonicalStoreKey,
+        (store, from, to) => fetchUnifiedSalesSummary(supabase, store, from, to),
+      ));
+    } catch {
+      return jsonResponse({ error: "統一売上を確認できませんでした。再読み込みしてからお試しください。", code: "unified_sales_unavailable" }, 503);
+    }
 
     if (salesContext.length > 100000) {
       return new Response(

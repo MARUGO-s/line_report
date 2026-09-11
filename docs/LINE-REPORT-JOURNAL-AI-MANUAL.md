@@ -135,6 +135,7 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 - 取込は対象期間を置き換える方式で、0や空欄の日は既存データを消すため、期間と店舗キーを確認してから確定します。
 - 過去の売上を後からまとめて登録する具体的な手順はSAL-07にまとめています。
 - 売上分析画面では店舗・月を選び、売上、予算進捗、日別配分等を確認します。
+- 画面・定型返信・定期報告の売上は、項目別に日別修正→同期済みジャーナル→レシートの順で採用します。同じ日は二重加算しません。差異欄で日付・採用元・ジャーナルとレシートの差を確認できます。
 - 売上中間報告は原則毎月16日、月末レポートは翌月1日に指定ルームへ配信し、ON/OFFや送信先はルーム設定で管理します。
 
 **検索語:** excel / エクセル / 売上分析 / analytics / アップロード / 対象期間 / 店舗キー / 中間報告 / 月末レポート / 配信 / 曜日 / 予算進捗
@@ -147,7 +148,8 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 
 - 売上分析の日次表は、総売上・組数・客数をセル単位で手入力補正できます。送信された列だけを上書きし、空欄で手入力上書きを解除します。
 - 所定のxlsx／csvはドラッグ＆ドロップで解析し、店舗・期間・日数・合計・日別一覧を確認してから既存日へ上書きできます。解析だけではDBへ書かず、確認後に確定します。
-- 月次手入力と日次手入力はレシート集計と区別して保持し、画面では正本・上書きの優先順位に従って表示します。
+- 日別修正は原本と別に保持し、ジャーナル再同期でも消えません。空欄で解除するとジャーナル、なければレシートへ戻ります。月次値は日別実績がない月だけ採用します。
+- 税込売上だけ直すと税額要確認が出ます。警告内の「税額を確認・修正」で税額を入力できます。税率は推測しません。
 - 売上シート導線が設定された店舗では、管理ページからGoogleスプレッドシートを開けます。同期対象・正本方向は店舗ごとの運用設定に従います。
 - 店舗固有のレシート様式は、共通解析ルールを壊さず店舗別追記プロンプトで補強できます。Webhook状態、店舗候補、電話照合等も管理APIで確認します。
 
@@ -308,6 +310,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 店舗情報タブには定休日、ランチ／ディナー有無、特別営業ルール、営業メモ、施策・イベントカレンダーを店舗別に保存します。
 - AIは定休日の売上ゼロを弱点扱いせず、分析期間と重なる施策・イベントを優先して解釈します。
 - 過去売上同期は店舗ごとの明示ONでのみ動き、他店舗へ自動的に広げません。
+- 電子ジャーナル/Journal Reportの統一売上欄と新規AI分析は同じ採用値を使います。原本明細・保存済みAI文章とは区別してください。AIは指定店舗・期間だけを確認し、商品や時間帯の原本内訳を修正額へ配分しません。
 - ワイン量は、分類のグラス（赤／白／ロゼ／泡／オレンジ）・デキャンタ・ボトル（赤／白／ロゼ／泡／オレンジ）、または名称の Glass Wine / デキャンタ / Bottle Wine / ペアリングの点数からml換算します。大分類「飲料」のままの銘柄名は自動換算しません。
 - 「どれくらいワインが出たか」が曖昧な場合は、点数・総ml・両方のどれを見たいか確認してから回答します。
 
@@ -758,13 +761,13 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 この節はリポジトリの実コード入口を区分コードへ対応付けた監査表です。
 `npm run help:check` は、新しい入口が未分類のまま追加された場合に失敗します。
 
-- 公開コード入口: 41件
+- 公開コード入口: 42件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 100件
+- 共有TypeScriptモジュール: 102件
 - 補助・運用・レガシーコード: 40件
-- admin-api静的ルート: 143件
-- SQL migrations: 300件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 95件
+- admin-api静的ルート: 144件
+- SQL migrations: 301件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 98件
 
 ### 公開画面・ブラウザコード
 
@@ -807,6 +810,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `public/reservation.html` | RSV-01 / DEV-01 |
 | `public/reviews.html` | REV-01 / REV-02 / DEV-01 |
 | `public/room_settings.html` | OPS-01 / RSV-01 / DEV-01 |
+| `public/sales-source-notice.js` | SAL-04 / SAL-06 / JRN-04 |
 | `public/site-cache.js` | DEV-01 |
 | `public/system-map.html` | ADM-02 / DEV-01 / DEV-04 |
 | `public/system-map/environment.html` | ADM-02 / DEV-04 |
@@ -934,6 +938,8 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/room_config_link.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/room_hard_delete.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/sales_budget_allocation.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/sales_reconciliation.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
+| `supabase/functions/_shared/sales_reconciliation_ai.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/search_help_guide.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
 | `supabase/functions/_shared/store_receipt.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/store_receipt_phones.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
@@ -1085,6 +1091,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/pos-journals/report-ai-history/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
 | `/pos-journals/sales-forecasts` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
 | `/pos-journals/sales-forecasts/item` | JAI-01 / JAI-02 / JAI-04 / JAI-05 / DEV-02 |
+| `/pos-journals/sales-summary` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/saved-reports` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/saved-reports/cross-store-summary` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |
 | `/pos-journals/saved-reports/html` | JRN-01 / JRN-02 / JRN-03 / JRN-04 / JRN-05 / DEV-02 |

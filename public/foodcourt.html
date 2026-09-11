@@ -869,6 +869,7 @@
   </div>
 </div>
 
+<script src="sales-source-notice.js?v=20260911"></script>
 <script src="pages-config.js?v=20260622"></script>
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
@@ -3454,6 +3455,9 @@
       weather.forEach(w=>{ const d=String((w&&w.weather_date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) weatherByDate.set(d,w); });
       // 客数/売上の正本（管理表＝レシート集計＋手入力客数。売上は税抜net）。日報が無い日も含む。
       baseDailyByDate = new Map();
+      let sourceNotice=document.getElementById('foodcourtSalesSourceNotice');
+      if(!sourceNotice){sourceNotice=document.createElement('div');sourceNotice.id='foodcourtSalesSourceNotice';dom.loadMsg.insertAdjacentElement('afterend',sourceNotice);}
+      window.LINE_REPORT_SALES.render(sourceNotice,{series:body.baseDaily||[]},{showTotals:false});
       (Array.isArray(body.baseDaily)?body.baseDaily:[]).forEach(d=>{ const k=String((d&&d.date)||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(k)) baseDailyByDate.set(k, d); });
       forecast = Array.isArray(body.forecast) ? body.forecast : [];
       renderForecast();

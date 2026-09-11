@@ -1,12 +1,20 @@
 # LINE Report AI Handoff
 
+## 2026-09-11 統一売上・差異通知
+
+- 2026-09-11に利用者が公開GitHub `MARUGO-s/line_report` へのpush/PR・本番デプロイと既存OpenAI/Anthropic/Groqへの統一集計連携を承認し作業再開。作業場所 `/private/tmp/line-report-unified-sales-20260911`、ブランチ `codex/unified-sales-reconciliation-20260911`。本番状態はPR/Actionsで確認。
+
+- 現行仕様: [UNIFIED-SALES-SOURCE-POLICY.md](./docs/UNIFIED-SALES-SOURCE-POLICY.md)。日別修正→ジャーナル→レシートの項目別採用。JSON出所を独立保持し、書込みはロック付き `write_daily_sales_source`。直接日別upsertへ戻さない。
+- 定型報告/画面/シート/新規AIは共通集計、原本・保存済みAI/PDFは区別。AIの店舗・期間はサーバー検証し、原本内訳を修正額へ按分しない。提供元とモデルは既存のまま。
+- 過去復旧用 `backfill-marugos-journal-sales-20260911.sql` は新RPC前の手順。手修正を壊すため再実行しない。
+
 ## 2026-09-11 Journal → 売上分析の連携
 
 - PR #228を本番反映済み。MARUGO SのONと過去分反映を確定し、日次/月次の原本不一致0・再実行不変・他店データ/設定不変・Safariの4月集計を確認した。表示追補では、レシート0件のJournal日次も曜日・天候グラフへ含める。未入力の0円と明示実績を混同しない。
 
 - 同期は `journal_sales_sync.ts`。大容量レポートの `posJournalDays` 日計を優先し、`sales` と二重加算しない。欠損を0円へ変換せず、不正・矛盾した日計では同期前に拒否する。
 - `store_operation_profiles` はJournal側の小文字キー。日次・月次売上表は正式キー（MARUGO Sは `marugoS`）。両者を混同しない。他店は明示ON以外に広げない。
-- MARUGO Sの過去分取り込みはユーザー承認済み。固定範囲・原本照合・再実行可能なDML手順: `scripts/backfill-marugos-journal-sales-20260911.sql`。生データのバックアップは実チェックアウトの `.local/backups/restore-work/` のみ。GitやGraphifyへ入れない。
+- MARUGO Sの過去分取り込みはユーザー承認済み。当時の固定範囲復旧記録（現行では再使用不可）: `scripts/backfill-marugos-journal-sales-20260911.sql`。生データのバックアップは実チェックアウトの `.local/backups/restore-work/` のみ。GitやGraphifyへ入れない。
 - 税抜月別集計も同日のJournal値へ置換。ジャーナルの無い日のレシートは保持する。ONだけで過去全履歴が自動補完されると案内しない。詳細は `docs/JOURNAL-REPORT-FEATURES.md` §5.3。
 
 ## 2026-09-10 フードコートAIの安定化

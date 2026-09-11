@@ -1,3 +1,4 @@
+import { fetchUnifiedSalesSummary, validSalesDate } from '../_shared/sales_reconciliation.ts'
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 // deploy re-trigger marker (2026-07-09)
 import {
@@ -296,6 +297,7 @@ const STORE_LINK_ALLOWED_REQUESTS: Readonly<Record<string, ReadonlySet<string>>>
     "GET /foodcourt/weekly-report",
   ]),
   [CHAT_JOURNAL_AI_SCOPE]: new Set([
+    "GET /pos-journals/sales-summary",
     "GET /pos-journals/saved-reports",
     "GET /pos-journals/saved-reports/item",
     "GET /pos-journals/product-search",
@@ -990,7 +992,9 @@ async function loadBaseDailyForReports(
   const base = rows.map((r) => ({
     date: r.date,
     guests: (r.manual_guest || r.receipt_count > 0) ? r.guest_count : null,
-    sales: r.receipt_count > 0 ? r.net_sales_yen : null,
+    sales: r.net_sales_known ? r.net_sales_yen : null,
+    source_differences: r.source_differences, tax_needs_review: r.tax_needs_review,
+    sales_source: r.sales_source, source_by_field: r.source_by_field, journal_values: r.journal_values, receipt_values: r.receipt_values,
     party: (r.manual_party || r.receipt_count > 0) ? r.party_count : null,
     has_manual: r.manual_guest || r.manual_party || r.manual_gross,
     attendance: null as number | null,
@@ -1658,6 +1662,7 @@ Deno.serve(async (req, info) => {
       "/petty-cash/receipt-image",
       "/petty-cash/receipt-media",
       "/pos-journals",
+      "/pos-journals/sales-summary",
       "/pos-journals/stores",
       "/pos-journals/product-search",
       "/pos-journals/product-cohort",
@@ -2103,6 +2108,14 @@ Deno.serve(async (req, info) => {
     if (req.method === "GET" && path === "/documents") {
       const documentState = await fetchDocumentState(supabase, url)
       return json(documentState, 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/sales-summary") {
+      const from = url.searchParams.get('from') ?? ''
+      const to = url.searchParams.get('to') ?? ''
+      if (!validSalesDate(from) || !validSalesDate(to) || from > to || Date.parse(to)-Date.parse(from)>3660*86400000 || !url.searchParams.get('store_key')) {
+        return json({error:'Invalid sales period'},400)
+      }
+      return json(await fetchUnifiedSalesSummary(supabase, normalizePosJournalStoreKey(url.searchParams.get('store_key')), from, to),200)
     }
     if (req.method === "GET" && path === "/pos-journals") {
       return json(await fetchPosJournalState(supabase, url), 200)
@@ -10993,6 +11006,7 @@ async function upsertManualDayEntries(
   const upsertPayload: Array<{
     sales_date: string
     gross_sales_yen?: number | null
+    tax_amount_yen?: number | null
     party_count?: number | null
     guest_count?: number | null
   }> = []
@@ -11004,6 +11018,7 @@ async function upsertManualDayEntries(
     upsertPayload.push({
       sales_date,
       gross_sales_yen: resolveField(entry, "gross_sales_yen"),
+      tax_amount_yen: resolveField(entry, "tax_amount_yen"),
       party_count: resolveField(entry, "party_count"),
       guest_count: resolveField(entry, "guest_count"),
     })
@@ -12314,6 +12329,9 @@ async function fetchPosJournalState(
     ? "shared_reports"
     : "empty"
   summary.meta.store_codes = storeCodes
+  const [year, monthNumber] = month.split('-').map(Number)
+  const monthEnd = new Date(Date.UTC(year,monthNumber,0)).toISOString().slice(0,10)
+  const unifiedSales = await fetchUnifiedSalesSummary(supabase,storeKey,month+'-01',monthEnd)
   return {
     ok: true,
     store_key: storeKey,
@@ -12327,6 +12345,7 @@ async function fetchPosJournalState(
       added_day_count: sharedOnlyDays.length,
       error: shared.error,
     },
+    unified_sales: unifiedSales,
     recovery_report: recoveryReport
       ? {
         id: recoveryReport.id,
@@ -15757,12 +15776,22 @@ async function resolvePosJournalAiSummary(
     expected.month,
     mergePosJournalDaysPreferPrimary(storedDays, shared.days),
   )
+  const [year, monthNumber] = expected.month.split('-').map(Number)
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10)
+  let unified_sales
+  try {
+    unified_sales = await fetchUnifiedSalesSummary(
+      supabase, expected.storeKey, `${expected.month}-01`, monthEnd,
+    )
+  } catch {
+    throw { status: 503, message: "統一売上を確認できませんでした。再読み込みしてお試しください。" } satisfies AppError
+  }
   if (combinedDays.length) {
     const categoryOverrides = await fetchPosJournalCategoryOverrides(
       supabase,
       expected.storeKey,
     )
-    return buildPosJournalSummary({
+    return { ...buildPosJournalSummary({
       storeKey: expected.storeKey,
       storeName: expected.storeName,
       storeCode: expected.storeCode,
@@ -15770,9 +15799,9 @@ async function resolvePosJournalAiSummary(
       days: combinedDays,
       fileCount: rows.length + shared.reportCount,
       categoryOverrides,
-    })
+    }), unified_sales }
   }
-  return normalizePosJournalAiSummary(body.summary, expected)
+  return { ...normalizePosJournalAiSummary(body.summary, expected), unified_sales }
 }
 
 type PosJournalAiHistoryListRow = {
@@ -15830,7 +15859,7 @@ async function savePosJournalAiAnalysis(
   | { saved: false; error: string }
 > {
   const analysisText = String(result.text ?? "").trim()
-  if (!analysisText || !summary.days.length) {
+  if (!analysisText) {
     return { saved: false, error: "分析本文または分析対象データが空のため履歴を保存しませんでした。" }
   }
   try {
@@ -15848,9 +15877,9 @@ async function savePosJournalAiAnalysis(
         facts_snapshot: facts,
         source_file_count: toNonNegativeInteger(summary.meta.file_count),
         source_day_count: summary.days.length,
-        gross_sales: toNonNegativeInteger(summary.totals.gross_sales),
-        guests_count: toNonNegativeInteger(summary.totals.guests),
-        average_spend: toNonNegativeInteger(summary.totals.avg_spend),
+        gross_sales: toNonNegativeInteger(facts.totals.grossSales),
+        guests_count: toNonNegativeInteger(facts.totals.guests),
+        average_spend: toNonNegativeInteger(facts.totals.averageSpend),
       })
       .select(
         "id, store_partition_key, store_code, year_month, ai_generated, provider, model, warning, source_file_count, source_day_count, gross_sales, guests_count, average_spend, created_at",
@@ -15878,18 +15907,19 @@ async function analyzePosJournalWithAi(
   try {
     summary = await resolvePosJournalAiSummary(supabase, body, expected)
   } catch (error) {
+    if (isRecord(error) && error.status === 503) throw error
     throw {
       status: 400,
       message: error instanceof Error ? error.message : "分析データが不正です。",
     } satisfies AppError
   }
-  if (!summary.days.length) {
+  if (!summary.unified_sales.series.length && !summary.unified_sales.monthly_fallbacks.length) {
     return {
       ok: true,
       analysis: null,
       ai_generated: false,
       model: null,
-      warning: "分析対象の電子ジャーナルデータがありません。",
+      warning: "分析対象の統一売上データがありません。同期状態と対象月を確認してください。",
       facts: buildPosJournalAiFacts(summary),
     }
   }
@@ -15933,15 +15963,16 @@ async function askPosJournalAi(
     question = normalizePosJournalAiQuestion(body.question)
     history = normalizePosJournalAiHistory(body.history)
   } catch (error) {
+    if (isRecord(error) && error.status === 503) throw error
     throw {
       status: 400,
       message: error instanceof Error ? error.message : "質問データが不正です。",
     } satisfies AppError
   }
-  if (!summary.days.length) {
+  if (!summary.unified_sales.series.length && !summary.unified_sales.monthly_fallbacks.length) {
     return {
       ok: true,
-      answer: "分析対象の電子ジャーナルデータがありません。対象月を確認するか、LZHファイルをアップロードしてください。",
+      answer: "分析対象の統一売上データがありません。同期状態と対象月を確認してください。",
       ai_generated: false,
       model: null,
       warning: "データが空です。",

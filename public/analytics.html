@@ -751,6 +751,7 @@
   <!-- KPI -->
   <section class="card">
     <h2 class="card-title">月間サマリー <span id="kpiPeriodLabel" style="font-size:0.85rem;color:var(--sub);font-weight:400"></span></h2>
+    <div id="salesSourceNotice" aria-live="polite"></div>
     <div class="kpi-grid" id="kpiGrid">
       <div class="kpi-card"><div class="kpi-label">月間総売上</div><div class="kpi-value" id="kpiGross">-</div><div class="kpi-badges"><span class="kpi-badge flat" id="kpiBadgeGrossMom"></span><span class="kpi-badge flat" id="kpiBadgeGrossYoy"></span></div></div>
 
@@ -1039,6 +1040,7 @@
 </style>
 
 <script src="pages-config.js?v=20260818"></script>
+<script src="sales-source-notice.js?v=20260911"></script>
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
@@ -1625,7 +1627,7 @@ function receiptDailyCellsForDay(r, budgetByDate, storeClosedSet, asOfJst, nowRe
     : diff < 0 ? 'receipt-daily-diff-neg' : 'receipt-daily-diff-pos';
   const diffAttr = diffClass ? ` class="${diffClass}"` : '';
   return (
-    `<td>${receiptDailyDateCellInnerHtml(r.date)}</td>` +
+    `<td>${receiptDailyDateCellInnerHtml(r.date)}${(r.source_differences||[]).length ? '<br><small>⚠ 差異あり</small>' : ''}</td>` +
     rdEditableCell(dateKey, 'gross', r.gross_sales_yen, formatYenReceiptInt(r.gross_sales_yen), r.manual_gross === true) +
     rdEditableCell(dateKey, 'party', r.party_count, String(Number(r.party_count || 0)), r.manual_party === true) +
     rdEditableCell(dateKey, 'guest', r.guest_count, String(Number(r.guest_count || 0)), r.manual_guest === true) +
@@ -2195,6 +2197,7 @@ function refreshDailySalesTemplateLink() {
 })();
 
 function resetReceiptDailyDisconnected() {
+  document.getElementById('salesSourceNotice').textContent = '統一売上は未確認です。ログイン後に再読込してください。';
   lastReceiptDailyData = null;
   resetBudgetKpis({ clearInput: true });
   if (dom.receiptDailyMeta) dom.receiptDailyMeta.textContent = 'トークンを保存すると表示できます。';
@@ -3416,10 +3419,13 @@ function appendStoreSelectPlaceholder() {
   dom.storeSelect.appendChild(el);
 }
 
-function clearAnalyticsAwaitingStore() {
-  if (state.lineLockedStoreKey) return;
-  state.storeKey = '';
-  if (dom.storeSelect) dom.storeSelect.value = '';
+function clearAnalyticsAwaitingStore(preserveStore = false) {
+  document.getElementById('salesSourceNotice').replaceChildren();
+  if (state.lineLockedStoreKey && !preserveStore) return;
+  if (!preserveStore) {
+    state.storeKey = '';
+    if (dom.storeSelect) dom.storeSelect.value = '';
+  }
   state.dailySeries = [];
   state.monthlySeries = [];
   state.weather = {};
@@ -3792,7 +3798,9 @@ async function syncHolidaysFromApi() {
   }
 }
 
+let unifiedSalesLoadSequence = 0;
 async function loadAll() {
+  const loadSequence = ++unifiedSalesLoadSequence;
   const token = getToken();
   if (!token) {
     dom.filterMeta.textContent = 'トークンを保存してください。';
@@ -3820,6 +3828,7 @@ async function loadAll() {
   const sortedMonths = [...months].sort();
 
   dom.filterMeta.textContent = '読み込み中…';
+  document.getElementById('salesSourceNotice').textContent = '統一売上と差異を確認中…';
   dom.loadingDaily.classList.add('show');
   dom.loadingMonthly.classList.add('show');
 
@@ -3857,6 +3866,9 @@ async function loadAll() {
     ]);
     const salesResults = salesResultsWrapped.map((entry) => entry.data).filter(Boolean);
     const salesErrors = salesResultsWrapped.map((entry) => entry.error).filter(Boolean);
+    if (loadSequence !== unifiedSalesLoadSequence) return;
+    if (salesErrors.length) throw new Error('一部の月の取得に失敗したため、期間合計は未確定です。再読込してください。');
+    if (!monthlyData) throw new Error('月別売上の取得に失敗しました。再読込してください。');
     if (allStoresSales?.store_options?.length) {
       storeOptionsForSelect = allStoresSales.store_options;
     }
@@ -3872,6 +3884,14 @@ async function loadAll() {
     state.monthlySeries = monthlyData?.series ?? [];
 
     state.dailySeries = dailySeries;
+    window.LINE_REPORT_SALES.render(document.getElementById('salesSourceNotice'), {series:dailySeries,generated_at:salesData.generated_at}, {showTotals:false,onTaxEdit:async day=>{
+      const raw=window.prompt(day.date+' の確定税額（円）。空欄は税額の手修正を解除します。',String(day.tax_amount_yen ?? ''));
+      if(raw===null)return;
+      const tax=raw.trim()===''?null:Number(raw.replace(/,/g,''));
+      if(tax!==null&&(!Number.isSafeInteger(tax)||tax<0)){window.alert('0以上の整数を入力してください。');return;}
+      try {await apiFetch('/receipts/sales-manual-days',{method:'PUT',body:{store_key:state.storeKey,entries:[{sales_date:day.date,tax_amount_yen:tax}]}});await loadAll();}
+      catch(e){window.alert('税額を保存できませんでした：'+String(e.message||e));}
+    }});
 
     // 取得済みの各月レスポンスから日別予算・休業日をまとめておく（追加リクエストなし）。
     // 表は最終月だけを描くが、グラフ／CSV は複数月にまたがるため全月ぶん必要になる。
@@ -3983,6 +4003,7 @@ async function loadAll() {
     dom.loadingMonthly.classList.remove('show');
 
     const weatherResult = await (weatherPromise ?? Promise.resolve({ map: {} })).catch(() => ({ map: {} }));
+    if (loadSequence !== unifiedSalesLoadSequence) return;
     state.weather = weatherResult?.map ?? {};
     const weatherCount = Object.keys(state.weather).length;
     const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
@@ -4001,6 +4022,9 @@ async function loadAll() {
 
     renderAllCharts();
   } catch (e) {
+    if (loadSequence !== unifiedSalesLoadSequence) return;
+    clearAnalyticsAwaitingStore(true);
+    document.getElementById('salesSourceNotice').textContent = '統一売上を確認できませんでした。取得失敗を0円・差異なしとは扱いません。';
     dom.filterMeta.textContent = 'エラー: ' + e.message;
     resetBudgetKpis();
     lastReceiptDailyData = null;
