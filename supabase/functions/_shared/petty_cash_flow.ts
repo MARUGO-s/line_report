@@ -32,16 +32,28 @@ function conversationKey(roomId: string, userId: string | null): string {
 }
 
 function formatYen(n: number): string {
-  return '¥' + Math.round(Math.max(0, n)).toLocaleString('en-US')
+  const rounded = Math.round(Number(n) || 0)
+  return rounded < 0
+    ? '-¥' + Math.abs(rounded).toLocaleString('en-US')
+    : '¥' + rounded.toLocaleString('en-US')
 }
 
 // "¥1,234" / "1234円" → 1234（数字のみ抽出）。読めなければ null。
 function parseYenToInt(s: unknown): number | null {
   if (s == null) return null
-  const digits = String(s).replace(/[^\d]/g, '')
+  const raw = String(s)
+  const digits = raw.replace(/[^\d]/g, '')
   if (!digits) return null
-  const n = Number(digits)
+  // 「割引 -120」のような明細だけは符号を失うと通常商品120円になるため、
+  // 数字抽出の前に明示されたマイナスを保持する。通常の金額は従来どおり正数。
+  const negative = /(?:^|[^\d])[-−]\s*(?=[¥￥]?\s*\d)/.test(raw)
+  const n = Number((negative ? '-' : '') + digits)
   return Number.isFinite(n) ? n : null
+}
+
+// レシートの値引き行は、AIが価格を正数で返しても意味上は負の明細。
+function isPettyDiscountName(name: string): boolean {
+  return /(?:割引|値引|値下げ|クーポン|discount)/i.test(String(name ?? ''))
 }
 
 // 各種日付表記 → "YYYY-MM-DD"。読めなければ null。
@@ -111,7 +123,13 @@ export function extractExpenseFromReceipt(
   const itemRows = lineItems
     .map((li) => ({
       name: li?.name ? String(li.name).trim() : '',
-      amount: parseYenToInt(li?.price),
+      amount: (() => {
+        const parsed = parseYenToInt(li?.price)
+        if (parsed == null) return null
+        return isPettyDiscountName(li?.name ? String(li.name).trim() : '')
+          ? -Math.abs(parsed)
+          : parsed
+      })(),
       rate: (li?.rate === 8 || li?.rate === 10) ? li.rate : null,
     }))
     .filter((x) => x.name || x.amount != null)
@@ -125,8 +143,10 @@ export function extractExpenseFromReceipt(
     itemRows[0].amount != null &&
     [gross, net].some((amount) => amount != null && Math.abs(amount - itemRows[0].amount!) <= 1)
   ) return null
-  const itemsSum = itemRows.reduce((s, i) => s + (i.amount != null && i.amount > 0 ? i.amount : 0), 0)
-  const allPriced = itemRows.length > 0 && itemRows.every((i) => i.amount != null && i.amount > 0)
+  const isPricedItem = (i: { name: string; amount: number | null }) =>
+    i.amount != null && (i.amount > 0 || (i.amount < 0 && isPettyDiscountName(i.name)))
+  const itemsSum = itemRows.reduce((s, i) => s + (isPricedItem(i) ? i.amount! : 0), 0)
+  const allPriced = itemRows.length > 0 && itemRows.every(isPricedItem)
 
   // 税率別集計（「◯%税込/うち税額」型の印字がある場合のみ AI が返す）。
   //   total=その税率の税込小計、tax=その中に含まれる税額（うち税額）。
@@ -208,7 +228,7 @@ export function extractExpenseFromReceipt(
         const r = rateOf(i)
         if (r == null) return null
         const a = itemRows[i].amount
-        const p = a != null && a > 0 ? a : 0
+        const p = a != null && (a > 0 || (a < 0 && isPettyDiscountName(itemRows[i].name))) ? a : 0
         if (r === 10) g10 += p; else g8 += p
       }
       const ex = Math.floor((g8 * 8) / 100) + Math.floor((g10 * 10) / 100)
@@ -246,7 +266,7 @@ export function extractExpenseFromReceipt(
   const isLawsonVendor = /(lawson|ローソン)/i.test(String(receipt?.storeName ?? ''))
   const isFamilyMartVendor = /(family\s*mart|familymart|ファミリーマート|ファミマ)/i.test(String(receipt?.storeName ?? ''))
   const itemEntries = itemRows.map((i, idx) => {
-    const p = i.amount != null && i.amount > 0 ? i.amount : 0
+    const p = isPricedItem(i) ? i.amount! : 0
     // 【酒類の確定補正】本みりん等の酒類は軽減税率の対象外＝法律上必ず10%。OCRや税率配分が
     //   8% と誤読しても「rate=8→食材で確定」ロジックに乗せず、税率10%・科目アルコールで確定する
     //   （実障害: 2026-07-14 クック-Y の宝酒造 本みりん ¥499 が 8%・食材となり出金額が¥10不一致）。
@@ -422,7 +442,7 @@ export function extractExpenseFromReceipt(
   let item: string
   let items: PettyCashItem[]
   if (itemEntries.length) {
-    item = itemEntries.map((i) => `・${i.n}${i.p > 0 ? ' ' + formatYen(i.p) : ''}`.trim()).join('\n')
+    item = itemEntries.map((i) => `・${i.n}${i.p !== 0 ? ' ' + formatYen(i.p) : ''}`.trim()).join('\n')
     items = itemEntries
   } else {
     const nameItems = Array.isArray(receipt?.items) ? receipt!.items.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 8) : []
@@ -502,7 +522,10 @@ type ExtractedExpense = {
 // 明細（全品目に価格あり）の税込合計。価格欠けがあれば null（照合不能）。
 function itemsTotalWithTax(items?: PettyCashItem[] | null): number | null {
   if (!Array.isArray(items) || !items.length) return null
-  if (!items.every((it) => Number(it?.p) > 0)) return null
+  if (!items.every((it) => {
+    const p = Number(it?.p)
+    return Number.isFinite(p) && (p > 0 || (p < 0 && isPettyDiscountName(String(it?.n ?? ''))))
+  })) return null
   // 税は税率ごとにまとめて1円未満切り捨て。
   let b8 = 0, b10 = 0
   for (const it of items) { if (it.rate === 10) b10 += it.p; else b8 += it.p }
@@ -513,9 +536,9 @@ function itemsTotalWithTax(items?: PettyCashItem[] | null): number | null {
 
 function confirmFlex(pendingId: number, x: ExtractedExpense): Record<string, unknown> {
   const base = Math.max(0, x.amount - x.tax)
-  const acctLabel = pettyItemsLabel(x.items) || '—'
+  const acctLabel = pettyItemsLabel(x.items ?? null) || '—'
   // 検証: 明細の税込合計(税率別＋切り捨て)と支払合計のズレ(±1円超)は黙って通さず、警告＋「不一致を確認して記録」にする。
-  const itemsTotal = itemsTotalWithTax(x.items)
+  const itemsTotal = itemsTotalWithTax(x.items ?? null)
   const mismatch = itemsTotal != null && Math.abs(itemsTotal - x.amount) > 1
   const warnRows: Record<string, unknown>[] = mismatch
     ? [{

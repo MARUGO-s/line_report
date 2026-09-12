@@ -604,6 +604,7 @@
     const acctColor = (k) => { const a = ACCTS.find((x) => x.k === k); return a ? a.c : 'var(--acct-unknown)'; };
     const ACCT_RATE = { shokuzai: 8, shomohin: 10, alcohol: 10 };
     const rateOf = (acct) => ACCT_RATE[acct] || 10;
+    const isDiscountName = (name) => /(?:割引|値引|値下げ|クーポン|discount)/i.test(String(name || ''));
     function includedTaxFromGross(gross, rate) {
       const g = Math.max(0, Math.floor(Number(gross) || 0));
       return Math.floor(g * rate / (100 + rate));
@@ -676,7 +677,7 @@
         const targetNet = grossTotal - includedTaxFromGross(grossTotal, rate);
         const nets = rebalanceGroupedValues(
           groupItems,
-          groupItems.map((it) => Math.max(0, it.p - includedTaxFromGross(it.p, rate))),
+          groupItems.map((it) => it.p < 0 ? it.p : Math.max(0, it.p - includedTaxFromGross(it.p, rate))),
           targetNet
         );
         idxs.forEach((idx, j) => { list[idx].p = nets[j]; });
@@ -724,7 +725,7 @@
       ledBody: $('ledBody'), ledEmpty: $('ledEmpty'), tfBase: $('tfBase'), tfTax: $('tfTax'), tfTotal: $('tfTotal'),
     };
 
-    const yen = (n) => '¥' + Math.round(Number(n) || 0).toLocaleString('ja-JP');
+    const yen = (n) => { const v = Math.round(Number(n) || 0); return v < 0 ? '-¥' + Math.abs(v).toLocaleString('ja-JP') : '¥' + v.toLocaleString('ja-JP'); };
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const storeName = (key) => STORE_NAMES[key] || (PAGES && PAGES.resolveStoreName ? PAGES.resolveStoreName(key, '') : '') || key || '';
 
@@ -821,7 +822,8 @@
       raw.forEach((o) => {
         if (!o || typeof o !== 'object') return;
         const n = String(o.n != null ? o.n : (o.name != null ? o.name : '')).trim();
-        const p = Math.max(0, Math.floor(Number(o.p != null ? o.p : o.price) || 0));
+        const pNum = Math.floor(Number(o.p != null ? o.p : o.price) || 0);
+        const p = pNum < 0 && isDiscountName(n) ? pNum : Math.max(0, pNum);
         let acct = String(o.acct || '').trim(); if (!acct) acct = 'shokuzai';
         let rate = Number(o.rate); rate = (rate === 10) ? 10 : 8;
         if (!n && p <= 0) return;
@@ -891,11 +893,11 @@
         '<input class="input iname" type="text" placeholder="品目名（例: お徳用おろし生姜）" />' +
         '<select class="usel iacct">' + acctOptionsHTML(a) + '</select>' +
         '<span class="irate' + (rate === 8 ? ' r8' : '') + '">' + rate + '%</span>' +
-        '<div class="iyen"><input class="iprice" type="number" min="0" step="1" inputmode="numeric" placeholder="0" /></div>' +
+      '<div class="iyen"><input class="iprice" type="number" min="-999999999" step="1" inputmode="numeric" placeholder="0" /></div>' +
         '<button class="irm" type="button" aria-label="この品目を削除"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
       row.querySelector('.iname').value = name || '';
       const pv = (price === 0 || price) ? Math.floor(Number(price) || 0) : '';
-      row.querySelector('.iprice').value = (pv && pv > 0) ? String(pv) : '';
+      row.querySelector('.iprice').value = (pv !== 0) ? String(pv) : '';
       const iacct = row.querySelector('.iacct');
       iacct.addEventListener('change', () => {
         const rt = rateOf(iacct.value);
@@ -915,7 +917,8 @@
     function readItems() {
       return Array.prototype.map.call(dom.itemList.querySelectorAll('.item-row'), (row) => {
         const n = row.querySelector('.iname').value.trim();
-        const p = Math.max(0, Math.floor(Number(row.querySelector('.iprice').value) || 0));
+        const pNum = Math.floor(Number(row.querySelector('.iprice').value) || 0);
+        const p = pNum < 0 && isDiscountName(n) ? pNum : Math.max(0, pNum);
         const acct = row.querySelector('.iacct').value;
         const rate = rateOf(acct);
         return { n: n, p: p, acct: acct, rate: rate };
@@ -1225,7 +1228,10 @@
         const memo = r.memo ? '<div class="ld-memo">' + esc(r.memo) + '</div>' : '';
         // 検証: 明細(全品目に価格あり)の税込合計(税率別まとめ＋切り捨て)が保存済みの出金額と食い違えば警告（読み取りミスの目印）。
         let mismatchWarn = '';
-        if (r.items.length && r.items.every((it) => Number(it.p) > 0)) {
+        if (r.items.length && r.items.every((it) => {
+          const p = Number(it.p);
+          return Number.isFinite(p) && (p > 0 || (p < 0 && isDiscountName(it.n)));
+        })) {
           let lb8 = 0, lb10 = 0;
           r.items.forEach((it) => { if (Number(it.rate) === 10) lb10 += it.p; else lb8 += it.p; });
           const itemsTotal = (lb8 + lb10) + Math.floor(lb8 * 8 / 100) + Math.floor(lb10 * 10 / 100);

@@ -30,6 +30,12 @@ test("expense prompt keeps the SEIYU supplier rule within the configured limit",
   assert.ok(EXPENSE_RECEIPT_PROMPT_ADDITION.length <= STORE_RECEIPT_PROMPT_MAX_CHARS);
 });
 
+test("expense prompt preserves discount signs", () => {
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /割引・値引の符号/);
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /割引 20% -120/);
+  assert.match(EXPENSE_RECEIPT_PROMPT_ADDITION, /符号付き合計/);
+});
+
 test("expense prompt reads the horizontal Yamato Collect sender item and top-right amount", () => {
   assert.match(
     EXPENSE_RECEIPT_PROMPT_ADDITION,

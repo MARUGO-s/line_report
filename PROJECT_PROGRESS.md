@@ -1,5 +1,11 @@
 # LINE Report Project Progress
 
+### 2026-09-12 - 小口レシートの割引符号を保持し、出金額を再計算
+
+- 小口画像解析で「割引／値引 -120円」が正数化され、通常明細として加算される原因を特定。数字抽出時の符号欠落と、割引行の意味づけ不足が原因だった。
+- 小口フロー、admin-api、`petty_cash.html`、経費解析プロンプトを修正。割引語のある行だけ負数を許可し、明細・税・出金額を符号付きで検算する。
+- 匿名化した同型レシートの回帰テストを追加。`npm run test:receipt` 33件、`npm run test:ci` 全件、`npm run check`、`knowledge:check`、`git diff --check` が成功。保存済みの誤登録行は自動変更しない。
+
 ### 2026-09-11 - 3アプリのDB・共通データ連携監査
 
 - LINE Report / Journal Report / M-talkは同じhocbn。別DBではなく、同期失敗の黙殺・期限切れキャッシュ・認証JS二重読込・端末設定の誤表示を修正。確認済み0円日だけ安全に補完するmigrationを追加。

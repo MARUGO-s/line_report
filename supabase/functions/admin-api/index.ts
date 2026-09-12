@@ -9684,7 +9684,11 @@ const PETTY_ACCT_NAMES: Record<string, string> = { shokuzai: "食材", shomohin:
 type PettyItem = { n: string; p: number; acct: string; rate: number }
 type PettyTaxMode = "ex" | "in"
 
-// items 配列を正規化（[{n,p,acct,rate}]）。各品目: 税抜価格 p(int≥0)、acct∈3科目、rate∈{8,10}。
+function isPettyDiscountName(name: string): boolean {
+  return /(?:割引|値引|値下げ|クーポン|discount)/i.test(String(name ?? ''))
+}
+
+// items 配列を正規化（[{n,p,acct,rate}]）。各品目: 税抜価格 p(int、割引行のみ負数可)、acct∈3科目、rate∈{8,10}。
 // 空行（名前も価格も無い）は除去。1件も無ければ null（＝従来の単一フィールド経路にフォールバック）。
 function normalizePettyItems(raw: unknown): PettyItem[] | null {
   if (!Array.isArray(raw)) return null
@@ -9694,7 +9698,7 @@ function normalizePettyItems(raw: unknown): PettyItem[] | null {
     const o = el as Record<string, unknown>
     const n = toSafeString(o.n ?? (o as { name?: unknown }).name).trim()
     const pNum = Math.floor(Number(o.p ?? (o as { price?: unknown }).price))
-    const p = Number.isFinite(pNum) && pNum > 0 ? pNum : 0
+    const p = Number.isFinite(pNum) && (pNum > 0 || (pNum < 0 && isPettyDiscountName(n))) ? pNum : 0
     let acct = toSafeString(o.acct).trim().toLowerCase()
     if (!PETTY_ACCT_KEYS.has(acct)) acct = "shokuzai"
     let rate = Math.floor(Number(o.rate))
@@ -9727,7 +9731,10 @@ function normalizePettyTaxMode(raw: unknown): PettyTaxMode {
 
 // 検索/旧表示用の品目テキスト（複数は「・名 ¥価格」改行、1件はそのまま）。
 function pettyItemText(items: PettyItem[]): string {
-  const lines = items.map((it) => `${it.n}${it.p > 0 ? " ¥" + it.p.toLocaleString("ja-JP") : ""}`.trim()).filter(Boolean)
+  const lines = items.map((it) => {
+    const amount = it.p < 0 ? ` -¥${Math.abs(it.p).toLocaleString("ja-JP")}` : it.p > 0 ? ` ¥${it.p.toLocaleString("ja-JP")}` : ""
+    return `${it.n}${amount}`.trim()
+  }).filter(Boolean)
   if (!lines.length) return ""
   return lines.length > 1 ? lines.map((s) => "・" + s).join("\n") : lines[0]
 }
