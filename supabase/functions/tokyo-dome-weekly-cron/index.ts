@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
 import { formatEventTimeLabel, normalizeEventTime } from "../_shared/tokyo_dome_schedule.ts"
+import { explicitWeekWindow, nextWeekWindow, type WeekWindow } from "../_shared/tokyo_dome_weekly_window.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
@@ -48,19 +49,35 @@ Deno.serve(async (req) => {
   const now = new Date()
   const jst = toJstDateParts(now)
 
-  // ?test_send=1&room_id=... と専用ヘッダーで1ルームへ即時プレビュー送信（ログ更新なし）。
-  // 秘密値はURL・アクセスログへ残さない。
+  // ?test_send=1&room_id=... で1ルームへ即時プレビュー送信（重複防止ログは更新しない＝何度でも再送可）。
+  // 認証は「専用ヘッダー(TOKYO_DOME_WEEKLY_TEST_KEY)」か「内部cron認証」のどちらか。
+  // 後者は SQL から public.invoke_tokyo_dome_weekly_resend() で叩く経路で、秘密値をURLへ載せずに済む。
+  // ?week_start=YYYY-MM-DD を付けると、その日から14日間を対象にする（省略時は通常配信と同じ翌週日曜起点）。
   const testFlag = ["1", "true", "yes", "on"].includes((url.searchParams.get("test_send") ?? "").toLowerCase())
   if (testFlag) {
     const testKey = (Deno.env.get("TOKYO_DOME_WEEKLY_TEST_KEY") ?? "").trim()
     const provided = (req.headers.get("x-dome-weekly-test-key") ?? "").trim()
-    if (!testKey || !provided || !constantTimeEqualSecret(provided, testKey)) {
+    const byTestKey = Boolean(testKey) && Boolean(provided) && constantTimeEqualSecret(provided, testKey)
+    const byCronAuth = byTestKey ? false : await isInternalCronAuthorized(req, supabase)
+    if (!byTestKey && !byCronAuth) {
       return json({ ok: false, error: "Forbidden" }, 403)
     }
     const roomId = (url.searchParams.get("room_id") ?? "").trim()
     if (!roomId) return json({ ok: false, error: "room_id required" }, 400)
+    // cron認証経路は宛先を既知ルームに限定する（打ち間違いで無関係なルームへ送らない）。
+    if (byCronAuth) {
+      const { data: knownRoom, error: roomLookupError } = await supabase
+        .from("room_summary_settings")
+        .select("room_id")
+        .eq("room_id", roomId)
+        .maybeSingle()
+      if (roomLookupError) return json({ ok: false, error: `room lookup failed: ${roomLookupError.message}` }, 500)
+      if (!knownRoom) return json({ ok: false, error: "unknown room_id" }, 404)
+    }
+    const weekStartParam = (url.searchParams.get("week_start") ?? "").trim()
+    const win = weekStartParam ? explicitWeekWindow(weekStartParam) : nextWeekWindow(jst)
+    if (!win) return json({ ok: false, error: "week_start must be YYYY-MM-DD" }, 400)
     const storeKey = (url.searchParams.get("store_partition_key") ?? "marugos").trim()
-    const win = nextWeekWindow(jst)
     const events = await loadEvents(supabase, win.startStr, win.endStr)
     const flex = buildWeeklyFlex(win, events)
     const r = await sendLinePush(roomId, [flex], resolveStoreLineToken(storeKey, lineAccessToken), storeKey)
@@ -263,19 +280,6 @@ function buildWeeklyFlexBody(win: WeekWindow, events: WeeklyEvent[], showTimes: 
 }
 
 // --- date helpers (JST) ---
-type WeekWindow = { start: { year: number; month: number; day: number; dow: number }; end: { year: number; month: number; day: number; dow: number }; startStr: string; endStr: string }
-
-function nextWeekWindow(jst: { year: number; month: number; day: number; dow: number }): WeekWindow {
-  const daysToNextSunday = jst.dow === 0 ? 7 : (7 - jst.dow) // 翌週の日曜まで
-  const s = addDaysUtc(jst.year, jst.month, jst.day, daysToNextSunday)
-  const e = addDaysUtc(s.year, s.month, s.day, 13) // 翌週日曜から2週間(14日間)分: 日〜翌々週の土
-  return { start: s, end: e, startStr: ymd(s), endStr: ymd(e) }
-}
-
-function addDaysUtc(year: number, month: number, day: number, n: number) {
-  const dt = new Date(Date.UTC(year, month - 1, day + n))
-  return { year: dt.getUTCFullYear(), month: dt.getUTCMonth() + 1, day: dt.getUTCDate(), dow: dt.getUTCDay() }
-}
 function dowOf(ymdStr: string): string {
   const m = ymdStr.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!m) return "?"
@@ -285,7 +289,6 @@ function toJstDateParts(base = new Date()) {
   const jst = new Date(base.getTime() + JST_OFFSET_MS)
   return { year: jst.getUTCFullYear(), month: jst.getUTCMonth() + 1, day: jst.getUTCDate(), hour: jst.getUTCHours(), minute: jst.getUTCMinutes(), dow: jst.getUTCDay() }
 }
-function ymd(d: { year: number; month: number; day: number }): string { return `${String(d.year).padStart(4, "0")}-${pad2(d.month)}-${pad2(d.day)}` }
 function pad2(v: number): string { return String(v).padStart(2, "0") }
 function truncate(v: string, max: number): string { return v.length > max ? `${v.slice(0, max - 1)}…` : v }
 

@@ -766,11 +766,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 42件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 104件
+- 共有TypeScriptモジュール: 105件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
-- SQL migrations: 305件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 103件
+- SQL migrations: 306件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 104件
 
 ### 公開画面・ブラウザコード
 
@@ -949,6 +949,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/store_receipt_phones.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/store_receipt_query.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/tokyo_dome_schedule.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/tokyo_dome_weekly_window.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/usage_metrics.ts` | ADM-02 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/weather_daily.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/web_push.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
