@@ -2,6 +2,8 @@ export type ExtractedTokyoDomeEvent = {
   event_date: string
   title: string
   category: string
+  open_time?: string | null   // 開場（開門）時刻 HH:MM
+  start_time?: string | null  // 開始（開演/試合開始）時刻 HH:MM
 }
 
 export function normalizeBaseballCategory(title: string, category: string): string {
@@ -20,6 +22,64 @@ function markerCategory(value: string): "野球" | "コンサート" | "その�
   if (text === "コンサート") return "コンサート"
   if (["イベント", "その他", "展示会", "展示", "格闘技", "プロレス", "式典"].includes(text)) return "その他"
   return null
+}
+
+// 時刻テキストの表記ゆれ（全角数字・全角コロン・「18時30分」）を HH:MM へ寄せる。
+function normalizeTimeText(value: string): string {
+  return String(value ?? "")
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[：]/g, ":")
+    .replace(/(\d{1,2})\s*時\s*(\d{1,2})\s*分?/g, "$1:$2")
+    .replace(/(\d{1,2})\s*時(?!間)/g, "$1:00")
+}
+
+// "18:5" のような桁落ちを弾きつつ HH:MM に整形。範囲外(24時以降・60分以上)は不採用。
+export function normalizeEventTime(value: unknown): string | null {
+  const m = normalizeTimeText(String(value ?? "")).match(/(\d{1,2}):(\d{2})/)
+  if (!m) return null
+  const hour = Number(m[1])
+  const minute = Number(m[2])
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
+const OPEN_LABEL = /^(開場|開門)$/
+const START_LABEL = /^(開始|開演|試合開始|プレイボール|スタート)$/
+
+// 1イベント分のテキストから開場／開始時刻を拾う。
+// 想定表記: 「開場 12:00／開始 14:00」「開場12:00 開演18:00」「18:00開演」「開演18時」。
+// 「終演」「試合時間」など終了・所要時間の表記は拾わない。
+export function extractEventTimes(text: string): { openTime: string | null; startTime: string | null } {
+  const normalized = normalizeTimeText(text)
+  let openTime: string | null = null
+  let startTime: string | null = null
+
+  const assign = (label: string, raw: string) => {
+    const time = normalizeEventTime(raw)
+    if (!time) return
+    if (OPEN_LABEL.test(label)) { if (!openTime) openTime = time }
+    else if (START_LABEL.test(label)) { if (!startTime) startTime = time }
+  }
+
+  // ラベルが先（開場 12:00）
+  const labelFirst = /(開場|開門|試合開始|プレイボール|開始|開演|スタート)\s*[:：]?\s*(\d{1,2}:\d{2})/g
+  let m: RegExpExecArray | null
+  while ((m = labelFirst.exec(normalized))) assign(m[1], m[2])
+
+  // 時刻が先（12:00開場）
+  const timeFirst = /(\d{1,2}:\d{2})\s*[:：]?\s*(開場|開門|試合開始|プレイボール|開始|開演|スタート)/g
+  while ((m = timeFirst.exec(normalized))) assign(m[2], m[1])
+
+  return { openTime, startTime }
+}
+
+// 配信・画面共通の時刻表記。両方あれば「開場16:00 / 開始18:00」、片方だけならその1つ。
+export function formatEventTimeLabel(openTime?: string | null, startTime?: string | null): string {
+  const parts: string[] = []
+  if (openTime) parts.push(`開場${openTime}`)
+  if (startTime) parts.push(`開始${startTime}`)
+  return parts.join(" / ")
 }
 
 // Parse the text version of the official Tokyo Dome schedule by calendar cell.
@@ -58,16 +118,27 @@ export function parseTokyoDomeSchedule(text: string): ExtractedTokyoDomeEvent[] 
     for (let k = 0; k < content.length; k++) {
       const marker = markerCategory(content[k])
       if (!marker) continue
+      // このイベントの範囲＝次のジャンル見出しまで。タイトルと時刻はこの範囲から拾う。
+      let segEnd = content.length
+      for (let s = k + 1; s < content.length; s++) {
+        if (markerCategory(content[s])) { segEnd = s; break }
+      }
       let title = ""
-      for (let t = k + 1; t < content.length; t++) {
+      let titleIndex = -1
+      for (let t = k + 1; t < segEnd; t++) {
         const candidate = content[t]
-        if (markerCategory(candidate)) break
         if (/^(開場|開始|開演|開門|終演|開催)/.test(candidate)) continue
         if (candidate.startsWith("【") || /TEL|電話|お?問い合わせ|チケット|発売/.test(candidate)) continue
         title = candidate
+        titleIndex = t
         break
       }
       if (!title || /TOKYO\s*DOME\s*TOUR/i.test(title)) continue
+
+      // 「開場 12:00／開始 14:00」はタイトルの前後どちらに来ても拾えるよう、
+      // タイトル行以外のこのイベント範囲をまとめて解析する。
+      const timeSource = content.slice(k + 1, segEnd).filter((_, idx) => (k + 1 + idx) !== titleIndex).join(" ")
+      const { openTime, startTime } = extractEventTimes(timeSource)
 
       const category = marker === "野球"
         ? (/(大学|高校|社会人|選手権|リトル|シニア|ボーイズ|女子|クラブ選手権|アマチュア)/.test(title) ? "アマ野球" : "プロ野球")
@@ -76,7 +147,13 @@ export function parseTokyoDomeSchedule(text: string): ExtractedTokyoDomeEvent[] 
       const key = `${date}__${cleanTitle}`
       if (seen.has(key)) continue
       seen.add(key)
-      events.push({ event_date: date, title: cleanTitle, category: normalizeBaseballCategory(cleanTitle, category) })
+      events.push({
+        event_date: date,
+        title: cleanTitle,
+        category: normalizeBaseballCategory(cleanTitle, category),
+        open_time: openTime,
+        start_time: startTime,
+      })
     }
     i = next - 1
   }

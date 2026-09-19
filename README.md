@@ -181,8 +181,8 @@ LINE リンクから開いた画面はセッション作成時に `store_partiti
 | `reservation-today-cron` | 毎朝 | 当日予約を LINE に通知 |
 | `review-alert-cron` | 定期 | 新着口コミを検出して LINE アラート |
 | `room-messages-retention-cron` | 定期 | 古いメッセージの自動削除 |
-| `tokyo-dome-events-cron` | 定期 | 東京ドームイベント情報を自動取得・更新 |
-| `tokyo-dome-weekly-cron` | 毎週 | 翌週のドームイベントスケジュールを LINE 配信 |
+| `tokyo-dome-events-cron` | 定期 | 東京ドームイベント情報（開場・開始時刻含む）を自動取得・更新 |
+| `tokyo-dome-weekly-cron` | 毎週 | 今後2週間のドームイベントを LINE 配信（時刻が取れたイベントは開場/開始も表示） |
 | `weather-daily-cron` | 毎日 | 気象データを取得・DB に保存 |
 | `pv-japan-alert-cron` | 定期 | PV ジャパン関連アラート |
 
@@ -278,7 +278,7 @@ MARUGO S のレシート解析カードに「📋 日報を記入する」ボタ
 | `foodcourt_forecast_factors` | 係数・モデル選択結果・バックテスト誤差 |
 | `foodcourt_forecast_history` | 参考再計算の履歴（本番精度の正本は発行台帳） |
 | `foodcourt_daily_logs` | 日報データ（施策・評価・申し送り） |
-| `tokyo_dome_events` | 東京ドームイベント一覧（動員予測値含む） |
+| `tokyo_dome_events` | 東京ドームイベント一覧（動員予測値・開場/開始時刻含む） |
 
 ---
 
@@ -453,6 +453,7 @@ http://127.0.0.1:8765/line_report/foodcourt-report.html    # フードコート�
 
 | 日付 | 変更内容 |
 |---|---|
+| 2026-09-19 | ドームシティ週次イベント配信に開場・開始時刻を追加。公式スケジュールに記載がある分だけ表示し、記載が無いイベントは従来どおりタイトルのみ |
 | 2026-09-10 | フードコート予測を5方式の事前台帳・WAPE/MAE・週次採用判定へ移行。本番反映済み。現行説明を更新し、旧GLM仕様を履歴へ分離 |
 | 2026-07-09 | フードコート日報ページ（`foodcourt-report.html`）の認証バグ修正（themeBtn ID 不一致によりログイン済みでも「未接続」になる問題） |
 | 2026-07-09 | レシート解析カードに「📋 日報を記入する」ボタンを追加（marugoS 専用・ワンタイムログインリンク付き） |

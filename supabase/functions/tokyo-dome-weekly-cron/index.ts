@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { resolveStorePartitionKeyForRoom } from "../_shared/receipt_report_aggregate.ts"
+import { formatEventTimeLabel, normalizeEventTime } from "../_shared/tokyo_dome_schedule.ts"
 import { recordLineWebhookDeliveryLog } from "../_shared/line_webhook_delivery_log.ts"
 import { isBlockedByMarugosecondLockdown } from "../_shared/line_client.ts"
 import { isMtalkSyntheticRoomId } from "../_shared/mtalk_room_id.ts"
@@ -157,17 +158,26 @@ Deno.serve(async (req) => {
   return json({ ok: true, now_jst: nowJst, week: `${win.startStr}〜${win.endStr}`, target_room_count: targets.length, sent_room_count: sent.length, skipped, errors }, 200)
 })
 
-type WeeklyEvent = { event_date: string; title: string; category: string; venue: string; is_japan: boolean }
+type WeeklyEvent = { event_date: string; title: string; category: string; venue: string; is_japan: boolean; open_time: string | null; start_time: string | null }
 
 async function loadEvents(supabase: DbClient, startStr: string, endStr: string): Promise<WeeklyEvent[]> {
   // 4会場（東京ドーム/カナデビア/後楽園/PV観戦）を取得し、会場ごとに分けて配信する。
-  const { data, error } = await supabase
+  const query = (columns: string) => supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, category, venue, is_japan")
+    .select(columns)
     .gte("event_date", startStr)
     .lte("event_date", endStr)
     .order("event_date", { ascending: true })
     .order("title", { ascending: true })
+
+  // 時刻2列は後から追加したもの。関数だけ先に出た場合でも配信を止めないよう、旧スキーマへフォールバックする。
+  let { data, error } = await query("event_date, title, category, venue, is_japan, open_time, start_time")
+  if (error) {
+    console.error("loadEvents with times failed:", error.message)
+    const legacy = await query("event_date, title, category, venue, is_japan")
+    data = legacy.data
+    error = legacy.error
+  }
   if (error) { console.error("loadEvents failed:", error.message); return [] }
   return (Array.isArray(data) ? data : []).map((e) => ({
     event_date: String((e as { event_date?: unknown }).event_date ?? "").slice(0, 10),
@@ -175,10 +185,27 @@ async function loadEvents(supabase: DbClient, startStr: string, endStr: string):
     category: String((e as { category?: unknown }).category ?? "その他"),
     venue: String((e as { venue?: unknown }).venue ?? "tokyo-dome"),
     is_japan: (e as { is_japan?: unknown }).is_japan === true,
+    open_time: normalizeEventTime((e as { open_time?: unknown }).open_time),
+    start_time: normalizeEventTime((e as { start_time?: unknown }).start_time),
   })).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e.event_date) && e.title)
 }
 
+// LINEのFlexメッセージ上限(50KB)に対する安全弁。時刻行を足した分だけ本文が太るため、
+// 万一超えそうな週は時刻行を落として「イベント一覧が届かない」事態を避ける。
+const FLEX_JSON_SAFE_BYTES = 45000
+
 function buildWeeklyFlex(win: WeekWindow, events: WeeklyEvent[]) {
+  const withTimes = buildWeeklyFlexBody(win, events, true)
+  if (jsonByteLength(withTimes) <= FLEX_JSON_SAFE_BYTES) return withTimes
+  console.warn("weekly flex too large with times; falling back to titles only")
+  return buildWeeklyFlexBody(win, events, false)
+}
+
+function jsonByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length
+}
+
+function buildWeeklyFlexBody(win: WeekWindow, events: WeeklyEvent[], showTimes: boolean) {
   const rangeLabel = `${win.start.month}/${win.start.day}(${WDAY_JP[win.start.dow]})〜${win.end.month}/${win.end.day}(${WDAY_JP[win.end.dow]})`
   const total = events.length
   const headerContents: Array<Record<string, unknown>> = [
@@ -188,11 +215,18 @@ function buildWeeklyFlex(win: WeekWindow, events: WeeklyEvent[]) {
   const evRow = (e: WeeklyEvent): Record<string, unknown> => {
     const dow = dowOf(e.event_date)
     const dateLabel = `${Number(e.event_date.slice(5, 7))}/${Number(e.event_date.slice(8, 10))}(${dow})`
+    // 開場/開始はタイトル下に小さく1行。横並びに足すとタイトルが潰れるため2行構成にする。
+    // 公式に時刻の記載が無いイベント（各ホールの一部・IMM・PV観戦）は行ごと出さない。
+    const timeLabel = showTimes ? formatEventTimeLabel(e.open_time, e.start_time) : ""
+    const detail: Array<Record<string, unknown>> = [
+      { type: "text", text: `${EVT_ICON[e.category] || "🎫"} ${e.is_japan ? "🇯🇵 " : ""}${e.title}`, size: "sm", color: "#333333", wrap: true },
+    ]
+    if (timeLabel) detail.push({ type: "text", text: `🕒 ${timeLabel}`, size: "xxs", color: "#8A94A6", wrap: true })
     return {
       type: "box", layout: "horizontal", margin: "sm", spacing: "sm",
       contents: [
         { type: "text", text: dateLabel, size: "sm", weight: "bold", color: "#1F2D3D", flex: 3 },
-        { type: "text", text: `${EVT_ICON[e.category] || "🎫"} ${e.is_japan ? "🇯🇵 " : ""}${e.title}`, size: "sm", color: "#333333", flex: 8, wrap: true },
+        { type: "box", layout: "vertical", flex: 8, contents: detail },
       ],
     }
   }
