@@ -927,7 +927,7 @@ async function loadVenueEventsForReports(
   let data: any[] = []
   const firstTry = await supabase
     .from("tokyo_dome_events")
-    .select("event_date, title, category, venue, is_japan, note, expected_attendance, start_time, game_duration, game_result, game_score, score_margin")
+    .select("event_date, title, category, venue, is_japan, note, expected_attendance, open_time, start_time, game_duration, game_result, game_score, score_margin")
     .gte("event_date", lo)
     .lte("event_date", hi)
     .order("event_date", { ascending: true })

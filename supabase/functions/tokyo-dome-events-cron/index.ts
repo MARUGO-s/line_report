@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
-import { normalizeBaseballCategory, parseTokyoDomeSchedule, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
+import { extractEventTimes, normalizeBaseballCategory, normalizeEventTime, parseTokyoDomeSchedule, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
 import { GROQ_TEXT_FALLBACK_MODEL, resolveGroqTextModel } from "../_shared/groq_model.ts"
 import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
@@ -124,14 +124,24 @@ Deno.serve(async (req) => {
     }
   }
   const now = new Date().toISOString()
+  // 開場/開始時刻は公式スケジュール側が正本。掲載が消えた場合は null に戻す（この後の巨人戦同期が実績値で上書きする）。
   const rows = [
-    ...domeEvents.map((e) => ({ event_date: e.event_date, venue: "tokyo-dome", title: e.title, category: normalizeBaseballCategory(e.title, e.category), source: "tokyo-dome.co.jp", updated_at: now })),
-    ...hallResults.flatMap((r) => r.events.map((e) => ({ event_date: e.event_date, venue: r.venue, title: e.title, category: e.category, source: r.source, updated_at: now }))),
-    ...immEvents.map((e) => ({ event_date: e.event_date, venue: "imm", title: e.title, category: e.category, source: "imm.theater", updated_at: now })),
+    ...domeEvents.map((e) => ({ event_date: e.event_date, venue: "tokyo-dome", title: e.title, category: normalizeBaseballCategory(e.title, e.category), source: "tokyo-dome.co.jp", open_time: e.open_time ?? null, start_time: e.start_time ?? null, updated_at: now })),
+    ...hallResults.flatMap((r) => r.events.map((e) => ({ event_date: e.event_date, venue: r.venue, title: e.title, category: e.category, source: r.source, open_time: e.open_time ?? null, start_time: e.start_time ?? null, updated_at: now }))),
+    ...immEvents.map((e) => ({ event_date: e.event_date, venue: "imm", title: e.title, category: e.category, source: "imm.theater", open_time: e.open_time ?? null, start_time: e.start_time ?? null, updated_at: now })),
   ]
-  const { error } = await supabase
+  const upsertRows = (payload: Array<Record<string, unknown>>) => supabase
     .from("tokyo_dome_events")
-    .upsert(rows, { onConflict: "event_date,venue,title" })
+    .upsert(payload, { onConflict: "event_date,venue,title" })
+
+  let { error } = await upsertRows(rows)
+  // open_time は後から追加した列。migration より先に関数が出た場合でも、
+  // イベント本体の取り込みまで巻き込んで止めない（時刻だけ落として書き込む）。
+  if (error && /open_time/.test(error.message ?? "")) {
+    console.error("upsert with open_time failed; retrying without it:", error.message)
+    const legacy = rows.map(({ open_time: _openTime, ...rest }) => rest)
+    error = (await upsertRows(legacy)).error
+  }
   if (error) {
     return json({ ok: false, error: `upsert failed: ${error.message}`, extracted: rows.length }, 500)
   }
@@ -316,17 +326,21 @@ Deno.serve(async (req) => {
 
         // 2) Update tokyo_dome_events for matches held in Tokyo Dome
         if (info.stadium === "東京ドーム") {
+          // start_time は公式スケジュール由来の予定時刻も入る。実績ページに時刻が無い日は
+          // キー自体を送らず、既存値を維持する（null で上書きすると配信から時刻が消える）。
+          const giantsUpdate: Record<string, unknown> = {
+            expected_attendance: info.attendance ?? null,
+            game_duration: info.duration ?? null,
+            game_result: info.result ?? null,
+            game_score: info.score ?? null,
+            score_margin: info.margin ?? null,
+            updated_at: new Date().toISOString()
+          }
+          const giantsStartTime = normalizeEventTime(info.startTime)
+          if (giantsStartTime) giantsUpdate.start_time = giantsStartTime
           const { error: updateErr } = await supabase
             .from("tokyo_dome_events")
-            .update({
-              expected_attendance: info.attendance ?? null,
-              start_time: info.startTime ?? null,
-              game_duration: info.duration ?? null,
-              game_result: info.result ?? null,
-              game_score: info.score ?? null,
-              score_margin: info.margin ?? null,
-              updated_at: new Date().toISOString()
-            })
+            .update(giantsUpdate)
             .eq("event_date", dateString)
             .eq("venue", "tokyo-dome")
             .eq("category", "プロ野球")
@@ -418,7 +432,9 @@ function parseDomeCityHallCalendar(html: string): ExtractedEvent[] {
         const key = `${date}__${cleanTitle}`
         if (seen.has(key)) continue
         seen.add(key)
-        out.push({ event_date: date, title: cleanTitle, category: mapCat(tag) })
+        // 開場/開演時刻はホールによって記載があったり無かったりする。あるときだけ拾う（無い日は null のまま）。
+        const { openTime, startTime } = extractEventTimes(stripTags(blk))
+        out.push({ event_date: date, title: cleanTitle, category: mapCat(tag), open_time: openTime, start_time: startTime })
       }
     }
   }
@@ -490,12 +506,17 @@ function parseImmTheaterSchedule(html: string): ExtractedEvent[] {
       }
     }
     
+    // 期間公演(複数日)は日ごとに開演時刻が違うため、1日公演のときだけ時刻を採用する。
+    const times = dates.length === 1
+      ? extractEventTimes(stripTags(li))
+      : { openTime: null, startTime: null }
+
     for (const date of dates) {
       const cleanTitle = title.slice(0, 200)
       const key = `${date}__${cleanTitle}`
       if (seen.has(key)) continue
       seen.add(key)
-      out.push({ event_date: date, title: cleanTitle, category: "その他" })
+      out.push({ event_date: date, title: cleanTitle, category: "その他", open_time: times.openTime, start_time: times.startTime })
     }
   }
   
@@ -513,8 +534,9 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
   const system = [
     "あなたは東京ドームのイベント日程表から、日付ごとのイベントを構造化抽出するアシスタントです。",
     "出力は JSON 配列のみ。前後に説明文やコードフェンスを付けないこと。",
-    "各要素は { \"event_date\": \"YYYY-MM-DD\", \"title\": \"...\", \"category\": \"...\" }。",
+    "各要素は { \"event_date\": \"YYYY-MM-DD\", \"title\": \"...\", \"category\": \"...\", \"open_time\": \"HH:MM\", \"start_time\": \"HH:MM\" }。",
     "ルール:",
+    "- open_time は開場(開門)時刻、start_time は開始(開演/試合開始)時刻。記載が無ければ null。終演時刻や試合時間は入れない。",
     "- 日付範囲（例: 6/2〜6/4、6月13・14日）は、必ず1日ごとの個別要素に展開する。",
     "- title はイベント名（野球は『巨人ー中日』のようなカード名、ライブは公演名）。",
     "- category は次のいずれか1つ: プロ野球 / アマ野球 / ライブ / その他。",
@@ -551,7 +573,13 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
     const key = `${date}__${title}`
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ event_date: date, title, category })
+    out.push({
+      event_date: date,
+      title,
+      category,
+      open_time: normalizeEventTime(rec.open_time ?? rec.openTime),
+      start_time: normalizeEventTime(rec.start_time ?? rec.startTime),
+    })
   }
   out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
   return { events: out, raw, usage }
