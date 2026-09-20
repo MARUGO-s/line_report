@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 フードコートPDF白紙化
+
+- `openReportWindow` は全ブラウザーで `showReportOverlay` → 接続済みsrcdoc iframe。SafariではBlob別タブ/空タブdocument.writeの保存が白紙となるため戻さない。60秒後revoke撤去だけでは修正にならない。
+- Safari/Chromeで合成長文の実PDF保存を確認。全出力入口、エスケープ、表示/置換/閉じる、本文フォールバックの回帰は `tests/foodcourt_pdf_export.test.mjs`。検証用実店舗データやPDF原本はコミットしない。
+- 最新画面で保存済み分析から再出力。AI/DBの再実行・移行なし。配備確認は対応PR/Pages Actions。見えるプレビューだけでPDF保存成功と判断しない。
+
 ## 2026-09-20 分析整合性監査（先行v21への追補）
 
 - 本番反映済み（2026-09-20）: PR #245 / `57c5f8a`、Edge `35504384002`・Pages `35504384026` 成功。`admin-api v1207` / `ai-analyze v290` の主要分析ソースと公開3ファイルが修正版に一致、未認証POSTは401。配備確認と実AI回答品質の確認を混同しない。
