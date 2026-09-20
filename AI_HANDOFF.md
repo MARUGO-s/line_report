@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 分析整合性監査（先行v21への追補）
+
+- 正本は `docs/ANALYSIS-INTEGRITY-AUDIT.md`。KPI pack v2: breakEven/縮小個数は不成立時null、checkUpliftYenはproductSpendPerPurchasingCheckYenへ変更。店舗純増と呼ばない。
+- 実績は同日対応・重複なしの観測値、月日数は全暦日観測月の売上発生日数で代替。部分月を営業日数にしない。廃棄後能力と整数配分/円丸めを保持する。
+- 通常提案・達成状況確認では試算しない。型/範囲外を入力値に丸め込まない。評価用確定ブロックは `evaluationProtectedPrefixLength` で3シナリオを保護。FC日次/期間v22。
+- 既存回答は自動変更しない。実AI文章・店舗全体の採算は別検証。認可・DB/URLは変更なし。
+
 ## 2026-09-20 KGI/KPI/KFIの分析モデル
 
 - KFIは利用者指定により現場行動。財務指標へ変更しない。定義・数値境界・出力は `business_goal_metrics.ts` と `docs/BUSINESS-GOAL-METRICS.md` を正本にする。指標名だけで試算起動しない。

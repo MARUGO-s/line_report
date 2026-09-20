@@ -92,6 +92,8 @@ test('real handler only computes KPI scenarios with both the flag and an explici
       ['昨年のKPIを数字で教えて',true,false],
       ['KPIとは？',true,false],
       ['KGI・KPI・KFIの関係を分析に入れて',true,false],
+      ['売上を伸ばすための提案を3つ',true,false],
+      ['KPI目標の達成状況を確認して',true,false],
       ['KFIの実績を教えて',true,false],
       ['KPIの目標を試算してください',false,false],
       ['KPIの目標を試算してください',true,true],

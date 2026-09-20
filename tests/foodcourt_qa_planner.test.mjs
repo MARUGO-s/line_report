@@ -67,7 +67,7 @@ test('cancel, invalid/overlapping ranges and replacement questions do not start 
 });
 
 test('KPI planner matches server gate and explicit period means no period clarification',()=>{
-  for(const q of ['粗利率とは？','先月の廃棄率は？','KPIを数字で','損益分岐の個数を教えて','新商品のKPIを試算してください','実績だけ','昨年のKPIを数字で教えて']) assert.equal(planner.wantsKpiTargets(q),isKpiScenarioRequest(q),q);
+  for(const q of ['粗利率とは？','先月の廃棄率は？','KPIを数字で','損益分岐の個数を教えて','新商品のKPIを試算してください','実績だけ','昨年のKPIを数字で教えて','売上を伸ばすための提案を3つ','KGI・KPI・KFIを含む改善提案','KPI目標の達成状況を確認して']) assert.equal(planner.wantsKpiTargets(q),isKpiScenarioRequest(q),q);
   const result=planner.nextTurn(planner.initialState(),'2026年6月の売上を教えて',options);assert.equal(result.kind,'ready');
 });
 

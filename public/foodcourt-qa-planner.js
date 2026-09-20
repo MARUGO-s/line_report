@@ -55,11 +55,13 @@
     const simulation = /試算(?:して|する|を|したい|してください|しよう)|シミュレーション(?:して|する|を|したい)|シナリオ(?:を|で)|(?:試算|シミュレーション)$|試算してほしい/;
     if (metric.test(q) && simulation.test(q)) return true;
     if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
-    const plan = /目標|狙う|決めたい|設定(?:したい|して|する)|提案|値付け|単価設定|価格設定/;
+    if (/達成状況|進捗|振り返|確認|評価/.test(q)) return false;
+    const plan = /目標.*(?:出して|出す|決め|設定|提案)|決めたい|設定(?:したい|して|する)|値付け|単価設定|価格設定/;
     const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
     return (metric.test(q) && plan.test(q)) ||
       (/損益分岐/.test(q) && /教えて|計算|何個|何円/.test(q)) ||
-      (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q));
+      (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q)) ||
+      (numeric.test(q) && /粗利|原価率/.test(q) && /狙う|目標|提案/.test(q));
   }
   const initialState = () => ({period:null,pending:null,kpiConfirmed:false});
   function needsInputTrialChoice(query) {

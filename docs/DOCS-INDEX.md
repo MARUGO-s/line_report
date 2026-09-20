@@ -104,6 +104,7 @@
 | 店舗 Webhook 本体 | `supabase/functions/line-webhook/index.ts` |
 | 管理 Bot Webhook | `supabase/functions/line-admin-webhook/index.ts` |
 | Journal AIチャット規約 | [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) / `public/jnm/jnl2txt.html` / `.cursor/rules/ai-enrichment-additive.mdc` |
+| 分析の整合性・数値・3指標 | [ANALYSIS-INTEGRITY-AUDIT.md](./ANALYSIS-INTEGRITY-AUDIT.md) / [BUSINESS-GOAL-METRICS.md](./BUSINESS-GOAL-METRICS.md) / `supabase/functions/_shared/kpi_scenario.ts` |
 
 ---
 

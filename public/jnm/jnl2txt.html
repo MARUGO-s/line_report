@@ -9559,11 +9559,11 @@ const KPI_REQUIRED_ASSUMPTION_KEYS = Object.freeze([
 ]);
 
 function normalizeKpiAssumptionValue(raw, rule) {
-  if (raw === null || raw === undefined || raw === '') return null;
-  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
-  if (!Number.isFinite(n)) return null;
-  const bounded = Math.max(rule.min, Math.min(rule.max, n));
-  return rule.integer ? Math.round(bounded) : Math.round(bounded * 100) / 100;
+  if (typeof raw !== 'number' && typeof raw !== 'string') return null;
+  if (typeof raw === 'string' && !raw.trim()) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < rule.min || n > rule.max || (rule.integer && !Number.isInteger(n))) return null;
+  return rule.integer ? n : Math.round(n * 100) / 100;
 }
 
 function normalizeStoreOpsKpiAssumptions(raw) {
@@ -17329,11 +17329,13 @@ function wantsKpiTargets(query) {
   if (metric.test(q) && simulation.test(q)) return true;
   // サーバーの isKpiScenarioRequest と同じ判定。実績・用語説明では試算しない。
   if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
-  const plan = /目標|狙う|決めたい|設定(?:したい|して|する)|提案|値付け|単価設定|価格設定/;
+  if (/達成状況|進捗|振り返|確認|評価/.test(q)) return false;
+  const plan = /目標.*(?:出して|出す|決め|設定|提案)|決めたい|設定(?:したい|して|する)|値付け|単価設定|価格設定/;
   const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
   return (metric.test(q) && plan.test(q)) ||
     (/損益分岐/.test(q) && /教えて|計算|何個|何円/.test(q)) ||
-    (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q));
+    (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q)) ||
+    (numeric.test(q) && /粗利|原価率/.test(q) && /狙う|目標|提案/.test(q));
 }
 
 /** 質問文から試算対象の商品名を拾う。取れなければ汎用名にする（推測で商品名を作らない）。 */
@@ -17359,6 +17361,8 @@ function parseKpiAssumptionsFromText(text) {
   const grab = (pattern) => {
     const m = t.match(pattern);
     if (!m) return null;
+    // 符号を落として負の費用を正の入力値に変えない。
+    if (/[-−]\s*\d/.test(m[0]) || /[-−]$/.test(t.slice(0, m.index))) return null;
     const n = Number(String(m[1]).replace(/,/g, ''));
     return Number.isFinite(n) ? n : null;
   };
