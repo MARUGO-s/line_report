@@ -63,6 +63,22 @@ function extractNumericConst(source, name) {
   return Number(match[1].replaceAll('_', ''));
 }
 
+/** Object.freeze({...}) / Object.freeze([...]) で宣言された定数をそのまま評価して取り出す。 */
+function extractFrozenConst(source, name) {
+  const start = source.indexOf(`const ${name} = Object.freeze(`);
+  assert.notEqual(start, -1, `${name} must exist as a frozen const`);
+  const open = source.indexOf('(', start);
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '(') depth += 1;
+    if (source[i] === ')') depth -= 1;
+    if (depth === 0) {
+      return vm.runInNewContext(`(${source.slice(open + 1, i)})`);
+    }
+  }
+  throw new Error(`Could not extract ${name}`);
+}
+
 const knowledgeLimits = Object.freeze({
   maxItems: extractNumericConst(html, 'AI_KNOWLEDGE_MAX_ITEMS'),
   maxChunks: extractNumericConst(html, 'AI_KNOWLEDGE_MAX_CHUNKS'),
@@ -82,6 +98,12 @@ const context = {
   FOODCOURT_BOOST_CLARIFICATION_MARKER: 'さらに分析をブーストしますか',
   FOODCOURT_BOOST_ON_DIRECTIVE: '【FOODCOURT_BOOST:ON】',
   FOODCOURT_BOOST_OFF_DIRECTIVE: '【FOODCOURT_BOOST:OFF】',
+  KPI_ASSUMPTION_CLARIFICATION_MARKER: '試算の前提条件を教えてください',
+  KPI_ASSUMPTION_SKIP_DIRECTIVE: '【KPI_ASSUMPTION:SCENARIO】',
+  // KPI試算の前提条件。アプリ側の定義（および kpi_scenario.ts の allowlist）と一致させること。
+  KPI_ASSUMPTION_FIELDS: extractFrozenConst(html, 'KPI_ASSUMPTION_FIELDS'),
+  KPI_REQUIRED_ASSUMPTION_KEYS: extractFrozenConst(html, 'KPI_REQUIRED_ASSUMPTION_KEYS'),
+  aiChatKpiAssumptionOverrides: null,
   WEEKDAY_ORDER: ['月', '火', '水', '木', '金', '土', '日'],
   // 期間解決の番兵年（開区間の端点）。アプリ側の定数と一致させること。
   // 分類の2階層モデル。アプリ側の定義と一致させること。
@@ -191,6 +213,20 @@ for (const name of [
   'resolveFoodcourtBoostClarificationReply',
   'needsFoodcourtBoostConfirmation',
   'buildFoodcourtBoostClarificationReply',
+  'wantsKpiTargets',
+  'resolveKpiProductName',
+  'parseKpiAssumptionsFromText',
+  'normalizeKpiAssumptionValue',
+  'normalizeStoreOpsKpiAssumptions',
+  'emptyStoreOpsKpiAssumptions',
+  'providedKpiAssumptionKeys',
+  'missingKpiAssumptionLabels',
+  'resetAiChatKpiAssumptionOverrides',
+  'mergeAiChatKpiAssumptionOverrides',
+  'hasKpiAssumptionSkipDirective',
+  'stripKpiAssumptionSkipDirective',
+  'buildKpiAssumptionClarificationReply',
+  'resolveKpiAssumptionClarificationReply',
   'resolveAiChatQuery',
   'needsAiIntentClarification',
   'needsWineMetricClarification',
@@ -704,7 +740,7 @@ test('period clarification is required when no period is specified', () => {
   ];
   assert.equal(context.shouldAskPeriodClarification('ではドリンク比率は？', afterAnswer), false);
   const stripped = context.stripInventedPeriodScopeFromQuery(
-    '全体の売り上げを伸ばす成長戦略を提案して 保存済み最新月を対象に全体分析',
+    '全体の売り上げを伸ばす成長戦略を提案して 保存済み全期間を対象に全体分析',
   );
   assert.equal(context.mentionsExplicitPeriod(stripped), false);
   assert.match(stripped, /成長戦略/);
@@ -798,7 +834,7 @@ test('period clarification keeps the analysis focus and a complete new request r
   );
   assert.equal(
     context.resolveSavedDataClarificationReply('おまかせ', history),
-    'ワインの実績はどう？ 保存済み最新月を対象に全体分析',
+    'ワインの実績はどう？ 保存済み全期間を対象に全体分析',
   );
   assert.equal(
     context.resolveSavedDataClarificationReply('全部', history),
@@ -836,7 +872,8 @@ test('all-month wording survives the clarification retry guard instead of shrink
   assert.equal(context.hasAllSavedPeriodIntent('全体像を見たい'), false);
   assert.equal(context.hasAllSavedPeriodIntent('全て', true), true);
   assert.equal(context.resolveExhaustedPeriodClarificationScope('全ての月を対象にしてください'), '保存済み全期間');
-  assert.equal(context.resolveExhaustedPeriodClarificationScope('期間は任せます'), '保存済み最新月');
+  // 要件E: 期間未指定でも特定イベント・単月へ寄せず、既定は保存済み全期間にする
+  assert.equal(context.resolveExhaustedPeriodClarificationScope('期間は任せます'), '保存済み全期間');
   const exactHistory = [
     {
       role: 'assistant',
@@ -2980,4 +3017,158 @@ test('saving product categories verifies against the server, not the 10-minute c
   );
   // 確認自体は残すこと。書き込みの取りこぼしを見逃さないため。
   assert.match(persist, /クラウド保存確認に失敗/);
+});
+
+test('numeric-KPI questions are detected and the product name comes from the question', () => {
+  assert.equal(
+    context.wantsKpiTargets('焼き上げクロワッサンの導入について、目標KPIを具体的な数字で出してください'),
+    true,
+  );
+  assert.equal(context.wantsKpiTargets('損益分岐の販売個数を教えて'), true);
+  assert.equal(context.wantsKpiTargets('粗利率はどれくらいを狙う？'), true);
+  assert.equal(context.wantsKpiTargets('撤退ラインを決めたい'), true);
+  assert.equal(context.wantsKpiTargets('先月の売上はいくら？'), false);
+  assert.equal(context.wantsKpiTargets('ワインの売れ筋TOP10を出して'), false);
+
+  assert.equal(
+    context.resolveKpiProductName('焼き上げクロワッサンの導入について、目標KPIを具体的な数字で出してください'),
+    '焼き上げクロワッサン',
+  );
+  assert.equal(context.resolveKpiProductName('KPIを数字で'), '検討中の新商品');
+});
+
+test('free-text answers become assumptions; bare numbers are ignored', () => {
+  const parsed = context.parseKpiAssumptionsFromText(
+    '原価180円、売価450円、ドリンクセット750円、ワインセット1200円、1回20個、1日3回、1人、廃棄8%',
+  );
+  assert.equal(parsed.unitCostYen, 180);
+  assert.equal(parsed.unitPriceYen, 450);
+  assert.equal(parsed.setDrinkPriceYen, 750);
+  assert.equal(parsed.setWinePriceYen, 1200);
+  assert.equal(parsed.bakeBatchUnits, 20);
+  assert.equal(parsed.bakeBatchesPerDay, 3);
+  assert.equal(parsed.prepStaffCount, 1);
+  assert.equal(parsed.wasteRateTolerancePct, 8);
+
+  const vague = context.parseKpiAssumptionsFromText('たぶん 300 とか 20 くらい');
+  assert.equal(context.providedKpiAssumptionKeys(vague).length, 0, '単位の無い裸の数字は採用しない');
+
+  // 範囲外はサーバー側 kpi_scenario.ts と同じ境界でクランプする
+  const clamped = context.parseKpiAssumptionsFromText('原価99999999円、1回9999個');
+  assert.equal(clamped.unitCostYen, 100000);
+  assert.equal(clamped.bakeBatchUnits, 2000);
+});
+
+test('missing required assumptions are listed for the clarification question', () => {
+  const labels = context.missingKpiAssumptionLabels({});
+  assert.equal(labels.length, context.KPI_REQUIRED_ASSUMPTION_KEYS.length);
+  assert.ok(labels.includes('原価（1個あたり）'));
+  assert.ok(labels.includes('設備で1回に焼ける個数'));
+  assert.ok(labels.includes('廃棄の許容範囲（％）'));
+
+  const partial = context.normalizeStoreOpsKpiAssumptions({ unitPriceYen: 420, unitCostYen: 126 });
+  const rest = context.missingKpiAssumptionLabels(partial);
+  assert.ok(!rest.includes('想定売価（単品）'));
+  assert.ok(!rest.includes('原価（1個あたり）'));
+  assert.ok(rest.includes('設備で1回に焼ける個数'));
+});
+
+test('the KPI assumption question explains the 3-scenario fallback and stays a single round', () => {
+  const reply = context.buildKpiAssumptionClarificationReply(
+    context.missingKpiAssumptionLabels({}),
+  );
+  assert.match(reply, new RegExp(context.KPI_ASSUMPTION_CLARIFICATION_MARKER));
+  assert.match(reply, /保守・標準・強気の3シナリオ/);
+  assert.match(reply, /仮定\(シナリオ\)/);
+  assert.match(reply, /店舗営業情報タブ/);
+
+  const history = [
+    {
+      role: 'assistant',
+      clarification: 'kpiAssumption',
+      originalQuery: '焼き上げクロワッサンの導入について、目標KPIを具体的な数字で出してください',
+      clarificationChoices: ['おまかせ（3シナリオで仮置き）', '前提を入力する'],
+      content: reply,
+    },
+  ];
+
+  context.resetAiChatKpiAssumptionOverrides();
+  const vague = context.resolveAiChatQuery('おまかせ', history);
+  assert.match(vague, /^焼き上げクロワッサンの導入について、目標KPIを具体的な数字で出してください/);
+  assert.ok(context.hasKpiAssumptionSkipDirective(vague), '曖昧な返答でも仮置きで進めて往復を増やさない');
+  assert.equal(
+    context.stripKpiAssumptionSkipDirective(vague),
+    '焼き上げクロワッサンの導入について、目標KPIを具体的な数字で出してください',
+  );
+
+  context.resetAiChatKpiAssumptionOverrides();
+  const answered = context.resolveAiChatQuery('原価180円、売価450円、1回20個、1日3回、1人、廃棄8%', history);
+  assert.ok(context.hasKpiAssumptionSkipDirective(answered), '入力後に同じ確認を重ねない');
+  assert.equal(context.aiChatKpiAssumptionOverrides.unitCostYen, 180);
+  assert.equal(context.aiChatKpiAssumptionOverrides.unitPriceYen, 450);
+  assert.equal(context.aiChatKpiAssumptionOverrides.bakeBatchUnits, 20);
+
+  // 新しい自己完結した質問は、前の確認を引きずらない（NFKC正規化は既存の確認と同じ挙動）
+  context.resetAiChatKpiAssumptionOverrides();
+  const fresh = context.resolveAiChatQuery('2026年7月の売上はいくらですか？', history);
+  assert.match(fresh, /^2026年7月の売上はいくらですか[?？]$/);
+  assert.ok(!context.hasKpiAssumptionSkipDirective(fresh));
+});
+
+test('sendAiChat asks for assumptions before the AI call and passes kpiRequest to the server', () => {
+  const send = extractFunction(html, 'sendAiChat');
+  assert.match(send, /needsKpiAssumptionClarification\(/);
+  assert.match(send, /clarification:\s*'kpiAssumption'/);
+  assert.match(send, /const kpiTargetsRequested = wantsKpiTargets\(resolvedChatQuery\)/);
+  assert.match(send, /kpiRequest:\s*kpiTargetsRequested/);
+  assert.match(send, /assumptions:\s*effectiveKpiAssumptions\(chatRun\.storeKey\)/);
+  assert.ok(
+    send.indexOf('needsKpiAssumptionClarification') < send.indexOf('AI_CLIENT.request'),
+    'the assumption question must come before the paid AI call',
+  );
+  assert.ok(
+    send.indexOf('shouldAskWineMetricClarification') < send.indexOf('needsKpiAssumptionClarification'),
+    'existing clarifications keep their order',
+  );
+  assert.ok(
+    send.indexOf('needsKpiAssumptionClarification') < send.indexOf('needsFoodcourtBoostConfirmation'),
+    'the free assumption question comes before the paid foodcourt opt-in',
+  );
+});
+
+test('the prompt requires labelled numbers, 3 scenarios and an all-period default', () => {
+  // A-1〜A-7 を必ず出させる条文
+  assert.match(html, /15\. 【数値提案（KPI試算）・必須】/);
+  assert.match(html, /保守・標準・強気の3シナリオを併記/);
+  assert.match(html, /【実績】【仮定\(入力\)】【仮定\(シナリオ\)】のラベル/);
+  assert.match(html, /この試算の精度を上げるために必要なデータ/);
+  // 「出せません」で止めない
+  assert.match(html, /効果予測値は設定しない.*で止めてはいけません/);
+  // 実績と仮定の分離（既存の推測ラベル運用は維持）
+  assert.match(html, /※これは推測です/);
+  // 分析範囲の既定
+  assert.match(html, /16\. 【分析範囲の既定】/);
+  assert.match(html, /【分析範囲の既定（必須・全分析に常時適用）】/);
+  assert.match(html, /既定は全期間（通常営業日を含む）です/);
+  // 既存機能が残っていること
+  assert.match(html, /API利用料金も高くなります/);
+  assert.match(html, /さらに分析をブーストしますか/);
+});
+
+test('the store ops tab stores KPI assumptions and never fills blanks with defaults', () => {
+  for (const field of Object.values(context.KPI_ASSUMPTION_FIELDS)) {
+    assert.match(html, new RegExp(`id="${field.inputId}"`), `${field.label} の入力欄があること`);
+  }
+  const read = extractFunction(html, 'readStoreOpsKpiForm');
+  assert.match(read, /String\(raw\)\.trim\(\) === ''\) \? null : raw/);
+  const normalizeProfile = extractFunction(html, 'normalizeStoreOpsProfile');
+  assert.match(normalizeProfile, /kpiAssumptions: normalizeStoreOpsKpiAssumptions\(src\.kpiAssumptions\)/);
+
+  const empty = context.emptyStoreOpsKpiAssumptions();
+  for (const key of Object.keys(context.KPI_ASSUMPTION_FIELDS)) {
+    assert.equal(empty[key], null, `${key} は未入力のとき null のまま`);
+  }
+  assert.equal(context.normalizeKpiAssumptionValue('', { min: 1, max: 10, integer: true }), null);
+  assert.equal(context.normalizeKpiAssumptionValue('abc', { min: 1, max: 10, integer: true }), null);
+  assert.equal(context.normalizeKpiAssumptionValue('7', { min: 1, max: 10, integer: true }), 7);
 });

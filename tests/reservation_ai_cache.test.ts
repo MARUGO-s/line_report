@@ -241,7 +241,7 @@ test("reservation-based visitor structure is limited to the actual store and imp
   assert.match(admin, /function buildReservationImportCoveragePolicy\(storeKey: string\)/)
   assert.match(
     admin,
-    /buildJournalAiServerPolicy\("analyze", locationBlock, canonicalStoreKey \|\| ""\)/,
+    /buildJournalAiServerPolicy\(\s*"analyze",\s*locationBlock,\s*canonicalStoreKey \|\| "",/,
   )
   assert.match(
     admin,

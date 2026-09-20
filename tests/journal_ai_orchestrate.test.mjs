@@ -164,9 +164,17 @@ test('client conversation data never becomes provider system or assistant author
     ai.indexOf('function buildClarificationMessages'),
     ai.indexOf('function resolveOpenAiApiKey'),
   );
+  // missingKind はサーバー側の allowlist だけを通す（クライアント文字列をそのまま渡さない）
   assert.match(
     clarifyBuilder,
-    /missingKind:\s*rawContext\.missingKind === "period" \? "period" : "intent"/,
+    /const missingKind = rawContext\.missingKind === "period"\s*\n\s*\? "period"\s*\n\s*: rawContext\.missingKind === "kpiAssumption"\s*\n\s*\? "kpiAssumption"\s*\n\s*: "intent";/,
+  );
+  assert.match(clarifyBuilder, /missingKind,/);
+  assert.doesNotMatch(clarifyBuilder, /missingKind:\s*rawContext\.missingKind[^=]/);
+  // KPI前提の不足項目も、クライアント文言ではなくサーバーの allowlist から導く
+  assert.match(
+    clarifyBuilder,
+    /missingKpiAssumptions: missingKind === "kpiAssumption"\s*\n\s*\? describeMissingKpiAssumptions\(rawContext\.kpiAssumptions\)\s*\n\s*: \[\],/,
   );
   assert.match(clarifyBuilder, /content:\s*CLARIFICATION_PROMPT/);
   assert.match(clarifyBuilder, /priorChatHistory:\s*history/);

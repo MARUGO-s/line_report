@@ -64,6 +64,7 @@ import {
   type SalesBudgetAllocationWeights,
 } from "../_shared/sales_budget_allocation.ts"
 import { fetchJapaneseHolidayMap } from "../_shared/japanese_holidays.ts"
+import { normalizeKpiAssumptions } from "../_shared/kpi_scenario.ts"
 import {
   type JournalSalesSyncResult,
   syncJournalSalesFromReport,
@@ -16955,6 +16956,14 @@ function normalizeStoreOpsWineMl(raw: unknown): Record<string, number> {
   }
 }
 
+/** KPI試算の前提条件。入力済みの項目だけを保持し、未入力は null のまま残す（既定値で埋めない）。 */
+function normalizeStoreOpsKpiAssumptions(raw: unknown): Record<string, number | null> | null {
+  if (!isRecord(raw)) return null
+  const normalized = normalizeKpiAssumptions(raw)
+  if (!normalized.provided.length) return null
+  return { ...normalized.values }
+}
+
 function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
   const src = isRecord(raw) ? raw : {}
   const weekdays = new Set(["日", "月", "火", "水", "木", "金", "土"])
@@ -16991,6 +17000,8 @@ function normalizeStoreOperationProfile(raw: unknown): Record<string, unknown> {
     // 店舗情報カレンダー（施策・イベント等）。古いクライアント未送信時は save 側で既存を維持
     calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents ?? src.events),
     wineMl: normalizeStoreOpsWineMl(src.wineMl),
+    // KPI試算の前提条件。未登録は null（0 や既定値へ読み替えない）
+    kpiAssumptions: normalizeStoreOpsKpiAssumptions(src.kpiAssumptions),
   }
 }
 
@@ -17028,8 +17039,9 @@ async function saveStoreOperationProfile(
   const omitEvents = !Object.prototype.hasOwnProperty.call(rawProfile, "calendarEvents") &&
     !Object.prototype.hasOwnProperty.call(rawProfile, "events")
   const omitWineMl = !Object.prototype.hasOwnProperty.call(rawProfile, "wineMl")
-  // 古いクライアントがキー未送信のとき、既存の同期ON／カレンダー／ワインml設定を誤って消さない
-  if (omitSync || omitEvents || omitWineMl) {
+  const omitKpi = !Object.prototype.hasOwnProperty.call(rawProfile, "kpiAssumptions")
+  // 古いクライアントがキー未送信のとき、既存の同期ON／カレンダー／ワインml／KPI前提を誤って消さない
+  if (omitSync || omitEvents || omitWineMl || omitKpi) {
     const { data: existing, error: existingError } = await supabase
       .from("store_operation_profiles")
       .select("profile")
@@ -17052,6 +17064,9 @@ async function saveStoreOperationProfile(
     }
     if (omitWineMl && existingProfile) {
       profile.wineMl = normalizeStoreOpsWineMl(existingProfile.wineMl)
+    }
+    if (omitKpi && existingProfile) {
+      profile.kpiAssumptions = normalizeStoreOpsKpiAssumptions(existingProfile.kpiAssumptions)
     }
   }
   const now = new Date().toISOString()

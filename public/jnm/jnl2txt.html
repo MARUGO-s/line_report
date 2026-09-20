@@ -2393,6 +2393,50 @@
   </div>
 
   <div class="card" style="margin-top:14px;">
+    <div class="card-kicker">新商品・KPI試算の前提条件（数値提案用）</div>
+    <p class="kn-note" style="margin-top:0;">「目標KPIを具体的な数字で」と聞いたときに、粗利率・損益分岐個数・目標販売個数・売上期待値をコード側で計算するための前提です。<strong>実績ではなく仮定</strong>として扱われ、AIの回答では必ず「仮定(入力)」と表示されます。空欄の項目は保守・標準・強気の3シナリオで仮置きされます。</p>
+    <div class="kn-form">
+      <label class="kn-field kn-narrow">想定売価・単品（円）
+        <input id="opsKpiUnitPrice" type="number" min="1" max="100000" step="1" placeholder="例: 420">
+      </label>
+      <label class="kn-field kn-narrow">想定売価・ドリンクセット（円）
+        <input id="opsKpiSetDrinkPrice" type="number" min="1" max="100000" step="1" placeholder="例: 720">
+      </label>
+      <label class="kn-field kn-narrow">想定売価・ワインセット（円）
+        <input id="opsKpiSetWinePrice" type="number" min="1" max="100000" step="1" placeholder="例: 1120">
+      </label>
+      <label class="kn-field kn-narrow">原価・1個あたり（円）
+        <input id="opsKpiUnitCost" type="number" min="0" max="100000" step="1" placeholder="例: 126">
+      </label>
+      <label class="kn-field kn-narrow">ドリンクセットの追加原価（円）
+        <input id="opsKpiSetDrinkAddCost" type="number" min="0" max="100000" step="1" placeholder="例: 90">
+      </label>
+      <label class="kn-field kn-narrow">ワインセットの追加原価（円）
+        <input id="opsKpiSetWineAddCost" type="number" min="0" max="100000" step="1" placeholder="例: 210">
+      </label>
+      <label class="kn-field kn-narrow">1回に焼ける個数
+        <input id="opsKpiBakeBatchUnits" type="number" min="1" max="2000" step="1" placeholder="例: 20">
+      </label>
+      <label class="kn-field kn-narrow">1日の焼成回数の上限
+        <input id="opsKpiBakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3">
+      </label>
+      <label class="kn-field kn-narrow">仕込み・焼成に割ける人員（人）
+        <input id="opsKpiPrepStaffCount" type="number" min="0.5" max="50" step="0.5" placeholder="例: 1">
+      </label>
+      <label class="kn-field kn-narrow">1日の仕込み・焼成時間（時間）
+        <input id="opsKpiPrepHoursPerDay" type="number" min="0.5" max="24" step="0.5" placeholder="例: 3">
+      </label>
+      <label class="kn-field kn-narrow">人件費（円／時）
+        <input id="opsKpiStaffHourlyCost" type="number" min="1" max="100000" step="1" placeholder="例: 1300">
+      </label>
+      <label class="kn-field kn-narrow">廃棄の許容範囲（％）
+        <input id="opsKpiWasteTolerance" type="number" min="0" max="100" step="0.5" placeholder="例: 8">
+      </label>
+    </div>
+    <p class="kn-note">空欄のままでも分析はできます。その場合は3シナリオの仮置き値が使われ、回答に「仮定(シナリオ)」と表示されます。AIチャット側からも不足項目を1つずつ聞き返します。</p>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
     <div class="card-kicker">過去売上への同期（ジャーナルを正とする）</div>
     <div class="ops-sync-row">
       <div class="ops-sync-copy">
@@ -9387,6 +9431,11 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 - 新規予約や飛び込みが前月より増減した月は、【今回の分析で参照する店舗資料・根拠】の同月・前後の施策・メニュー・価格改定を照合し、見つかれば「登録資料によると」と明示して要因に使う。【登録資料目次】だけの資料は根拠にしない。根拠資料にめぼしい記述が無い場合のみ「※これは推測です」と前置きしたうえで仮説を述べる。「予約専用項目なし」と併記されていても本節があれば後者を優先し、「表示されていません」で止めない。
 - 解析欄にも金額が無い場合のみ、数値を捏造せず「※これは推測です」として季節要因に含めてよい。
 
+【分析範囲の既定（必須・全分析に常時適用）】
+- 利用者が対象を絞っていない場合は、特定のイベント日（ライブ・試合など）だけに寄せない。提示された全期間の実績と、イベントのない通常営業日を土台にする。
+- 特定イベントを深掘りする場合も、必ず同じ期間の通常営業日の数値を比較対象として併記する。単発イベントの数値を店舗全体の傾向として述べない。
+- 売上が低かった単一イベントを主題にし続けない。通常営業を含む全体像のなかでの位置づけとして扱う。
+
 【期間表現（必須・全分析に常時適用）】
 - 「2026年1月から7月まで」「2026年1月〜7月」「1月〜7月」は、端点の2か月だけではない。開始月〜終了月のあいだの全月（例: 1・2・3・4・5・6・7月）を含む連続期間として扱う。
 - 確定済み集計のラベルや月次推移にその範囲の月がある場合は、端点だけを抜き出して「1月と7月だけ」と答えない。途中月が集計に無いときだけ、その月は「今回の確定済み集計には表示されていません」と月単位で述べる。
@@ -9397,7 +9446,7 @@ const MARUGO_AI_COMPANY_CONTEXT = `【分析対象企業の前提（必須・常
 3. フード×ワインのペアリング・客単価向上（昼夜別）
 4. 予約取り込み・集客構造の利用範囲がある場合だけ、その範囲内で予約組数 vs 飛び込み組数の推移（集客経路の変化）と要因を扱う（資料照合→無ければ推測前置き）
 5. 同エリア姉妹店連携は妥当な場合のみ（新宿三丁目話の他エリア転用禁止）
-6. 提供データに無い原価・在庫・利益は捏造しない
+6. 提供データに無い原価・在庫・利益を、実績や確定値として述べない。ただしサーバーが確定計算した【数値提案（KPI試算）】ブロックがある場合は、粗利・損益分岐・目標個数・売上期待値を、保守／標準／強気の3シナリオ併記＋【仮定(入力)】【仮定(シナリオ)】ラベル付きで述べてよい。根拠のない断定的な予測は避け、前提を明示したシナリオ試算として出す
 7. 売れ筋商品: 「★ドリンク」「★アラカルト」等のPOS大分類行は単独商品ではない。確定集計の売れ筋TOPで「コース系（合算）」がある場合は、コース分割を無視してドリンクを単独最大商品と断定しない。カテゴリ合計（フード売上 vs ドリンク売上）と商品ランキングを混同しない。質問が「コース以外」のときはコース／おまかせとコース系（合算）をランキングから除外し、確定済みの「質問に該当する保存商品明細」または売れ筋TOPをそのまま位数どおり述べる（「TOP形式ではない」「表示されていません」で止めない。順位は売上金額順）`;
 
 const MARUGO_AI_ANALYZE_INSTRUCTION = `${MARUGO_AI_COMPANY_CONTEXT}
@@ -9479,6 +9528,70 @@ let opsCalViewMonth = new Date().getMonth() + 1;
 let opsCalRangeAnchor = '';
 let opsCalEditingId = '';
 
+/**
+ * KPI試算の前提条件。サーバーの supabase/functions/_shared/kpi_scenario.ts と同じ
+ * allowlist・範囲で正規化する。未入力は null のまま残し、既定値で埋めない
+ * （埋めると「仮定(シナリオ)」であるべき値が「仮定(入力)」に化けるため）。
+ */
+const KPI_ASSUMPTION_FIELDS = Object.freeze({
+  unitPriceYen: { min: 1, max: 100000, integer: true, label: '想定売価（単品）', inputId: 'opsKpiUnitPrice' },
+  setDrinkPriceYen: { min: 1, max: 100000, integer: true, label: '想定売価（ドリンクセット）', inputId: 'opsKpiSetDrinkPrice' },
+  setWinePriceYen: { min: 1, max: 100000, integer: true, label: '想定売価（ワインセット）', inputId: 'opsKpiSetWinePrice' },
+  unitCostYen: { min: 0, max: 100000, integer: true, label: '原価（1個あたり）', inputId: 'opsKpiUnitCost' },
+  setDrinkAddCostYen: { min: 0, max: 100000, integer: true, label: 'ドリンクセットの追加原価', inputId: 'opsKpiSetDrinkAddCost' },
+  setWineAddCostYen: { min: 0, max: 100000, integer: true, label: 'ワインセットの追加原価', inputId: 'opsKpiSetWineAddCost' },
+  bakeBatchUnits: { min: 1, max: 2000, integer: true, label: '設備で1回に焼ける個数', inputId: 'opsKpiBakeBatchUnits' },
+  bakeBatchesPerDay: { min: 1, max: 48, integer: true, label: '1日の焼成回数の上限', inputId: 'opsKpiBakeBatchesPerDay' },
+  prepStaffCount: { min: 0.5, max: 50, integer: false, label: '仕込み・焼成に割ける人員', inputId: 'opsKpiPrepStaffCount' },
+  prepHoursPerDay: { min: 0.5, max: 24, integer: false, label: '1日の仕込み・焼成時間', inputId: 'opsKpiPrepHoursPerDay' },
+  staffHourlyCostYen: { min: 1, max: 100000, integer: true, label: '人件費（時給）', inputId: 'opsKpiStaffHourlyCost' },
+  wasteRateTolerancePct: { min: 0, max: 100, integer: false, label: '廃棄の許容範囲（％）', inputId: 'opsKpiWasteTolerance' }
+});
+
+/** 確認質問で必ず埋めにいく項目。サーバーの KPI_REQUIRED_ASSUMPTION_KEYS と揃える。 */
+const KPI_REQUIRED_ASSUMPTION_KEYS = Object.freeze([
+  'unitPriceYen',
+  'unitCostYen',
+  'bakeBatchUnits',
+  'bakeBatchesPerDay',
+  'prepStaffCount',
+  'wasteRateTolerancePct'
+]);
+
+function normalizeKpiAssumptionValue(raw, rule) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isFinite(n)) return null;
+  const bounded = Math.max(rule.min, Math.min(rule.max, n));
+  return rule.integer ? Math.round(bounded) : Math.round(bounded * 100) / 100;
+}
+
+function normalizeStoreOpsKpiAssumptions(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const out = {};
+  for (const [key, rule] of Object.entries(KPI_ASSUMPTION_FIELDS)) {
+    out[key] = normalizeKpiAssumptionValue(src[key], rule);
+  }
+  return out;
+}
+
+function emptyStoreOpsKpiAssumptions() {
+  return normalizeStoreOpsKpiAssumptions({});
+}
+
+function providedKpiAssumptionKeys(assumptions) {
+  const values = normalizeStoreOpsKpiAssumptions(assumptions);
+  return Object.keys(KPI_ASSUMPTION_FIELDS).filter(key => values[key] !== null);
+}
+
+/** 未入力の必須項目を日本語ラベルで返す。確認質問の文面に使う。 */
+function missingKpiAssumptionLabels(assumptions) {
+  const values = normalizeStoreOpsKpiAssumptions(assumptions);
+  return KPI_REQUIRED_ASSUMPTION_KEYS
+    .filter(key => values[key] === null)
+    .map(key => KPI_ASSUMPTION_FIELDS[key].label);
+}
+
 function emptyStoreOpsWineMl() {
   return { glassMl: 100, decanterMl: 375, bottleMl: 750, pairingMl: 300 };
 }
@@ -9510,7 +9623,8 @@ function emptyStoreOpsProfile() {
     notes: '',
     journalSalesSync: false,
     calendarEvents: [],
-    wineMl: emptyStoreOpsWineMl()
+    wineMl: emptyStoreOpsWineMl(),
+    kpiAssumptions: emptyStoreOpsKpiAssumptions()
   };
 }
 
@@ -9524,7 +9638,8 @@ function defaultStoreOpsProfile(storeKey = STORE_KEY) {
     ...preset,
     closedWeekdays: [...(preset.closedWeekdays || [])],
     calendarEvents: normalizeStoreOpsCalendarEvents(preset.calendarEvents || []),
-    wineMl: normalizeStoreOpsWineMl(preset.wineMl || base.wineMl)
+    wineMl: normalizeStoreOpsWineMl(preset.wineMl || base.wineMl),
+    kpiAssumptions: normalizeStoreOpsKpiAssumptions(preset.kpiAssumptions || base.kpiAssumptions)
   };
 }
 
@@ -9606,7 +9721,8 @@ function normalizeStoreOpsProfile(raw) {
     notes: String(src.notes || '').slice(0, 4000),
     journalSalesSync: !!(src.journalSalesSync === true || src.journalSalesSync === 'on' || src.journalSalesSync === 'true'),
     calendarEvents: normalizeStoreOpsCalendarEvents(src.calendarEvents || src.events),
-    wineMl: normalizeStoreOpsWineMl(src.wineMl)
+    wineMl: normalizeStoreOpsWineMl(src.wineMl),
+    kpiAssumptions: normalizeStoreOpsKpiAssumptions(src.kpiAssumptions)
   };
 }
 
@@ -9877,6 +9993,29 @@ function formatStoreOpsCalendarEventsForAi(events, verifiedData = null) {
   return lines;
 }
 
+/**
+ * KPI試算の前提条件をAIブロックへ書き出す。ここは「仮定(入力)」であり実績ではない。
+ * 計算そのものはサーバー（kpi_scenario.ts）が行うので、ここでは登録状態だけを伝える。
+ */
+function formatKpiAssumptionLinesForAi(profile) {
+  const values = normalizeStoreOpsKpiAssumptions(profile?.kpiAssumptions);
+  const entries = Object.entries(KPI_ASSUMPTION_FIELDS)
+    .filter(([key]) => values[key] !== null)
+    .map(([key, field]) => `${field.label}=${values[key]}`);
+  const lines = ['【KPI試算の前提条件（仮定・実績ではない）】'];
+  if (!entries.length) {
+    lines.push('- 登録なし。数値提案を求められた場合は保守／標準／強気の3シナリオで仮置きし、「仮定(シナリオ)」と明示する。');
+    return lines;
+  }
+  lines.push(`- 登録済み（仮定(入力)）: ${entries.join(' / ')}`);
+  const missing = missingKpiAssumptionLabels(values);
+  if (missing.length) {
+    lines.push(`- 未登録（3シナリオで仮置き・「仮定(シナリオ)」表記）: ${missing.join('・')}`);
+  }
+  lines.push('- これらは利用者が入力した前提であり、実績値ではない。粗利・損益分岐・目標個数・売上期待値はサーバーが確定計算した【数値提案（KPI試算）】ブロックの値を使う。');
+  return lines;
+}
+
 function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData = null) {
   const p = normalizeStoreOpsProfile(profile);
   const hasCalendar = Array.isArray(p.calendarEvents) && p.calendarEvents.length > 0;
@@ -9891,6 +10030,7 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
     lines.push('分析ルール: 店舗営業情報が未登録のため、定休前提での免責は適用しない。他店ルールも転用しない。');
     lines.push(...formatStoreOpsCalendarEventsForAi([], verifiedData));
     lines.push(...formatWineMlAnalysisLines(p, verifiedData));
+    lines.push(...formatKpiAssumptionLinesForAi(p));
     return '\n\n' + lines.join('\n');
   }
 
@@ -9903,6 +10043,7 @@ function formatStoreOpsBlockForAi(profile = readStoreOpsProfile(), verifiedData 
   if (p.notes) lines.push(`補足: ${p.notes}`);
   lines.push(...formatStoreOpsCalendarEventsForAi(p.calendarEvents, verifiedData));
   lines.push(...formatWineMlAnalysisLines(p, verifiedData));
+  lines.push(...formatKpiAssumptionLinesForAi(p));
   lines.push('分析ルール:');
   lines.push('- 定休曜日の売上ゼロ／極端な低さは「弱点」「機会損失」と断定しない');
   lines.push('- 定休曜日に売上が立っている日は特別営業（または例外営業）として区別して説明する');
@@ -10630,8 +10771,19 @@ function readStoreOpsForm() {
       decanterMl: document.getElementById('opsWineDecanterMl')?.value,
       bottleMl: 750,
       pairingMl: document.getElementById('opsWinePairingMl')?.value
-    }
+    },
+    kpiAssumptions: readStoreOpsKpiForm()
   });
+}
+
+/** 空欄は null のまま返す。0 や既定値へ読み替えない。 */
+function readStoreOpsKpiForm() {
+  const out = {};
+  for (const [key, field] of Object.entries(KPI_ASSUMPTION_FIELDS)) {
+    const raw = document.getElementById(field.inputId)?.value;
+    out[key] = (raw === undefined || raw === null || String(raw).trim() === '') ? null : raw;
+  }
+  return out;
 }
 
 function fillStoreOpsForm(profile) {
@@ -10664,6 +10816,11 @@ function fillStoreOpsForm(profile) {
   if (decanterMl) decanterMl.value = String(p.wineMl.decanterMl);
   if (bottleMl) bottleMl.value = '750';
   if (pairingMl) pairingMl.value = String(p.wineMl.pairingMl);
+  const kpi = normalizeStoreOpsKpiAssumptions(p.kpiAssumptions);
+  for (const [key, field] of Object.entries(KPI_ASSUMPTION_FIELDS)) {
+    const el = document.getElementById(field.inputId);
+    if (el) el.value = kpi[key] === null ? '' : String(kpi[key]);
+  }
   opsCalendarEvents = normalizeStoreOpsCalendarEvents(p.calendarEvents);
   opsCalEditingId = '';
   opsCalRangeAnchor = '';
@@ -11736,6 +11893,7 @@ function toggleAiChat() {
 function resetAiChat() {
   cancelActiveAiChatRun('reset');
   aiChatHistory = [];
+  resetAiChatKpiAssumptionOverrides();
   const chat = document.getElementById('aiChatMessages');
   if (chat) chat.innerHTML = '';
   const input = document.getElementById('aiChatInput');
@@ -16868,6 +17026,8 @@ const AI_INTENT_CLARIFICATION_MARKER = '知りたい内容を具体化してく�
 const FOODCOURT_BOOST_CLARIFICATION_MARKER = 'さらに分析をブーストしますか';
 const FOODCOURT_BOOST_ON_DIRECTIVE = '【FOODCOURT_BOOST:ON】';
 const FOODCOURT_BOOST_OFF_DIRECTIVE = '【FOODCOURT_BOOST:OFF】';
+const KPI_ASSUMPTION_CLARIFICATION_MARKER = '試算の前提条件を教えてください';
+const KPI_ASSUMPTION_SKIP_DIRECTIVE = '【KPI_ASSUMPTION:SCENARIO】';
 
 /**
  * 保存済みの全期間を求める表現を共通判定する。
@@ -16882,9 +17042,12 @@ function hasAllSavedPeriodIntent(text, allowBare = false) {
   return allowBare && /^(?:全部|全て|すべて)(?:$|[。．.!！?？、,\s])/.test(q);
 }
 
-/** 確認上限に達した場合も、明示された全期間を勝手に最新月へ縮小しない。 */
-function resolveExhaustedPeriodClarificationScope(query) {
-  return hasAllSavedPeriodIntent(query) ? '保存済み全期間' : '保存済み最新月';
+/**
+ * 確認上限に達したときの既定範囲。特定イベントや単月へ勝手に寄せないため、
+ * 明示の有無にかかわらず保存済み全期間（通常営業日を含む）を既定にする。
+ */
+function resolveExhaustedPeriodClarificationScope(_query) {
+  return '保存済み全期間';
 }
 
 function isSelfContainedAiQuestion(text) {
@@ -16981,7 +17144,8 @@ function resolveSavedDataClarificationReply(query, chatHistory) {
   if (/^(?:半年|1年|一年|\d{1,2}\s*(?:か月|ヶ月|ケ月|カ月))(?:$|[.、)\s])/.test(raw)) {
     selected = `直近${raw}`;
   }
-  if (/おまかせ|任せる/.test(raw)) selected = '保存済み最新月を対象に全体分析';
+  // 既定は全期間。「おまかせ」で単月・特定イベントへ寄せない。
+  if (/おまかせ|任せる/.test(raw)) selected = '保存済み全期間を対象に全体分析';
   if (hasAllSavedPeriodIntent(raw, true)) selected = '保存済み全期間';
   return original ? `${original} ${selected}`.trim() : selected;
 }
@@ -17153,6 +17317,172 @@ function resolveWineMetricClarificationReply(query, chatHistory) {
   return `${original} 表示単位:${selected}`.trim();
 }
 
+/**
+ * 「KPIを具体的な数字で」「目標販売個数は」など、数値提案を求めている質問か。
+ * ここが true のときだけ、サーバーへ kpiRequest を送りKPI試算を計算させる。
+ */
+function wantsKpiTargets(query) {
+  const q = String(query || '').normalize('NFKC').toLowerCase();
+  if (!q) return false;
+  const explicit = /kpi|損益分岐|粗利|原価率|目標販売|販売目標|目標個数|売上(?:の)?期待値|撤退(?:ライン|基準)|縮小(?:ライン|基準)|単価設定|価格設定|値付け|セット率|廃棄率|テイクアウト比率/;
+  if (explicit.test(q)) return true;
+  const numericAsk = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに/;
+  const planAsk = /目標|導入|新商品|試算|シミュレーション|採算|投資|回収/;
+  return numericAsk.test(q) && planAsk.test(q);
+}
+
+/** 質問文から試算対象の商品名を拾う。取れなければ汎用名にする（推測で商品名を作らない）。 */
+function resolveKpiProductName(query) {
+  const q = String(query || '').normalize('NFKC').trim();
+  const patterns = [
+    /([^\s、。「」]{2,30}?)\s*の\s*導入/,
+    /([^\s、。「」]{2,30}?)\s*を\s*(?:導入|投入|販売|出す|始め)/,
+    /([^\s、。「」]{2,30}?)\s*の\s*(?:販売|展開|試算)/
+  ];
+  for (const pattern of patterns) {
+    const m = q.match(pattern);
+    const name = m && String(m[1] || '').trim();
+    if (name && name.length >= 2) return name.slice(0, 80);
+  }
+  return '検討中の新商品';
+}
+
+/** 自由文の回答から前提条件を拾う。単位付きの表現だけを採用し、裸の数字は無視する。 */
+function parseKpiAssumptionsFromText(text) {
+  const t = String(text || '').normalize('NFKC');
+  const out = {};
+  const grab = (pattern) => {
+    const m = t.match(pattern);
+    if (!m) return null;
+    const n = Number(String(m[1]).replace(/,/g, ''));
+    return Number.isFinite(n) ? n : null;
+  };
+  const wineSet = grab(/ワイン\s*セット[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/);
+  const drinkSet = grab(/(?:ドリンク|飲み物)\s*セット[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/);
+  const unitCost = grab(/原価[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/);
+  const unitPrice = grab(/(?:売価|単価|価格|定価|単品)[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/);
+  const batchUnits = grab(/(?:1|一)\s*回[^0-9]{0,8}([0-9,]+)\s*(?:個|本|枚)/);
+  const batchesPerDay = grab(/(?:1|一)\s*日[^0-9]{0,12}?([0-9,]+)\s*回/);
+  const staff = grab(/([0-9,]+(?:\.[0-9]+)?)\s*(?:人|名)/);
+  const hours = grab(/([0-9,]+(?:\.[0-9]+)?)\s*時間/);
+  const hourly = grab(/(?:時給|人件費)[^0-9]{0,8}([0-9,]+)\s*円/);
+  const waste = grab(/廃棄[^0-9]{0,10}([0-9,]+(?:\.[0-9]+)?)\s*[%％]/);
+  if (unitPrice !== null) out.unitPriceYen = unitPrice;
+  if (drinkSet !== null) out.setDrinkPriceYen = drinkSet;
+  if (wineSet !== null) out.setWinePriceYen = wineSet;
+  if (unitCost !== null) out.unitCostYen = unitCost;
+  if (batchUnits !== null) out.bakeBatchUnits = batchUnits;
+  if (batchesPerDay !== null) out.bakeBatchesPerDay = batchesPerDay;
+  if (staff !== null) out.prepStaffCount = staff;
+  if (hours !== null) out.prepHoursPerDay = hours;
+  if (hourly !== null) out.staffHourlyCostYen = hourly;
+  if (waste !== null) out.wasteRateTolerancePct = waste;
+  return normalizeStoreOpsKpiAssumptions(out);
+}
+
+/** この会話で追加入力された前提条件。店舗営業情報の登録値より優先する。 */
+let aiChatKpiAssumptionOverrides = emptyStoreOpsKpiAssumptions();
+
+function resetAiChatKpiAssumptionOverrides() {
+  aiChatKpiAssumptionOverrides = emptyStoreOpsKpiAssumptions();
+}
+
+function mergeAiChatKpiAssumptionOverrides(parsed) {
+  const next = normalizeStoreOpsKpiAssumptions(parsed);
+  for (const key of Object.keys(KPI_ASSUMPTION_FIELDS)) {
+    if (next[key] !== null) aiChatKpiAssumptionOverrides[key] = next[key];
+  }
+  return aiChatKpiAssumptionOverrides;
+}
+
+/** 店舗営業情報の登録値に、この会話での追加入力を重ねた実効前提。 */
+function effectiveKpiAssumptions(storeKey = STORE_KEY) {
+  let stored = {};
+  try {
+    stored = normalizeStoreOpsKpiAssumptions(readStoreOpsProfile(storeKey).kpiAssumptions);
+  } catch (_) {
+    stored = emptyStoreOpsKpiAssumptions();
+  }
+  const merged = { ...stored };
+  for (const key of Object.keys(KPI_ASSUMPTION_FIELDS)) {
+    if (aiChatKpiAssumptionOverrides[key] !== null) merged[key] = aiChatKpiAssumptionOverrides[key];
+  }
+  return merged;
+}
+
+function hasKpiAssumptionSkipDirective(query) {
+  return String(query || '').includes(KPI_ASSUMPTION_SKIP_DIRECTIVE);
+}
+
+function stripKpiAssumptionSkipDirective(query) {
+  return String(query || '')
+    .replaceAll(KPI_ASSUMPTION_SKIP_DIRECTIVE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 数値提案を求められたのに必須の前提条件が欠けている場合だけ、既存の確認の仕組みで1度だけ尋ねる。
+ * 回答が無くても3シナリオで仮置きして進めるので、往復で止め続けない。
+ */
+function needsKpiAssumptionClarification(query, chatHistory, storeKey = STORE_KEY) {
+  if (!wantsKpiTargets(query)) return false;
+  if (hasKpiAssumptionSkipDirective(query)) return false;
+  if (countRecentClarificationsByKind(chatHistory, 'kpiAssumption') >= 1) return false;
+  const latestAssistant = Array.isArray(chatHistory)
+    ? [...chatHistory].reverse().find(item => item?.role === 'assistant')
+    : null;
+  if (latestAssistant && (
+    latestAssistant.clarification === 'kpiAssumption'
+    || String(latestAssistant.content || '').includes(KPI_ASSUMPTION_CLARIFICATION_MARKER)
+  )) return false;
+  return missingKpiAssumptionLabels(effectiveKpiAssumptions(storeKey)).length > 0;
+}
+
+function buildKpiAssumptionClarificationReply(missingLabels = []) {
+  const list = (Array.isArray(missingLabels) ? missingLabels : []).slice(0, 6);
+  const bullets = list.map(label => `- ${label}`).join('\n');
+  return `### 🧮 ${KPI_ASSUMPTION_CLARIFICATION_MARKER}
+
+具体的な数字（粗利率・損益分岐個数・目標販売個数・売上の期待値）を出すために、次の前提がまだ登録されていません。
+
+${bullets}
+
+分かる範囲で「原価180円、売価450円、1回20個、1日3回、1人、廃棄8%」のように入力してください。**「おまかせ」と答えれば、保守・標準・強気の3シナリオで仮置きして試算します**（その数値には「仮定(シナリオ)」と表示されます）。
+毎回入力せずに済ませたい場合は、店舗営業情報タブの「新商品・KPI試算の前提条件」に登録できます。`;
+}
+
+/**
+ * 前提条件の確認への返答を解決する。数値が読み取れたらこの会話の前提として保持し、
+ * 「おまかせ」等ならシナリオ仮置きで進める指示を元質問へ足す。
+ */
+function resolveKpiAssumptionClarificationReply(query, chatHistory) {
+  const raw = String(query || '').normalize('NFKC').trim();
+  if (!raw || hasKpiAssumptionSkipDirective(raw) || !Array.isArray(chatHistory)) return raw;
+  let asked = null;
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const item = chatHistory[i];
+    if (!item || item.role !== 'assistant') continue;
+    const isAsk = item.clarification === 'kpiAssumption'
+      || String(item.content || '').includes(KPI_ASSUMPTION_CLARIFICATION_MARKER);
+    asked = isAsk ? item : null;
+    break;
+  }
+  if (!asked) return raw;
+  const original = String(asked.originalQuery || '').trim();
+  if (!original) return raw;
+  if (isSelfContainedAiQuestion(raw)) return raw;
+  const parsed = parseKpiAssumptionsFromText(raw);
+  const picked = providedKpiAssumptionKeys(parsed);
+  if (picked.length) {
+    mergeAiChatKpiAssumptionOverrides(parsed);
+    // 追加入力後も残りは3シナリオで仮置きする。同じ確認を重ねない。
+    return `${original} ${KPI_ASSUMPTION_SKIP_DIRECTIVE}`.trim();
+  }
+  // 「おまかせ」「分からない」「そのままで」等は仮置きで進める。曖昧でも往復を増やさない。
+  return `${original} ${KPI_ASSUMPTION_SKIP_DIRECTIVE}`.trim();
+}
+
 function hasFoodcourtBoostDirective(query) {
   return String(query || '').includes(FOODCOURT_BOOST_ON_DIRECTIVE)
     || String(query || '').includes(FOODCOURT_BOOST_OFF_DIRECTIVE);
@@ -17268,10 +17598,13 @@ function formatWineVolumeFactsForAi(verifiedData, query, indent = '') {
 }
 
 function resolveAiChatQuery(query, chatHistory) {
-  return resolveFoodcourtBoostClarificationReply(
-    resolveWineMetricClarificationReply(
-      resolveAiIntentClarificationReply(
-        resolveSavedDataClarificationReply(query, chatHistory),
+  return resolveKpiAssumptionClarificationReply(
+    resolveFoodcourtBoostClarificationReply(
+      resolveWineMetricClarificationReply(
+        resolveAiIntentClarificationReply(
+          resolveSavedDataClarificationReply(query, chatHistory),
+          chatHistory
+        ),
         chatHistory
       ),
       chatHistory
@@ -17318,16 +17651,20 @@ function countRecentClarificationsByKind(chatHistory, kind = '') {
       || item.clarification === 'period'
       || item.clarification === 'wineMetric'
       || item.clarification === 'foodcourtBoost'
+      || item.clarification === 'kpiAssumption'
       || String(item.content || '').includes(AI_INTENT_CLARIFICATION_MARKER)
       || String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER)
-      || String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER);
+      || String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER)
+      || String(item.content || '').includes(KPI_ASSUMPTION_CLARIFICATION_MARKER);
     if (!isClarification) break;
     const itemKind = item.clarification
       || (String(item.content || '').includes(SAVED_DATA_CLARIFICATION_MARKER)
         ? 'period'
         : String(item.content || '').includes(FOODCOURT_BOOST_CLARIFICATION_MARKER)
           ? 'foodcourtBoost'
-          : 'intent');
+          : String(item.content || '').includes(KPI_ASSUMPTION_CLARIFICATION_MARKER)
+            ? 'kpiAssumption'
+            : 'intent');
     if (!kind || itemKind === kind) count += 1;
   }
   return count;
@@ -17427,9 +17764,9 @@ function buildSavedDataNaturalClarificationReply(userMsg = '', coverage) {
     ? `${formatCoverageMonth(coverage.first)}から${formatCoverageMonth(coverage.last)}`
     : '保存済みの期間';
   if (/比較|推移|変化|トレンド/.test(q)) {
-    return `${range}まで確認できます。最新月、直近数か月、全期間のどれで見ますか？`;
+    return `${range}まで確認できます。既定は全期間（通常営業日を含む）です。最新月、直近数か月、全期間のどれで見ますか？`;
   }
-  return `${range}まで保存されています。最新月、直近数か月、全期間のどれで分析しますか？`;
+  return `${range}まで保存されています。既定は全期間（通常営業日を含む）です。最新月、直近数か月、全期間のどれで分析しますか？`;
 }
 
 function normalizeAiClarificationText(text) {
@@ -17621,7 +17958,7 @@ function buildSavedDataClarificationReply(coverage) {
 
 1. **最新月**
 2. **直近数か月**
-3. **保存済み全期間**
+3. **保存済み全期間**（既定・おすすめ。特定イベントに偏らず通常営業日を含みます）
 
 または「2025年」「2025年4月〜2026年3月」のように期間を指定してください。続けて、売上推移・フード／ドリンク比率・客単価・売れ筋・改善策など、知りたい内容も入力できます。`;
 }
@@ -19065,6 +19402,32 @@ async function sendAiChat() {
     return;
   }
 
+  // 数値提案（KPI試算）を求められたのに必須の前提条件が無い場合は、既存の確認の仕組みで1度だけ尋ねる。
+  // 回答が無くても保守・標準・強気の3シナリオで仮置きして進むので、往復で止め続けない。
+  if (needsKpiAssumptionClarification(resolvedChatQuery, aiChatHistory, chatRun.storeKey)) {
+    const missingLabels = missingKpiAssumptionLabels(effectiveKpiAssumptions(chatRun.storeKey));
+    const reply = buildKpiAssumptionClarificationReply(missingLabels);
+    const clarificationChoices = ['おまかせ（3シナリオで仮置き）', '前提を入力する'];
+    removeAiChatLoading(loadingId);
+    appendAiChatMessage('ai', reply, {
+      question: msg,
+      provider: 'local-kpi-assumption-clarifier',
+      clarificationChoices
+    });
+    aiChatHistory.push({
+      role: 'assistant',
+      content: reply,
+      clarification: 'kpiAssumption',
+      originalQuery: resolvedChatQuery,
+      clarificationChoices
+    });
+    finishChatUi();
+    return;
+  }
+
+  const kpiTargetsRequested = wantsKpiTargets(resolvedChatQuery);
+  resolvedChatQuery = stripKpiAssumptionSkipDirective(resolvedChatQuery);
+
   // 現在の軽量な東京ドーム／コート内要約で十分な通常分析と、追加料金を伴う
   // フードコート専門AIの深掘りを分ける。確認前には追加の深掘りAPIを呼ばない。
   if (needsFoodcourtBoostConfirmation(resolvedChatQuery, aiChatHistory, chatRun.storeKey)) {
@@ -19242,6 +19605,7 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
 【絶対遵守プロンプト規約】
 1. あなたはマルゴグループ各店舗の保存済み売上データ専用の厳密なアナリストAIです。営業・売上に関するあらゆる種類の質問（実績照会、期間比較、トレンド、客単価、商品構成、ワイン／ドリンク比率、原因分析、改善提案、今後の見通しなど）に幅広く対応してください。
 2. 数値（金額・件数・客数・比率など）は、必ず提示された確定済み集計データ（salesDataを含む）のみから厳密に引用・計算してください。店舗資料内の数字、推測、Web情報、一般的な相場観を数値の出典にすることは【完全禁止】です。
+2-2. 唯一の例外は、サーバーが確定計算した【数値提案（KPI試算）】ブロックです（sales_data.kpi_scenarios はその存在を示す参照で、数値の正本ではありません）。これは実績ではなく、前提条件にもとづくシナリオ試算です。引用するときは各数値に【実績】【仮定(入力)】【仮定(シナリオ)】のラベルを必ず付け、実績と仮定を同じ表・同じ合計に混ぜないでください。ブロックに無い金額・個数・比率を新たに作ることは、この例外に含まれません。
 3. 【ランチ／ディナー分離・必須】会計時刻16:00未満＝ランチ、16:00以降＝ディナー。客単価・客数・フード割合・ドリンク割合・商品構成の内部分析は必ずランチとディナーを分けて行う。合算の総売上は最終サマリーに使ってよいが、合算のフード／ドリンク比率をディナー（またはランチ）の比率として述べてはならない。確定集計に「ランチ／ディナー別フード・ドリンク比率（月次）」または各月のランチ内／ディナー内 F:D% がある場合は、それを正本にしてドリンク比率の推移・時期を述べよ。「ディナー単体のフード／ドリンク比率が表示されていない」と言ってはいけない。昼夜別の数値が無い場合のみ「昼夜合算の構成比」と明示する。
 4. 【12月・クリスマス季節要因・証拠必須】12月を含む分析では、【異常月の詳細解析】の商品名・高単価コース寄与、または【今回の分析で参照する店舗資料・根拠】にクリスマスディナー／季節コースの記録があるか確認する。記録がある場合だけ実施事実として数値・商品名を述べる。記録が無い場合は実施を断定せず、「※これは推測です」と明示した季節要因の仮説に留める。
 5. 一方、原因分析・傾向の解釈・改善提案・今後の見通しなど、データから直接は読み取れない考察を求められた場合は、拒否せず、マルゴグループ（ワイン推し・ワイン充実）および各店舗業態の知見に基づいた見解を述べて構いません。一般飲食の汎用アドバイスに逃げず、ワイン提案・ペアリング・ドリンク構成・グループ連携を優先してください。ただしその部分は必ず「※これは推測です」「（推測）」等の文言を付けて、データに基づく事実の記述と明確に区別してください。サーバーが付与する外部知見（Perplexity/Grok）を使う場合は「※これは外部知見です」と明示し、店舗数値と混同しないでください。
@@ -19254,7 +19618,9 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
 11. 【店舗営業情報・必須】毎回必ず添付されます。分析の最初に読み、定休曜日の売上ゼロ／低下を弱点や機会損失としないでください。定休曜日に売上が立っている日は特別営業（または例外営業）として区別してください。他店の定休ルールを転用しないでください。
 12. 【3系統統合・必須】①ジャーナル確定集計（数値・予約vs飛び込み含む）②店舗営業情報（定休・ランチ等）③店舗資料（施策・メニュー）を必ず突き合わせて回答してください。どれか欠ける場合はチェック欄の状態に従い、欠けた系統を推測で埋めないでください。マルゴエスでは④東京ドーム・フードコート背景も会場要因として突き合わせる（コート日報の順位・シェアは背景。売上金額の正本は①のまま）。
 13. 【期間の読み方・必須】「2026年1月から7月まで」「2026年1月〜7月」などは1月と7月の2点比較ではない。1〜7月の全月を含む連続期間として扱い、確定済み集計の月次推移がある月はすべて述べる。端点だけを抜き出して途中月を無視してはいけない。
-14. 【過去の自分の回答】前のターンであなたが確定済み集計データを根拠に提示した数値は依然として確定値です。今回の提示範囲が前より狭いことは前の数値の誤りを意味しません。自分の過去回答を「誤りでした」と撤回・謝罪してはいけません。前回の値に言及するときは「前回の確定済み集計で提示した値（今回の提示範囲外）」と明示し、それを出典に新たな平均・合計・増減を計算することは【完全禁止】です。必要なら対象期間を指定して質問し直すよう促してください。${integrated.checklist}${integrated.storeOpsBlock}${integrated.foodcourtBlock || ''}${verifiedDataBlock}${integrated.knowledgeBlock}${chatPdfHistoryBlock}`;
+14. 【過去の自分の回答】前のターンであなたが確定済み集計データを根拠に提示した数値は依然として確定値です。今回の提示範囲が前より狭いことは前の数値の誤りを意味しません。自分の過去回答を「誤りでした」と撤回・謝罪してはいけません。前回の値に言及するときは「前回の確定済み集計で提示した値（今回の提示範囲外）」と明示し、それを出典に新たな平均・合計・増減を計算することは【完全禁止】です。必要なら対象期間を指定して質問し直すよう促してください。
+15. 【数値提案（KPI試算）・必須】利用者が「KPIを具体的な数字で」「目標を数字で」等の数値提案を求め、【数値提案（KPI試算）】ブロックが付いている場合は、そこにある数値をそのまま使って次をすべて出してください: ①価格設定案（単品・ドリンクセット・ワインセット）と粗利率 ②損益分岐となる1日の販売個数 ③目標販売個数（ランチ／野球デーゲーム／大型ライブ／ナイター／通常ディナー別、イベント開始前・終演後などの時間帯別） ④売上の期待値（1日・月間） ⑤KPI目標値（セット率・購入会計の客単価上昇額・テイクアウト比率・廃棄率） ⑥撤退・縮小ラインの数値 ⑦イベントのない通常営業日の見込み。推定値は必ず保守・標準・強気の3シナリオを併記し、各数値に【実績】【仮定(入力)】【仮定(シナリオ)】のラベルを付けてください。「効果予測値は設定しない」「利益ベースの撤退金額は判断できない」で止めてはいけません。自分で電卓計算をやり直さず、ブロックの値をそのまま引用してください。回答の最後に「この試算の精度を上げるために必要なデータ」を必ず置いてください。
+16. 【分析範囲の既定】利用者が対象を絞っていない場合は、特定のイベント日だけに寄せず、提示された全期間の実績と通常営業日を土台にしてください。特定イベントを深掘りするときも、同じ期間の通常営業日の数値を比較対象として必ず併記してください。${integrated.checklist}${integrated.storeOpsBlock}${integrated.foodcourtBlock || ''}${verifiedDataBlock}${integrated.knowledgeBlock}${chatPdfHistoryBlock}`;
 
   const strictSystemInstructionClamped = clampAiSystemInstruction(strictSystemInstruction);
 
@@ -19271,6 +19637,15 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
       systemInstruction: strictSystemInstructionClamped,
       salesData: salesDataForAi,
       chatHistory: chatHistoryForAi,
+      // 数値提案を求められたときだけ、コード側でKPI試算を確定させる材料を渡す。
+      // 実績はサーバーの統一売上から取り、ここでは前提（仮定）だけを送る。
+      kpiRequest: kpiTargetsRequested
+        ? {
+            requested: true,
+            productName: resolveKpiProductName(resolvedChatQuery),
+            assumptions: effectiveKpiAssumptions(chatRun.storeKey)
+          }
+        : null,
       // 深掘り時は専門AI側がWeb/X/反証まで担当するため、Journal側は確定データ分析に集中する。
       orchestrationMode: foodcourtBoostEnabled ? 'data' : 'auto',
       storeKey: chatRun.storeKey,
@@ -19323,6 +19698,14 @@ ${formatReservationImportCoverageForAi(chatRun.storeKey)}
               }
             },
             orchestrationMode: 'data',
+            // 最終統合でもKPI試算の確定値を落とさない。2本の下書きを1本にまとめる際に数値が消える事故を防ぐ。
+            kpiRequest: kpiTargetsRequested
+              ? {
+                  requested: true,
+                  productName: resolveKpiProductName(resolvedChatQuery),
+                  assumptions: effectiveKpiAssumptions(chatRun.storeKey)
+                }
+              : null,
             storeKey: chatRun.storeKey,
             storeName: resolveStoreDisplayName(chatRun.storeKey),
             storeLocationBlock: buildStoreLocationBlockForAi(chatRun.storeKey)
