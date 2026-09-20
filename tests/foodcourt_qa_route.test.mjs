@@ -167,7 +167,7 @@ test('dialogue consent reaches the real route with original consultation and ove
   const context=vm.createContext({Date});vm.runInContext(readFileSync(new URL('../public/foodcourt-qa-planner.js',import.meta.url),'utf8'),context);
   const planner=context.FOODCOURT_QA_PLANNER;
   const question='売り上げアップのために、焼きたてのクロワッサンをお出ししようと思っています。どう思いますか？';
-  const opts={now:new Date('2026-09-20T00:00:00Z'),hasAssumptions:true};
+  const opts={now:new Date('2026-09-20T00:00:00Z'),hasAssumptions:true,hasUnitPrice:true,hasUnitCost:true};
   let turn=planner.nextTurn(planner.initialState(),question,opts);
   turn=planner.nextTurn(turn.state,'2026年6月',opts);
   turn=planner.nextTurn(turn.state,'入力値で3シナリオを試算',opts);

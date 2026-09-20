@@ -899,7 +899,7 @@
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
-<script src="foodcourt-qa-planner.js?v=20260921-kpi-followup"></script>
+<script src="foodcourt-qa-planner.js?v=20260921-price-ask"></script>
 <script>
 'use strict';
 (function(){
@@ -2914,9 +2914,17 @@
     const fields=[...document.querySelectorAll('#qaKpiInputs input')];
     const invalid=!/^(キャンセル|取り消し|やめる)$/.test(raw) && fields.find(input=>!input.checkValidity());
     if(invalid){ $('qaKpiInputs').open=true; invalid.reportValidity(); return; }
+    const parsedAssumptions = qaPlanner.parsePriceCostFromText ? qaPlanner.parsePriceCostFromText(raw) : {};
+    if (parsedAssumptions && Object.keys(parsedAssumptions).length) {
+      fields.forEach(input=>{
+        const key=input.dataset.kpiKey;
+        if(parsedAssumptions[key]!=null) input.value=String(parsedAssumptions[key]);
+      });
+      $('qaKpiInputs').open=true;
+    }
     const assumptions=readQaKpiAssumptions();
     const viewingDate=currentViewedReport?salesDateOf(currentViewedReport):'';
-    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,hasAssumptions:Object.keys(assumptions).length>0,assumptionsReady:fields.every(input=>input.value.trim()!==''),historyText:qaContextHistory.map(m=>m.content).join('\n'),hasPriorAnswer:qaContextHistory.some(m=>m.role==='assistant')});
+    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,hasAssumptions:Object.keys(assumptions).length>0,assumptionsReady:Boolean(assumptions.unitPriceYen!=null && assumptions.unitCostYen!=null),hasUnitPrice:assumptions.unitPriceYen!=null,hasUnitCost:assumptions.unitCostYen!=null,historyText:qaContextHistory.map(m=>m.content).join('\n'),hasPriorAnswer:qaContextHistory.some(m=>m.role==='assistant')});
     qaPlanState=plan.state;
     updateQaPeriodLabel();
     dom.qInput.value = '';
@@ -2931,7 +2939,7 @@
       qaChoiceLock = true;
       setTimeout(()=>{ qaChoiceLock=false; }, 400);
       qaHistory.push({role:'assistant',content:plan.message,clarification:true,choices:plan.choices,actions:plan.actions});
-      if(qaPlanState.pending?.kind==='kpi') $('qaKpiInputs').open=true;
+      if(qaPlanState.pending?.kind==='kpi' || qaPlanState.pending?.kind==='assumptions') $('qaKpiInputs').open=true;
       renderQaThread(false); dom.qInput.focus(); return;
     }
     const question=plan.question;
@@ -2952,7 +2960,7 @@
       // 表示日も送るが、対話で確定した period_mode/requested_ranges を優先する。
       const viewingReportId = currentViewedReport && currentViewedReport.id != null ? currentViewedReport.id : null;
       const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId,
-        period_mode:activePeriod.mode, requested_ranges:activePeriod.ranges, kpi_assumptions:assumptions, analysis_methods:plan.methods||qaPlanState.methods||[] });
+        period_mode:activePeriod.mode, requested_ranges:activePeriod.ranges, kpi_assumptions:Object.assign({}, assumptions, (plan.allowEstimate||qaPlanState.allowEstimate)?{allow_estimate:true}:{}), analysis_methods:plan.methods||qaPlanState.methods||[] });
       qaContextHistory.push({role:'user',content:question+'\n対象期間: '+activePeriod.label},{role:'assistant',content:b.answer||'(回答が空でした)'});
       // question を回答側にも保持（レポート出力時に分析サマリーと取り違えないため）
       qaHistory.push({

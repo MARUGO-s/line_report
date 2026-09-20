@@ -114,13 +114,14 @@ export function formatKpiUserAppendix(
     const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
     const fromUplift = uplift?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
     const units = fromOutlook?.daily_units ?? scenario.normalDayOutlook.targetUnits.value
-    const dailySales = fromOutlook?.daily_sales_yen ?? fromUplift?.initiative_daily_sales_yen ?? scenario.averageDailyRevenueYen.value
+    const priced = item?.price.value != null && units != null ? Math.round(Number(units) * item.price.value) : null
+    const dailySales = priced ?? fromUplift?.initiative_daily_sales_yen ?? scenario.averageDailyRevenueYen.value
     return { scenario, item, units, dailySales, fromUplift }
   })
   const labels = col.map((row) => row.scenario.scenarioLabel)
   const lines = [
     '【新しい施策のKPI見込み（コード計算）】',
-    'この施策自体の販売実績はない。データ不足で分析を止めない。今の店舗売上と類似商品から売価・原価・販売数を推測した。',
+    'この施策自体の販売実績はない。データ不足で分析を止めない。売価・原価は入力または仮定(シナリオ)。販売数の錨だけ類似商品の日次実績を使う。',
   ]
   if (pack.baseline.averageDailySalesYen != null) {
     lines.push(`今の店舗 1日あたり売上【実績】${yen(pack.baseline.averageDailySalesYen)}（${pack.baseline.periodLabel}）`)
@@ -192,9 +193,8 @@ export async function prepareFoodCourtKpiScenario(
       detail,
       `${input.question}\n${input.historyText || ""}`,
     )
-    if (assumptions.unitPriceYen == null && outlook?.facts.unit_price_yen) {
-      assumptions.unitPriceYen = outlook.facts.unit_price_yen
-    }
+    // 売価は入力欄・店舗前提・3シナリオ仮置きだけを使う。
+    // ジャーナル類似商品の単価（客単価や別SKU）を新商品の店頭価格に流用しない。
     const pack = buildKpiScenarioPack({ assumptions, baseline: deriveKpiBaselineFromUnifiedSales(sales.unified_sales) })
     const dailyUnits = (label: string) => {
       const fromOutlook = outlook?.facts.scenarios.find(s => s.label === label)?.daily_units
@@ -216,10 +216,12 @@ export async function prepareFoodCourtKpiScenario(
       operatingDaysPerMonth: pack.baseline.operatingDaysPerMonth,
       scenarios: pack.scenarios.map((s) => {
         const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === s.scenarioLabel)
+        const units = fromOutlook?.daily_units ?? s.normalDayOutlook.targetUnits.value
+        const price = s.prices[0]?.price.value
         return {
           label: s.scenarioLabel,
-          daily_units: fromOutlook?.daily_units ?? s.normalDayOutlook.targetUnits.value,
-          daily_sales_yen: fromOutlook?.daily_sales_yen ?? s.averageDailyRevenueYen.value,
+          daily_units: units,
+          daily_sales_yen: units != null && price != null ? Math.round(Number(units) * price) : s.averageDailyRevenueYen.value,
         }
       }),
     })

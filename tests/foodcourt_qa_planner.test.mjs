@@ -59,14 +59,21 @@ test('missing period asks once, clarification preserves question, follow-up reta
   assert.equal(result.period.ranges[0].from,'2026-06-01');
 });
 
-test('KPI asks period then methods; selecting targets skips extra assumption chips',()=>{
+test('KPI asks period then methods, then sell-price and cost before analysis',()=>{
   let result=planner.nextTurn(planner.initialState(),'新商品のKPIを試算してください',options);
   result=planner.nextTurn(result.state,'全期間',options);
   assert.equal(result.state.pending.kind,'methods');
   assert.ok(result.state.pending.recommended.includes('kpi'));
   result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
+  assert.equal(result.kind,'clarify');
+  assert.equal(result.state.pending.kind,'assumptions');
+  assert.match(result.message,/想定売価/);
+  assert.ok(result.actions.includes('全部お任せ'));
+  assert.ok(result.actions.includes('入力欄に書いて進む'));
+  result=planner.nextTurn(result.state,'全部お任せ',options);
   assert.equal(result.kind,'ready');assert.equal(result.question,'新商品のKPIを試算してください');
   assert.equal(result.period.mode,'all');
+  assert.equal(result.allowEstimate,true);
   assert.equal(result.state.kpiConfirmed,true);
   assert.ok(result.methods.includes('kpi'));
   result=planner.nextTurn(result.state,'KPIを数字で',options);
@@ -106,15 +113,19 @@ test('follow-up KPI analysis after croissant adds the kpi method instead of refu
   assert.equal(result.kind,'ready');
   assert.equal(result.methods.includes('kpi'),false);
   const follow=planner.nextTurn(result.state,'KPI分析してみてください',opts);
-  assert.equal(follow.kind,'ready');
-  assert.equal(follow.question,'KPI分析してみてください');
-  assert.ok(follow.methods.includes('kpi'));
-  assert.equal(follow.state.kpiConfirmed,true);
+  assert.equal(follow.kind,'clarify');
+  assert.equal(follow.state.pending.kind,'assumptions');
+  const go=planner.nextTurn(follow.state,'全部お任せ',opts);
+  assert.equal(go.kind,'ready');
+  assert.equal(go.question,'KPI分析してみてください');
+  assert.ok(go.methods.includes('kpi'));
+  assert.equal(go.state.kpiConfirmed,true);
+  assert.equal(go.allowEstimate,true);
 });
 
 test('croissant consultation with inputs asks trial consent without losing the original question',()=>{
   const question='売り上げアップのために、焼きたてのクロワッサンをお出ししようと思っています。どう思いますか？';
-  const opts={...options,hasAssumptions:true,assumptionsReady:true};
+  const opts={...options,hasAssumptions:true,assumptionsReady:true,hasUnitPrice:true,hasUnitCost:true};
   let result=planner.nextTurn(planner.initialState(),question,opts);
   assert.equal(result.state.pending.kind,'period');
   result=planner.nextTurn(result.state,'全期間',opts);
@@ -164,7 +175,28 @@ test('method chips accumulate, reveal extras, and margin/kpi allow estimates wit
   assert.ok(result.choices.includes('粗利・採算（未登録なら推測）'));
   result=planner.nextTurn(result.state,'粗利・採算（未登録なら推測）',options);
   result=planner.nextTurn(result.state,'この分析で進む',options);
+  assert.equal(result.state.pending.kind,'assumptions');
+  result=planner.nextTurn(result.state,'全部お任せ',options);
   assert.equal(result.kind,'ready');
   assert.deepEqual(plain(result.methods),['mix','margin']);
   assert.equal(result.state.kpiConfirmed,true);
+});
+
+test('entered price and cost skip the extra question; chat numbers are accepted',()=>{
+  const filled={...options,hasUnitPrice:true,hasUnitCost:true};
+  let result=planner.nextTurn(planner.initialState(),'新商品のKPIを試算してください',filled);
+  result=planner.nextTurn(result.state,'全期間',filled);
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',filled);
+  assert.equal(result.kind,'ready');
+  assert.equal(result.allowEstimate,false);
+  const parsed=planner.parsePriceCostFromText('売価420円、原価126円');
+  assert.equal(parsed.unitPriceYen,420);
+  assert.equal(parsed.unitCostYen,126);
+  let asking=planner.nextTurn(planner.initialState(),'新商品のKPIを試算してください',options);
+  asking=planner.nextTurn(asking.state,'全期間',options);
+  asking=planner.nextTurn(asking.state,'おすすめ全部で進む',options);
+  const typed=planner.nextTurn(asking.state,'売価380円、原価110円',{...options,hasUnitPrice:true,hasUnitCost:true});
+  assert.equal(typed.kind,'ready');
+  assert.equal(typed.question,'新商品のKPIを試算してください');
+  assert.equal(typed.period.mode,'all');
 });

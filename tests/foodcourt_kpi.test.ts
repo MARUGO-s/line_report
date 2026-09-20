@@ -197,6 +197,21 @@ test('follow-up detection treats later questions as about the previous answer un
   assert.equal(ctx.latestFoodCourtAssistantAnswer(history),'客数が伸び、客単価は横ばいです。')
 })
 
+test('journal similar-item unit price is not copied as the new product selling price',async()=>{
+  const io=loaders({missing:true})
+  const journalDetail=await buildFoodCourtJournalDetail(
+    [{from:'2025-12-09',to:'2025-12-09'}],
+    'クロワッサン',
+    async()=>[{business_date:'2025-12-09',gross_sales:1076,receipts:[{total:1076,time:'11:30',items:[{code:'1001',name:'クロワッサンサンド',qty:1,unit:1076,amount:1076}]}]}],
+  )
+  const result=await prepareFoodCourtKpiScenario({...input,salesDates:[],journalDetail},io)
+  assert.ok(result)
+  const tableRows=(result.userAppendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
+  const priceRow=tableRows.find(line=>line.includes('予想売価'))||''
+  assert.doesNotMatch(priceRow,/1,076|1076/)
+  assert.match(result.userAppendix,/売価・原価は入力または仮定\(シナリオ\)/)
+})
+
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{
   assert.equal(buildFoodCourtKpiInputs({notes:'untrusted',unitPriceYen:'<script>',unitCostYen:null}),null)
   const context=buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:0,store_key:'other',requested:true,notes:'UNTRUSTED'})!

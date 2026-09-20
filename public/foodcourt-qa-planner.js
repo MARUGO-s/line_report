@@ -83,7 +83,8 @@
     {id:'goal', label:'改善の打ち手'},
   ];
   const METHOD_ACTIONS = ['おすすめ全部で進む','ほかの手法を見る','この分析で進む','キャンセル'];
-  const initialState = () => ({period:null,pending:null,kpiConfirmed:false,methods:null});
+  const ASSUMPTION_ACTIONS = ['入力欄に書いて進む','全部お任せ','キャンセル'];
+  const initialState = () => ({period:null,pending:null,kpiConfirmed:false,methods:null,assumptionsConfirmed:false,allowEstimate:false});
   function needsInputTrialChoice(query) {
     const q=String(query||'').normalize('NFKC');
     if(/試算.*(?:不要|なし|しない)|実績|推移|とは|意味|定義/.test(q)) return false;
@@ -115,6 +116,51 @@
   function methodsForceKpi(ids) {
     return (ids||[]).some(id => id==='kpi' || id==='margin');
   }
+  function parsePriceCostFromText(text) {
+    const t = String(text || '').normalize('NFKC');
+    const out = {};
+    const grab = (pattern, min, max, integer) => {
+      const m = t.match(pattern);
+      if (!m) return null;
+      if (/[-−]\s*\d/.test(m[0]) || /[-−]$/.test(t.slice(0, m.index))) return null;
+      const n = Number(String(m[1]).replace(/,/g, ''));
+      if (!Number.isFinite(n) || n < min || n > max) return null;
+      return integer ? Math.round(n) : n;
+    };
+    const unitPrice = grab(/(?:売価|単価|価格|定価|単品)[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/, 1, 100000, true);
+    const unitCost = grab(/原価[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/, 0, 100000, true);
+    const batchUnits = grab(/(?:1|一)\s*回[^0-9]{0,8}([0-9,]+)\s*(?:個|本|枚)/, 1, 2000, true);
+    const batchesPerDay = grab(/(?:1|一)\s*日[^0-9]{0,12}?([0-9,]+)\s*回/, 1, 48, true);
+    const staff = grab(/([0-9,]+(?:\.[0-9]+)?)\s*(?:人|名)/, 0.5, 50, false);
+    const waste = grab(/廃棄[^0-9]{0,10}([0-9,]+(?:\.[0-9]+)?)\s*[%％]/, 0, 100, false);
+    if (unitPrice != null) out.unitPriceYen = unitPrice;
+    if (unitCost != null) out.unitCostYen = unitCost;
+    if (batchUnits != null) out.bakeBatchUnits = batchUnits;
+    if (batchesPerDay != null) out.bakeBatchesPerDay = batchesPerDay;
+    if (staff != null) out.prepStaffCount = staff;
+    if (waste != null) out.wasteRateTolerancePct = waste;
+    return out;
+  }
+  function hasPriceAndCost(options) {
+    return Boolean(options && options.hasUnitPrice && options.hasUnitCost);
+  }
+  function needsPriceCostInputs(question, historyText, methods) {
+    const q = String(question || '').normalize('NFKC');
+    if (!q) return false;
+    if (/(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/.test(q)) return false;
+    if (/(?:とは|意味|定義)/.test(q) && !/試算|KPI|目標/.test(q)) return false;
+    if (wantsKpiTargets(question, historyText)) return true;
+    if (methodsForceKpi(methods)) return true;
+    return false;
+  }
+  function assumptionsClarify(state, options) {
+    const missing = [];
+    if (!options?.hasUnitPrice) missing.push('想定売価（その商品1個の店頭価格）');
+    if (!options?.hasUnitCost) missing.push('予想原価（1個あたり）');
+    const list = missing.length ? missing.map(item => '・'+item).join('\n') : '・想定売価と予想原価';
+    const message = 'この分析には、その商品自体の想定売価と予想原価が必要です。客単価や別商品の単価は使いません。\nまだ足りない項目:\n'+list+'\n下の「新商品・KPIの試算前提」に入力するか、チャットで「売価420円、原価126円」のように書いてください。分からなければ「全部お任せ」で、仮定(シナリオ)として仮置きします。';
+    return {state,kind:'clarify',message,choices:[],actions:ASSUMPTION_ACTIONS};
+  }
   function normalizeMethodIds(ids) {
     const allowed = new Set(ANALYSIS_METHODS.map(m => m.id));
     return [...new Set((ids||[]).filter(id => allowed.has(id)))];
@@ -145,7 +191,26 @@
     const raw = String(text||'').trim();
     const clarify = (message,choices=[]) => ({state,kind:'clarify',message,choices});
     if(/^(キャンセル|取り消し|やめる)$/.test(raw)) { state.pending=null; return {state,kind:'notice',message:'確認を取り消しました。別の質問を入力してください。'}; }
-    let period = resolvePeriod(raw,options.now,options.viewingDate);
+    let heldQuestion = null;
+    const assumptionChip = /^(全部お任せ|おまかせ|分からない|仮置きで進む|入力欄に書いて進む|入力した前提で進む)$/.test(raw);
+    if(state.pending?.kind==='assumptions') {
+      heldQuestion = state.pending.question;
+      if(/^(全部お任せ|おまかせ|分からない|仮置きで進む)$/.test(raw)) {
+        state.assumptionsConfirmed=true; state.allowEstimate=true; state.pending=null;
+      } else if(/^(入力欄に書いて進む|入力した前提で進む)$/.test(raw)) {
+        if(hasPriceAndCost(options)) { state.assumptionsConfirmed=true; state.allowEstimate=false; state.pending=null; }
+        else return assumptionsClarify(state, options);
+      } else if(hasPriceAndCost(options)) {
+        state.assumptionsConfirmed=true; state.allowEstimate=false; state.pending=null;
+      } else if(/分析|試算|教えて|[?？]/.test(raw) && !/売価|原価|円/.test(raw)) {
+        heldQuestion = raw;
+        state.pending=null;
+        state.assumptionsConfirmed=false;
+      } else {
+        return assumptionsClarify(state, options);
+      }
+    }
+    let period = assumptionChip ? null : resolvePeriod(raw,options.now,options.viewingDate);
     if(period?.error) { state.pending={kind:'period',question:state.pending?.question||raw}; return clarify(period.error,['保存済み全期間']); }
     if(period?.ranges?.length) {
       const sorted=[...period.ranges].sort((a,b)=>a.from.localeCompare(b.from));
@@ -154,7 +219,7 @@
         return clarify('開始日・終了日の順序と期間の重複を確認してください。合計3660日以内で指定できます。');
       }
     }
-    let question = state.pending?.question || raw;
+    let question = heldQuestion || state.pending?.question || raw;
     let inputChoiceResolved=false;
     if(state.pending?.kind==='methods') {
       const picked = methodByChip(raw);
@@ -217,6 +282,8 @@
     if(isRestartQuestion(raw) && options.hasPriorAnswer) {
       state.methods=null;
       state.kpiConfirmed=false;
+      state.assumptionsConfirmed=false;
+      state.allowEstimate=false;
     }
     const skipMethods = Boolean(options.hasPriorAnswer && state.methods?.length && !isRestartQuestion(raw) && !isRestartQuestion(question));
     if(!skipMethods && !state.methods) {
@@ -235,13 +302,22 @@
       state.methods=normalizeMethodIds([...(state.methods||[]),'kpi']);
       state.kpiConfirmed=true;
     }
+    if(needsPriceCostInputs(question, options.historyText, state.methods) && !state.assumptionsConfirmed) {
+      if(hasPriceAndCost(options)) {
+        state.assumptionsConfirmed=true;
+        state.allowEstimate=false;
+      } else {
+        state.pending={kind:'assumptions',question};
+        return assumptionsClarify(state, options);
+      }
+    }
     state.pending=null;
-    return {state,kind:'ready',question,period:state.period,methods:state.methods||[]};
+    return {state,kind:'ready',question,period:state.period,methods:state.methods||[],allowEstimate:state.allowEstimate===true};
   }
   function promptMethods(state, question, options={}) {
     const next = {...state, methods:null};
     next.pending={kind:'methods',question,recommended:recommendAnalysisMethods(question, options.historyText),selected:[],showAll:false};
     return methodsClarify(next);
   }
-  root.FOODCOURT_QA_PLANNER={resolvePeriod,wantsKpiTargets,recommendAnalysisMethods,ANALYSIS_METHODS,initialState,nextTurn,promptMethods};
+  root.FOODCOURT_QA_PLANNER={resolvePeriod,wantsKpiTargets,recommendAnalysisMethods,needsPriceCostInputs,parsePriceCostFromText,ANALYSIS_METHODS,initialState,nextTurn,promptMethods};
 })(globalThis);
