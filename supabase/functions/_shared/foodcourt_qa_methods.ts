@@ -1,3 +1,5 @@
+import { foodCourtManagementPack } from './foodcourt_management_packs.ts'
+
 /** Q&Aで利用者が選ぶ分析角度。ブラウザーの FOODCOURT_QA_PLANNER.ANALYSIS_METHODS と同じ id。 */
 
 export const FOODCOURT_ANALYSIS_METHODS = [
@@ -67,11 +69,14 @@ export function foodCourtAnalysisMethodPrompt(ids: readonly string[]): string {
   if (!selected.length) return ""
   const lines = selected.map((id) => {
     const row = FOODCOURT_ANALYSIS_METHODS.find((item) => item.id === id)!
-    return `- ${row.label}: ${row.instruction}`
+    const pack = foodCourtManagementPack(id)
+    return pack
+      ? `- ${row.label}: ${row.instruction}\n【知識パック・${row.label}】\n${pack}`
+      : `- ${row.label}: ${row.instruction}`
   })
   return [
     "【今回選ばれた分析方法・最優先】",
-    "次の角度だけを本題にする。選ばれていない分析・フレームワーク・KPI節・次の一手を義務として並べない。下記の市場調査項目も、選ばれていないものは省略する。",
+    "次の角度だけを本題にする。選ばれていない分析・フレームワーク・KPI節・次の一手を義務として並べない。下記の市場調査項目も、選ばれていないものは省略する。選ばれていない手法の知識パックは読まない。",
     ...lines,
     "粗利・目標を含む場合、原価や人件費が未登録でも【仮定(シナリオ)】の推測値で目標を出してよい。新しい施策に実績が無くても数値未確認で止めず、サーバー確定の寄与率・上積みを引用する。AIが別係数で作り直さない。実績と推測は混ぜない。",
   ].join("\n")

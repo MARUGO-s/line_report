@@ -52,7 +52,7 @@ const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-08-18: 規模帯・最大動員の数値は実測/手入力のみ。会場収容の推定はラベル専用にしたため v18。
 // 2026-09-20: 数値の出所制限＋通常営業日ベースラインの必須化で v20。旧キャッシュを再生成させる。
 // 2026-09-20: 目的に応じた分析手法。KGI/KPI/KFIは改善管理時のみ。旧キャッシュを再生成させる。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v25-store-kpi'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v26-method-packs'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
 // 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
@@ -64,9 +64,9 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。' + '\n' + BUSINESS_GOAL_METRICS_POLICY
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v25-store-kpi'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v26-method-packs'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
-// 現行では通常版・loop版とも v25 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
+// 現行では通常版・loop版とも v26 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
   return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', false))
     ? FOODCOURT_DAILY_ANALYSIS_AI_VERSION

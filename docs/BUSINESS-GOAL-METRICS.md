@@ -64,8 +64,9 @@ KGI: 店舗売上などの最終成果
 | フードコートQ&A・日次・期間・週次・任意深掘り | `supabase/functions/_shared/foodcourt_compare.ts` の共通施策ルールと品質評価 |
 | Journal標準分析・チャット・フードコート統合 | `supabase/functions/ai-analyze/index.ts` の `buildJournalAiServerPolicy` |
 | 既存の決定的試算・3概念への対応 | `supabase/functions/_shared/kpi_scenario.ts` |
+| 手法ごとの知識パック（分析前に選択分だけ読む） | `docs/management-warehouse/` と `foodcourt_management_packs.ts` |
 | 実ルート/プロンプト・数値回帰 | `tests/foodcourt_goal_metrics.test.ts`、`foodcourt_kpi.test.ts`、`kpi_scenario.test.ts`、`journal_store_context_integration.test.mjs` |
 
-既存ファイル移動・公開URL変更・DB migration・新規のデータ取得はない。フードコート日次/期間キャッシュはv25。保存済みQ&A・Journal履歴・週次報告は遡及変更しないため、新しく質問/分析して確認する。
+既存ファイル移動・公開URL変更・DB migration・新規のデータ取得はない。フードコート日次/期間キャッシュはv26。保存済みQ&A・Journal履歴・週次報告は遡及変更しないため、新しく質問/分析して確認する。
 
 テストは外部AIをモックし、実処理から送るルール/入力/事前計算の接続を確認する。実AIの回答品質を実証するものではない。本番反映は対応PRと同一SHAのEdge/Pages Actionsで確認する。
