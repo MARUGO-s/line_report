@@ -476,7 +476,9 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 専門AIは数値・他店比較、イベント・天気、運営改善を分担し、反証AIが言い過ぎや矛盾を確認した後、統合AIが現場向けの最終回答を作ります。
 - 任意の品質評価AIは回答を採点し、不合格時は改善点だけを統合AIへ戻します。専門AI全体を毎回再実行せず、品質とコストを両立します。
 - 分析モードは自由質問（Q&A）、日次サマリー、期間サマリー、週次報告です。Q&Aは期間が未指定なら対話で確認します。「2026年6月」「6月と8月を比較」「2026-06-01〜2026-06-15」「今月」「表示中の日」「保存済み全期間」を指定でき、続く質問も同じ期間を引き継ぎます。「期間を変更」や新しい年月の入力で変更でき、「会話をクリア」でリセットします。年を省略した月は今年として扱います。
-- Q&Aは確定した売上日（テナント報告日の前日）のデータ・日報を参照します。離れた比較期間の間にある月は対象外です。保存済み全期間も読込上限500件、AIに渡す日別詳細は最大45日で、欠損をゼロ扱いせず上限到達を回答に明示します。期間や前提の確認中は分析AIを呼びません。
+- Q&Aの「保存済み全期間」は、ジャーナル連携の自店売上と他店比較を別々に取得します。自店売上は手修正 > 同期済みジャーナル > 自店レシートの統一値を優先し、比較表とは合算しません。商品・会計時間帯・同時購入は、日計と明細が照合できた日の実績を集計します。取得期間・日数・除外日数を回答末尾に表示します。
+- 他店比較の読込上限は500件、比較表の日別詳細は最大45日です。自店売上は全対象月の集計と直近366日の日別詳細、商品は売上上位30件と質問に商品名が一致する最大10件を渡します。離れた比較期間の間の月・未取得日は含めず、欠損をゼロ扱いしません。取得失敗時は分析を停止します。期間や前提の確認中は分析AIを呼びません。
+- 商品販売数・購入会計比率・会計時間帯は実績としてKPI分析に使いますが、会計数は客数、同時購入はセット率や提案成功率ではありません。新商品の時間別目標は明示的な試算時だけ、観測した会計時間構成による配分案を保守・標準・強気で計算し【仮定(シナリオ)】と表示します。原価・廃棄・KFI実行件数など未記録の数値は創作しません。
 - 通常提案では数値を創作せず、明示依頼時だけ保守／標準／強気の3シナリオを計算します。前提は入力欄→保存値→仮置きの順で【仮定(入力)】【仮定(シナリオ)】を付けます。会話専用欄は店舗情報を書き換えず、質問文の数値は採用しません。商品売上は店舗の純増額ではなく、費用・税区分未確認の採算は未判定。赤字時の損益分岐は0個でなく不成立、部分月を月間営業日数にしません。
 - 入力欄の数値は試算を依頼しなくても【仮定(入力)】として分析へ渡します。入力済みの導入相談では「入力値で3シナリオを試算」か「入力値を使って分析のみ」を選べます。分析のみでは新しい目標数値を生成しません。回答末尾の「今回、分析へ渡した前提」で値と出所、試算実行の有無を確認できます。過去の回答は自動で書き換わらないため、修正後の画面で再質問してください。
 - Journalの任意深掘りは通常Q&Aとは別のマルゴエス専用経路です。Journalが確定した期間だけを使い、会話履歴とフードコートQ&A履歴保存を行わず、Journalの確定数値を正本にして最後に統合します。
@@ -486,7 +488,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 **検索語:** 複数ai / 5+1 / 専門ai / 反証ai / 統合ai / 評価ai / q&a / 日次サマリー / 期間サマリー / 週次 / オーケストレーション / 数字を作らない
 
-**主な実装根拠:** `supabase/functions/_shared/foodcourt_compare.ts` / `supabase/functions/_shared/foodcourt_loop_utils.ts` / `supabase/functions/_shared/foodcourt_distillation.ts` / `tests/foodcourt_prompt_evaluation.test.ts`
+**主な実装根拠:** `supabase/functions/_shared/foodcourt_compare.ts` / `supabase/functions/_shared/foodcourt_sales_context.ts` / `supabase/functions/_shared/foodcourt_journal_detail.ts` / `tests/foodcourt_journal_link.test.ts` / `supabase/functions/_shared/foodcourt_loop_utils.ts` / `supabase/functions/_shared/foodcourt_distillation.ts` / `tests/foodcourt_prompt_evaluation.test.ts`
 
 ### FCT-03 来客予測・事前予測の精度評価・AI学習進化
 
@@ -772,11 +774,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 43件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 108件
+- 共有TypeScriptモジュール: 110件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
 - SQL migrations: 306件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 111件
+- テストファイル: 112件
 
 ### 公開画面・ブラウザコード
 
@@ -879,8 +881,10 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/foodcourt_forecast_engine.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_forecast_utils.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_journal_coverage.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_journal_detail.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_kpi.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/foodcourt_loop_utils.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
+| `supabase/functions/_shared/foodcourt_sales_context.ts` | FCT-01 / FCT-02 / FCT-03 / FCT-04 / FCT-05 / FCT-06 / DEV-02 |
 | `supabase/functions/_shared/google_service_account_auth.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/google_sheets_client.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/groq_model.ts` | JAI-01 / FCT-02 / DEV-02 |

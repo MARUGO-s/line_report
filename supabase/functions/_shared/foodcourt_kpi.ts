@@ -4,6 +4,7 @@ import {
   KPI_ASSUMPTION_LABELS,
 } from './kpi_scenario.ts'
 import { buildTrustedAiSalesData, type UnifiedSalesSummary } from './sales_reconciliation_ai.ts'
+import { allocateFoodCourtHourlyTargets, type FoodCourtJournalDetail } from './foodcourt_journal_detail.ts'
 
 /** 入力の参照は試算の許可とは別。数値allowlist以外や自由文はここへ取り込まない。 */
 export function buildFoodCourtKpiInputs(raw: unknown, currentInputKeys?: string[]) {
@@ -37,9 +38,9 @@ type Loaders = {
   timeoutMs?: number
 }
 
-/** 認可後に呼ぶ。期間はサーバー取得の比較レポートから渡し、クライアント実績は受け取らない。 */
+/** 認可後に呼ぶ。自店売上の確定期間を優先し、クライアント実績は受け取らない。 */
 export async function prepareFoodCourtKpiScenario(
-  input: { question: string; authorizedStore: string; salesDates: string[]; salesRanges?: Array<{from:string;to:string}>; assumptions?: unknown },
+  input: { question: string; authorizedStore: string; salesDates: string[]; salesRanges?: Array<{from:string;to:string}>; assumptions?: unknown; journalDetail?: FoodCourtJournalDetail | null },
   loaders: Loaders,
 ) {
   if (!isKpiScenarioRequest(input.question)) return null
@@ -71,10 +72,16 @@ export async function prepareFoodCourtKpiScenario(
       if (value !== null) assumptions[key as keyof typeof assumptions] = value
     }
     const pack = buildKpiScenarioPack({ assumptions, baseline: deriveKpiBaselineFromUnifiedSales(sales.unified_sales) })
+    const detail = input.journalDetail
+    const hourlyTargets = detail && detail.facts.hourly.length ? pack.scenarios.map(s => ({
+      scenario: s.scenarioLabel, basis: 'scenario', daily_target_units: s.normalDayOutlook.targetUnits.value,
+      hours: allocateFoodCourtHourlyTargets(s.normalDayOutlook.targetUnits.value, detail),
+    })) : []
+    const hourlyBlock = hourlyTargets.length ? `\n\n【ジャーナル実績を重みにした時間別KPI配分案】\n${detail!.summary}\n【実績】時刻が分かる会計の時間別件数を配分の重みとする。【仮定(シナリオ)】通常日の新商品販売目標を同じ時間構成で売ると仮定した配分案。将来の需要予測・イベント前後の実績・注文時刻ではない。時刻不明会計は重みから除外し、整数配分の合計は各シナリオの日次目標に一致させる。\n${JSON.stringify(hourlyTargets)}` : ''
     return {
       inputs: buildFoodCourtKpiInputs(assumptions, normalizeKpiAssumptions(input.assumptions).provided),
-      block: formatKpiScenarioBlock(pack),
-      reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel },
+      block: formatKpiScenarioBlock(pack) + hourlyBlock,
+      reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel, journal_detail_coverage: detail?.coverage ?? null, hourly_targets: hourlyTargets },
     }
   } finally {
     clearTimeout(timer)

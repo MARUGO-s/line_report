@@ -4,6 +4,7 @@
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import { FOODCOURT_KPI_POLICY, type FoodCourtKpiContext, type FoodCourtKpiInputs } from './foodcourt_kpi.ts'
+import { FOODCOURT_SALES_POLICY, type FoodCourtSalesContext } from './foodcourt_sales_context.ts'
 import { BUSINESS_GOAL_METRICS_POLICY } from './business_goal_metrics.ts'
 import { FOODCOURT_DASHBOARD_SCOPE, issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
@@ -3138,6 +3139,7 @@ export async function answerFoodCourtQuestion(
   qaPeriodBlock = '',
   qaRanges: Array<{ from: string; to: string }> = [],
   kpiInputs: FoodCourtKpiInputs | null = null,
+  salesContext: FoodCourtSalesContext | null = null,
 ): Promise<{ answer: string | null; loopScore: number | null; loopCount: number; xTrendBrief?: string | null }> {
   if (!groqApiKey) return { answer: null, loopScore: null, loopCount: 0 }
   const deadlineAt = fcRequestDeadlineAt()
@@ -3160,7 +3162,7 @@ export async function answerFoodCourtQuestion(
     }
     if (rows.length) blocks.push(`■${fcDayLabel(r)}\n${rows.join('\n')}`)
   }
-  if (!blocks.length && !kpiContext && !kpiInputs) return { answer: 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。', loopScore: null, loopCount: 0 }
+  if (!blocks.length && !kpiContext && !kpiInputs && !salesContext?.hasData) return { answer: 'まだ分析できるデータがありません。ジャーナル売上・テナント比較表の登録を確認してください。', loopScore: null, loopCount: 0 }
   const journalScopeBlock = journalScope
     ? [
       "【Journal連携の対象範囲・サーバー確定】",
@@ -3176,8 +3178,8 @@ export async function answerFoodCourtQuestion(
     const scoped = reports.filter(report => { const date = fcSalesDate(report); return date >= range.from && date <= range.to })
     return `【指定範囲別のコード集計】${range.from}〜${range.to}\n${buildBaseInsights(scoped, baseName) || '比較可能なデータなし（0円とは扱わない）'}`
   }).join('\n\n')
-  const data = [journalScopeBlock, qaRangeFacts, blocks.reverse().join('\n\n')].filter(Boolean).join('\n\n')
-  const journalScopeRule = qaPeriodBlock + (journalScope
+  const data = [salesContext?.block, salesContext?.journalDetail?.block, journalScopeBlock, qaRangeFacts, blocks.reverse().join('\n\n')].filter(Boolean).join('\n\n')
+  const journalScopeRule = (salesContext ? FOODCOURT_SALES_POLICY + '\n' : '') + qaPeriodBlock + (journalScope
     ? "【Journal連携範囲】日報欠損日は0円扱いせず、部分日報の合計を対象期間全体の売上と呼ばない。Journalとの金額差だけを理由に、イベント・競合・順位の独立した背景事実まで捨てない。"
     : "")
   const insights = buildBaseInsights(reports, baseName)
@@ -3279,7 +3281,7 @@ export async function answerFoodCourtQuestion(
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
     journalScopeRule,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。現場日報があるときは、日報と売上実績をリンクした「施策レポート」としても書く。`,
-    `【データの大前提・最重要】売上・客数は「テナント一覧＝翌朝に出る“前日”の売上比較表」由来です。ただし提供データの日付は既に『実際に売上が発生した日（売上日）』へ補正済みなので、表示された日付＝その売上が発生した実日付として扱い、それ以上ずらさないこと（重ねて前日に戻さない）。イベント・天気・曜日との連動も、その売上日の条件でそのまま解釈してよい。`,
+    `【データの日付】テナント比較表の日付は翌朝発行日から売上日へ補正済み。ジャーナル連携の統一売上は最初から売上日。どちらも日付をさらにずらさない。自店売上の正本と比較表の参考集計は出典・期間・税区分を区別する。`,
     `【厳守・禁止】「売上は¥◯、客単価は¥◯、◯位です」のように表の値をそのまま言い換えるだけ／最大・最小をただ列挙するだけの回答は禁止。数字は根拠として最小限だけ引用し、必ず「だから何を意味するか（原因・メカニズム・顧客行動・示唆）」をセットで述べること。`,
     `【必ず市場調査として読み解く・以下を踏まえる】`,
     `(1) 競合プロファイル（各店の業態・提供する料理/飲み物・飲み中心か食事中心か）を必ず使い、“なぜその数字になるのか”を業態のメカニズムで説明する。例: 客単価の高低は業態（ワイン×スパイス＝高単価／ラーメン・ベトナム・もつ鍋＝低単価）の必然か想定外か。客数が伸びにくいのは「高単価で意思決定コストが高い業態だから」か。`,
@@ -3307,7 +3309,7 @@ export async function answerFoodCourtQuestion(
     FOODCOURT_ACTION_FORMAT_RULE,
   ].join('\n')
   const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'ask', q)
-  const contextBlock = `# データの前提（必読）\n以下の売上・客数は「テナント一覧＝翌朝発行の”前日”の売上比較表」由来ですが、日付は既に『実際の売上日』へ補正済みです。表示された日付＝その売上が発生した実日付として扱い、これ以上ずらさず、その日のイベント・天気・曜日で解釈してください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}\n\n# 日次生データ（全テナント）\n${data}`
+  const contextBlock = `# データの前提（必読）\n自店の全期間売上はジャーナル連携・統一売上、商品・時間帯は照合済みジャーナル明細を参照します。他店比較・要因分解・イベント相関はテナント比較表の取得範囲だけであり、自店全期間の結果ではありません。テナント比較表の報告日は実際の売上日へ補正済みです。ジャーナルは営業日です。どちらも日付をさらにずらさないでください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}\n\n# 出典別のサーバー集計・日次データ\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
@@ -3329,8 +3331,8 @@ export async function answerFoodCourtQuestion(
       groqApiKey, primary, kpiContext ? 4200 : 1800, 'openai', fallbackModel,
       { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
     ),
-    evaluationContext: kpiPolicy + '\n\n' + contextBlock,
-    evaluationProtectedPrefixLength: kpiPolicy.length,
+    evaluationContext: kpiPolicy + '\n\n' + (salesContext ? FOODCOURT_SALES_POLICY + '\n' + salesContext.evaluationBlock + '\n' + (salesContext.journalDetail?.evaluationBlock || '') + '\n' : '') + contextBlock,
+    evaluationProtectedPrefixLength: kpiPolicy.length + (salesContext ? FOODCOURT_SALES_POLICY.length + salesContext.evaluationBlock.length + (salesContext.journalDetail?.evaluationBlock.length || 0) + 5 : 0),
     numberAuditFacts: `${inputPolicy}\n${kpiContext?.block || ''}\n# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
     question: q,
     userInput: q,

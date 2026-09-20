@@ -6,6 +6,8 @@ import vm from 'node:vm';
 import {prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs} from '../supabase/functions/_shared/foodcourt_kpi.ts';
 import {isKpiScenarioRequest} from '../supabase/functions/_shared/kpi_scenario.ts';
 import {resolveAiSalesPeriods} from '../supabase/functions/_shared/sales_reconciliation_ai.ts';
+import {buildFoodCourtSalesContext} from '../supabase/functions/_shared/foodcourt_sales_context.ts';
+import {buildFoodCourtJournalDetail} from '../supabase/functions/_shared/foodcourt_journal_detail.ts';
 const source=readFileSync(new URL('../supabase/functions/admin-api/index.ts',import.meta.url),'utf8');
 const start=source.indexOf('    if (req.method === "POST" && (path === "/foodcourt/ask"');
 const end=source.indexOf('    if (req.method === "GET" && path === "/foodcourt/qa-history")',start);
@@ -27,6 +29,11 @@ function runtime(options={}) {
     json:(body,status)=>({body,status}),crypto,console,
     isStrictIsoDate:d=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d).toISOString().slice(0,10)===d,
     resolveAiSalesPeriods,isKpiScenarioRequest,prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs,
+    buildFoodCourtSalesContext,buildFoodCourtJournalDetail,
+    discoverFoodCourtSalesRange:async()=>[{from:'2025-12-09',to:'2026-08-01'}],
+    fetchPosJournalRows:async()=>{if(options.detailError)throw Error('synthetic');return []},
+    fetchSharedJournalReportState:async()=>({days:[],error:null}),
+    mergePosJournalDaysPreferPrimary:(a,b)=>[...a,...b],isRecord:v=>v&&typeof v==='object'&&!Array.isArray(v),
     normalizePosJournalStoreKey:s=>s.toLowerCase(),
     Deno:{env:{get:()=> 'synthetic-only'}},addDaysIso:dateAdd,jstDateIso:n=>dateAdd('2026-09-20',n),
     fcSalesDate:r=>dateAdd(r.report_date,-1),
@@ -34,7 +41,7 @@ function runtime(options={}) {
     loadVenueEventsForReports:async()=>{calls.push('events');return []},loadWeatherForReports:async()=>[],loadForecastForStore:async()=>[],
     loadFoodCourtDailyLogs:async()=>({logs:[{log_date:'2026-06-01'},{log_date:'2026-07-01'},{log_date:'2026-08-01'}],count:3,error:null}),
     loadJournalStoreContext:async(_db,store)=>{calls.push('profile');if(options.profileError)throw Error('synthetic');return {store_key:store,profile:null}},
-    fetchUnifiedSalesSummary:async(_db,store,from,to)=>{calls.push(['sales',store,from,to]);return {store_key:store,from,to,series:[],monthly_fallbacks:[],totals:{},reconciliation:{}}},
+    fetchUnifiedSalesSummary:async(_db,store,from,to)=>{calls.push(['sales',store,from,to]);if(options.salesError)throw Error('synthetic');return {store_key:store,from,to,series:options.journalOnly?[{date:from,gross_sales_yen:1000,guest_count:2,party_count:1,source_by_field:{},journal_values:{gross_sales_yen:1000}}]:[],monthly_fallbacks:[],totals:{},reconciliation:{}}},
     answerFoodCourtQuestion:async(...args)=>{calls.push('ai');sent=args;return {answer:'synthetic answer',loopScore:null,loopCount:1}},
   };
   return {queries,calls,get sent(){return sent},get inserted(){return inserted},run:async(body)=>{
@@ -55,6 +62,20 @@ test('real Q&A route filters comparison periods, shifts report dates once, remov
   assert.ok(app.queries.some(q=>q[0]==='lte' && q[2]==='2026-09-01'));
   assert.equal(app.calls.includes('profile'),false,'ordinary questions do not load assumptions');
   assert.equal(app.inserted.source_ref.period.report_count,2);
+});
+
+test('ordinary all-period Q&A loads early journal data without tenant reports and persists coverage',async()=>{
+  const app=runtime({rows:[],journalOnly:true});const result=await app.run({period_mode:'all',requested_ranges:[]});
+  assert.equal(result.status,200);assert.equal(app.sent[17].coverage.journal_from,'2025-12-09');
+  assert.match(result.body.answer,/2025-12-09/);assert.equal(app.inserted.source_ref.sales_coverage.journal_days,1);
+  assert.equal(app.calls.includes('profile'),false);
+});
+
+test('sales or journal-detail failure stops ordinary analysis before AI rather than falling back to receipts',async()=>{
+  for(const failure of [{salesError:true},{detailError:true}]) {
+    const app=runtime(failure);const result=await app.run({period_mode:'all',requested_ranges:[]});
+    assert.equal(result.status,503);assert.equal(result.body.code,'foodcourt_sales_unavailable');assert.equal(app.calls.includes('ai'),false);
+  }
 });
 
 test('tampered period modes, invalid dates, overlaps and missing ranges are rejected before DB/AI',async()=>{
