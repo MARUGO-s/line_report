@@ -68,6 +68,8 @@ test('M-talk and standalone Journal synthesize the same freshly loaded, sanitize
     assert.match(prompt,/KFI＝現場で実行・管理する行動指標/);
     assert.match(prompt,/KGIの目標との差→要因KPI→改善するKFI/);
     assert.match(prompt,/採算は未判定/);
+    assert.match(prompt,/改善策が必要な場合にだけKPIへ落とし込む/);
+    assert.doesNotMatch(prompt,/分析結果には必ず「KGI・KPI・KFI」/);
     assert.match(prompt,/対象施策/);assert.doesNotMatch(prompt,/期間外施策|forged-client-store|not-approved|架空太郎|090-1234-5678|fixture@example.invalid|99999/);
     assert.match(prompt,/estimated_from_shared_rates/);assert.match(prompt,/予約客A/);
     assert.deepEqual(app.calls.filter(c=>c[0]==='store'),[['store','fixture_store']]);

@@ -109,6 +109,9 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
       assert.match(prompt,/記録方法・単位/)
       assert.match(prompt,/目標が無ければギャップ\/達成率を創作しない/)
       assert.match(prompt,/採算は未判定/)
+      assert.match(prompt,/改善策が必要な場合にだけKPIへ落とし込む/)
+      assert.match(prompt,/売上構成比のABC/)
+      assert.doesNotMatch(prompt,/分析結果には必ず「KGI・KPI・KFI」/)
     }
     assert.equal(final.includes('コード側で確定計算済み'),enabled)
     assert.match(final,/確認済み期間/)

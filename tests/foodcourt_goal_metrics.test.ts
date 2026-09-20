@@ -15,9 +15,11 @@ test('framework uses the requested action meaning and forbids benchmark/denomina
   for (const text of ['KFI＝現場で実行・管理する行動指標', '担当候補', '実施タイミング', '記録方法・単位',
     'KGIの目標との差→要因KPI→改善するKFI', 'KFIの実行→KPIの変化→KGIへの寄与',
     '予約・会員・再来店が未導入/未計測', 'フードコートの共有席', '二重計上', '歩留まり率',
-    'FLRコスト率', '合意済み目標へ転用しない', '行動件数を計算・創作しない', '同じ表・同じ合計に混ぜない']) {
+    'FLRコスト率', '合意済み目標へ転用しない', '行動件数を計算・創作しない', '同じ表・同じ合計に混ぜない',
+    '改善策が必要な場合にだけKPIへ落とし込む', '売上構成比のABC', '人気と採算', '手法を全部毎回並べない']) {
     assert.ok(policy.includes(text), text)
   }
+  assert.doesNotMatch(policy, /分析結果には必ず「KGI・KPI・KFI」/)
   assert.doesNotMatch(policy, /55|60|62|15,000|30%|50%/)
 })
 
@@ -44,9 +46,13 @@ test('daily, period and weekly production paths send the same framework to integ
     assert.match(finalSystem, /見出しを増やさず/)
     assert.match(finalSystem, i < 2 ? /次の7つの見出し/ : /次の5つの見出し/)
     assert.doesNotMatch(evaluations[i].numberAuditFacts, /KGI・KPI・KFI/, 'instructions are not numeric evidence')
+    assert.match(finalSystem, /観察分析ではKPI節を付けず/)
+    assert.doesNotMatch(finalSystem, /KPIに落とし込めていない/)
   }
-  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v22-integrity')
+  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v23-methods')
   await ctx.evaluateFoodCourtAnswer({surface:'ask',question:'店舗売上の改善',contextBlock:'synthetic facts',finalAnswer:'synthetic analysis',groqApiKey:'synthetic',primary:'synthetic',fallbackModel:'synthetic',config:{evaluatorMaxTokens:500,evaluatorProvider:'groq'}})
   assert.ok(requests.at(-1)[0].content.includes(BUSINESS_GOAL_METRICS_POLICY))
+  assert.match(requests.at(-1)[0].content, /観察・照会ではKPI節は不要/)
+  assert.doesNotMatch(requests.at(-1)[0].content, /KPIに落とし込めていない/)
   assert.match(requests.at(-1)[1].content, /synthetic facts/)
 })

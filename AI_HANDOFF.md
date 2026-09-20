@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 分析は目的に応じた手法選択。KPIは改善管理時のみ
+
+- KGI・KPI・KFIは目標と行動の枠組みであり、全分析の骨格にしない。手順は質問理解 → 使えるデータで適した方法 → 改善策が必要な場合にだけKPI。手法を毎回全部並べない。
+- 売上構成比のABCは原価なしで可。人気×採算の分類と合成原価率だけ原価を要求する。導入相談は既存商品の実績・時間帯・併売を先に見る。
+- 共通指示は `business_goal_metrics.ts`。品質評価も「観察なのにKPIで結論を決める」「原価不足で売上ABCを拒否する」を禁止に変更。日次/期間キャッシュv23。保存済み回答は更新しない。
+- 数値創作禁止・明示試算以外のシナリオ計算・固定見出しは維持。回帰は `foodcourt_goal_metrics` / `foodcourt_kpi` / Journal統合テスト。正本は `docs/BUSINESS-GOAL-METRICS.md`。
+
 ## 2026-09-20 フードコートQ&Aの全期間・商品明細連携
 
 - `/foodcourt/ask` は認可後、`foodcourt_sales_context.ts` で全保存範囲を解決しJournalと共通の `fetchUnifiedSalesSummary` を取得。KPIも同じ範囲・キャッシュを使用し、比較表の日数だけに戻さない。

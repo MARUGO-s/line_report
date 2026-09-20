@@ -50,8 +50,8 @@ const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-07-23: 数値監査(未根拠係数の不合格化)＋施策の固定フォーマットを導入したため v17 に上げ、旧キャッシュを再生成させる。
 // 2026-08-18: 規模帯・最大動員の数値は実測/手入力のみ。会場収容の推定はラベル専用にしたため v18。
 // 2026-09-20: 数値の出所制限＋通常営業日ベースラインの必須化で v20。旧キャッシュを再生成させる。
-// 2026-09-20: KGI/KPI/KFIによる成果・中間指標・現場行動の判断と出力を共通化。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v22-integrity'
+// 2026-09-20: 目的に応じた分析手法。KGI/KPI/KFIは改善管理時のみ。旧キャッシュを再生成させる。
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v23-methods'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
 // 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
@@ -63,9 +63,9 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。' + '\n' + BUSINESS_GOAL_METRICS_POLICY
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v22-integrity'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v23-methods'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
-// 現行では通常版・loop版とも v22 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
+// 現行では通常版・loop版とも v23 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
   return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', false))
     ? FOODCOURT_DAILY_ANALYSIS_AI_VERSION
@@ -1481,8 +1481,10 @@ async function evaluateFoodCourtAnswer(params: {
     '- 評価用に省略された部分は未確認であり、元データに存在しないと断定しない。',
     '- 相関を因果と断定している',
     '- 売上日とレポート発行日を混同している',
-    '- 抽象的な打ち手だけで終えている（KPIに落とし込めていない）',
-    '- KGI（成果）・KPI（中間指標）・KFI（現場行動）の対応や関係、行動の記録方法がない、または未計測の行動・採算を断定している。単純照会は簡潔な対応でよい。',
+    '- 改善策なのに対象・条件・観測方法・判定がなく抽象的な打ち手だけで終えている',
+    '- 観察・分解の質問なのにKGI・KPI・KFIで結論を決め、商品変化や売れ方を見ていない',
+    '- 原価が無いのに人気×収益性のABCを作っている、または原価不足を理由に売上構成比のABCまで拒否している',
+    '- 改善策を書く場合にKGI（成果）・KPI（中間指標）・KFI（現場行動）の対応や記録方法がなく、または未計測の行動・採算を断定している。観察・照会ではKPI節は不要',
     ...foodCourtEvaluationSurfaceRules(params.surface),
     // 出力が長いとトークン上限でJSONが途中で切れて採点不能になる。件数・文字数を厳しく制限して短いJSONに収めさせる。
     '【出力長の厳守】improvement_points は最重要のものだけ最大3件・各60字以内。risk_flags は最大2件・各40字以内。factuality_notes は最大2件・各40字以内。それ以上書かない。',
