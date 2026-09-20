@@ -116,7 +116,8 @@ test('chart rendering failure still opens the text report', () => {
 
 test('Q&A, summary, daily and weekly archives share the fixed report opener', () => {
   for (const [start, end] of [
-    ['window.exportSingleQa =', 'window.exportSummary ='],
+    ['window.exportSingleQa =', 'window.exportQaConversation ='],
+    ['window.exportQaConversation =', 'window.exportSummary ='],
     ['window.exportSummary =', '// レポート出力用のグラフデータを、'],
     ['function openArchivedDailyReport(', 'function openArchivedWeeklyReport('],
     ['function openArchivedWeeklyReport(', 'function buildWeeklyChartData('],
@@ -126,4 +127,82 @@ test('Q&A, summary, daily and weekly archives share the fixed report opener', ()
     assert.ok(begin >= 0 && finish > begin, `missing source boundary: ${start}`);
     assert.match(source.slice(begin, finish), /openReportWindow\(/);
   }
+});
+
+test('Q&A PDF uses the editorial layout instead of red number highlights', () => {
+  const h = harness();
+  const answer = [
+    '【結論】',
+    '焼きたてクロワッサンは**入口商品**として有望です。',
+    '',
+    '【数字から見た判断】',
+    '客数は125人、売上は¥239,577でした。',
+    '',
+    '施策案：ライブ日限定',
+    '| 対象客 | 若年女性ライブ来場者 |',
+    '| 実施内容 | ・紙袋でテイクアウト |',
+    '| 判定・中止ライン | まず1〜2回のライブ日で検証する |',
+    '',
+    '注釈: この表の数値はすべて【仮定(シナリオ)】',
+    '| 項目 | 保守 | 標準 | 強気 |',
+    '| --- | --- | --- | --- |',
+    '| 予想売価 | ¥380 | ¥420 | ¥480 |',
+    '',
+    '【最終判断】',
+    '大量常備ではなく限定テストを支持します。',
+  ].join('\n');
+  h.context.qaHistory = [
+    { role: 'user', content: 'クロワッサンをお出ししようと思っています。どう思いますか？' },
+    { role: 'assistant', content: answer, score: 82 },
+  ];
+  const items = h.context.collectQaExportItems();
+  assert.equal(items.length, 1);
+  const body = h.context.buildQaExportBodyHtml(items);
+  const page = h.context.buildReportHtml('検証', '', null, {
+    theme: 'qa',
+    preformattedHtml: body,
+    subtitle: '焼きたてクロワッサン施策について相談した回答例',
+    questionCount: 1,
+  });
+  assert.match(page, /売上分析AI/);
+  assert.match(page, /body class="qa-theme"/);
+  assert.match(page, /qa-callout/);
+  assert.match(page, /qa-callout-label">結論/);
+  assert.match(page, /qa-callout-label">最終判断/);
+  assert.match(page, /qa-h2/);
+  assert.match(page, /数字から見た判断/);
+  assert.match(page, /qa-table-kv/);
+  assert.match(page, /判定・中止ライン/);
+  assert.doesNotMatch(page, /qa-th">判定</);
+  assert.match(page, /qa-caption/);
+  assert.match(page, /仮定\(シナリオ\)/);
+  assert.match(page, /<strong>入口商品<\/strong>/);
+  assert.match(body, /Q1/);
+  assert.match(body, /82点/);
+  assert.doesNotMatch(page, /color: #E74C3C/);
+  assert.doesNotMatch(page, />AI分析レポート</);
+});
+
+test('conversation PDF builds a scored table of contents and skips clarifications', () => {
+  const h = harness();
+  h.context.qaHistory = [
+    { role: 'user', content: '質問A' },
+    { role: 'assistant', content: '【結論】Aです', score: 80 },
+    { role: 'user', content: '期間は？' },
+    { role: 'assistant', clarification: true, content: '期間を選んでください', choices: ['今月'] },
+    { role: 'user', content: '質問B' },
+    { role: 'assistant', content: '【判断】Bです', score: 70 },
+  ];
+  const items = h.context.collectQaExportItems();
+  assert.equal(items.length, 2);
+  const html = h.context.buildQaExportBodyHtml(items);
+  assert.match(html, /qa-toc/);
+  assert.match(html, /Q1/);
+  assert.match(html, /Q2/);
+  assert.match(html, /80点/);
+  assert.match(html, /70点/);
+  assert.doesNotMatch(html, /期間を選んでください/);
+  h.context.window.exportQaConversation();
+  assert.match(h.overlays[0], /qa-toc/);
+  assert.match(h.overlays[0], /売上分析AI/);
 });
