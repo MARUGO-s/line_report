@@ -2,6 +2,7 @@
 
 ## 2026-09-20 分析整合性監査（先行v21への追補）
 
+- 本番反映済み（2026-09-20）: PR #245 / `57c5f8a`、Edge `35504384002`・Pages `35504384026` 成功。`admin-api v1207` / `ai-analyze v290` の主要分析ソースと公開3ファイルが修正版に一致、未認証POSTは401。配備確認と実AI回答品質の確認を混同しない。
 - 正本は `docs/ANALYSIS-INTEGRITY-AUDIT.md`。KPI pack v2: breakEven/縮小個数は不成立時null、checkUpliftYenはproductSpendPerPurchasingCheckYenへ変更。店舗純増と呼ばない。
 - 実績は同日対応・重複なしの観測値、月日数は全暦日観測月の売上発生日数で代替。部分月を営業日数にしない。廃棄後能力と整数配分/円丸めを保持する。
 - 通常提案・達成状況確認では試算しない。型/範囲外を入力値に丸め込まない。評価用確定ブロックは `evaluationProtectedPrefixLength` で3シナリオを保護。FC日次/期間v22。

@@ -47,7 +47,15 @@ AIの自己採点は正確性の保証ではない。数値監査は主に数値
 
 ## ファイル構造・検証
 
-ローカル検証は全823件（Node 612件・Deno 211件）が成功。静的/対象型チェック、知識同期チェック、390px/1280pxの画面確認も完了。公開GitHubへの送信は安全審査で停止されたため、この監査時点では未配備。公開先と送信対象について利用者の追加承認待ち。
+**本番反映済み（2026-09-20）**。公開リポジトリへの修正コード・合成テスト・運用文書の送信と本番配備について利用者の追加承認を受け、[PR #245](https://github.com/MARUGO-s/line_report/pull/245) をmainへ反映した。配備対象SHAは `57c5f8aec9ea39846a45d01258cf264b6a485d83`。
+
+ローカル検証は全823件（Node 612件・Deno 211件）が成功。静的/対象型チェック、知識同期チェック、390px/1280pxの画面確認も完了。本番配備のActionsでも全体CI・静的チェック・Journal AI型チェックが成功した。
+
+- 配備: [Edge Functions](https://github.com/MARUGO-s/line_report/actions/runs/35504384002) と [GitHub Pages](https://github.com/MARUGO-s/line_report/actions/runs/35504384026) が同一SHAで成功。
+- 公開画面: `foodcourt-qa-planner.js`、`jnm/jnl2txt.html`、`foodcourt.html` のHTTP 200と配備ファイルの完全一致を確認。
+- 分析処理: `admin-api v1207`、`ai-analyze v290` のエントリーポイントと、両者が使用するKPI計算・3指標ルール・店舗前提・統合処理を照合。フードコートの比較/品質評価/KPI接続も一致。
+- 認証: 両APIへの未認証POSTが401で拒否されることを確認。これは認証境界の確認であり、実AIの回答内容の検証ではない。
+- 保存済み回答は自動更新しない。画面更新後に再質問/再分析が必要。実AI文章の正確性と施策の経営効果は、今後の運用・実測で確認する。
 
 共通計算層 `kpi_scenario.ts` と共通分析規則 `business_goal_metrics.ts` を維持する。数値契約はversion 2へ更新し、損益分岐nullと商品購入額への改称を型に表す。DB migration・ファイル移動・公開URL変更は不要。FCの日次/期間キャッシュはv22。保存済み回答は再質問/再分析が必要。
 
