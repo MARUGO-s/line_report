@@ -285,6 +285,7 @@
     .q-chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 12px;}
     .qchip{font-size:12.5px;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 13px;transition:.14s;}
     .qchip:hover{border-color:var(--accent);color:var(--tx-1);}
+    .qchip.is-selected{border-color:var(--accent);color:var(--accent-tx);background:var(--accent-soft);}
     .qbar{display:flex;gap:10px;}
     .qbar textarea{flex:1;min-width:0;min-height:74px;resize:vertical;box-sizing:border-box;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 15px;font-family:inherit;font-size:14px;line-height:1.6;color:var(--tx-1);}
     .qbar textarea:focus{outline:none;border-color:var(--accent);}
@@ -293,6 +294,8 @@
     .qa-kpi-grid label{font-size:12px;display:grid;gap:5px;min-width:0;}
     .qa-kpi-grid input{box-sizing:border-box;width:100%;min-width:0;background:var(--bg);color:var(--tx-1);border:1px solid var(--line);border-radius:8px;padding:10px;}
     .qa-choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+    .qa-choices.is-arming{pointer-events:none;}
+    .qa-actions{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);}
 
     .chart-wrap{margin-top:16px;}
     .chartbox{position:relative;height:200px;margin:6px 0 4px;}
@@ -895,7 +898,7 @@
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
-<script src="foodcourt-qa-planner.js?v=20260920-input-fix"></script>
+<script src="foodcourt-qa-planner.js?v=20260921-kpi-followup"></script>
 <script>
 'use strict';
 (function(){
@@ -2346,14 +2349,25 @@
     return values;
   }
   function updateQaPeriodLabel(){ $('qaPeriodLabel').textContent='分析期間: '+(qaPlanState.period?.label||'未指定'); }
+  let qaChoiceLock = false;
+  let qaChoiceArmTimer = 0;
+  function renderChoiceButtons(list){
+    return (list||[]).map(choice=>{
+      const selected = String(choice).startsWith('✓');
+      return '<button type="button" class="qchip'+(selected?' is-selected':'')+'" data-qa-choice="'+escapeHtml(choice)+'">'+escapeHtml(choice)+'</button>';
+    }).join('');
+  }
   function renderQaThread(thinking){
     const parts = qaHistory.map((m, idx) => {
       if (m.role === 'user') {
         return '<div class="qa-q">' + escapeHtml(m.content) + '</div>';
       } else {
         if(m.clarification) {
-          const choices = (m.choices||[]).map(choice=>'<button type="button" class="qchip" data-qa-choice="'+escapeHtml(choice)+'">'+escapeHtml(choice)+'</button>').join('');
-          return '<div class="qa-a">'+escapeHtml(m.content)+'<div class="qa-choices">'+choices+'</div></div>';
+          const choices = renderChoiceButtons(m.choices);
+          const actions = renderChoiceButtons(m.actions);
+          const arm = (choices||actions) ? ' is-arming' : '';
+          const actionRow = actions ? '<div class="qa-choices qa-actions'+arm+'">'+actions+'</div>' : '';
+          return '<div class="qa-a">'+escapeHtml(m.content).replace(/\n/g,'<br>')+'<div class="qa-choices'+arm+'">'+choices+'</div>'+actionRow+'</div>';
         }
         const scoreBadge = (m.score != null)
           ? '<span class="qa-score-badge" title="AI自己採点（100点満点）">⭐ ' + m.score + '点</span>'
@@ -2377,7 +2391,19 @@
       });
     });
     dom.qAnswer.scrollTop = dom.qAnswer.scrollHeight;
-    dom.qAnswer.querySelectorAll('[data-qa-choice]').forEach(btn=>btn.addEventListener('click',()=>askQuestion(btn.dataset.qaChoice)));
+    if(!dom.qAnswer.dataset.qaChoiceBound) {
+      dom.qAnswer.dataset.qaChoiceBound = '1';
+      dom.qAnswer.addEventListener('click', ev => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-qa-choice]') : null;
+        if(!btn || !dom.qAnswer.contains(btn) || qaChoiceLock) return;
+        ev.preventDefault();
+        askQuestion(btn.getAttribute('data-qa-choice'));
+      });
+    }
+    clearTimeout(qaChoiceArmTimer);
+    qaChoiceArmTimer = setTimeout(() => {
+      dom.qAnswer.querySelectorAll('.qa-choices.is-arming').forEach(el=>el.classList.remove('is-arming'));
+    }, 400);
   }
   function clearQa(){
     if(dom.qBtn.disabled) return;
@@ -2404,14 +2430,21 @@
     if(invalid){ $('qaKpiInputs').open=true; invalid.reportValidity(); return; }
     const assumptions=readQaKpiAssumptions();
     const viewingDate=currentViewedReport?salesDateOf(currentViewedReport):'';
-    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,hasAssumptions:Object.keys(assumptions).length>0,assumptionsReady:fields.every(input=>input.value.trim()!=='')});
+    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,hasAssumptions:Object.keys(assumptions).length>0,assumptionsReady:fields.every(input=>input.value.trim()!==''),historyText:qaContextHistory.map(m=>m.content).join('\n'),hasPriorAnswer:qaContextHistory.some(m=>m.role==='assistant')});
     qaPlanState=plan.state;
     updateQaPeriodLabel();
     dom.qInput.value = '';
     qaHistory.forEach(m=>{if(m.clarification) m.choices=[];});
     qaHistory.push({ role:'user', content:raw });
+    const isFollowUp = qaContextHistory.some(m=>m.role==='assistant');
+    if(plan.kind==='ready' && !isFollowUp && !(plan.methods||[]).length && typeof qaPlanner.promptMethods==='function') {
+      plan=qaPlanner.promptMethods(qaPlanState, plan.question, {historyText:qaContextHistory.map(m=>m.content).join('\n')});
+      qaPlanState=plan.state;
+    }
     if(plan.kind!=='ready') {
-      qaHistory.push({role:'assistant',content:plan.message,clarification:true,choices:plan.choices});
+      qaChoiceLock = true;
+      setTimeout(()=>{ qaChoiceLock=false; }, 400);
+      qaHistory.push({role:'assistant',content:plan.message,clarification:true,choices:plan.choices,actions:plan.actions});
       if(qaPlanState.pending?.kind==='kpi') $('qaKpiInputs').open=true;
       renderQaThread(false); dom.qInput.focus(); return;
     }
@@ -2433,7 +2466,7 @@
       // 表示日も送るが、対話で確定した period_mode/requested_ranges を優先する。
       const viewingReportId = currentViewedReport && currentViewedReport.id != null ? currentViewedReport.id : null;
       const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId,
-        period_mode:activePeriod.mode, requested_ranges:activePeriod.ranges, kpi_assumptions:assumptions });
+        period_mode:activePeriod.mode, requested_ranges:activePeriod.ranges, kpi_assumptions:assumptions, analysis_methods:plan.methods||qaPlanState.methods||[] });
       qaContextHistory.push({role:'user',content:question+'\n対象期間: '+activePeriod.label},{role:'assistant',content:b.answer||'(回答が空でした)'});
       // question を回答側にも保持（レポート出力時に分析サマリーと取り違えないため）
       qaHistory.push({

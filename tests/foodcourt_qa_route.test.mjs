@@ -5,6 +5,7 @@ import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 import {prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs} from '../supabase/functions/_shared/foodcourt_kpi.ts';
 import {isKpiScenarioRequest} from '../supabase/functions/_shared/kpi_scenario.ts';
+import {analysisMethodsForceKpi,parseFoodCourtAnalysisMethods} from '../supabase/functions/_shared/foodcourt_qa_methods.ts';
 import {resolveAiSalesPeriods} from '../supabase/functions/_shared/sales_reconciliation_ai.ts';
 import {buildFoodCourtSalesContext} from '../supabase/functions/_shared/foodcourt_sales_context.ts';
 import {buildFoodCourtJournalDetail} from '../supabase/functions/_shared/foodcourt_journal_detail.ts';
@@ -29,6 +30,7 @@ function runtime(options={}) {
     json:(body,status)=>({body,status}),crypto,console,
     isStrictIsoDate:d=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d).toISOString().slice(0,10)===d,
     resolveAiSalesPeriods,isKpiScenarioRequest,prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs,
+    parseFoodCourtAnalysisMethods,analysisMethodsForceKpi,
     buildFoodCourtSalesContext,buildFoodCourtJournalDetail:async(...args)=>{calls.push(['detail',args[1],args[3]||'']);return buildFoodCourtJournalDetail(...args)},
     discoverFoodCourtSalesRange:async()=>[{from:'2025-12-09',to:'2026-08-01'}],
     fetchPosJournalRows:async()=>{if(options.detailError)throw Error('synthetic');return []},
@@ -62,6 +64,30 @@ test('real Q&A route filters comparison periods, shifts report dates once, remov
   assert.ok(app.queries.some(q=>q[0]==='lte' && q[2]==='2026-09-01'));
   assert.equal(app.calls.includes('profile'),false,'ordinary questions do not load assumptions');
   assert.equal(app.inserted.source_ref.period.report_count,2);
+});
+
+test('new-product sales analysis with conversation context loads KPI assumptions',async()=>{
+  const app=runtime();
+  const result=await app.run({
+    period_mode:'all',requested_ranges:[],question:'販売分析をお願い',
+    history:[{role:'user',content:'クロワッサンの導入はどう思う？'},{role:'assistant',content:'軽食の実績を見ます。'}],
+  });
+  assert.equal(result.status,200);
+  assert.equal(app.calls.includes('profile'),true);
+});
+
+test('follow-up KPI analysis after croissant still computes estimates',async()=>{
+  const app=runtime();
+  const result=await app.run({
+    period_mode:'all',requested_ranges:[],question:'KPI分析してみてください',
+    history:[{role:'user',content:'クロワッサンの導入はどう思う？'},{role:'assistant',content:'軽食の実績を見ます。'}],
+  });
+  assert.equal(result.status,200);
+  assert.equal(app.calls.includes('profile'),true);
+  assert.equal(result.body.kpi_scenarios.status,'computed_server_side');
+  assert.match(app.sent[13].block,/仮定\(シナリオ\)/);
+  assert.match(result.body.answer,/予想売価/);
+  assert.match(result.body.answer,/データ不足で分析を止めない/);
 });
 
 test('follow-up history is passed to journal product matching and the integrator',async()=>{
@@ -146,7 +172,26 @@ test('dialogue consent reaches the real route with original consultation and ove
   turn=planner.nextTurn(turn.state,'2026年6月',opts);
   turn=planner.nextTurn(turn.state,'入力値で3シナリオを試算',opts);
   assert.equal(turn.kind,'ready');assert.ok(turn.question.includes(question));
-  const app=runtime();const result=await app.run({question:turn.question,period_mode:turn.period.mode,requested_ranges:turn.period.ranges,kpi_assumptions:{unitPriceYen:833,unitCostYen:123}});
+  assert.ok(turn.methods.includes('kpi'));
+  const app=runtime();const result=await app.run({question:turn.question,period_mode:turn.period.mode,requested_ranges:turn.period.ranges,kpi_assumptions:{unitPriceYen:833,unitCostYen:123},analysis_methods:turn.methods});
   assert.equal(result.status,200);assert.match(app.sent[13].block,/¥833/);assert.match(app.sent[13].block,/¥123/);
   assert.equal(result.body.kpi_scenarios.status,'computed_server_side');assert.match(result.body.answer,/3シナリオをコードで計算/);
+});
+
+test('selected margin/kpi methods force scenario estimates without KPI wording or registered cost',async()=>{
+  const app=runtime();
+  const result=await app.run({question:'売上の傾向を教えて',period_mode:'all',requested_ranges:[],analysis_methods:['mix','margin','unknown']});
+  assert.equal(result.status,200);
+  assert.equal(app.calls.includes('profile'),true);
+  assert.ok(app.sent[13].block.includes('仮定(シナリオ)'));
+  assert.deepEqual(app.sent[18],['mix','margin']);
+  assert.deepEqual(result.body.analysis_methods,['mix','margin']);
+});
+
+test('actuals-only follow-up does not force KPI even if previous methods included targets',async()=>{
+  const app=runtime();
+  const result=await app.run({question:'先月の実績だけ教えて',period_mode:'all',requested_ranges:[],analysis_methods:['kpi','margin']});
+  assert.equal(result.status,200);
+  assert.equal(app.calls.includes('profile'),false);
+  assert.equal(app.sent[13],null);
 });

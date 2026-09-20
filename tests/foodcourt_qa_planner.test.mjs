@@ -3,11 +3,17 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {isKpiScenarioRequest} from '../supabase/functions/_shared/kpi_scenario.ts';
+import {FOODCOURT_ANALYSIS_METHODS} from '../supabase/functions/_shared/foodcourt_qa_methods.ts';
 const ctx=vm.createContext({Date});
 vm.runInContext(readFileSync(new URL('../public/foodcourt-qa-planner.js',import.meta.url),'utf8'),ctx);
 const planner=ctx.FOODCOURT_QA_PLANNER;
 const plain=value=>JSON.parse(JSON.stringify(value));
 const options={now:new Date('2026-09-20T08:00:00Z'),viewingDate:'2026-09-18'};
+
+test('browser method catalog ids match the server catalog',()=>{
+  assert.deepEqual(plain(planner.ANALYSIS_METHODS.map(m=>m.id)), plain(FOODCOURT_ANALYSIS_METHODS.map(m=>m.id)));
+  assert.deepEqual(plain(planner.ANALYSIS_METHODS.map(m=>m.label)), plain(FOODCOURT_ANALYSIS_METHODS.map(m=>m.label)));
+});
 
 test('period resolver supports exact dates, months, comparisons, relative months and default',()=>{
   for(const [text,ranges] of [
@@ -33,9 +39,13 @@ test('missing period asks once, clarification preserves question, follow-up reta
   let result=planner.nextTurn(planner.initialState(),'売上の傾向を教えて',options);
   assert.equal(result.kind,'clarify');assert.equal(result.state.pending.kind,'period');
   result=planner.nextTurn(result.state,'2026年6月',options);
+  assert.equal(result.state.pending.kind,'methods');
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
   assert.equal(result.kind,'ready');assert.equal(result.question,'売上の傾向を教えて');
+  assert.ok(result.methods.includes('mix'));
   result=planner.nextTurn(result.state,'もっと詳しく',options);
   assert.equal(result.kind,'ready');assert.equal(result.period.ranges[0].from,'2026-06-01');
+  assert.deepEqual(result.methods,result.state.methods);
   result=planner.nextTurn(result.state,'その日は何があった？',options);
   assert.equal(result.period.ranges[0].from,'2026-06-01','follow-up must not switch to the unrelated viewing day');
   result=planner.nextTurn(result.state,'7月はどう？',options);
@@ -43,17 +53,22 @@ test('missing period asks once, clarification preserves question, follow-up reta
   result=planner.nextTurn(result.state,'直近3ヶ月は？',options);
   assert.equal(result.kind,'clarify','unrecognized periods must not silently reuse July');
   result=planner.nextTurn(result.state,'2026年6月',options);
+  assert.equal(result.state.pending.kind,'methods');
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
   assert.equal(result.question,'直近3ヶ月は？');
   assert.equal(result.period.ranges[0].from,'2026-06-01');
 });
 
-test('KPI asks period then assumptions once; confirmation is not sent as a new question',()=>{
+test('KPI asks period then methods; selecting targets skips extra assumption chips',()=>{
   let result=planner.nextTurn(planner.initialState(),'新商品のKPIを試算してください',options);
   result=planner.nextTurn(result.state,'全期間',options);
-  assert.equal(result.state.pending.kind,'kpi');
-  result=planner.nextTurn(result.state,'保存済み前提・仮置きで進む',options);
+  assert.equal(result.state.pending.kind,'methods');
+  assert.ok(result.state.pending.recommended.includes('kpi'));
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
   assert.equal(result.kind,'ready');assert.equal(result.question,'新商品のKPIを試算してください');
   assert.equal(result.period.mode,'all');
+  assert.equal(result.state.kpiConfirmed,true);
+  assert.ok(result.methods.includes('kpi'));
   result=planner.nextTurn(result.state,'KPIを数字で',options);
   assert.equal(result.kind,'ready');
 });
@@ -63,12 +78,38 @@ test('cancel, invalid/overlapping ranges and replacement questions do not start 
   result=planner.nextTurn(result.state,'2026-07-31〜2026-07-01',options);assert.equal(result.kind,'clarify');
   result=planner.nextTurn(result.state,'6月と6月',options);assert.equal(result.kind,'clarify');
   result=planner.nextTurn(result.state,'キャンセル',options);assert.equal(result.kind,'notice');assert.equal(result.state.pending,null);
-  result=planner.nextTurn(result.state,'6月の客数を教えて',options);assert.equal(result.question,'6月の客数を教えて');
+  result=planner.nextTurn(result.state,'6月の客数を教えて',options);
+  assert.equal(result.state.pending.kind,'methods');
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
+  assert.equal(result.question,'6月の客数を教えて');
 });
 
 test('KPI planner matches server gate and explicit period means no period clarification',()=>{
-  for(const q of ['粗利率とは？','先月の廃棄率は？','KPIを数字で','損益分岐の個数を教えて','新商品のKPIを試算してください','実績だけ','昨年のKPIを数字で教えて','売上を伸ばすための提案を3つ','KGI・KPI・KFIを含む改善提案','KPI目標の達成状況を確認して']) assert.equal(planner.wantsKpiTargets(q),isKpiScenarioRequest(q),q);
-  const result=planner.nextTurn(planner.initialState(),'2026年6月の売上を教えて',options);assert.equal(result.kind,'ready');
+  for(const q of ['粗利率とは？','先月の廃棄率は？','KPIを数字で','損益分岐の個数を教えて','新商品のKPIを試算してください','実績だけ','昨年のKPIを数字で教えて','売上を伸ばすための提案を3つ','KGI・KPI・KFIを含む改善提案','KPI目標の達成状況を確認して','提案した新商品の販売分析をお願い','販売分析をお願い','新しい施策の売上貢献を分析して','この施策で売上をどれだけ上積みできるか']) assert.equal(planner.wantsKpiTargets(q),isKpiScenarioRequest(q),q);
+  assert.equal(planner.wantsKpiTargets('販売分析をお願い','クロワッサンの導入はどう思う？'),true);
+  assert.equal(isKpiScenarioRequest('販売分析をお願い','クロワッサンの導入はどう思う？'),true);
+  assert.equal(planner.wantsKpiTargets('KPI分析してみてください','クロワッサンの導入はどう思う？'),true);
+  assert.equal(isKpiScenarioRequest('KPI分析してみてください','クロワッサンの導入はどう思う？'),true);
+  let result=planner.nextTurn(planner.initialState(),'2026年6月の売上を教えて',options);
+  assert.equal(result.state.pending.kind,'methods');
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
+  assert.equal(result.kind,'ready');
+});
+
+test('follow-up KPI analysis after croissant adds the kpi method instead of refusing estimates',()=>{
+  const question='売り上げアップのために、焼きたてのクロワッサンをお出ししようと思っています。どう思いますか？';
+  const hist=question+'\n軽食の実績を見ます。';
+  const opts={...options,historyText:hist,hasPriorAnswer:true};
+  let result=planner.nextTurn(planner.initialState(),question,options);
+  result=planner.nextTurn(result.state,'全期間',options);
+  result=planner.nextTurn(result.state,'この分析で進む',options);
+  assert.equal(result.kind,'ready');
+  assert.equal(result.methods.includes('kpi'),false);
+  const follow=planner.nextTurn(result.state,'KPI分析してみてください',opts);
+  assert.equal(follow.kind,'ready');
+  assert.equal(follow.question,'KPI分析してみてください');
+  assert.ok(follow.methods.includes('kpi'));
+  assert.equal(follow.state.kpiConfirmed,true);
 });
 
 test('croissant consultation with inputs asks trial consent without losing the original question',()=>{
@@ -77,18 +118,53 @@ test('croissant consultation with inputs asks trial consent without losing the o
   let result=planner.nextTurn(planner.initialState(),question,opts);
   assert.equal(result.state.pending.kind,'period');
   result=planner.nextTurn(result.state,'全期間',opts);
-  assert.equal(result.state.pending.kind,'kpi_use');
-  const analyze=planner.nextTurn(result.state,'入力値を使って分析のみ',opts);
+  assert.equal(result.state.pending.kind,'methods');
+  const analyze=planner.nextTurn(result.state,'この分析で進む',opts);
   assert.equal(analyze.kind,'ready');assert.equal(analyze.question,question);
   assert.equal(isKpiScenarioRequest(analyze.question),false);
+  assert.equal(analyze.methods.includes('kpi'),false);
   const trial=planner.nextTurn(result.state,'入力値で3シナリオを試算',opts);
-  assert.equal(trial.kind,'ready');assert.ok(trial.question.includes(question));
-  assert.equal(isKpiScenarioRequest(trial.question),true);
+  assert.equal(trial.kind,'ready');assert.equal(trial.question,question);
+  assert.ok(trial.methods.includes('kpi'));
+  assert.equal(trial.state.kpiConfirmed,true);
   assert.equal(trial.period.mode,'all');
   const factual=planner.nextTurn(trial.state,'先月の実績だけ教えて',opts);
   assert.equal(factual.kind,'ready');assert.equal(isKpiScenarioRequest(factual.question),false);
   const cancelled=planner.nextTurn(result.state,'キャンセル',opts);
   assert.equal(cancelled.kind,'notice');assert.equal(cancelled.state.pending,null);
   const replacement=planner.nextTurn(result.state,'2026年6月の実績を教えて',opts);
-  assert.equal(replacement.kind,'ready');assert.equal(replacement.period.ranges[0].from,'2026-06-01');
+  assert.equal(replacement.state.pending.kind,'methods');
+  const readyReplacement=planner.nextTurn(replacement.state,'おすすめ全部で進む',opts);
+  assert.equal(readyReplacement.kind,'ready');assert.equal(readyReplacement.period.ranges[0].from,'2026-06-01');
+});
+
+test('period chips used on the screen still stop at method selection',()=>{
+  for(const chip of ['保存済み全期間','今月','先月']) {
+    let result=planner.nextTurn(planner.initialState(),'売上の傾向を教えて',options);
+    result=planner.nextTurn(result.state,chip,options);
+    assert.equal(result.kind,'clarify',chip);
+    assert.equal(result.state.pending.kind,'methods',chip);
+    assert.equal(result.kind==='ready',false,chip);
+  }
+});
+
+test('method chips accumulate, reveal extras, and margin/kpi allow estimates without cost',()=>{
+  let result=planner.nextTurn(planner.initialState(),'売上の傾向を教えて',options);
+  result=planner.nextTurn(result.state,'全期間',options);
+  assert.match(result.message,/粗利が未登録でも/);
+  assert.ok(result.choices.includes('売上構成・主力商品'));
+  assert.equal(result.choices.includes('同時購入・併売'),false);
+  assert.equal(result.choices.includes('おすすめ全部で進む'),false);
+  assert.ok(result.actions.includes('おすすめ全部で進む'));
+  assert.ok(result.actions.includes('この分析で進む'));
+  result=planner.nextTurn(result.state,'売上構成・主力商品',options);
+  assert.equal(result.state.pending.kind,'methods');
+  assert.ok(result.choices.includes('✓ 売上構成・主力商品'));
+  result=planner.nextTurn(result.state,'ほかの手法を見る',options);
+  assert.ok(result.choices.includes('粗利・採算（未登録なら推測）'));
+  result=planner.nextTurn(result.state,'粗利・採算（未登録なら推測）',options);
+  result=planner.nextTurn(result.state,'この分析で進む',options);
+  assert.equal(result.kind,'ready');
+  assert.deepEqual(plain(result.methods),['mix','margin']);
+  assert.equal(result.state.kpiConfirmed,true);
 });

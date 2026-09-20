@@ -6,6 +6,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0
 import { FOODCOURT_KPI_POLICY, type FoodCourtKpiContext, type FoodCourtKpiInputs } from './foodcourt_kpi.ts'
 import { FOODCOURT_SALES_POLICY, type FoodCourtSalesContext } from './foodcourt_sales_context.ts'
 import { BUSINESS_GOAL_METRICS_POLICY } from './business_goal_metrics.ts'
+import { foodCourtAnalysisMethodPrompt } from './foodcourt_qa_methods.ts'
 import { FOODCOURT_DASHBOARD_SCOPE, issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
@@ -3112,6 +3113,35 @@ export function buildFoodCourtNippouBlocks(
 // 蓄積されたフードコート日次データを根拠に、ユーザーの質問へ回答する（Groqテキスト／安価）。
 // events（東京ドームのイベント日程）・weather（日次天気）を渡すと、客数増減との相関も踏まえて回答する。
 // 競合店プロファイル（業態・価格帯・飲み/食事傾向）も注入し、業態文脈を踏まえた分析にする。
+/** Previous assistant answer exists and the user did not ask to start over. */
+export function isFoodCourtQaFollowUp(
+  question: string,
+  history: Array<{ role: string; content: string }> | null | undefined,
+): boolean {
+  const hasAnswer = (Array.isArray(history) ? history : []).some((row) =>
+    row?.role === 'assistant' && String(row.content ?? '').trim()
+  )
+  if (!hasAnswer) return false
+  const q = String(question ?? '').normalize('NFKC')
+  if (
+    /最初から|やり直|し直して|新しく分析|全体を(?:もう一度)?分析|別の(?:テーマ|件|質問)で/
+      .test(q)
+  ) return false
+  return true
+}
+
+export function latestFoodCourtAssistantAnswer(
+  history: Array<{ role: string; content: string }> | null | undefined,
+): string {
+  const rows = Array.isArray(history) ? history : []
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i]?.role !== 'assistant') continue
+    const content = String(rows[i].content ?? '').trim()
+    if (content) return content.slice(0, 4000)
+  }
+  return ''
+}
+
 export type FoodCourtJournalAnalysisScope = {
   requested_ranges?: Array<{ from: string; to: string }>
   expected_day_count?: number
@@ -3142,6 +3172,7 @@ export async function answerFoodCourtQuestion(
   qaRanges: Array<{ from: string; to: string }> = [],
   kpiInputs: FoodCourtKpiInputs | null = null,
   salesContext: FoodCourtSalesContext | null = null,
+  analysisMethods: string[] = [],
 ): Promise<{ answer: string | null; loopScore: number | null; loopCount: number; xTrendBrief?: string | null }> {
   if (!groqApiKey) return { answer: null, loopScore: null, loopCount: 0 }
   const deadlineAt = fcRequestDeadlineAt()
@@ -3210,20 +3241,30 @@ export async function answerFoodCourtQuestion(
   // 現場日報: 原文＋コード側「施策×実績」効果対照（普段の売上AI分析と日報をリンク）
   const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
+  const followUp = isFoodCourtQaFollowUp(q, history)
+  const previousAnswer = latestFoodCourtAssistantAnswer(history)
   const conversationLines: string[] = []
   for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
     const role = h?.role === 'assistant' ? 'assistant' : h?.role === 'user' ? 'user' : ''
-    const content = String(h?.content ?? '').trim().slice(0, 1200)
+    const content = String(h?.content ?? '').trim().slice(0, followUp ? 4000 : 1200)
     if (role && content) conversationLines.push(`${role}: ${content}`)
   }
-  const conversationBlock = conversationLines.length
+  const conversationBlock = followUp && previousAnswer
+    ? `【重ね聞き】前回の回答が本文。今回の質問はその本文への質問である。本文の該当箇所を理解してから、足りない分析だけ今回の集計で足す。全体レポートを書き直さない。\n【前回の回答（本文）】\n${previousAnswer}\n\n`
+    : conversationLines.length
     ? `【直前の会話・対象の引き継ぎ】追加質問・指示語は直前の商品・店舗・期間・結論を指す。新しい別テーマとして始めない。金額・件数は今回の集計だけを使う。\n${conversationLines.join('\n')}\n\n`
     : ''
+  const followUpSpecialistRule = followUp
+    ? '今回は新規の全体分析ではない。前回の回答が本文。ユーザー質問はその本文への重ね聞き。質問が触れる箇所だけ、今回の集計で裏付け・補足・訂正する短いメモを書く。本文に無い主題で全体を書き直さない。'
+    : ''
+  const methodRule = foodCourtAnalysisMethodPrompt(analysisMethods)
 
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
   const quantSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、他店舗比較と過去実績データの分析専門家です。`,
     journalScopeRule,
+    followUpSpecialistRule,
+    methodRule,
     `担当は「他店舗との関係」と「過去の実績データ」および「日報施策の数値効果」のみ。イベント・天気の深掘りは別担当。`,
     `【厳守】表の値をそのまま言い換えるだけの回答は禁止。数字は根拠として引用し、必ず「だから何を意味するか」まで述べる。`,
     `(1) 競合プロファイル（各店の業態）を使い、客単価・客数の水準がその業態から見て妥当か想定外かを判定する。`,
@@ -3240,6 +3281,8 @@ export async function answerFoodCourtQuestion(
   const extSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
     journalScopeRule,
+    followUpSpecialistRule,
+    methodRule,
     `担当は「東京ドームのイベント」と「天気」のみ。競合比較・過去実績の話は別担当なので触れなくてよい。`,
     `(1) 客数・売上に動きがある日は、そのイベント名・種別・規模・客層まで特定し、なぜ効いた/効かなかったかを客層・滞在時間と業態(ワイン×スパイス＝高単価大人向け)の相性で説明する。`,
     `(2) 野球は対戦相手/デーナイター、ライブはアーティスト/客層、ドームシティの小ホール(後楽園ホール・カナデビアホール等)独自の集客動機も考慮する。`,
@@ -3253,6 +3296,8 @@ export async function answerFoodCourtQuestion(
   const opsSystem = [
     `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
     journalScopeRule,
+    followUpSpecialistRule,
+    methodRule,
     `担当は「明日から現場で試せる打ち手」に加え、日報に書かれた「こんなことをしてみた」施策の効果検証と次アクションへの接続。`,
     `【厳守】データに無い販売点数・原価・スタッフ人数を作らない。仮定ラベルを付けても独自の数値生成は禁止。KPI試算は統合担当へ渡されるサーバー確定計算に任せる。打ち手は必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
     `【現場の大前提・重要】フードコート店舗であるため、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であり禁止します。デリバリーではなく、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案してください。`,
@@ -3278,7 +3323,9 @@ export async function answerFoodCourtQuestion(
   const criticSystem = [
     `あなたは「${baseName}」分析の反証・品質管理担当です。`,
     journalScopeRule,
-    `担当は、専門AIメモに含まれる言い過ぎ、根拠不足、相関と因果の混同、対象日/期間の取り違え、データに無い数字の混入を検出すること。`,
+    followUpSpecialistRule,
+    methodRule,
+    `担当は、専門AIメモに含まれる言い過ぎ、根拠不足、相関と因果の混同、対象日/期間の取り違え、データに無い数字の混入を検出すること。新しい施策のKPI試算は後段のサーバー確定ブロックが担当する。施策未実施を理由に「分析できない」「数値未確認」へ落とす指摘はしない。`,
     `日報施策の効果を断定している場合、「日報×実績 効果対照」の数値と照合していないなら「仮説に弱める」よう指摘する。`,
     `担当者評価と実績の不一致を無視しているメモも指摘する。`,
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
@@ -3288,9 +3335,22 @@ export async function answerFoodCourtQuestion(
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
 
-  const system = [
+  const followUpIntegratorSystem = [
+    `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の分析担当です。`,
+    journalScopeRule,
+    BUSINESS_GOAL_METRICS_POLICY,
+    methodRule,
+    `【重ね聞き・本文】前回の回答が本文である。今回のユーザー質問は、その本文の内容への質問である。まず本文のどの箇所への質問かを理解し、その質問に答える。足りない分析だけ今回の集計で足す。全体レポートを最初から書き直さない。市場調査の全項目・全フレームワークを毎回並べない。`,
+    `【出力】質問への答えを先に書く。本文の該当箇所を短く指してから補足する。ユーザーが改善や次の一手を求めたときだけ打ち手を書く。確認や深掘りだけの質問にKPI節や「次の一手」を付けない。ユーザーがKPI分析・目標・見込みを求めた場合、新しい施策に実績が無くても「データがないので分析できません」とは書かない。サーバー確定の売価・原価・販売数・寄与率・上積み・損益分岐・撤退ラインを【仮定(シナリオ)】として引用する。`,
+    `【数値】金額・件数は今回の集計ブロックとサーバー確定試算だけを使う。本文の数字と食い違えば今回の集計を使い、食い違いを一言述べる。ジャーナル推移から出した見込みは【仮定(シナリオ)】と明示する。ブロックに無い数字は作らない。デリバリー導入は提案しない。`,
+    `【指示語】「それ」「さっき」「客数のところ」「もっと詳しく」は本文から解決する。本文に無い主題へ勝手に切り替えない。`,
+    `【専門AIメモ】参考であり鵜呑みにしない。本文への重ね聞きに必要な裏付けだけ使う。`,
+  ].join('\n')
+
+  const system = followUp ? followUpIntegratorSystem : [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、飲食業界に精通したシニア市場アナリスト兼経営コンサルタントです。`,
     journalScopeRule,
+    methodRule,
     `目的は「表を見れば分かる事実の再掲」ではなく、数字の“奥”を読み解いた洞察（市場調査レベルの考察）を提供することです。現場日報があるときは、日報と売上実績をリンクした「施策レポート」としても書く。`,
     `【データの日付】テナント比較表の日付は翌朝発行日から売上日へ補正済み。ジャーナル連携の統一売上は最初から売上日。どちらも日付をさらにずらさない。自店売上の正本と比較表の参考集計は出典・期間・税区分を区別する。`,
     `【厳守・禁止】「売上は¥◯、客単価は¥◯、◯位です」のように表の値をそのまま言い換えるだけ／最大・最小をただ列挙するだけの回答は禁止。数字は根拠として最小限だけ引用し、必ず「だから何を意味するか（原因・メカニズム・顧客行動・示唆）」をセットで述べること。`,
@@ -3300,7 +3360,7 @@ export async function answerFoodCourtQuestion(
     `(3) 真の競合（代替関係）を特定する。席は共有なので“客の財布と滞在時間”の奪い合い。同じ来店動機・時間帯・価格帯で客を奪い合う相手はどの店か。同ジャンル競合の有無（ワインは自店がほぼ独占）も強み/弱みとして語る。`,
     `(4) 需要ドライバーの中でも【東京ドームのイベント】を最重要視し、具体的に深掘りする。提供データの「会場イベント相関」「直近の日別イベント（日付・客数・売上・イベント名つき）」を必ず使い、客数・売上に動きがある日は次を必ず述べる: (a) その日に**どんなイベントが・いつ（昼興行か夜公演か）あったかをイベント名・種別・規模・客層まで特定**する（例: NiziUライブ＝若年女性中心で物販・グッズ後の軽い飲食、巨人戦などプロ野球＝幅広い年齢の野球ファンで試合前後に長め滞在、大学野球＝昼開催で飲酒需要が薄い、コンサート＝開演前後に集中、等）。(b) そのイベントが${baseName}の客数・売上に**どれだけ・なぜ**効いた/効かなかったかを実数を引用してメカニズムで説明する（観客の客層・財布・滞在時間・開演時間帯と、ワイン×スパイスという高単価・大人向け業態の相性）。(c) 取り込めたイベント／取りこぼしたイベントを切り分け、次に同種のイベントが来たときの打ち手につなげる。「イベント日は客数が多い」で終わらせない。天気・曜日は補助要因として絡める。`,
     `(5) 自店の構造的な強み・弱みと打開仮説。打ち手は「誰の・どの来店動機を・どう取るか」まで具体化し、検証方法（次に何の数字を見れば効果が分かるか）も添える。なお、本店舗はフードコート（FOOD STADIUM TOKYO）であり、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であるため厳禁とする。代わりに、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案すること。`,
-    `(5-2) 施策効果の実績値が無い場合、AIが増収額・客数リフト率・客単価上昇額・目標や判定ラインの数値を新たに作ることは禁止。前提や仮定のラベルを付けても例外にはならない。提供された実績・現場設定値・コード側の事前計算値のみ出所を付けて引用し、参考値は実績と別にする。不足時は未計測と明記し、対象客・実施方法・観測KPI・必要な追加計測を具体化する。KPI試算は明示的な依頼とサーバー側の確定計算ブロックが揃う場合だけ引用する。`,
+    `(5-2) 新しい施策にその施策自体の実績が無いのは当然であり、「数値未確認」で止めない。増収額・寄与率・上積み・目標は、サーバー確定の試算ブロックがあるときだけそれを【仮定(シナリオ)】として引用する。AIが別の係数で作り直すことは禁止。ブロックが無い項目だけ未計測とし、対象客・実施方法・観測KPIを具体化する。`,
     `【分析フレームワーク（設計書準拠・必ず踏まえる）】`,
     `(6) 要因分解を最初に：売上＝客数×客単価。売上が動いたら必ず「客数要因」か「客単価要因」かを切り分ける（提供の「要因分解」ブロックの数値を使う）。集客が課題なら集客策、単価が課題なら単価策、と打ち手を取り違えない。`,
     `(7) 店舗間のカニバリ/アンカー：提供の「店舗間相関」を使い、負相関＝同じ来店動機の食い合い(カニバリ)候補、正相関＝連動/アンカー（人気店の集客が周辺も底上げ）候補として業態文脈で解釈する。ただし相関は因果ではない（曜日・イベント等の共通要因で連動しうる）ことを明示する。`,
@@ -3319,7 +3379,7 @@ export async function answerFoodCourtQuestion(
     `【回答品質】最後に必ず、実行すべき次の一手または次に確認すべきKPIを1つ以上入れる。数字の羅列だけで終えない。日報があるときは次の一手を日報の学びと接続する。`,
     FOODCOURT_ACTION_FORMAT_RULE,
   ].join('\n')
-  const learningMemory = await loadFoodCourtLearningMemory(supabase, storeKey, 'ask', q)
+  const learningMemory = followUp ? '' : await loadFoodCourtLearningMemory(supabase, storeKey, 'ask', q)
   const contextBlock = `# データの前提（必読）\n自店の全期間売上はジャーナル連携・統一売上、商品・時間帯は照合済みジャーナル明細を参照します。他店比較・要因分解・イベント相関はテナント比較表の取得範囲だけであり、自店全期間の結果ではありません。テナント比較表の報告日は実際の売上日へ補正済みです。ジャーナルは営業日です。どちらも日付をさらにずらさないでください。\n\n# 競合プロファイル（FOOD STADIUM TOKYO）\n${competitors}\n\n# 事前計算サマリー（基準店）\n${insights || '(履歴不足)'}\n\n# 売上=客数×客単価 の要因分解（基準店）\n${decomposition || '(日数不足で分解不可)'}\n\n# 店舗間相関（カニバリ/アンカー・基準店 vs 各店）\n${storeCorr || '(共通日数が不足)'}\n\n# 会場イベント相関（東京ドーム）\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関（東京ドーム周辺）\n${weatherCorr || '(天気データなし)'}\n\n# 異常値（基準店・Zスコア）\n${anomalies || '(外れ値なし/日数不足)'}\n\n# 来客予測（学習型モデル・自己採点つき）\n${forecastCtx || '(予測データなし/蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 他店舗・過去データ分析メモ（専門AIの下書き）\n${quantNote}\n\n# イベント・天気分析メモ（専門AIの下書き）\n${extNote}\n\n# 運営改善メモ（専門AIの下書き）\n${opsNote}\n\n# 反証メモ（品質管理AIの指摘）\n${criticNote}${learningMemory ? '\n\n' + learningMemory : ''}${xTrendBlock ? '\n\n' + xTrendBlock : ''}\n\n# 出典別のサーバー集計・日次データ\n${data}`
   // 会話継続: 直前までのQ&Aを文脈として渡す（「その店は?」等の指示語が効くように）。最大8メッセージ。
   const convo: Array<{ role: string; content: string }> = []
@@ -3330,8 +3390,16 @@ export async function answerFoodCourtQuestion(
   }
   const inputPolicy = (kpiContext?.inputs || kpiInputs)?.block || ''
   const kpiPolicy = inputPolicy + (kpiContext ? '\n\n' + FOODCOURT_KPI_POLICY + '\n\n' + kpiContext.block : '')
-  const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + kpiPolicy + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
-  const baseMessages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
+  const previousAnswerBlock = followUp && previousAnswer
+    ? `# 前回の回答（本文・最優先で読む）\n${previousAnswer}\n\n`
+    : ''
+  const materialsHeading = followUp
+    ? '# 裏付け用の今回集計（本文の書き直し用ではない）\n'
+    : '# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n'
+  const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + kpiPolicy + '\n\n' + previousAnswerBlock + materialsHeading + contextBlock
+  const baseMessages = followUp
+    ? [{ role: 'system', content: systemFull }, { role: 'user', content: `前回の分析への質問: ${q}` }]
+    : [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
   // AIループエンジニアリング（Phase 1・Q&Aのみ）: FOODCOURT_LOOP_ENABLED=true かつ FOODCOURT_LOOP_APPLY_TO_ASK=true の
   // ときだけ有効。既定はOFFで、無効時は従来どおり1回生成して返すだけ（挙動・使用量記録とも変わらない）。
   const loopResult = await runFoodCourtLoopEngineering({

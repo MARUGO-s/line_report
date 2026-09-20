@@ -3,6 +3,7 @@ import { discoverFoodCourtSalesRange, buildFoodCourtSalesContext, type FoodCourt
 import { buildFoodCourtJournalDetail } from '../_shared/foodcourt_journal_detail.ts'
 import { buildFoodCourtKpiInputs, prepareFoodCourtKpiScenario, type FoodCourtKpiContext } from '../_shared/foodcourt_kpi.ts'
 import { isKpiScenarioRequest } from '../_shared/kpi_scenario.ts'
+import { analysisMethodsForceKpi, parseFoodCourtAnalysisMethods } from '../_shared/foodcourt_qa_methods.ts'
 import { loadJournalStoreContext } from '../_shared/journal_store_context.ts'
 import { resolveAiSalesPeriods } from '../_shared/sales_reconciliation_ai.ts'
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
@@ -2965,6 +2966,9 @@ Deno.serve(async (req, info) => {
           reports.map((report) => fcSalesDate(report)).filter(Boolean),
         )
         : null
+      const analysisMethods = isJournalDeep ? [] : parseFoodCourtAnalysisMethods(body.analysis_methods)
+      const declinedKpi = /(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/.test(rawQuestion)
+      const forceKpi = !declinedKpi && analysisMethodsForceKpi(analysisMethods)
       const currentKpiInputs = isJournalDeep ? null : buildFoodCourtKpiInputs(body.kpi_assumptions)
       let salesContext: FoodCourtSalesContext | null = null
       let salesRanges = requestedRanges
@@ -3000,7 +3004,7 @@ Deno.serve(async (req, info) => {
           return json({ error: "ジャーナル連携の売上・商品明細・対象期間を取得できませんでした。時間をおいて再試行してください。", code: "foodcourt_sales_unavailable" }, 503)
         }
       }
-      if (!reports.length && (isJournalDeep || (!salesContext?.hasData && !isKpiScenarioRequest(rawQuestion) && !currentKpiInputs))) {
+      if (!reports.length && (isJournalDeep || (!salesContext?.hasData && !isKpiScenarioRequest(rawQuestion, history.map((row) => row.content).join('\n')) && !forceKpi && !currentKpiInputs))) {
         if (isJournalDeep) {
           return json({
             error: "指定期間のフードコート比較データがありません。",
@@ -3017,11 +3021,13 @@ Deno.serve(async (req, info) => {
         try {
           kpiContext = await prepareFoodCourtKpiScenario({
             question: rawQuestion,
+            historyText: history.map((row) => row.content).join('\n'),
             authorizedStore: normalizePosJournalStoreKey(storeKey),
             salesDates: (hasQaPeriod ? reports : reports.slice(0, 45)).map(report => fcSalesDate(report)).filter(Boolean),
             salesRanges,
             journalDetail: salesContext?.journalDetail,
             assumptions: body.kpi_assumptions,
+            force: forceKpi,
           }, {
             loadProfile: store => loadJournalStoreContext(supabase, store, {}),
             loadSales: loadQaSales,
@@ -3113,6 +3119,7 @@ Deno.serve(async (req, info) => {
           hasQaPeriod ? requestedRanges : [],
           usedKpiInputs,
           salesContext,
+          analysisMethods,
         )
         if (isJournalDeep && !String(qaResult.answer ?? "").trim()) {
           return json({
@@ -3122,6 +3129,7 @@ Deno.serve(async (req, info) => {
           }, 502)
         }
         let answer = qaResult.answer || "回答を生成できませんでした。もう一度お試しください。"
+        if (kpiContext?.userAppendix) answer += `\n\n${kpiContext.userAppendix}`
         if (usedKpiInputs) answer += `\n\n今回、分析へ渡した前提\n${usedKpiInputs.summary}\n${kpiContext ? '上記の入力前提と不足項目の仮置きから3シナリオをコードで計算しました。' : '入力前提として参照しています。数値試算は実行していません。'}`
         if (qaPeriod) answer += `\n\n対象期間: ${qaPeriod.label}（比較レポート${reports.length}日${qaPeriod.truncated ? '・取得上限のため一部のみ' : ''}）`
         if (salesContext) {
@@ -3186,6 +3194,7 @@ Deno.serve(async (req, info) => {
               period: qaPeriod,
               sales_coverage: salesContext?.coverage ?? null,
               journal_detail_coverage: salesContext?.journalDetail?.coverage ?? null,
+              analysis_methods: analysisMethods,
             },
           })
           .select("id, created_at")
@@ -3202,6 +3211,7 @@ Deno.serve(async (req, info) => {
           period: qaPeriod,
           sales_coverage: salesContext?.coverage ?? null,
           journal_detail_coverage: salesContext?.journalDetail?.coverage ?? null,
+          analysis_methods: analysisMethods,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,
           loop_count: qaResult.loopCount,

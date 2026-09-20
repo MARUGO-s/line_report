@@ -3,11 +3,12 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import vm from 'node:vm'
-import { prepareFoodCourtKpiScenario, FOODCOURT_KPI_POLICY, buildFoodCourtKpiInputs } from '../supabase/functions/_shared/foodcourt_kpi.ts'
+import { prepareFoodCourtKpiScenario, FOODCOURT_KPI_POLICY, buildFoodCourtKpiInputs, buildFoodCourtInitiativeUplift } from '../supabase/functions/_shared/foodcourt_kpi.ts'
 import * as reliability from '../supabase/functions/_shared/foodcourt_ai_reliability.ts'
 import * as loop from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 import * as groq from '../supabase/functions/_shared/groq_model.ts'
 import { BUSINESS_GOAL_METRICS_POLICY } from '../supabase/functions/_shared/business_goal_metrics.ts'
+import { foodCourtAnalysisMethodPrompt } from '../supabase/functions/_shared/foodcourt_qa_methods.ts'
 import {FOODCOURT_SALES_POLICY,buildFoodCourtSalesContext} from '../supabase/functions/_shared/foodcourt_sales_context.ts'
 import {buildFoodCourtJournalDetail} from '../supabase/functions/_shared/foodcourt_journal_detail.ts'
 
@@ -29,17 +30,40 @@ function loaders(options: Record<string, any> = {}) {
   }
 }
 
+test('new-initiative uplift is a scenario share of current store sales, not unconfirmed',()=>{
+  const uplift=buildFoodCourtInitiativeUplift({
+    storeDailySalesYen:174866,storePeriodLabel:'対象期間',operatingDaysPerMonth:26,
+    scenarios:[
+      {label:'保守',daily_sales_yen:3000,daily_units:5},
+      {label:'標準',daily_sales_yen:5000,daily_units:8},
+      {label:'強気',daily_sales_yen:8000,daily_units:12},
+    ],
+  })
+  assert.ok(uplift)
+  assert.match(uplift.block,/数値未確認とはしない/)
+  assert.match(uplift.block,/仮定\(シナリオ\)/)
+  const standard=uplift.facts.scenarios.find(s=>s.label==='標準')!
+  assert.equal(standard.daily_uplift_yen,2750)
+  assert.equal(standard.monthly_uplift_yen,71500)
+  assert.equal(standard.store_contribution_pct,2.9)
+  assert.equal(buildFoodCourtInitiativeUplift({storeDailySalesYen:100,storePeriodLabel:'x',operatingDaysPerMonth:30,scenarios:[]}),null)
+})
+
 test('ordinary metrics and historical KPI questions do not load any extra data',async()=>{
   for(const question of ['先月の廃棄率は？','昨年のKPIを数字で教えて','粗利率とは？','試算は不要、実績だけ']) {
     const io=loaders();assert.equal(await prepareFoodCourtKpiScenario({...input,question,assumptions:stored},io),null);assert.equal(io.calls.length,0)
   }
+  const forced=loaders()
+  assert.ok(await prepareFoodCourtKpiScenario({...input,question:'売上の傾向を教えて',force:true},forced))
+  assert.ok(forced.calls.length>0)
 })
 
 test('KPI uses same-store unified sales, preserves stored assumptions and sanitizes overrides',async()=>{
   const io=loaders()
   const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:600,unitCostYen:null,notes:'FORGED',guestsPerOperatingDay:9999}},io)
   assert.ok(result);assert.match(result.block,/売価 【仮定\(入力\)】¥600/);assert.match(result.block,/原価 【仮定\(入力\)】¥126/)
-  assert.match(result.block,/【実績】100名/);assert.doesNotMatch(result.block,/PRIVATE-NOTES|FORGED|9999/)
+  assert.match(result.block,/【実績】100名/);assert.match(result.block,/新しい施策の店舗売上への寄与・上積み/);assert.doesNotMatch(result.block,/PRIVATE-NOTES|FORGED|9999/)
+  assert.match(result.userAppendix,/予想売価/);assert.match(result.userAppendix,/上積み\/日/)
   assert.deepEqual(result.reference.scenarios,['保守','標準','強気'])
   assert.deepEqual(io.calls,[['profile','fixture_store'],['sales','fixture_store','2026-06-01','2026-06-02']])
   assert.equal(result.inputs!.reference.items.find(i=>i.key==='unitPriceYen')!.source,'今回の入力欄')
@@ -76,7 +100,7 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
   for(const mode of ['ordinary','inputs','kpi','empty','journal']) {
     const enabled=mode==='kpi'||mode==='empty'
     const requests: any[]=[];let loopArgs: any
-    const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,FOODCOURT_SALES_POLICY,BUSINESS_GOAL_METRICS_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,
+    const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,FOODCOURT_SALES_POLICY,BUSINESS_GOAL_METRICS_POLICY,foodCourtAnalysisMethodPrompt,console,URL,URLSearchParams,setTimeout,clearTimeout,
       Deno:{env:{get:()=>''}},classifyJournalChatIntent:()=> 'data',
       captureChat:async(messages:any[],_key:string,_model:string,tokens:number)=>{requests.push({messages,tokens});return {content:'synthetic answer',usage:null}},
       captureLoop:async(args:any)=>{loopArgs=args;const result=await args.initialGenerate();return {answer:result.content,usages:[],loopScore:null,loopCount:1}},
@@ -100,11 +124,14 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
     if(salesContext) {
       for(const r of requests) {assert.match(JSON.stringify(r),/2025-12-09/);assert.match(JSON.stringify(r),/クロワッサン/);assert.match(JSON.stringify(r),/hourly_quantity/)}
       for(const r of requests.slice(0,4)) {
-        assert.match(JSON.stringify(r),/直前の会話・対象の引き継ぎ/)
-        assert.match(JSON.stringify(r),/クロワッサンの導入はどう思う/)
+        assert.match(JSON.stringify(r),/重ね聞き/)
+        assert.match(JSON.stringify(r),/前回の回答（本文）/)
+        assert.match(JSON.stringify(r),/既存の軽食実績を先に見ます/)
       }
-      assert.match(final,/クロワッサンの導入はどう思う/)
-      assert.match(final,/追加質問は新しい別テーマとして始めず/)
+      assert.match(final,/前回の分析への質問/)
+      assert.match(final,/前回の回答（本文・最優先で読む）/)
+      assert.match(final,/裏付け用の今回集計/)
+      assert.doesNotMatch(final,/最後に必ず、実行すべき次の一手/)
       assert.match(loopArgs.numberAuditFacts,/クロワッサン/)
       const compact=loop.compactFoodCourtEvaluationContext(loopArgs.evaluationContext+'long'.repeat(10000),14000,loopArgs.evaluationProtectedPrefixLength)
       assert.match(compact,/2025-12-09/);assert.match(compact,/クロワッサン/);assert.match(compact,/hourly_quantity/)
@@ -120,6 +147,7 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
       assert.match(prompt,/売上構成比のABC/)
       assert.doesNotMatch(prompt,/分析結果には必ず「KGI・KPI・KFI」/)
     }
+    if(mode!=='journal') assert.match(final,/最後に必ず、実行すべき次の一手/)
     assert.equal(final.includes('コード側で確定計算済み'),enabled)
     assert.match(final,/確認済み期間/)
     assert.match(final,/指定範囲別のコード集計/)
@@ -140,7 +168,29 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
       assert.equal(requests.slice(0,4).some(r=>JSON.stringify(r).includes('今回の入力前提')),false)
       assert.match(final,/未入力.*未知のまま/)
     }
+    if(mode==='ordinary') {
+      const before=requests.length
+      await ctx.answerFoodCourtQuestion(reports,'MARUGO S','売上の傾向を教えて','synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,null,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}],null,null,['mix'])
+      const methodPrompt=JSON.stringify(requests.slice(before))
+      assert.match(methodPrompt,/今回選ばれた分析方法・最優先/)
+      assert.match(methodPrompt,/売上構成・主力商品/)
+      assert.doesNotMatch(methodPrompt,/目標・損益分岐・撤退: /)
+    }
   }
+})
+
+test('follow-up detection treats later questions as about the previous answer unless the user starts over',()=>{
+  const source=readFileSync(new URL('../supabase/functions/_shared/foodcourt_compare.ts',import.meta.url),'utf8')
+  const executable=stripTypeScriptTypes(source.replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*$/gm,'').replace(/^export /gm,''))
+    + '\nthis.isFoodCourtQaFollowUp=isFoodCourtQaFollowUp;this.latestFoodCourtAssistantAnswer=latestFoodCourtAssistantAnswer'
+  const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,FOODCOURT_SALES_POLICY,BUSINESS_GOAL_METRICS_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,Deno:{env:{get:()=>''}}})
+  vm.runInContext(executable,ctx)
+  const history=[{role:'user',content:'売上を分析して'},{role:'assistant',content:'客数が伸び、客単価は横ばいです。'}]
+  assert.equal(ctx.isFoodCourtQaFollowUp('客数のところをもっと詳しく',history),true)
+  assert.equal(ctx.isFoodCourtQaFollowUp('同時購入は？',history),true)
+  assert.equal(ctx.isFoodCourtQaFollowUp('最初から分析し直して',history),false)
+  assert.equal(ctx.isFoodCourtQaFollowUp('売上を分析して',[]),false)
+  assert.equal(ctx.latestFoodCourtAssistantAnswer(history),'客数が伸び、客単価は横ばいです。')
 })
 
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{

@@ -17,5 +17,7 @@ test('only the Q&A button and explicit suggestion choices call askQuestion', () 
   const qEvents = page.match(/dom\.q(Input|Btn)\.addEventListener\([^;]+/g) || [];
   assert.equal(qEvents.some((event) => event.includes('qInput') && event.includes('keydown')), false);
   assert.equal(qEvents.some((event) => event.includes('qBtn') && event.includes("'click'")), true);
-  assert.match(page, /data-qa-choice.*askQuestion/);
+  assert.match(page, /data-qa-choice/);
+  assert.match(page, /qaChoiceLock/);
+  assert.match(page, /askQuestion\(btn\.getAttribute\('data-qa-choice'\)\)/);
 });

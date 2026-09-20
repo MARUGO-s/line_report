@@ -59,9 +59,15 @@ test('通常の改善提案・KGI/KPI/KFIの関係説明は数値試算を許可
   for (const query of ['売上を伸ばすための提案を3つ', 'KGI・KPI・KFIを含む改善提案', '売上アップを狙うには', 'KPI目標の達成状況を確認して']) {
     assert.equal(isKpiScenarioRequest(query), false, query)
   }
-  for (const query of ['新商品のKPI目標を設定して', '売上を3シナリオで試算してください', 'KPIを具体的な数字で提案して']) {
+  for (const query of ['新商品のKPI目標を設定して', '売上を3シナリオで試算してください', 'KPIを具体的な数字で提案して', '提案した新商品の販売分析をお願い', '新商品の販売戦略とKPI目標', '新しい施策の売上貢献を分析して', 'この施策で売上をどれだけ上積みできるか']) {
     assert.equal(isKpiScenarioRequest(query), true, query)
   }
+  assert.equal(isKpiScenarioRequest('販売分析をお願い'), false)
+  assert.equal(isKpiScenarioRequest('販売分析をお願い', 'クロワッサンの導入はどう思う？'), true)
+  assert.equal(isKpiScenarioRequest('実績の推移を加味して新商品の販売分析をして'), true)
+  assert.equal(isKpiScenarioRequest('KPI分析してみてください'), false)
+  assert.equal(isKpiScenarioRequest('KPI分析してみてください', 'クロワッサンの導入はどう思う？'), true)
+  assert.equal(isKpiScenarioRequest('それをKPI分析してみてください', '焼きたてのクロワッサンの施策はどう思う？'), true)
 })
 
 test('空白・配列・不正な入力値を実際に入力された数値へ変換しない', () => {
@@ -79,6 +85,7 @@ test('実績は重複しない同一日・同一母集団から導き、部分�
   const baseline = deriveKpiBaselineFromUnifiedSales({ periods: [{ label: '部分月', ranges: [range, range] }] })
   assert.equal(baseline.guestsPerOperatingDay, 75)
   assert.equal(baseline.averageSpendYen, 2000)
+  assert.equal(baseline.averageDailySalesYen, 150000)
   assert.equal(baseline.operatingDaysPerMonth, null)
 })
 

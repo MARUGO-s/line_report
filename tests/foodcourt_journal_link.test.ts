@@ -6,6 +6,7 @@ import {
 } from "../supabase/functions/_shared/foodcourt_sales_context.ts";
 import {
   allocateFoodCourtHourlyTargets,
+  buildFoodCourtJournalDemandOutlook,
   buildFoodCourtJournalDetail,
 } from "../supabase/functions/_shared/foodcourt_journal_detail.ts";
 import { prepareFoodCourtKpiScenario } from "../supabase/functions/_shared/foodcourt_kpi.ts";
@@ -257,6 +258,29 @@ test("follow-up questions keep previously discussed products and their pairs", a
   assert.ok(
     followUp.facts.co_purchase.some((p) => p.products.includes("クロワッサン")),
   );
+});
+
+test("demand outlook anchors the standard day to observed units and labels a scenario guess", async () => {
+  const detail = await buildFoodCourtJournalDetail(
+    [{ from: "2025-12-09", to: "2025-12-09" }],
+    "クロワッサン",
+    async (month) => month === "2025-12" ? [day("2025-12-09")] : [],
+  );
+  const outlook = buildFoodCourtJournalDemandOutlook(detail, "クロワッサン");
+  assert.ok(outlook);
+  assert.equal(outlook.facts.verified_days, 1);
+  assert.equal(outlook.facts.daily_units, 2);
+  assert.equal(outlook.facts.spread_basis, "single_month_scenario_ratio");
+  assert.equal(
+    outlook.facts.scenarios.find((s) => s.label === "標準")?.daily_units,
+    2,
+  );
+  assert.equal(
+    outlook.facts.scenarios.find((s) => s.label === "保守")?.daily_units,
+    Math.round(2 * 8 / 12 * 100) / 100,
+  );
+  assert.match(outlook.block, /仮定\(シナリオ\)/);
+  assert.doesNotMatch(outlook.block, /PRIVATE-RECEIPT/);
 });
 
 test("unknown times stay unknown; KPI hourly targets are scenarios and preserve daily totals", async () => {

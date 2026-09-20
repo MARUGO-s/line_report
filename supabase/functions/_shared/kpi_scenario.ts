@@ -16,18 +16,57 @@
 export type KpiBasis = "actual" | "input" | "scenario";
 export type KpiScenarioName = "conservative" | "standard" | "aggressive";
 
-/** 指標名だけでは許可しない。ブラウザーの wantsKpiTargets と同じ保守的な判定。 */
-export function isKpiScenarioRequest(query: unknown): boolean {
-  const q = String(query || '').normalize('NFKC').toLowerCase();
-  if (!q || /(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/.test(q)) return false;
-  const metric = /kpi|損益分岐|粗利|原価率|販売|売上|撤退|縮小|単価|価格|値付け|セット率|廃棄率|テイクアウト比率|新商品|導入|採算/;
-  const simulation = /試算(?:して|する|を|したい|してください|しよう)|シミュレーション(?:して|する|を|したい)|シナリオ(?:を|で)|(?:試算|シミュレーション)$|試算してほしい/;
+/** 指標名だけでは許可しない。ブラウザーの wantsKpiTargets と同じ判定。 */
+export function isKpiScenarioRequest(query: unknown, historyText = ""): boolean {
+  const q = String(query || "").normalize("NFKC").toLowerCase();
+  const context = `${q}\n${String(historyText || "").normalize("NFKC").toLowerCase()}`;
+  if (
+    !q ||
+    /(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/
+      .test(q)
+  ) return false;
+  const metric =
+    /kpi|損益分岐|粗利|原価率|販売|売上|撤退|縮小|単価|価格|値付け|セット率|廃棄率|テイクアウト比率|新商品|導入|採算/;
+  const simulation =
+    /試算(?:して|する|を|したい|してください|しよう)|シミュレーション(?:して|する|を|したい)|シナリオ(?:を|で)|(?:試算|シミュレーション)$|試算してほしい/;
+  const productPlan = /新商品|導入|提案した(?:新)?商品|テスト販売|新しい施策|新施策|お出ししよう|売り出/;
+  const salesPlan =
+    /販売分析|販売戦略|販売見込み|売上見込み|売上予測|販売予測|目標販売|販売目標|kpi目標|kpi分析|kpiを分析|kpiで分析|売上貢献|上積み/;
   if (metric.test(q) && simulation.test(q)) return true;
-  // 実績照会・定義の説明は、明示的な試算依頼と区別する。
-  if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
-  if (/達成状況|進捗|振り返|確認|評価/.test(q)) return false;
-  const plan = /目標.*(?:出して|出す|決め|設定|提案)|決めたい|設定(?:したい|して|する)|値付け|単価設定|価格設定/;
-  const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
+  if (salesPlan.test(q) && (productPlan.test(q) || productPlan.test(context))) {
+    return true;
+  }
+  if (
+    /kpi/.test(q) && /分析/.test(q) &&
+    (productPlan.test(q) || productPlan.test(context) || /施策/.test(context))
+  ) return true;
+  if (
+    productPlan.test(q) && /分析/.test(q) &&
+    /目標|戦略|見込み|推測|予測|kpi|撤退|貢献|上積み/.test(q)
+  ) return true;
+  if (/(?:とは|意味|定義)/.test(q) && !simulation.test(q) && !salesPlan.test(q)) {
+    return false;
+  }
+  if (
+    /(?:先月|昨年|去年|過去)の/.test(q) && /実績|廃棄|kpi/.test(q) &&
+    !simulation.test(q) && !productPlan.test(q) && !salesPlan.test(q)
+  ) return false;
+  if (
+    /達成状況|進捗|振り返|確認|評価/.test(q) && !salesPlan.test(q) &&
+    !simulation.test(q) && !productPlan.test(q)
+  ) return false;
+  if (
+    /推移/.test(q) && !productPlan.test(q) && !salesPlan.test(q) &&
+    !simulation.test(q) && !/目標|戦略|見込み/.test(q)
+  ) return false;
+  if (
+    /(?:新しい)?施策/.test(q) &&
+    /分析|kpi|目標|見込み|貢献|上積み|どれだけ|効果/.test(q)
+  ) return true;
+  const plan =
+    /目標.*(?:出して|出す|決め|設定|提案)|決めたい|設定(?:したい|して|する)|値付け|単価設定|価格設定/;
+  const numeric =
+    /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
   return (metric.test(q) && plan.test(q)) ||
     (/損益分岐/.test(q) && /教えて|計算|何個|何円/.test(q)) ||
     (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q)) ||
@@ -347,6 +386,7 @@ export type KpiBaseline = {
   guestsPerOperatingDay: number | null;
   operatingDaysPerMonth: number | null;
   averageSpendYen: number | null;
+  averageDailySalesYen: number | null;
   periodLabel: string;
   sourceNote: string;
 };
@@ -356,6 +396,7 @@ export function emptyKpiBaseline(periodLabel = "対象期間"): KpiBaseline {
     guestsPerOperatingDay: null,
     operatingDaysPerMonth: null,
     averageSpendYen: null,
+    averageDailySalesYen: null,
     periodLabel,
     sourceNote: "統一売上の実績を取得できませんでした",
   };
@@ -415,6 +456,9 @@ export function deriveKpiBaselineFromUnifiedSales(raw: unknown): KpiBaseline {
       : null,
     averageSpendYen: guestTotal > 0
       ? Math.round(salesTotal / guestTotal)
+      : null,
+    averageDailySalesYen: paired.length > 0
+      ? Math.round(salesTotal / paired.length)
       : null,
     periodLabel: [...new Set(labels)].join(" / ") || "対象期間",
     sourceNote: `統一売上の日別実績 ${paired.length}日（売上・正の客数が揃う重複なしの日）。月間営業日数は全暦日の売上を観測した${completeMonthActiveDays.length}か月の売上発生日数を代替使用。部分月・月次代替合計は不使用。同日競合の除外 ${conflicts.size}日。`,

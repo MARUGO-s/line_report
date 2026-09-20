@@ -3046,6 +3046,7 @@ test('browser and server require a planning request, not a metric keyword', () =
     ['損益分岐の販売個数を教えて', true],
     ['先月の実績を基に来月のKPIを試算してください', true],
     ['新商品の売上をシミュレーションして', true],
+    ['提案した新商品の販売分析をお願い', true],
     ['先月の廃棄率の実績は？', false],
     ['昨年のKPIを数字で教えて', false],
     ['原価率の推移', false],

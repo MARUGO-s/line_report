@@ -48,14 +48,23 @@
     return null;
   }
   // サーバー isKpiScenarioRequest と同じ基準。指標名だけで試算しない。
-  function wantsKpiTargets(query) {
+  function wantsKpiTargets(query, historyText) {
     const q = String(query || '').normalize('NFKC').toLowerCase();
+    const context = q + '\n' + String(historyText || '').normalize('NFKC').toLowerCase();
     if (!q || /(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/.test(q)) return false;
     const metric = /kpi|損益分岐|粗利|原価率|販売|売上|撤退|縮小|単価|価格|値付け|セット率|廃棄率|テイクアウト比率|新商品|導入|採算/;
     const simulation = /試算(?:して|する|を|したい|してください|しよう)|シミュレーション(?:して|する|を|したい)|シナリオ(?:を|で)|(?:試算|シミュレーション)$|試算してほしい/;
+    const productPlan = /新商品|導入|提案した(?:新)?商品|テスト販売|新しい施策|新施策|お出ししよう|売り出/;
+    const salesPlan = /販売分析|販売戦略|販売見込み|売上見込み|売上予測|販売予測|目標販売|販売目標|kpi目標|kpi分析|kpiを分析|kpiで分析|売上貢献|上積み/;
     if (metric.test(q) && simulation.test(q)) return true;
-    if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
-    if (/達成状況|進捗|振り返|確認|評価/.test(q)) return false;
+    if (salesPlan.test(q) && (productPlan.test(q) || productPlan.test(context))) return true;
+    if (/kpi/.test(q) && /分析/.test(q) && (productPlan.test(q) || productPlan.test(context) || /施策/.test(context))) return true;
+    if (productPlan.test(q) && /分析/.test(q) && /目標|戦略|見込み|推測|予測|kpi|撤退|貢献|上積み/.test(q)) return true;
+    if (/(?:とは|意味|定義)/.test(q) && !simulation.test(q) && !salesPlan.test(q)) return false;
+    if (/(?:先月|昨年|去年|過去)の/.test(q) && /実績|廃棄|kpi/.test(q) && !simulation.test(q) && !productPlan.test(q) && !salesPlan.test(q)) return false;
+    if (/達成状況|進捗|振り返|確認|評価/.test(q) && !salesPlan.test(q) && !simulation.test(q) && !productPlan.test(q)) return false;
+    if (/推移/.test(q) && !productPlan.test(q) && !salesPlan.test(q) && !simulation.test(q) && !/目標|戦略|見込み/.test(q)) return false;
+    if (/(?:新しい)?施策/.test(q) && /分析|kpi|目標|見込み|貢献|上積み|どれだけ|効果/.test(q)) return true;
     const plan = /目標.*(?:出して|出す|決め|設定|提案)|決めたい|設定(?:したい|して|する)|値付け|単価設定|価格設定/;
     const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
     return (metric.test(q) && plan.test(q)) ||
@@ -63,13 +72,74 @@
       (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q)) ||
       (numeric.test(q) && /粗利|原価率/.test(q) && /狙う|目標|提案/.test(q));
   }
-  const initialState = () => ({period:null,pending:null,kpiConfirmed:false});
+  const ANALYSIS_METHODS = [
+    {id:'mix', label:'売上構成・主力商品'},
+    {id:'decompose', label:'客数と客単価の分解'},
+    {id:'timing', label:'時間帯・曜日'},
+    {id:'bundle', label:'同時購入・併売'},
+    {id:'event', label:'イベント・天気'},
+    {id:'margin', label:'粗利・採算（未登録なら推測）'},
+    {id:'kpi', label:'目標・損益分岐・撤退'},
+    {id:'goal', label:'改善の打ち手'},
+  ];
+  const METHOD_ACTIONS = ['おすすめ全部で進む','ほかの手法を見る','この分析で進む','キャンセル'];
+  const initialState = () => ({period:null,pending:null,kpiConfirmed:false,methods:null});
   function needsInputTrialChoice(query) {
     const q=String(query||'').normalize('NFKC');
     if(/試算.*(?:不要|なし|しない)|実績|推移|とは|意味|定義/.test(q)) return false;
     return /どう思|どうです|導入|新商品|提案|検討|しようと思|始めたい|売り?上げアップ/.test(q);
   }
   const trialChoices=['入力値で3シナリオを試算','入力値を使って分析のみ','キャンセル'];
+  function isRestartQuestion(text) {
+    return /最初から|やり直|し直して|新しく分析|全体を(?:もう一度)?分析|別の(?:テーマ|件|質問)で/.test(String(text||'').normalize('NFKC'));
+  }
+  function methodByChip(text) {
+    const chip = String(text||'').replace(/^✓\s*/,'').trim();
+    return ANALYSIS_METHODS.find(m => m.id===chip || m.label===chip) || null;
+  }
+  function recommendAnalysisMethods(question, historyText) {
+    const q = String(question||'').normalize('NFKC');
+    const ids = [];
+    const add = id => { if(!ids.includes(id)) ids.push(id); };
+    if (/売上|構成|主力|売れ筋|abc|商品|何が売/.test(q)) add('mix');
+    if (/売上|客数|客単価|要因|分解|傾向/.test(q)) add('decompose');
+    if (/時間帯|ピーク|曜日|朝|昼|夜|ランチ|ディナー/.test(q)) add('timing');
+    if (/同時購入|併売|セット|一緒に/.test(q)) add('bundle');
+    if (/イベント|天気|試合|ライブ|雨|ドーム/.test(q)) add('event');
+    if (/粗利|原価|採算|利益|マージン/.test(q)) add('margin');
+    if (/kpi|目標|損益分岐|撤退|見込み|予測|販売分析|販売戦略|施策|貢献|上積み/.test(q) || wantsKpiTargets(q, historyText)) add('kpi');
+    if (/改善|打ち手|提案|どう思|導入|戦略|対策|施策/.test(q)) add('goal');
+    if (!ids.length) { add('mix'); add('decompose'); add('event'); }
+    return ids;
+  }
+  function methodsForceKpi(ids) {
+    return (ids||[]).some(id => id==='kpi' || id==='margin');
+  }
+  function normalizeMethodIds(ids) {
+    const allowed = new Set(ANALYSIS_METHODS.map(m => m.id));
+    return [...new Set((ids||[]).filter(id => allowed.has(id)))];
+  }
+  function methodsClarify(state) {
+    const pending = state.pending;
+    const recommended = pending.recommended || [];
+    const selected = pending.selected || [];
+    const showAll = pending.showAll === true;
+    const visible = showAll ? ANALYSIS_METHODS : ANALYSIS_METHODS.filter(m => recommended.includes(m.id) || selected.includes(m.id));
+    const recLabels = ANALYSIS_METHODS.filter(m => recommended.includes(m.id)).map(m => m.label).join('、');
+    const selLabels = selected.length
+      ? ANALYSIS_METHODS.filter(m => selected.includes(m.id)).map(m => m.label).join('、')
+      : 'まだありません（おすすめを使うか、手法を選んでください）';
+    const choices = visible.map(m => (selected.includes(m.id)?'✓ ':'')+m.label);
+    const actions = METHOD_ACTIONS.filter(action => showAll ? action!=='ほかの手法を見る' : true);
+    return {state,kind:'clarify',message:'この質問には次の分析が向いています。使いたい手法を選んでください（複数可）。粗利が未登録でも、目標は推測値として出せます。\nおすすめ: '+recLabels+'\n選択中: '+selLabels,choices,actions};
+  }
+  function applySelectedMethods(state, ids) {
+    const pendingRecommended = state.pending?.recommended || recommendAnalysisMethods(state.pending?.question || '', '');
+    state.methods = normalizeMethodIds(ids);
+    if (!state.methods.length) state.methods = pendingRecommended.slice();
+    if (methodsForceKpi(state.methods)) state.kpiConfirmed = true;
+    state.pending = null;
+  }
   function nextTurn(previous,text,options={}) {
     const state = {...previous};
     const raw = String(text||'').trim();
@@ -86,10 +156,42 @@
     }
     let question = state.pending?.question || raw;
     let inputChoiceResolved=false;
-    if(state.pending?.kind==='kpi_use') {
+    if(state.pending?.kind==='methods') {
+      const picked = methodByChip(raw);
+      if(picked) {
+        const selected = new Set(state.pending.selected||[]);
+        if(selected.has(picked.id)) selected.delete(picked.id); else selected.add(picked.id);
+        state.pending={...state.pending,selected:[...selected]};
+        return methodsClarify(state);
+      }
+      if(/^ほかの手法を見る$/.test(raw)) {
+        state.pending={...state.pending,showAll:true};
+        return methodsClarify(state);
+      }
+      if(/^(おすすめ全部で進む|入力値で3シナリオを試算)$/.test(raw)) {
+        const extra = /入力値で3シナリオを試算/.test(raw) ? ['kpi'] : [];
+        applySelectedMethods(state, [...(state.pending.recommended||[]), ...extra]);
+      } else if(/^(この分析で進む|入力値を使って分析のみ|分析のみ|試算は不要)$/.test(raw)) {
+        const selected = /分析のみ|試算は不要/.test(raw)
+          ? (state.pending.selected||[]).filter(id => id!=='kpi' && id!=='margin')
+          : (state.pending.selected||[]);
+        applySelectedMethods(state, selected);
+      } else if(/分析|試算|教えて|[?？]/.test(raw) && !period) {
+        question=raw;
+        state.pending={kind:'methods',question,recommended:recommendAnalysisMethods(question, options.historyText),selected:[],showAll:false};
+        return methodsClarify(state);
+      } else if(period) {
+        state.period=period;
+        return methodsClarify(state);
+      } else {
+        return methodsClarify(state);
+      }
+      period=period||state.period;
+    } else if(state.pending?.kind==='kpi_use') {
       if(/^(入力値で3シナリオを試算|はい|お願いします)$/.test(raw)) {
         question='新商品のKPIを保守・標準・強気の3シナリオで試算してください。\n元の相談: '+question;
         state.kpiConfirmed=true; inputChoiceResolved=true; state.pending=null;
+        state.methods = normalizeMethodIds([...(state.methods||[]),'kpi']);
       } else if(/^(入力値を使って分析のみ|分析のみ|試算は不要|いいえ)$/.test(raw)) {
         inputChoiceResolved=true; state.pending=null;
       } else if(/分析|試算|教えて|[?？]/.test(raw)) { question=raw; state.pending=null; }
@@ -104,20 +206,42 @@
       question=raw;
     }
     if(period) state.period=period;
+    if(state.pending?.kind==='period' && period && /分析|試算|教えて|[?？]|どう/.test(question)) {
+      state.methods=null;
+      state.kpiConfirmed=false;
+    }
     if(!state.period || (state.pending?.kind==='period' && !period)) {
       state.pending={kind:'period',question};
       return clarify('どの期間を分析しますか？ 例「2026年6月」「2026年6月と7月を比較」「2026-06-01〜2026-06-15」。おまかせなら保存済み全期間です。',['保存済み全期間','今月','先月',...(options.viewingDate?['表示中の日']:[]),'キャンセル']);
     }
-    if(options.hasAssumptions && !inputChoiceResolved && !wantsKpiTargets(question) && needsInputTrialChoice(question)) {
+    if(isRestartQuestion(raw) && options.hasPriorAnswer) {
+      state.methods=null;
+      state.kpiConfirmed=false;
+    }
+    const skipMethods = Boolean(options.hasPriorAnswer && state.methods?.length && !isRestartQuestion(raw) && !isRestartQuestion(question));
+    if(!skipMethods && !state.methods) {
+      state.pending={kind:'methods',question,recommended:recommendAnalysisMethods(question, options.historyText),selected:[],showAll:false};
+      return methodsClarify(state);
+    }
+    if(options.hasAssumptions && !inputChoiceResolved && !wantsKpiTargets(question, options.historyText) && needsInputTrialChoice(question) && !state.methods) {
       state.pending={kind:'kpi_use',question};
       return clarify('入力した売価・原価などの前提を分析に使います。保守・標準・強気の3シナリオでKPIの数値試算も行いますか？',trialChoices);
     }
-    if(wantsKpiTargets(question) && !state.kpiConfirmed && !options.assumptionsReady) {
+    if(wantsKpiTargets(question, options.historyText) && !state.kpiConfirmed && !options.assumptionsReady && !state.methods) {
       state.pending={kind:'kpi',question};
       return clarify('KPI試算の前提を確認します。売価・原価・焼成個数/回数・人員・廃棄許容率は分かりますか？ 下の「試算前提」に入力するか、保存済み値・仮置きで進められます。',['入力した前提で進む','保存済み前提・仮置きで進む','キャンセル']);
     }
+    if(wantsKpiTargets(question, options.historyText)) {
+      state.methods=normalizeMethodIds([...(state.methods||[]),'kpi']);
+      state.kpiConfirmed=true;
+    }
     state.pending=null;
-    return {state,kind:'ready',question,period:state.period};
+    return {state,kind:'ready',question,period:state.period,methods:state.methods||[]};
   }
-  root.FOODCOURT_QA_PLANNER={resolvePeriod,wantsKpiTargets,initialState,nextTurn};
+  function promptMethods(state, question, options={}) {
+    const next = {...state, methods:null};
+    next.pending={kind:'methods',question,recommended:recommendAnalysisMethods(question, options.historyText),selected:[],showAll:false};
+    return methodsClarify(next);
+  }
+  root.FOODCOURT_QA_PLANNER={resolvePeriod,wantsKpiTargets,recommendAnalysisMethods,ANALYSIS_METHODS,initialState,nextTurn,promptMethods};
 })(globalThis);
