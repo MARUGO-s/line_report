@@ -25,11 +25,13 @@ export function isKpiScenarioRequest(query: unknown): boolean {
   if (metric.test(q) && simulation.test(q)) return true;
   // 実績照会・定義の説明は、明示的な試算依頼と区別する。
   if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
-  const plan = /目標|狙う|決めたい|設定(?:したい|して|する)|提案|値付け|単価設定|価格設定/;
+  if (/達成状況|進捗|振り返|確認|評価/.test(q)) return false;
+  const plan = /目標.*(?:出して|出す|決め|設定|提案)|決めたい|設定(?:したい|して|する)|値付け|単価設定|価格設定/;
   const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
   return (metric.test(q) && plan.test(q)) ||
     (/損益分岐/.test(q) && /教えて|計算|何個|何円/.test(q)) ||
-    (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q));
+    (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q)) ||
+    (numeric.test(q) && /粗利|原価率/.test(q) && /狙う|目標|提案/.test(q));
 }
 
 export type KpiNumber = {
@@ -162,22 +164,22 @@ const isRecord = (value: unknown): Record<string, unknown> =>
     ? value as Record<string, unknown>
     : {};
 
-function clampField(raw: unknown, rule: FieldRule): number | null {
-  if (raw === null || raw === undefined || raw === "") return null;
-  const n = typeof raw === "number" ? raw : Number(String(raw).trim());
-  if (!Number.isFinite(n)) return null;
-  const bounded = Math.max(rule.min, Math.min(rule.max, n));
-  return rule.integer ? Math.round(bounded) : Math.round(bounded * 100) / 100;
+function validateAssumptionField(raw: unknown, rule: FieldRule): number | null {
+  if (typeof raw !== "number" && typeof raw !== "string") return null;
+  if (typeof raw === "string" && !raw.trim()) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < rule.min || n > rule.max || (rule.integer && !Number.isInteger(n))) return null;
+  return rule.integer ? n : Math.round(n * 100) / 100;
 }
 
-/** ブラウザ・DB・チャットのどこから来ても同じ allowlist / clamp を通す。 */
+/** 範囲外・不正値を別の入力値へ丸め込まない。無効値は未入力として再確認する。 */
 export function normalizeKpiAssumptions(raw: unknown): NormalizedKpiAssumptions {
   const src = isRecord(raw);
   const values = {} as KpiAssumptionValues;
   const provided: (keyof KpiAssumptionValues)[] = [];
   const missing: (keyof KpiAssumptionValues)[] = [];
   for (const key of KPI_ASSUMPTION_KEYS) {
-    const value = clampField(src[key], ASSUMPTION_RULES[key]);
+    const value = validateAssumptionField(src[key], ASSUMPTION_RULES[key]);
     values[key] = value;
     if (value === null) missing.push(key);
     else provided.push(key);
@@ -366,13 +368,11 @@ export function emptyKpiBaseline(periodLabel = "対象期間"): KpiBaseline {
 export function deriveKpiBaselineFromUnifiedSales(raw: unknown): KpiBaseline {
   const unified = isRecord(raw);
   const periods = Array.isArray(unified.periods) ? unified.periods : [];
-  let guestTotal = 0;
-  let salesTotal = 0;
-  let dayCount = 0;
-  let hasGuest = false;
-  let hasSales = false;
   const labels: string[] = [];
-  const months = new Set<string>();
+  const days = new Map<string, { sales: number | null; guests: number | null }>();
+  const conflicts = new Set<string>();
+  const validNumber = (n: unknown): number | null =>
+    typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null;
   for (const periodRaw of periods) {
     const period = isRecord(periodRaw);
     const label = typeof period.label === "string" ? period.label : "";
@@ -380,44 +380,44 @@ export function deriveKpiBaselineFromUnifiedSales(raw: unknown): KpiBaseline {
     const ranges = Array.isArray(period.ranges) ? period.ranges : [];
     for (const rangeRaw of ranges) {
       const range = isRecord(rangeRaw);
-      const totals = isRecord(range.totals);
-      const guests = Number(totals.guest_count);
-      const gross = Number(totals.gross_sales_yen);
-      if (Number.isFinite(guests) && guests > 0) {
-        guestTotal += guests;
-        hasGuest = true;
-      }
-      if (Number.isFinite(gross) && gross > 0) {
-        salesTotal += gross;
-        hasSales = true;
-      }
       const daily = Array.isArray(range.daily) ? range.daily : [];
+      // compact daily の既定順序。列名が提供されていればそちらを優先する。
+      const columns = Array.isArray(range.daily_columns) ? range.daily_columns : ["date", "gross_sales_yen", "guest_count"];
       for (const rowRaw of daily) {
         if (!Array.isArray(rowRaw)) continue;
-        const date = String(rowRaw[0] ?? "");
-        const sales = Number(rowRaw[1]);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-        if (!Number.isFinite(sales) || sales <= 0) continue;
-        dayCount += 1;
-        months.add(date.slice(0, 7));
+        const date = String(rowRaw[columns.indexOf("date")] ?? "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) continue;
+        const value = { sales: validNumber(rowRaw[columns.indexOf("gross_sales_yen")]), guests: validNumber(rowRaw[columns.indexOf("guest_count")]) };
+        const previous = days.get(date);
+        if (previous && (previous.sales !== value.sales || previous.guests !== value.guests)) conflicts.add(date);
+        days.set(date, value);
       }
     }
   }
-  const monthCount = months.size;
+  for (const date of conflicts) days.delete(date);
+  // 月次代替値や別期間の合計を日別の分母へ混ぜない。客数欠測日の売上も除外する。
+  const paired = [...days.values()].filter((d) => d.sales !== null && d.guests !== null && d.guests > 0);
+  const guestTotal = paired.reduce((sum, d) => sum + d.guests!, 0);
+  const salesTotal = paired.reduce((sum, d) => sum + d.sales!, 0);
+  const months = [...new Set([...days.keys()].map((date) => date.slice(0, 7)))];
+  const completeMonthActiveDays: number[] = [];
+  for (const month of months) {
+    const count = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+    const rows = Array.from({ length: count }, (_, i) => days.get(`${month}-${String(i + 1).padStart(2, "0")}`));
+    if (rows.every((d) => d && d.sales !== null)) completeMonthActiveDays.push(rows.filter((d) => d!.sales! > 0).length);
+  }
   return {
-    guestsPerOperatingDay: hasGuest && dayCount > 0
-      ? Math.round((guestTotal / dayCount) * 10) / 10
+    guestsPerOperatingDay: paired.length > 0
+      ? Math.round((guestTotal / paired.length) * 10) / 10
       : null,
-    operatingDaysPerMonth: dayCount > 0 && monthCount > 0
-      ? Math.round((dayCount / monthCount) * 10) / 10
+    operatingDaysPerMonth: completeMonthActiveDays.length > 0
+      ? Math.round((completeMonthActiveDays.reduce((a, b) => a + b, 0) / completeMonthActiveDays.length) * 10) / 10
       : null,
-    averageSpendYen: hasGuest && hasSales && guestTotal > 0
+    averageSpendYen: guestTotal > 0
       ? Math.round(salesTotal / guestTotal)
       : null,
-    periodLabel: labels.join(" / ") || "対象期間",
-    sourceNote: dayCount > 0
-      ? `統一売上の日別実績 ${dayCount}日（${monthCount}か月）`
-      : "統一売上に日別実績なし",
+    periodLabel: [...new Set(labels)].join(" / ") || "対象期間",
+    sourceNote: `統一売上の日別実績 ${paired.length}日（売上・正の客数が揃う重複なしの日）。月間営業日数は全暦日の売上を観測した${completeMonthActiveDays.length}か月の売上発生日数を代替使用。部分月・月次代替合計は不使用。同日競合の除外 ${conflicts.size}日。`,
   };
 }
 
@@ -447,6 +447,17 @@ function num(
 
 const round0 = (n: number) => Math.round(n);
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** 最大剰余法。同率は元の順序で決め、丸めても内訳の和を総数と一致させる。 */
+function allocateUnits(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const raw = weights.map((w) => sum > 0 ? total * w / sum : 0);
+  const result = raw.map(Math.floor);
+  const order = raw.map((n, i) => ({ i, remainder: n - result[i] })).sort((a, b) => b.remainder - a.remainder || a.i - b.i);
+  const left = total - result.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < left; i++) result[order[i].i]++;
+  return result;
+}
 
 export type KpiPriceLine = {
   key: "single" | "drink_set" | "wine_set";
@@ -480,7 +491,8 @@ export type KpiScenarioResult = {
   dailyCapacityUnits: KpiNumber;
   dailyFixedCostYen: KpiNumber;
   contributionPerSoldUnitYen: KpiNumber;
-  breakEvenUnitsPerDay: KpiNumber;
+  breakEvenUnitsPerDay: KpiNumber | null;
+  sellableCapacityUnits: KpiNumber;
   breakEvenAchievable: boolean;
   segments: KpiSegmentTarget[];
   normalDayOutlook: {
@@ -492,14 +504,14 @@ export type KpiScenarioResult = {
   averageDailyRevenueYen: KpiNumber;
   kpiTargets: {
     setRatePct: KpiNumber;
-    checkUpliftYen: KpiNumber;
+    productSpendPerPurchasingCheckYen: KpiNumber;
     takeoutRatePct: KpiNumber;
     wasteRatePct: KpiNumber;
   };
   exitLines: {
-    shrinkUnitsPerDay: KpiNumber;
+    shrinkUnitsPerDay: KpiNumber | null;
     shrinkWeeks: KpiNumber;
-    exitUnitsPerDay: KpiNumber;
+    exitUnitsPerDay: KpiNumber | null;
     exitWeeks: KpiNumber;
     wasteRateAlertPct: KpiNumber;
     wasteAlertWeeks: KpiNumber;
@@ -507,7 +519,7 @@ export type KpiScenarioResult = {
 };
 
 export type KpiScenarioPack = {
-  version: 1;
+  version: 2;
   productName: string;
   baseline: KpiBaseline;
   assumptions: NormalizedKpiAssumptions;
@@ -563,13 +575,13 @@ function computeScenario(
   const drinkAddCost = resolveAssumption(
     "setDrinkAddCostYen",
     v,
-    round0((drinkSetPrice.value - unitPrice.value) * d.setDrinkAddCostRate),
+    round0(d.setDrinkAddPriceYen * d.setDrinkAddCostRate),
     "円",
   );
   const wineAddCost = resolveAssumption(
     "setWineAddCostYen",
     v,
-    round0((wineSetPrice.value - unitPrice.value) * d.setWineAddCostRate),
+    round0(d.setWineAddPriceYen * d.setWineAddCostRate),
     "円",
   );
   const batchUnits = resolveAssumption(
@@ -677,10 +689,10 @@ function computeScenario(
   const wineSetShare = setRate * wineShare;
   const mixBasis: KpiBasis = "scenario";
 
-  const blendedPriceValue = unitPrice.value * singleShare +
-    drinkSetPrice.value * drinkSetShare + wineSetPrice.value * wineSetShare;
-  const blendedCostValue = unitCost.value * singleShare +
-    drinkSetCost.value * drinkSetShare + wineSetCost.value * wineSetShare;
+  const blendedPriceValue = round0(unitPrice.value * singleShare +
+    drinkSetPrice.value * drinkSetShare + wineSetPrice.value * wineSetShare);
+  const blendedCostValue = round0(unitCost.value * singleShare +
+    drinkSetCost.value * drinkSetShare + wineSetCost.value * wineSetShare);
   const blendedBasis = mergeBasis(
     unitPrice.basis,
     drinkSetPrice.basis,
@@ -718,7 +730,7 @@ function computeScenario(
     mergeBasis(batchUnits.basis, batchesPerDay.basis),
     "1回の焼成個数 × 1日の焼成回数上限",
   );
-  const dailyFixedCost = staffCount.value * prepHours.value * hourlyCost.value;
+  const dailyFixedCost = round0(staffCount.value * prepHours.value * hourlyCost.value);
   const dailyFixedCostYen = num(
     round0(dailyFixedCost),
     "円",
@@ -727,7 +739,7 @@ function computeScenario(
   );
   const expectedWasteRate = Math.min(0.9, d.expectedWasteRate);
   const costPerSoldUnit = blendedCostValue / (1 - expectedWasteRate);
-  const contributionValue = blendedPriceValue - costPerSoldUnit;
+  const contributionValue = round0(blendedPriceValue - costPerSoldUnit);
   const contributionPerSoldUnitYen = num(
     round0(contributionValue),
     "円",
@@ -736,17 +748,16 @@ function computeScenario(
   );
   const breakEvenUnits = contributionValue > 0
     ? Math.ceil(dailyFixedCost / contributionValue)
-    : 0;
-  const breakEvenUnitsPerDay = num(
+    : null;
+  const breakEvenUnitsPerDay = breakEvenUnits === null ? null : num(
     breakEvenUnits,
     "個/日",
     mergeBasis(dailyFixedCostYen.basis, contributionPerSoldUnitYen.basis),
-    contributionValue > 0
-      ? "1日の固定費 ÷ 1個あたり貢献利益（切り上げ）"
-      : "貢献利益が0以下のため損益分岐点が成立しない",
+    "仕込み・焼成人件費 ÷ 1個あたり貢献利益（切り上げ、他費用は未算入）",
   );
-  const breakEvenAchievable = contributionValue > 0 &&
-    breakEvenUnits <= dailyCapacityUnits.value;
+  const sellableCapacityUnits = num(Math.floor(dailyCapacityUnits.value * (1 - expectedWasteRate)), "個/日", "scenario", "焼成上限 × (1 − 想定廃棄率)、整数切り捨て");
+  const breakEvenAchievable = breakEvenUnits !== null &&
+    breakEvenUnits <= sellableCapacityUnits.value;
 
   // A-3 目標販売個数（営業区分別・時間帯別）
   const guestsPerDayValue = baseline.guestsPerOperatingDay ??
@@ -765,27 +776,17 @@ function computeScenario(
   const dinnerSegmentKeys = KPI_SEGMENT_KEYS.filter(
     (key): key is Exclude<KpiSegmentKey, "lunch"> => key !== "lunch",
   );
-  const defaultDinnerDayTotal = dinnerSegmentKeys.reduce(
-    (sum, key) => sum + d.segmentDaysPerMonth[key],
-    0,
-  );
-  const dinnerDayScale = defaultDinnerDayTotal > 0
-    ? operatingDaysValue / defaultDinnerDayTotal
-    : 0;
+  const allocatedDays = allocateUnits(round0(operatingDaysValue * 10), dinnerSegmentKeys.map((key) => d.segmentDaysPerMonth[key]));
   const scaledDinnerDays = {} as Record<Exclude<KpiSegmentKey, "lunch">, number>;
-  for (const key of dinnerSegmentKeys) {
-    scaledDinnerDays[key] = round1(d.segmentDaysPerMonth[key] * dinnerDayScale);
-  }
+  dinnerSegmentKeys.forEach((key, i) => { scaledDinnerDays[key] = allocatedDays[i] / 10; });
 
   const lunchGuests = guestsPerDayValue * d.lunchGuestShare;
   const dinnerGuests = guestsPerDayValue * (1 - d.lunchGuestShare);
   // ランチは毎営業日、ディナー区分は同じ日に1つだけ立つ。1日の焼成上限は両者の合算に効く。
   const lunchUnitsRaw = lunchGuests * d.purchaseRate;
-  const lunchCap = dailyCapacityUnits.value * (1 - expectedWasteRate) *
-    d.lunchGuestShare;
-  const lunchUnits = Math.min(lunchUnitsRaw, lunchCap);
-  const dinnerCapBase = dailyCapacityUnits.value * (1 - expectedWasteRate) -
-    lunchUnits;
+  const lunchCap = Math.floor(sellableCapacityUnits.value * d.lunchGuestShare);
+  const lunchUnits = Math.min(round0(lunchUnitsRaw), lunchCap);
+  const dinnerCapBase = sellableCapacityUnits.value - lunchUnits;
 
   const segments: KpiSegmentTarget[] = KPI_SEGMENT_KEYS.map((key) => {
     const isLunch = key === "lunch";
@@ -795,21 +796,21 @@ function computeScenario(
     const rawGuests = isLunch ? lunchGuests : dinnerGuests * index;
     const rawUnits = isLunch ? lunchUnitsRaw : rawGuests * d.purchaseRate;
     const cap = isLunch ? lunchCap : Math.max(0, dinnerCapBase);
-    const units = Math.max(0, Math.min(rawUnits, cap));
+    const units = Math.max(0, Math.min(round0(rawUnits), cap));
     const unitsBasis = mergeBasis(
       guestsBasis,
       "scenario",
       dailyCapacityUnits.basis,
     );
     const split = SLOT_SPLIT[key];
-    const slotKeys: KpiSlotKey[] = ["before_event", "after_event", "steady"];
+    const slotKeys = (["before_event", "after_event", "steady"] as KpiSlotKey[]).filter((slotKey) => split[slotKey] > 0);
+    const slotUnits = allocateUnits(units, slotKeys.map((slotKey) => split[slotKey]));
     const slots = slotKeys
-      .filter((slotKey) => split[slotKey] > 0)
-      .map((slotKey) => ({
+      .map((slotKey, i) => ({
         key: slotKey,
         label: KPI_SLOT_LABELS[slotKey],
         targetUnits: num(
-          round0(units * split[slotKey]),
+          slotUnits[i],
           "個",
           unitsBasis,
           `${KPI_SEGMENT_LABELS[key]}の目標個数 × 時間帯配分${
@@ -832,7 +833,7 @@ function computeScenario(
           : `1営業日のディナー客数 × 需要指数${index}（指数は仮定）`,
       ),
       targetUnits: num(round0(units), "個", unitsBasis, "想定客数 × 購入率（焼成上限で頭打ち）"),
-      capacityLimited: rawUnits > cap + 0.5,
+      capacityLimited: round0(rawUnits) > cap,
       slots,
       dailyRevenue: num(
         round0(units * blendedPriceValue),
@@ -844,7 +845,7 @@ function computeScenario(
         round1(daysPerMonth),
         "日/月",
         isLunch ? operatingDaysBasis : "scenario",
-        isLunch ? "統一売上の営業日数" : "月あたり該当日数（仮定）",
+        isLunch ? (operatingDaysBasis === "actual" ? "全暦日観測月の売上発生日数（営業日数の代替）" : "月あたり営業日数（仮定）") : "月あたり該当日数（仮定）",
       ),
     };
   });
@@ -883,7 +884,7 @@ function computeScenario(
     "各営業区分の1日売上 × 月あたり該当日数の合計",
   );
   const averageDailyRevenueYen = num(
-    operatingDaysValue > 0 ? round0(monthlyRevenue / operatingDaysValue) : 0,
+    operatingDaysValue > 0 ? round0(monthlyRevenueYen.value / operatingDaysValue) : 0,
     "円/日",
     revenueBasis,
     "月間売上 ÷ 営業日数",
@@ -895,9 +896,9 @@ function computeScenario(
       round1(setRate * 100),
       "%",
       "scenario",
-      "セット（ドリンク／ワイン）を付けた会計の比率目標",
+      "販売個数に占めるセット（ドリンク／ワイン）販売個数の比率目標",
     ),
-    checkUpliftYen: num(
+    productSpendPerPurchasingCheckYen: num(
       round0(blendedPriceValue * d.unitsPerPurchasingCheck),
       "円",
       mergeBasis(blendedBasis, "scenario"),
@@ -919,25 +920,25 @@ function computeScenario(
 
   // A-6 撤退・縮小ラインの数値化
   const exitLines = {
-    shrinkUnitsPerDay: num(
-      Math.max(0, Math.floor(breakEvenUnits * 0.8)),
+    shrinkUnitsPerDay: breakEvenUnits === null ? null : num(
+      Math.max(0, Math.ceil(breakEvenUnits * 0.8)),
       "個/日",
-      breakEvenUnitsPerDay.basis,
-      "損益分岐個数の80%",
+      "scenario",
+      "損益分岐個数の80%未満（整数判定の境界は切り上げ）",
     ),
     shrinkWeeks: num(4, "週", "scenario", "判定に使う連続週数（仮定）"),
-    exitUnitsPerDay: num(
-      Math.max(0, Math.floor(breakEvenUnits * 0.5)),
+    exitUnitsPerDay: breakEvenUnits === null ? null : num(
+      Math.max(0, Math.ceil(breakEvenUnits * 0.5)),
       "個/日",
-      breakEvenUnitsPerDay.basis,
-      "損益分岐個数の50%",
+      "scenario",
+      "損益分岐個数の50%未満（整数判定の境界は切り上げ）",
     ),
     exitWeeks: num(8, "週", "scenario", "判定に使う連続週数（仮定）"),
     wasteRateAlertPct: num(
-      round1(wasteTolerance.value * 1.5),
+      round1(Math.min(100, wasteTolerance.value * 1.5)),
       "%",
-      wasteTolerance.basis,
-      "廃棄許容範囲の1.5倍",
+      "scenario",
+      "廃棄許容範囲の1.5倍（係数は仮定、上限100%）",
     ),
     wasteAlertWeeks: num(4, "週", "scenario", "判定に使う連続週数（仮定）"),
   };
@@ -955,6 +956,7 @@ function computeScenario(
     dailyFixedCostYen,
     contributionPerSoldUnitYen,
     breakEvenUnitsPerDay,
+    sellableCapacityUnits,
     breakEvenAchievable,
     segments,
     normalDayOutlook: {
@@ -970,7 +972,7 @@ function computeScenario(
         mergeBasis(normalDayBasis, blendedBasis),
         "ランチ＋通常ディナーの1日売上",
       ),
-      coversBreakEven: normalDayUnits >= breakEvenUnits && breakEvenUnits > 0,
+      coversBreakEven: breakEvenUnits !== null && normalDayUnits >= breakEvenUnits,
     },
     monthlyRevenueYen,
     averageDailyRevenueYen,
@@ -1013,7 +1015,7 @@ export function buildKpiScenarioPack(params: {
   const baseline = params.baseline ?? emptyKpiBaseline();
   const productName = String(params.productName || "検討中の新商品").slice(0, 80);
   return {
-    version: 1,
+    version: 2,
     productName,
     baseline,
     assumptions,
@@ -1030,7 +1032,7 @@ export function buildKpiScenarioPack(params: {
  */
 export function buildKpiScenarioReference(pack: KpiScenarioPack) {
   return {
-    version: pack.version as 1,
+    version: pack.version,
     status: "computed_server_side" as const,
     product_name: pack.productName,
     scenarios: pack.scenarios.map((s) => s.scenarioLabel),
@@ -1061,18 +1063,21 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
   const lines: string[] = [];
   lines.push("【数値提案（KPI試算・コード側で確定計算済み）】");
   lines.push(`対象: ${pack.productName}`);
+  lines.push("モデルの範囲: 焼成商品の導入を想定した参考試算。保守・標準・強気は作業仮説であり、実現確率・信頼区間ではない。既存商品の置き換えを控除していないため、商品購入額・商品売上は店舗の純増額ではない。");
+  lines.push("採算上の制限: 【仮定(シナリオ)】売価と原価は同じ税区分・単位と仮置き（税区分は未確認、税額換算なし）。仕込み・焼成人件費以外の家賃・光熱費・包装費・決済手数料等は未算入。損益分岐は算入費用の回収個数に限り、店舗全体の採算は未判定。廃棄は加重原価全体へ適用する簡易モデル。");
+  lines.push("丸め規則: 加重売価・加重原価・貢献利益・人件費は円単位で四捨五入して以後の計算に使用。販売能力は廃棄後の整数切り捨て、時間帯個数と月日数の内訳は合計を保持して配分。セット率は販売個数ベース、テイクアウト比率は会計数ベース。");
   lines.push(
     `実績ベースライン: ${pack.baseline.periodLabel} / ${pack.baseline.sourceNote}`,
   );
   lines.push(
-    `- 1営業日あたり来店客数: ${
+    `- 来客観測日あたり来店客数（売上・正の客数が揃う日）: ${
       pack.baseline.guestsPerOperatingDay === null
         ? "【仮定(シナリオ)】実績なしのためシナリオ値"
         : `【実績】${pack.baseline.guestsPerOperatingDay}名`
     }`,
   );
   lines.push(
-    `- 月あたり営業日数: ${
+    `- 月あたり営業日数（全暦日観測月の売上発生日数で代替）: ${
       pack.baseline.operatingDaysPerMonth === null
         ? "【仮定(シナリオ)】実績なしのためシナリオ値"
         : `【実績】${pack.baseline.operatingDaysPerMonth}日`
@@ -1099,7 +1104,7 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
     lines.push(`    - KGI候補: 商品の月間売上見込み ${show(s.monthlyRevenueYen)}。未合意の目標候補であり、店舗の純増売上・最終利益ではない。`);
     lines.push(`    - KPI: 通常日の販売目標 ${show(s.normalDayOutlook.targetUnits)} / セット率 ${show(s.kpiTargets.setRatePct)} / テイクアウト比率 ${show(s.kpiTargets.takeoutRatePct)}。営業区分別・時間帯別目標は下記。`);
     lines.push("    - KFI候補（現場行動）: 店頭案内・セット提案の実施。実施件数・提案率は未計測、数値目標は未設定。担当候補=販売担当、実施時=商品案内時、記録=案内/提案件数と購入/セット成立件数を同じ時間帯で記録。計算済み販売目標を行動実績へ読み替えない。");
-    lines.push(`    - 採算確認（KFIとは別）: 加重粗利率 ${show(s.blendedGrossMarginPct)} / 1個あたり貢献利益 ${show(s.contributionPerSoldUnitYen)} / 損益分岐 ${show(s.breakEvenUnitsPerDay)}。最終利益は未算出。`);
+    lines.push(`    - 採算確認（KFIとは別）: 加重粗利率 ${show(s.blendedGrossMarginPct)} / 1個あたり貢献利益 ${show(s.contributionPerSoldUnitYen)} / 損益分岐 ${s.breakEvenUnitsPerDay ? show(s.breakEvenUnitsPerDay) : "成立しない（貢献利益が非正）"}。最終利益は未算出。`);
     lines.push(`    - 関係・判断: 店頭案内・セット提案（KFI）→販売数・セット率（KPI）→商品売上（KGI候補）の仮説を検証する。採算確認では通常日の販売目標は損益分岐${s.normalDayOutlook.coversBreakEven ? "に届く" : "に届かない"}。${s.breakEvenAchievable ? "焼成上限内で損益分岐に到達可能な試算だが、実現・利益を保証しない。" : "焼成上限内では損益分岐に到達しないため、価格・原価・生産条件を見直す。"}廃棄・縮小条件も下記と照合する。`);
     lines.push("  A-1 価格設定案と粗利率");
     for (const p of s.prices) {
@@ -1119,20 +1124,20 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
       `    - 1日の焼成上限: ${show(s.dailyCapacityUnits)}（${s.dailyCapacityUnits.source}）`,
     );
     lines.push(
-      `    - 1日の固定費: ${show(s.dailyFixedCostYen)}（${s.dailyFixedCostYen.source}）`,
+      `    - 1日の算入固定費（仕込み・焼成人件費のみ）: ${show(s.dailyFixedCostYen)}（${s.dailyFixedCostYen.source}）`,
     );
     lines.push(
       `    - 1個あたり貢献利益: ${show(s.contributionPerSoldUnitYen)}（${s.contributionPerSoldUnitYen.source}）`,
     );
     lines.push(
-      `    - 損益分岐個数: ${show(s.breakEvenUnitsPerDay)}（${s.breakEvenUnitsPerDay.source}）${
-        s.breakEvenAchievable ? "" : " ※焼成上限内では到達しない"
+      `    - 廃棄後の販売上限: ${show(s.sellableCapacityUnits)} / 損益分岐個数: ${s.breakEvenUnitsPerDay ? `${show(s.breakEvenUnitsPerDay)}（${s.breakEvenUnitsPerDay.source}）` : "成立しない（貢献利益が非正）"}${
+        s.breakEvenAchievable ? "" : " ※廃棄後の販売上限内では到達しない"
       }`,
     );
     lines.push("  A-3 目標販売個数（営業区分別・時間帯別）");
     for (const seg of s.segments) {
       const slotText = seg.slots.map((slot) =>
-        `${slot.label} ${slot.targetUnits.value}個`
+        `${slot.label} ${show(slot.targetUnits)}`
       ).join(" / ");
       lines.push(
         `    - ${seg.label}: 想定客数 ${show(seg.expectedGuests)} → 目標 ${
@@ -1148,31 +1153,23 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
     lines.push("  A-5 KPI目標値");
     lines.push(`    - セット率: ${show(s.kpiTargets.setRatePct)}`);
     lines.push(
-      `    - 購入会計の客単価上昇額: ${show(s.kpiTargets.checkUpliftYen)}（${s.kpiTargets.checkUpliftYen.source}）`,
+      `    - 購入会計あたりの商品購入額（純増額ではない）: ${show(s.kpiTargets.productSpendPerPurchasingCheckYen)}（${s.kpiTargets.productSpendPerPurchasingCheckYen.source}）`,
     );
     lines.push(`    - テイクアウト比率: ${show(s.kpiTargets.takeoutRatePct)}`);
     lines.push(`    - 廃棄率: ${show(s.kpiTargets.wasteRatePct)}以下`);
     lines.push("  A-6 撤退・縮小ライン");
-    lines.push(
-      `    - 縮小: ${s.exitLines.shrinkWeeks.value}週連続で1日 ${
-        s.exitLines.shrinkUnitsPerDay.value
-      }個未満${tag(s.exitLines.shrinkUnitsPerDay)}`,
-    );
-    lines.push(
-      `    - 撤退: ${s.exitLines.exitWeeks.value}週連続で1日 ${
-        s.exitLines.exitUnitsPerDay.value
-      }個未満${tag(s.exitLines.exitUnitsPerDay)}`,
-    );
-    lines.push(
-      `    - 廃棄: ${s.exitLines.wasteAlertWeeks.value}週連続で廃棄率 ${
-        s.exitLines.wasteRateAlertPct.value
-      }%超${tag(s.exitLines.wasteRateAlertPct)}`,
-    );
+    if (s.exitLines.shrinkUnitsPerDay && s.exitLines.exitUnitsPerDay) {
+      lines.push(`    - 縮小: ${show(s.exitLines.shrinkWeeks)}連続で ${show(s.exitLines.shrinkUnitsPerDay)}未満`);
+      lines.push(`    - 撤退: ${show(s.exitLines.exitWeeks)}連続で ${show(s.exitLines.exitUnitsPerDay)}未満`);
+    } else {
+      lines.push("    - 縮小・撤退個数は設定不可。貢献利益が非正のため、期間判定を待たず導入前に価格・原価を見直す。");
+    }
+    lines.push(`    - 廃棄: ${show(s.exitLines.wasteAlertWeeks)}連続で廃棄率 ${show(s.exitLines.wasteRateAlertPct)}${s.exitLines.wasteRateAlertPct.value === 0 ? "超" : "以上"}`);
     lines.push("  A-7 イベントのない通常営業日の見込み");
     lines.push(
       `    - 目標個数 ${show(s.normalDayOutlook.targetUnits)} / 売上 ${
         show(s.normalDayOutlook.dailyRevenue)
-      } / 損益分岐${s.normalDayOutlook.coversBreakEven ? "を上回る" : "に届かない"}`,
+      } / 損益分岐${s.normalDayOutlook.coversBreakEven ? "に届く" : "に届かない"}`,
     );
   }
 

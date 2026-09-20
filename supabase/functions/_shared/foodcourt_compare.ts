@@ -50,7 +50,7 @@ const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-08-18: 規模帯・最大動員の数値は実測/手入力のみ。会場収容の推定はラベル専用にしたため v18。
 // 2026-09-20: 数値の出所制限＋通常営業日ベースラインの必須化で v20。旧キャッシュを再生成させる。
 // 2026-09-20: KGI/KPI/KFIによる成果・中間指標・現場行動の判断と出力を共通化。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v21-goal-metrics'
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v22-integrity'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
 // 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
@@ -62,9 +62,9 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。' + '\n' + BUSINESS_GOAL_METRICS_POLICY
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v21-goal-metrics'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v22-integrity'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
-// 現行では通常版・loop版とも v21 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
+// 現行では通常版・loop版とも v22 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
   return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', false))
     ? FOODCOURT_DAILY_ANALYSIS_AI_VERSION
@@ -1459,6 +1459,7 @@ async function evaluateFoodCourtAnswer(params: {
   surface: FoodCourtLoopSurface
   question: string
   contextBlock: string
+  protectedPrefixLength?: number
   finalAnswer: string
   groqApiKey: string
   primary: string
@@ -1476,6 +1477,7 @@ async function evaluateFoodCourtAnswer(params: {
     ...foodCourtEvaluationScoreAnchors(),
     '禁止（見つけたら improvement_points/risk_flags に指摘として書く）:',
     '- データに無い数字を正しいものとして扱っている',
+    '- 評価用に省略された部分は未確認であり、元データに存在しないと断定しない。',
     '- 相関を因果と断定している',
     '- 売上日とレポート発行日を混同している',
     '- 抽象的な打ち手だけで終えている（KPIに落とし込めていない）',
@@ -1486,7 +1488,7 @@ async function evaluateFoodCourtAnswer(params: {
     'JSONのみで返答すること。他の文章・前置き・コードフェンスは一切書かない。',
     '{"total_score":number,"scores":{"accuracy":number,"logic":number,"expertise":number,"practicality":number,"evidence":number},"improvement_points":string[],"risk_flags":string[],"factuality_notes":string[]}',
   ].join('\n')
-  const evaluationContext = compactFoodCourtEvaluationContext(params.contextBlock)
+  const evaluationContext = compactFoodCourtEvaluationContext(params.contextBlock, 14000, params.protectedPrefixLength)
   const evalUser = `質問/タスク: ${params.question}\n\n# 分析の材料（実データ含む）\n${evaluationContext}\n\n# 評価対象の最終回答\n${params.finalAnswer}`
   const res = await foodCourtAiChat(
     [{ role: 'system', content: evalSystem }, { role: 'user', content: evalUser }],
@@ -1729,6 +1731,7 @@ export async function runFoodCourtLoopEngineering(params: {
   surface: FoodCourtLoopSurface
   initialGenerate: (feedback?: string, previousAnswer?: string) => Promise<FoodCourtLoopGenerated>
   evaluationContext: string
+  evaluationProtectedPrefixLength?: number
   // 数値監査の正本。専門AIメモ/RAG回答を除き、コード計算・生データ・日報原文だけを渡す。
   numberAuditFacts?: string
   question: string
@@ -1788,6 +1791,7 @@ export async function runFoodCourtLoopEngineering(params: {
       surface: params.surface,
       question: params.question,
       contextBlock: params.evaluationContext,
+      protectedPrefixLength: params.evaluationProtectedPrefixLength,
       finalAnswer: gen.content,
       groqApiKey: params.groqApiKey,
       primary: params.primaryModel,
@@ -3068,7 +3072,7 @@ export function foodCourtNippouPromptRules(baseName: string): string {
     `(N1) 日報の「実施施策／こんなことをしてみた」記述を具体的に引用する（抽象化して消さない）。`,
     `(N2) 同日の実績（売上・客数・客単価）と、前日比・同曜日平均比・全日平均比（「日報×実績 効果対照」ブロック）を必ず使い、施策がどの程度の実績につながったかを述べる。`,
     `(N3) 担当者の客数/売上評価は主観。実績と一致→「データと一致」、乖離→「主観と実績が不一致」と明記し、イベント・天気の交絡を疑う。`,
-    `(N4) 因果は原則「仮説」。効果があった/薄かったの判定は「支持／不支持／条件付き」＋効果量（%や差分）で書く。`,
+    `(N4) 因果は原則「仮説」。効果があった/薄かったの判定は「支持／不支持／条件付き」で書く。効果量（%や差分）はコード提供の計算済み値がある場合だけ引用し、なければ「効果量は未算出・判定保留」とする。`,
     `(N5) 日報が無い日は施策を捏造しない。施策あり日があれば、総評や評価見出しで必ず触れる。`,
     `(N6) 次の一手は、日報の成功施策の継続/強化、または失敗・課題の改善に接続する（${baseName}向けに具体化）。`,
     `【動的要因・必須】固定の曜日パターンだけで終わらせない。`,
@@ -3290,7 +3294,7 @@ export async function answerFoodCourtQuestion(
     `(8) 異常値の切り分け：提供の「異常値（Zスコア）」の突出日/落込日は平常の傾向から切り離し、その日のイベント・天気で要因を注記する（外れ値で平常分析を歪めない）。`,
     `(8-2) 【分析範囲・既定】質問で対象日・対象イベントが絞られていない限り、特定のイベント日（ライブ・試合など）だけに寄せず、提供期間の全体と通常営業日（非イベント日）を土台に分析する。特定イベントを深掘りするときも、「会場イベント相関」の非イベント日の平均客数・平均売上を必ず比較対象として併記し、イベント日だけの数値を店舗全体の傾向として述べない。低調だった単一イベントを主題にし続けない。`,
     `(9) イベント深掘りと交互作用：野球は対戦相手・デー/ナイター、ライブはアーティスト・客層（若年女性公演はデザート/カフェ/ドリンクの単価感度が高い等）で効き方が変わる。東京ドーム本体が無イベントでも、ドームシティの各会場（後楽園ホール＝格闘技で中年男性、プリズムホール＝展示/即売、カナデビアホール＝ライブ/舞台、ラクーア＝アイドル）が独立した来館動機になりうる点も考慮。交互作用（雨×イベント有無、猛暑×デザート/ドリンク等）も組み合わせて見る。`,
-    `(10) 仮説は「支持／不支持／条件付き」で判定し、効果量（リフト率や差・倍率）を数値で添える。相関と因果は区別し、因果を主張する前に他要因（曜日・天気・イベント）を考慮する。データに無い指標（販売点数・推定来館者数による捕捉率・前年同曜日比など）は「データにありません／取得すれば精度が上がる」と明示し捏造しない。`,
+    `(10) 仮説は「支持／不支持／条件付き」で判定する。効果量（リフト率や差・倍率）はコード提供の計算済み値がある場合だけ引用し、なければ「効果量は未算出・判定保留」とする。相関と因果は区別し、因果を主張する前に他要因（曜日・天気・イベント）を考慮する。データに無い指標（販売点数・推定来館者数による捕捉率・前年同曜日比など）は「データにありません／取得すれば精度が上がる」と明示し捏造しない。`,
     `(11) 「来客予測（学習型モデル）」がある場合は、今後の予測客数・売上を仕入・人員の助言に使う。ただしモデルの自己採点（誤差%）も併記されているので、誤差が大きい時は「精度は発展途上（データ蓄積で改善）」と断った上で参考値として扱う。`,
     nippouRules,
     `(12) 出力では可能なら短い見出し「施策と実績」を1つ入れ、日報の施策→実績比→次アクションの順で書く（日報が無い場合は省略可）。`,
@@ -3326,6 +3330,7 @@ export async function answerFoodCourtQuestion(
       { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
     ),
     evaluationContext: kpiPolicy + '\n\n' + contextBlock,
+    evaluationProtectedPrefixLength: kpiPolicy.length,
     numberAuditFacts: `${inputPolicy}\n${kpiContext?.block || ''}\n# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
     question: q,
     userInput: q,

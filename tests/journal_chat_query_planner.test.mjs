@@ -3052,6 +3052,11 @@ test('browser and server require a planning request, not a metric keyword', () =
     ['粗利率とは？', false],
     ['KPIとは？', false],
     ['KPI', false],
+    ['売上を伸ばすための提案を3つ', false],
+    ['KGI・KPI・KFIを含む改善提案', false],
+    ['KPI目標の達成状況を確認して', false],
+    ['粗利率はどれくらい？', false],
+    ['売上目標を教えて', false],
     ['セット率を教えて', false],
     ['テイクアウト比率は？', false],
     ['目標KPIの試算は不要、実績だけ', false],
@@ -3079,10 +3084,12 @@ test('free-text answers become assumptions; bare numbers are ignored', () => {
   const vague = context.parseKpiAssumptionsFromText('たぶん 300 とか 20 くらい');
   assert.equal(context.providedKpiAssumptionKeys(vague).length, 0, '単位の無い裸の数字は採用しない');
 
-  // 範囲外はサーバー側 kpi_scenario.ts と同じ境界でクランプする
+  // 範囲外はサーバーと同じく未入力にし、上限値を入力実績として扱わない
   const clamped = context.parseKpiAssumptionsFromText('原価99999999円、1回9999個');
-  assert.equal(clamped.unitCostYen, 100000);
-  assert.equal(clamped.bakeBatchUnits, 2000);
+  assert.equal(clamped.unitCostYen, null);
+  assert.equal(clamped.bakeBatchUnits, null);
+  const invalidSigned = context.parseKpiAssumptionsFromText('原価-100円、売価-450円、-1人、廃棄-5%');
+  for (const key of ['unitCostYen', 'unitPriceYen', 'prepStaffCount', 'wasteRateTolerancePct']) assert.equal(invalidSigned[key], null, key);
 });
 
 test('missing required assumptions are listed for the clarification question', () => {

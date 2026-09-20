@@ -111,7 +111,7 @@ Deno.test("missing row is not registered, while legacy missing fields never gain
   equal(legacy.kpiAssumptions, null);
 });
 
-Deno.test("KPI assumptions pass the allowlist, clamp, and never gain defaults", () => {
+Deno.test("KPI assumptions pass the allowlist, reject invalid values, and never gain defaults", () => {
   // 未入力は null のまま。既定値で埋めると「仮定(シナリオ)」が「仮定(入力)」に化ける。
   equal(selectJournalStoreProfile({ kpiAssumptions: {} }, input).kpiAssumptions, null);
   equal(
@@ -131,8 +131,8 @@ Deno.test("KPI assumptions pass the allowlist, clamp, and never gain defaults", 
   assert(selected.kpiAssumptions, "registered assumptions must survive");
   equal(selected.kpiAssumptions?.unitPriceYen, 420);
   equal(selected.kpiAssumptions?.unitCostYen, 126);
-  equal(selected.kpiAssumptions?.bakeBatchUnits, 2000);
-  equal(selected.kpiAssumptions?.wasteRateTolerancePct, 0);
+  equal(selected.kpiAssumptions?.bakeBatchUnits, null);
+  equal(selected.kpiAssumptions?.wasteRateTolerancePct, null);
   equal(selected.kpiAssumptions?.prepStaffCount, null);
   assert(
     !Object.prototype.hasOwnProperty.call(selected.kpiAssumptions, "secretField"),

@@ -45,7 +45,7 @@ test('daily, period and weekly production paths send the same framework to integ
     assert.match(finalSystem, i < 2 ? /次の7つの見出し/ : /次の5つの見出し/)
     assert.doesNotMatch(evaluations[i].numberAuditFacts, /KGI・KPI・KFI/, 'instructions are not numeric evidence')
   }
-  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v21-goal-metrics')
+  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v22-integrity')
   await ctx.evaluateFoodCourtAnswer({surface:'ask',question:'店舗売上の改善',contextBlock:'synthetic facts',finalAnswer:'synthetic analysis',groqApiKey:'synthetic',primary:'synthetic',fallbackModel:'synthetic',config:{evaluatorMaxTokens:500,evaluatorProvider:'groq'}})
   assert.ok(requests.at(-1)[0].content.includes(BUSINESS_GOAL_METRICS_POLICY))
   assert.match(requests.at(-1)[1].content, /synthetic facts/)

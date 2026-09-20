@@ -247,11 +247,13 @@ export function assessFoodCourtEvolutionReadiness(input: FoodCourtEvolutionReadi
   }
 }
 
-export function compactFoodCourtEvaluationContext(context: string, maxChars = 14000): string {
+export function compactFoodCourtEvaluationContext(context: string, maxChars = 14000, protectedPrefixLength = 0): string {
   if (context.length <= maxChars) return context
   const marker = '\n\n...（評価用に中間部分を省略）...\n\n'
-  const side = Math.max(1, Math.floor((maxChars - marker.length) / 2))
-  return context.slice(0, side) + marker + context.slice(-side)
+  const budget = Math.max(0, maxChars - marker.length)
+  const head = Math.min(budget, Math.max(Math.floor(budget / 2), Math.floor(protectedPrefixLength)))
+  const tail = budget - head
+  return context.slice(0, head) + marker + (tail > 0 ? context.slice(-tail) : '')
 }
 
 // ===== AIフォールバック検知（docs/AI_LOOP_ENGINEERING_DESIGN.md 16章 リスク対策の可観測化） =====

@@ -101,6 +101,14 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
     if(mode!=='empty') assert.match(final,/合計¥300,000/,'range aggregate includes days outside the 45-day detail window')
     assert.equal(loopArgs.numberAuditFacts.includes('コード側で確定計算済み'),enabled)
     assert.equal(loopArgs.evaluationContext.includes('保守／標準／強気'),enabled)
+    if (enabled) {
+      const compact = loop.compactFoodCourtEvaluationContext(loopArgs.evaluationContext + 'synthetic-long-facts'.repeat(2000), 14000, loopArgs.evaluationProtectedPrefixLength)
+      assert.ok(compact.includes(kpi!.block), '評価用の省略でも3シナリオ全体を保持する')
+      assert.ok(compact.length <= 14000)
+      await ctx.evaluateFoodCourtAnswer({surface:'ask',question:input.question,contextBlock:loopArgs.evaluationContext + 'synthetic-long-facts'.repeat(2000),protectedPrefixLength:loopArgs.evaluationProtectedPrefixLength,finalAnswer:'synthetic',groqApiKey:'synthetic',primary:'synthetic',fallbackModel:'synthetic',config:{evaluatorMaxTokens:500,evaluatorProvider:'groq'}})
+      assert.ok(requests.at(-1).messages[1].content.includes(kpi!.block), '実際の評価呼出しにも確定計算ブロックを保持する')
+      requests.pop()
+    }
     assert.equal(requests.at(-1).tokens,enabled?4200:1800)
     if(inputs) {
       for(const text of [final,loopArgs.numberAuditFacts,loopArgs.evaluationContext]) {assert.match(text,/833円/);assert.match(text,/123円/);assert.match(text,/仮定\(入力\)/)}

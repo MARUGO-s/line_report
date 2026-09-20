@@ -8,6 +8,8 @@ import {
   formatKpiScenarioBlock,
   KPI_REQUIRED_ASSUMPTION_KEYS,
   KPI_SCENARIO_NAMES,
+  KPI_SCENARIO_DEFAULTS,
+  isKpiScenarioRequest,
   mergeBasis,
   missingRequiredKpiAssumptions,
   normalizeKpiAssumptions,
@@ -35,7 +37,7 @@ const standardOf = (pack: ReturnType<typeof buildKpiScenarioPack>) => {
   return s
 }
 
-test('入力値は allowlist と clamp を通り、未入力は null のまま残る', () => {
+test('入力値は allowlist と範囲検証を通り、範囲外・未入力は null のまま残る', () => {
   const normalized = normalizeKpiAssumptions({
     unitPriceYen: '420',
     unitCostYen: 126,
@@ -45,12 +47,99 @@ test('入力値は allowlist と clamp を通り、未入力は null のまま�
   })
   assert.equal(normalized.values.unitPriceYen, 420)
   assert.equal(normalized.values.unitCostYen, 126)
-  assert.equal(normalized.values.bakeBatchUnits, 2000, '上限でクランプする')
-  assert.equal(normalized.values.wasteRateTolerancePct, 0, '下限でクランプする')
+  assert.equal(normalized.values.bakeBatchUnits, null, '範囲外を別の入力値に変換しない')
+  assert.equal(normalized.values.wasteRateTolerancePct, null, '負の率をゼロへ変換しない')
   assert.equal(normalized.values.prepStaffCount, null)
   assert.ok(!Object.prototype.hasOwnProperty.call(normalized.values, 'bogusField'))
   assert.ok(normalized.missing.includes('prepStaffCount'))
   assert.ok(normalized.provided.includes('unitPriceYen'))
+})
+
+test('通常の改善提案・KGI/KPI/KFIの関係説明は数値試算を許可しない', () => {
+  for (const query of ['売上を伸ばすための提案を3つ', 'KGI・KPI・KFIを含む改善提案', '売上アップを狙うには', 'KPI目標の達成状況を確認して']) {
+    assert.equal(isKpiScenarioRequest(query), false, query)
+  }
+  for (const query of ['新商品のKPI目標を設定して', '売上を3シナリオで試算してください', 'KPIを具体的な数字で提案して']) {
+    assert.equal(isKpiScenarioRequest(query), true, query)
+  }
+})
+
+test('空白・配列・不正な入力値を実際に入力された数値へ変換しない', () => {
+  for (const value of ['   ', [], [420], {}, true, -1, Infinity, 100001]) {
+    assert.equal(normalizeKpiAssumptions({ unitPriceYen: value }).values.unitPriceYen, null)
+  }
+})
+
+test('実績は重複しない同一日・同一母集団から導き、部分月を月間営業日数にしない', () => {
+  const range = {
+    totals: { gross_sales_yen: 9000000, guest_count: 5000 },
+    daily: [['2026-08-01', 120000, 60], ['2026-08-02', 180000, 90], ['2026-08-03', 100000, null]],
+    monthly_fallbacks: [{ month: '2026-07', gross_sales_yen: 8700000, guest_count: 4850 }],
+  }
+  const baseline = deriveKpiBaselineFromUnifiedSales({ periods: [{ label: '部分月', ranges: [range, range] }] })
+  assert.equal(baseline.guestsPerOperatingDay, 75)
+  assert.equal(baseline.averageSpendYen, 2000)
+  assert.equal(baseline.operatingDaysPerMonth, null)
+})
+
+test('不正日付と矛盾する同日データをベースラインへ含めない', () => {
+  const baseline = deriveKpiBaselineFromUnifiedSales({ periods: [{ ranges: [
+    { daily: [['2026-08-01', 120000, 60], ['2026-02-30', 1000000, 1000]] },
+    { daily: [['2026-08-01', 240000, 120], ['2026-08-02', 180000, 90]] },
+  ] }] })
+  assert.equal(baseline.guestsPerOperatingDay, 90)
+  assert.equal(baseline.averageSpendYen, 2000)
+  assert.match(baseline.sourceNote, /競合.*1日/)
+})
+
+test('個数・時間帯・売上・月日数は表示値で再現でき、廃棄後能力を超えない', () => {
+  for (let capacity = 1; capacity <= 100; capacity++) {
+    const pack = buildKpiScenarioPack({ assumptions: { ...filled, bakeBatchUnits: capacity, bakeBatchesPerDay: 1 }, baseline: { ...emptyKpiBaseline(), guestsPerOperatingDay: 10000, operatingDaysPerMonth: 17.3 } })
+    for (const s of pack.scenarios) {
+      const sellable = Math.floor(capacity * (1 - KPI_SCENARIO_DEFAULTS[s.scenario].expectedWasteRate))
+      const lunch = s.segments[0]
+      for (const seg of s.segments) {
+        assert.equal(seg.slots.reduce((n, slot) => n + slot.targetUnits.value, 0), seg.targetUnits.value)
+        assert.equal(seg.dailyRevenue.value, Math.round(seg.targetUnits.value * s.blendedPrice.value))
+        if (seg.key !== 'lunch') assert.ok(lunch.targetUnits.value + seg.targetUnits.value <= sellable)
+      }
+      assert.equal(Math.round(s.segments.slice(1).reduce((n, seg) => n + seg.daysPerMonth.value, 0) * 10), 173)
+      assert.equal(s.breakEvenAchievable, s.breakEvenUnitsPerDay !== null && s.breakEvenUnitsPerDay.value <= sellable)
+    }
+  }
+})
+
+test('貢献利益が非正なら損益分岐・縮小個数は0ではなく成立しないと表示する', () => {
+  const pack = buildKpiScenarioPack({ assumptions: { ...filled, unitCostYen: 100000 } })
+  for (const s of pack.scenarios) {
+    assert.equal(s.breakEvenUnitsPerDay, null)
+    assert.equal(s.exitLines.shrinkUnitsPerDay, null)
+    assert.equal(s.exitLines.exitUnitsPerDay, null)
+    assert.equal(s.breakEvenAchievable, false)
+    assert.equal(s.normalDayOutlook.coversBreakEven, false)
+  }
+  const block = formatKpiScenarioBlock(pack)
+  assert.match(block, /損益分岐.*成立しない/)
+  assert.doesNotMatch(block, /損益分岐個数:.*0個\/日/)
+  assert.match(block, /導入前に価格・原価を見直す/)
+})
+
+test('セット値引きから負の追加原価を作らず、廃棄警戒値はシナリオとして表示する', () => {
+  for (const s of buildKpiScenarioPack({ assumptions: { ...filled, setDrinkPriceYen: 300, setWinePriceYen: 200, setDrinkAddCostYen: null, setWineAddCostYen: null, wasteRateTolerancePct: 90 } }).scenarios) {
+    assert.ok(s.resolvedAssumptions.setDrinkAddCostYen.value > 0)
+    assert.ok(s.resolvedAssumptions.setWineAddCostYen.value > 0)
+    assert.equal(s.exitLines.wasteRateAlertPct.basis, 'scenario')
+    assert.ok(s.exitLines.wasteRateAlertPct.value <= 100)
+  }
+})
+
+test('商品購入額を純増の客単価上昇と呼ばず、採算試算の未算入費用と税区分を明記する', () => {
+  const block = formatKpiScenarioBlock(buildKpiScenarioPack({ assumptions: filled }))
+  assert.doesNotMatch(block, /客単価上昇額/)
+  assert.match(block, /商品購入額/)
+  assert.match(block, /税区分/)
+  assert.match(block, /光熱費/)
+  assert.match(block, /既存商品の置き換え/)
 })
 
 test('必須の前提条件が欠けていれば確認質問用に列挙される', () => {
@@ -200,17 +289,17 @@ test('A-4 売上期待値は3シナリオで単調に増え、月間は1日平�
 test('A-5 / A-6 / A-7 が数値で出る', () => {
   const s = standardOf(buildKpiScenarioPack({ assumptions: filled }))
   assert.ok(s.kpiTargets.setRatePct.value > 0)
-  assert.ok(s.kpiTargets.checkUpliftYen.value > 0)
+  assert.ok(s.kpiTargets.productSpendPerPurchasingCheckYen.value > 0)
   assert.ok(s.kpiTargets.takeoutRatePct.value > 0)
   assert.equal(s.kpiTargets.wasteRatePct.value <= 8, true, '廃棄許容範囲を超えない')
 
   assert.equal(
     s.exitLines.shrinkUnitsPerDay.value,
-    Math.floor(s.breakEvenUnitsPerDay.value * 0.8),
+    Math.ceil(s.breakEvenUnitsPerDay.value * 0.8),
   )
   assert.equal(
     s.exitLines.exitUnitsPerDay.value,
-    Math.floor(s.breakEvenUnitsPerDay.value * 0.5),
+    Math.ceil(s.breakEvenUnitsPerDay.value * 0.5),
   )
   assert.equal(s.exitLines.wasteRateAlertPct.value, 12) // 8% × 1.5
   assert.ok(s.exitLines.shrinkUnitsPerDay.value > s.exitLines.exitUnitsPerDay.value)
@@ -227,23 +316,33 @@ test('統一売上から実績ベースラインを取り、実績ラベルを�
       ranges: [{
         totals: { gross_sales_yen: 3000000, guest_count: 1500 },
         daily: [
-          ['2026-08-01', 120000],
-          ['2026-08-02', 130000],
-          ['2026-08-03', 0],
+          ['2026-08-01', 120000, 60],
+          ['2026-08-02', 130000, 65],
+          ['2026-08-03', 0, 0],
           ['not-a-date', 100000],
         ],
       }],
     }],
   })
-  assert.equal(baseline.guestsPerOperatingDay, 750) // 1500名 ÷ 売上のある2日
-  assert.equal(baseline.operatingDaysPerMonth, 2)
+  assert.equal(baseline.guestsPerOperatingDay, 62.5)
+  assert.equal(baseline.operatingDaysPerMonth, null)
   assert.equal(baseline.averageSpendYen, 2000)
   assert.match(baseline.sourceNote, /統一売上の日別実績 2日/)
 
   const s = standardOf(buildKpiScenarioPack({ assumptions: filled, baseline }))
   const lunch = s.segments.find((seg) => seg.key === 'lunch')!
   assert.equal(lunch.expectedGuests.basis, 'scenario', '実績客数 × 仮定比率は仮定側へ落ちる')
-  assert.equal(lunch.daysPerMonth.basis, 'actual', '営業日数はそのまま実績')
+  assert.equal(lunch.daysPerMonth.basis, 'scenario', '部分月から月間営業日数は導かない')
+})
+
+test('全暦日を観測した月だけ売上発生日数を営業日数の代替として明示する', () => {
+  const daily = Array.from({ length: 31 }, (_, i) => [`2026-08-${String(i + 1).padStart(2, '0')}`, i < 20 ? 120000 : 0, i < 20 ? 60 : 0])
+  const baseline = deriveKpiBaselineFromUnifiedSales({ periods: [{ ranges: [{ daily }] }] })
+  assert.equal(baseline.operatingDaysPerMonth, 20)
+  assert.equal(baseline.guestsPerOperatingDay, 60)
+  const s = standardOf(buildKpiScenarioPack({ assumptions: filled, baseline }))
+  assert.equal(s.segments[0].daysPerMonth.basis, 'actual')
+  assert.match(s.segments[0].daysPerMonth.source, /売上発生日数.*代替/)
 })
 
 test('統一売上が空なら実績を 0 と決めつけず null で返す', () => {
