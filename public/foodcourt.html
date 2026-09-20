@@ -286,9 +286,9 @@
     .qchip{font-size:12.5px;color:var(--tx-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:7px 13px;transition:.14s;}
     .qchip:hover{border-color:var(--accent);color:var(--tx-1);}
     .qbar{display:flex;gap:10px;}
-    .qbar input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 15px;font-family:inherit;font-size:14px;color:var(--tx-1);}
-    .qbar input:focus{outline:none;border-color:var(--accent);}
-    .qbar input::placeholder{color:var(--tx-3);}
+    .qbar textarea{flex:1;min-width:0;min-height:74px;resize:vertical;box-sizing:border-box;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 15px;font-family:inherit;font-size:14px;line-height:1.6;color:var(--tx-1);}
+    .qbar textarea:focus{outline:none;border-color:var(--accent);}
+    .qbar textarea::placeholder{color:var(--tx-3);}
     .qa-kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:12px 0;}
     .qa-kpi-grid label{font-size:12px;display:grid;gap:5px;min-width:0;}
     .qa-kpi-grid input{box-sizing:border-box;width:100%;min-width:0;background:var(--bg);color:var(--tx-1);border:1px solid var(--line);border-radius:8px;padding:10px;}
@@ -422,7 +422,7 @@
     @media (max-width:560px){
       .wrap{padding:0 14px 60px;}
       .qbar{flex-wrap:wrap;}
-      .qbar input{flex-basis:100%;}
+      .qbar input,.qbar textarea{flex-basis:100%;}
       .qa-q,.qa-a{overflow-wrap:anywhere;}
       .hero{padding:18px;}
       .controls .ctl{flex:1 1 100%;}
@@ -712,8 +712,8 @@
         <div class="card-note"><span id="qaPeriodLabel">分析期間: 未指定</span> <button type="button" class="btn ghost" id="qaPeriodChange">期間を変更</button></div>
         <div class="q-chips" id="qSuggest"></div>
         <div class="qbar">
-          <input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / その日は何があった？">
-          <button class="btn primary" id="qBtn">質問する</button>
+          <textarea id="qInput" rows="3" placeholder="例: 直近でマルゴSが一番売れた日は？ / その日は何があった？&#10;Enterで改行・変換確定。解析は「質問する」ボタンで開始します。"></textarea>
+          <button class="btn primary" id="qBtn" type="button">質問する</button>
           <button class="btn ghost" id="qClear" type="button" style="display:none">会話をクリア</button>
         </div>
         <details id="qaKpiInputs" style="margin-top:12px">
@@ -3540,7 +3540,7 @@
   dom.tokenBtn.addEventListener('click', connectWithToken);
   dom.tokenInput.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithToken(); });
   dom.qBtn.addEventListener('click', ()=>askQuestion());
-  dom.qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') askQuestion(); });
+  // Q&A入力はtextarea。Enterは改行またはIME変換の確定に使い、AI解析は質問ボタンだけで開始する。
   if (dom.qClear) dom.qClear.addEventListener('click', clearQa);
   dom.reloadBtn.addEventListener('click', loadReports);
   dom.reportSel.addEventListener('change', ()=>{ const i=Number(dom.reportSel.value); if(reports[i]){ mode='single'; setModeButtons(); render(reports[i]); } });

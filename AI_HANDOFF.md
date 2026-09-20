@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 フードコートQ&AのEnter送信を停止
+
+- `public/foodcourt.html` のQ&A欄を`textarea`へ変更。Enterは改行、日本語入力中はブラウザ標準の変換確定として動作し、Q&A入力の`keydown`では`askQuestion()`を呼ばない。
+- AI解析の開始経路は「質問する」ボタンと明示的な候補選択に限定。ボタンには`type="button"`を指定し、フォーム送信への暗黙依存も避けた。
+- 回帰は `tests/foodcourt_qa_input.test.mjs`。Q&A期間対話・KPI・PDF出力テストと合わせて確認する。画面文言は操作マニュアルへ反映済み。
+
 ## 2026-09-20 フードコートPDF白紙化
 
 - `openReportWindow` は全ブラウザーで `showReportOverlay` → 接続済みsrcdoc iframe。SafariではBlob別タブ/空タブdocument.writeの保存が白紙となるため戻さない。60秒後revoke撤去だけでは修正にならない。

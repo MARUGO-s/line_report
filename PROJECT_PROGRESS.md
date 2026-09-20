@@ -1,5 +1,11 @@
 # LINE Report Project Progress
 
+### 2026-09-20 - フードコートQ&AのEnter送信を停止
+
+- 原因: Q&Aの単行入力欄でEnterの`keydown`から`askQuestion()`を直接呼び出していたため、改行や日本語入力の変換確定より先にAI解析が始まっていた。
+- 修正: 入力欄を複数行`textarea`へ変更し、Q&A入力のEnterイベントから解析処理を削除。解析開始は「質問する」ボタンと画面上の候補選択だけに限定した。
+- 検証: Q&A入力の回帰テスト、既存の期間対話・KPI・PDF出力テスト、`git diff --check`を実施。操作マニュアルにも反映した。
+
 ### 2026-09-20 - フードコートPDF白紙化の修正（Safari/Chrome）
 
 - SafariのBlob別タブはプレビュー後のPDF保存で本文を失う。URLの60秒失効撤去だけでは解消せず、全ブラウザー共通の接続済みsrcdoc iframeへ変更した。
