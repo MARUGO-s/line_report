@@ -11,8 +11,9 @@
       const from = y+'-'+String(m).padStart(2,'0')+'-01';
       return range(from,new Date(Date.UTC(y,m,0)).toISOString().slice(0,10));
     };
-    if (/全期間|全データ|おまかせ|全部/.test(q)) return {mode:'all',ranges:[],label:'保存済み全期間'};
-    if (/表示中|この日|その日/.test(q)) return validDate(viewingDate)?range(viewingDate,viewingDate):{error:'表示中の日がありません。年月または開始日・終了日を指定してください。'};
+    if (/全期間|全データ/.test(q) || /^(?:おまかせ|全部)$/.test(q.trim())) return {mode:'all',ranges:[],label:'保存済み全期間'};
+    // 「その日」は直前の回答を指す。画面で開いている別の日へ勝手に切り替えない。
+    if (/表示中/.test(q)) return validDate(viewingDate)?range(viewingDate,viewingDate):{error:'表示中の日がありません。年月または開始日・終了日を指定してください。'};
     const dates = [...q.matchAll(/(\d{4})[年\/-](\d{1,2})[月\/-](\d{1,2})日?/g)].map(m=>m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0'));
     const withoutFullDates=q.replace(/\d{4}[年\/-]\d{1,2}[月\/-]\d{1,2}日?/g,'');
     if(/\d{1,2}月\s*\d{1,2}日|(?:^|[^\d])\d{1,2}\/\d{1,2}(?![\d/])/.test(withoutFullDates)) return {error:'日付は年も含めて指定してください。例: 2026-06-01〜2026-06-15'};
