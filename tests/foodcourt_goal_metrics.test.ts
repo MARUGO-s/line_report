@@ -17,7 +17,8 @@ test('framework uses the requested action meaning and forbids benchmark/denomina
     '予約・会員・再来店が未導入/未計測', 'フードコートの共有席', '二重計上', '歩留まり率',
     'FLRコスト率', '合意済み目標へ転用しない', '行動件数を計算・創作しない', '同じ表・同じ合計に混ぜない',
     '改善策が必要な場合にだけKPIへ落とし込む', '売上構成比のABC', '人気と採算', '手法を全部毎回並べない',
-    '最重要プロセスを1つに絞る', 'KGI未設定ならギャップ/達成率を創作しない']) {
+    '最重要プロセスを1つに絞る', 'KGI未設定ならギャップ/達成率を創作しない',
+    '売上だけで評価しない', '何円の商品がいくつ売れたか', '人時売上高', '月末だけにしない']) {
     assert.ok(policy.includes(text), text)
   }
   assert.doesNotMatch(policy, /分析結果には必ず「KGI・KPI・KFI」/)
@@ -50,7 +51,7 @@ test('daily, period and weekly production paths send the same framework to integ
     assert.match(finalSystem, /観察分析ではKPI節を付けず/)
     assert.doesNotMatch(finalSystem, /KPIに落とし込めていない/)
   }
-  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v24-kpi-process')
+  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v25-store-kpi')
   await ctx.evaluateFoodCourtAnswer({surface:'ask',question:'店舗売上の改善',contextBlock:'synthetic facts',finalAnswer:'synthetic analysis',groqApiKey:'synthetic',primary:'synthetic',fallbackModel:'synthetic',config:{evaluatorMaxTokens:500,evaluatorProvider:'groq'}})
   assert.ok(requests.at(-1)[0].content.includes(BUSINESS_GOAL_METRICS_POLICY))
   assert.match(requests.at(-1)[0].content, /観察・照会ではKPI節は不要/)
