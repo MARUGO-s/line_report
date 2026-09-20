@@ -777,7 +777,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - 共有TypeScriptモジュール: 112件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
-- SQL migrations: 306件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- SQL migrations: 307件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 113件
 
 ### 公開画面・ブラウザコード
