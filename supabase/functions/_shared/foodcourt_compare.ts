@@ -3,7 +3,7 @@
 // 安全策: ①対象店舗を限定（FOODCOURT_STORE_KEYS）②マーカー判定 ③抽出が表として成立しなければ未処理を返し
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
-import { FOODCOURT_KPI_POLICY, type FoodCourtKpiContext } from './foodcourt_kpi.ts'
+import { FOODCOURT_KPI_POLICY, type FoodCourtKpiContext, type FoodCourtKpiInputs } from './foodcourt_kpi.ts'
 import { FOODCOURT_DASHBOARD_SCOPE, issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
@@ -3129,6 +3129,7 @@ export async function answerFoodCourtQuestion(
   kpiContext: FoodCourtKpiContext | null = null,
   qaPeriodBlock = '',
   qaRanges: Array<{ from: string; to: string }> = [],
+  kpiInputs: FoodCourtKpiInputs | null = null,
 ): Promise<{ answer: string | null; loopScore: number | null; loopCount: number; xTrendBrief?: string | null }> {
   if (!groqApiKey) return { answer: null, loopScore: null, loopCount: 0 }
   const deadlineAt = fcRequestDeadlineAt()
@@ -3151,7 +3152,7 @@ export async function answerFoodCourtQuestion(
     }
     if (rows.length) blocks.push(`■${fcDayLabel(r)}\n${rows.join('\n')}`)
   }
-  if (!blocks.length && !kpiContext) return { answer: 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。', loopScore: null, loopCount: 0 }
+  if (!blocks.length && !kpiContext && !kpiInputs) return { answer: 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。', loopScore: null, loopCount: 0 }
   const journalScopeBlock = journalScope
     ? [
       "【Journal連携の対象範囲・サーバー確定】",
@@ -3306,7 +3307,8 @@ export async function answerFoodCourtQuestion(
     const content = String((h && h.content) ?? '').trim().slice(0, 4000)
     if (role && content) convo.push({ role, content })
   }
-  const kpiPolicy = kpiContext ? '\n\n' + FOODCOURT_KPI_POLICY + '\n\n' + kpiContext.block : ''
+  const inputPolicy = (kpiContext?.inputs || kpiInputs)?.block || ''
+  const kpiPolicy = inputPolicy + (kpiContext ? '\n\n' + FOODCOURT_KPI_POLICY + '\n\n' + kpiContext.block : '')
   const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + kpiPolicy + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
   const baseMessages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
   // AIループエンジニアリング（Phase 1・Q&Aのみ）: FOODCOURT_LOOP_ENABLED=true かつ FOODCOURT_LOOP_APPLY_TO_ASK=true の
@@ -3320,7 +3322,7 @@ export async function answerFoodCourtQuestion(
       { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
     ),
     evaluationContext: kpiPolicy + '\n\n' + contextBlock,
-    numberAuditFacts: `${kpiContext?.block || ''}\n# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
+    numberAuditFacts: `${inputPolicy}\n${kpiContext?.block || ''}\n# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
     question: q,
     userInput: q,
     sourceRef: { viewing_date: viewingDate ?? null },

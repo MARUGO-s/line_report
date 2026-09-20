@@ -3,7 +3,7 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import vm from 'node:vm'
-import { prepareFoodCourtKpiScenario, FOODCOURT_KPI_POLICY } from '../supabase/functions/_shared/foodcourt_kpi.ts'
+import { prepareFoodCourtKpiScenario, FOODCOURT_KPI_POLICY, buildFoodCourtKpiInputs } from '../supabase/functions/_shared/foodcourt_kpi.ts'
 import * as reliability from '../supabase/functions/_shared/foodcourt_ai_reliability.ts'
 import * as loop from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 import * as groq from '../supabase/functions/_shared/groq_model.ts'
@@ -39,6 +39,8 @@ test('KPI uses same-store unified sales, preserves stored assumptions and saniti
   assert.match(result.block,/【実績】100名/);assert.doesNotMatch(result.block,/PRIVATE-NOTES|FORGED|9999/)
   assert.deepEqual(result.reference.scenarios,['保守','標準','強気'])
   assert.deepEqual(io.calls,[['profile','fixture_store'],['sales','fixture_store','2026-06-01','2026-06-02']])
+  assert.equal(result.inputs!.reference.items.find(i=>i.key==='unitPriceYen')!.source,'今回の入力欄')
+  assert.equal(result.inputs!.reference.items.find(i=>i.key==='unitCostYen')!.source,'店舗営業情報')
 })
 
 test('explicit comparison periods remain disjoint in unified sales baseline',async()=>{
@@ -65,11 +67,11 @@ test('input errors, store/period mismatch and timeout stop calculation instead o
   await assert.rejects(prepareFoodCourtKpiScenario(input,{...loaders(),loadProfile:()=>new Promise(()=>{}),timeoutMs:5}),/unavailable/)
 })
 
-test('real Q&A integrator and numeric auditor receive computed block; specialists and search do not',async()=>{
+test('real Q&A integrator, evaluator and numeric auditor receive inputs even without trial consent',async()=>{
   const source=readFileSync(new URL('../supabase/functions/_shared/foodcourt_compare.ts',import.meta.url),'utf8')
   const executable=stripTypeScriptTypes(source.replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*$/gm,'').replace(/^export /gm,''))
-  for(const mode of ['ordinary','kpi','empty']) {
-    const enabled=mode!=='ordinary'
+  for(const mode of ['ordinary','inputs','kpi','empty']) {
+    const enabled=mode==='kpi'||mode==='empty'
     const requests: any[]=[];let loopArgs: any
     const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,
       Deno:{env:{get:()=>''}},classifyJournalChatIntent:()=> 'data',
@@ -79,8 +81,9 @@ test('real Q&A integrator and numeric auditor receive computed block; specialist
     vm.runInContext(executable,ctx)
     vm.runInContext(`foodCourtAiChat=captureChat;runFoodCourtLoopEngineering=captureLoop;buildForecastFactorsContext=async()=>'';loadFoodCourtLearningMemory=async()=>'';fetchFoodCourtXTrendBrief=async()=>null;recordFoodCourtAiUsage=async()=>{};`,ctx)
     const kpi=enabled?await prepareFoodCourtKpiScenario(input,loaders()):null
+    const inputs=mode==='inputs'?buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:123}):null
     const reports=mode==='empty'?[]:Array.from({length:60},(_,i)=>({report_date:new Date(Date.parse('2026-06-02')+i*86400000).toISOString().slice(0,10),tenants:[{name:'MARUGO S',sales:10000,guests:10},{name:'Other',sales:5000,guests:5}]})).reverse()
-    await ctx.answerFoodCourtQuestion(reports,'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}])
+    await ctx.answerFoodCourtQuestion(reports,'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}],inputs)
     assert.equal(requests.length,5)
     assert.equal(requests.slice(0,4).some(r=>JSON.stringify(r).includes('コード側で確定計算済み')),false)
     const final=JSON.stringify(requests.at(-1))
@@ -91,5 +94,18 @@ test('real Q&A integrator and numeric auditor receive computed block; specialist
     assert.equal(loopArgs.numberAuditFacts.includes('コード側で確定計算済み'),enabled)
     assert.equal(loopArgs.evaluationContext.includes('保守／標準／強気'),enabled)
     assert.equal(requests.at(-1).tokens,enabled?4200:1800)
+    if(inputs) {
+      for(const text of [final,loopArgs.numberAuditFacts,loopArgs.evaluationContext]) {assert.match(text,/833円/);assert.match(text,/123円/);assert.match(text,/仮定\(入力\)/)}
+      assert.equal(requests.slice(0,4).some(r=>JSON.stringify(r).includes('今回の入力前提')),false)
+      assert.match(final,/未入力.*未知のまま/)
+    }
   }
+})
+
+test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{
+  assert.equal(buildFoodCourtKpiInputs({notes:'untrusted',unitPriceYen:'<script>',unitCostYen:null}),null)
+  const context=buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:0,store_key:'other',requested:true,notes:'UNTRUSTED'})!
+  assert.equal(context.reference.items.length,2)
+  assert.match(context.summary,/0円/);assert.match(context.summary,/833円/)
+  assert.doesNotMatch(context.block,/UNTRUSTED|other|保守/)
 })

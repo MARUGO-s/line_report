@@ -1,8 +1,27 @@
 import {
   buildKpiScenarioPack, buildKpiScenarioReference, deriveKpiBaselineFromUnifiedSales,
   formatKpiScenarioBlock, isKpiScenarioRequest, normalizeKpiAssumptions,
+  KPI_ASSUMPTION_LABELS,
 } from './kpi_scenario.ts'
 import { buildTrustedAiSalesData, type UnifiedSalesSummary } from './sales_reconciliation_ai.ts'
+
+/** 入力の参照は試算の許可とは別。数値allowlist以外や自由文はここへ取り込まない。 */
+export function buildFoodCourtKpiInputs(raw: unknown, currentInputKeys?: string[]) {
+  const normalized = normalizeKpiAssumptions(raw)
+  if (!normalized.provided.length) return null
+  const items = normalized.provided.map(key => ({
+    key, label: KPI_ASSUMPTION_LABELS[key], value: normalized.values[key]!,
+    unit: key.endsWith('Yen') ? '円' : key.endsWith('Pct') ? '％' : key === 'bakeBatchUnits' ? '個' : key === 'bakeBatchesPerDay' ? '回' : key === 'prepStaffCount' ? '人' : '時間',
+    source: !currentInputKeys || currentInputKeys.includes(key) ? '今回の入力欄' : '店舗営業情報',
+  }))
+  const summary = items.map(item => `- 【仮定(入力)】${item.label}: ${item.value}${item.unit}（${item.source}）`).join('\n')
+  return {
+    block: `【今回の入力前提・実績ではない】\n${summary}\n関連する商品導入・価格・運営の相談では、入力済み条件を踏まえて判断する。入力済みの売価・原価・人員などを「不明」「未入力」と扱わない。専門AIや過去回答の「未設定」より今回の値を優先する。実績照会にはこれらを実績として混ぜず、質問と無関係な前提で結論を変えない。前提の参照だけでは試算を許可しない。サーバー確定計算ブロックがなければ新しい販売目標・利益・増収額・係数を作らない。未入力項目は未知のまま。`,
+    summary,
+    reference: { basis: 'input' as const, items },
+  }
+}
+export type FoodCourtKpiInputs = NonNullable<ReturnType<typeof buildFoodCourtKpiInputs>>
 
 export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外】
 利用者が明示的に依頼したため、以下のサーバー確定計算値だけを試算として引用できる。AI自身による数値・係数・前提の創作や再計算は禁止。
@@ -53,6 +72,7 @@ export async function prepareFoodCourtKpiScenario(
     }
     const pack = buildKpiScenarioPack({ assumptions, baseline: deriveKpiBaselineFromUnifiedSales(sales.unified_sales) })
     return {
+      inputs: buildFoodCourtKpiInputs(assumptions, normalizeKpiAssumptions(input.assumptions).provided),
       block: formatKpiScenarioBlock(pack),
       reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel },
     }

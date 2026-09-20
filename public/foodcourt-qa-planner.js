@@ -62,6 +62,12 @@
       (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q));
   }
   const initialState = () => ({period:null,pending:null,kpiConfirmed:false});
+  function needsInputTrialChoice(query) {
+    const q=String(query||'').normalize('NFKC');
+    if(/試算.*(?:不要|なし|しない)|実績|推移|とは|意味|定義/.test(q)) return false;
+    return /どう思|どうです|導入|新商品|提案|検討|しようと思|始めたい|売り?上げアップ/.test(q);
+  }
+  const trialChoices=['入力値で3シナリオを試算','入力値を使って分析のみ','キャンセル'];
   function nextTurn(previous,text,options={}) {
     const state = {...previous};
     const raw = String(text||'').trim();
@@ -77,7 +83,17 @@
       }
     }
     let question = state.pending?.question || raw;
-    if(state.pending?.kind==='kpi') {
+    let inputChoiceResolved=false;
+    if(state.pending?.kind==='kpi_use') {
+      if(/^(入力値で3シナリオを試算|はい|お願いします)$/.test(raw)) {
+        question='新商品のKPIを保守・標準・強気の3シナリオで試算してください。\n元の相談: '+question;
+        state.kpiConfirmed=true; inputChoiceResolved=true; state.pending=null;
+      } else if(/^(入力値を使って分析のみ|分析のみ|試算は不要|いいえ)$/.test(raw)) {
+        inputChoiceResolved=true; state.pending=null;
+      } else if(/分析|試算|教えて|[?？]/.test(raw)) { question=raw; state.pending=null; }
+      else return clarify('入力した前提で数値試算も行いますか？ 分析のみなら入力値は参照しますが、新しい目標数値は作りません。',trialChoices);
+      period=period||state.period;
+    } else if(state.pending?.kind==='kpi') {
       if(/^(保存済み前提・仮置きで進む|入力した前提で進む|おまかせ)$/.test(raw)) state.kpiConfirmed=true;
       else if(/分析|試算|教えて|[?？]/.test(raw)) { question=raw; state.pending=null; }
       else return clarify('試算前提の入力欄を確認してください。未入力は保存済み値、未登録なら仮置きになります。',['入力した前提で進む','保存済み前提・仮置きで進む','キャンセル']);
@@ -89,6 +105,10 @@
     if(!state.period || (state.pending?.kind==='period' && !period)) {
       state.pending={kind:'period',question};
       return clarify('どの期間を分析しますか？ 例「2026年6月」「2026年6月と7月を比較」「2026-06-01〜2026-06-15」。おまかせなら保存済み全期間です。',['保存済み全期間','今月','先月',...(options.viewingDate?['表示中の日']:[]),'キャンセル']);
+    }
+    if(options.hasAssumptions && !inputChoiceResolved && !wantsKpiTargets(question) && needsInputTrialChoice(question)) {
+      state.pending={kind:'kpi_use',question};
+      return clarify('入力した売価・原価などの前提を分析に使います。保守・標準・強気の3シナリオでKPIの数値試算も行いますか？',trialChoices);
     }
     if(wantsKpiTargets(question) && !state.kpiConfirmed && !options.assumptionsReady) {
       state.pending={kind:'kpi',question};
