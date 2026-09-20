@@ -58,7 +58,7 @@
 | **AI 使用料** | `/ai-usage.html` | ✅ 要 | AI API コスト・使用量ダッシュボード |
 | **システムマップ** | `/system-map.html` | ✅ 要 | Graphifyコード/SQL構成、本番・業務AI・開発知識循環 |
 | **小口現金** | `/petty_cash.html` | ✅ 要 | 経費仕訳・小口現金帳 |
-| **フードコート分析** | `/foodcourt.html` | ✅ 要 | MARUGO S 専用 来客予測・売上分析・施策提言 |
+| **フードコート分析** | `/foodcourt.html` | ✅ 要 | MARUGO S 専用 来客予測・売上分析・Q&A（期間→手法→必要な売価確認） |
 | **AI学習 進化** | `/foodcourt-evolution.html` | ✅ 要 | MARUGO S 専用 事前予測の精度・5方式比較 |
 | **フードコート日報** | `/foodcourt-report.html` | ✅ 要 | MARUGO S 専用 現場日報の入力・閲覧 |
 
@@ -422,6 +422,9 @@ http://127.0.0.1:8765/line_report/foodcourt-report.html    # フードコート�
 | [DOCS-INDEX.md](./docs/DOCS-INDEX.md) | 全ドキュメントの索引・用語集 |
 | [CHANGELOG-2026-05.md](./docs/CHANGELOG-2026-05.md) | 2026年5月の機能追加・変更履歴 |
 | [フードコートAIループシステム全体解説.md](./docs/フードコートAIループシステム全体解説.md) | 来客予測ループ・品質評価ループの全体設計 |
+| [BUSINESS-GOAL-METRICS.md](./docs/BUSINESS-GOAL-METRICS.md) | 目的に応じた分析とKGI/KPI/KFI |
+| [FOODCOURT-JOURNAL-LINK.md](./docs/FOODCOURT-JOURNAL-LINK.md) | フードコートQ&Aとジャーナル連携 |
+| [management-warehouse/README.md](./docs/management-warehouse/README.md) | 分析手法ごとの知識倉庫（選んだパックだけ読む） |
 | [フードコートAI分析システム_設計解説.md](./docs/フードコートAI分析システム_設計解説.md) | 5エージェントAI構成の設計書 |
 | [FOODCOURT-FORECAST-AUDIT.md](./docs/FOODCOURT-FORECAST-AUDIT.md) | 数値予測・評価・採用条件・本番検証の現行正本 |
 | [フードコート来客予測モデル.md](./docs/フードコート来客予測モデル.md) | 旧方式との差分と現行仕様への入口 |

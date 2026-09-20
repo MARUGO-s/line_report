@@ -74,7 +74,7 @@ line_report-main/
 | DB変更 | `supabase/migrations/` |
 | 自動テスト | `tests/` |
 | 開発・運用コマンド | `scripts/` |
-| 設計・運用文書 | `docs/` |
+| 設計・運用文書 | `docs/`。分析手法の出典とパックは `docs/management-warehouse/` |
 | 環境図の正本 | `knowledge/` |
 | 一時ファイル・DB・復旧作業 | `.local/` |
 

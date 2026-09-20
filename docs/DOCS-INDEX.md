@@ -63,6 +63,9 @@
 | [スプレッドシート売上バックアップ-GAS.md](./スプレッドシート売上バックアップ-GAS.md) | 運用・開発 | 全店舗売上スプレッドシートの毎日バックアップ（GAS・6時同期後に日付名コピー）。コード＋トリガー手順＋確定構成 |
 | [フードコートAI学習・自己進化システム_完全設計書.md](./フードコートAI学習・自己進化システム_完全設計書.md) | **説明・開発・運用** | 数値予測は2026-09-10更新。データ収集・5方式・事前評価・複数AI・RAG/蒸留を接続。旧DB件数は確認日付き履歴 |
 | [フードコートAI売上分析システム_総合解説.md](./フードコートAI売上分析システム_総合解説.md) | **説明・開発・運用** | **単独で読める統合版** — オーケストレーション、各AIの強み、統計の事前計算、Q&Aループ、学習・蒸留、日報データの重要性 |
+| [BUSINESS-GOAL-METRICS.md](./BUSINESS-GOAL-METRICS.md) | 開発・AI | 目的に応じた分析とKGI/KPI/KFI。手法選択、売価確認、知識パック |
+| [FOODCOURT-JOURNAL-LINK.md](./FOODCOURT-JOURNAL-LINK.md) | 開発・AI | フードコートQ&Aとジャーナル連携、KPI見込み、期間上限 |
+| [management-warehouse/README.md](./management-warehouse/README.md) | 開発・AI | マネジメント知識倉庫。選んだ手法の短いパックだけを分析前に読む |
 | [フードコートAI分析システム_設計解説.md](./フードコートAI分析システム_設計解説.md) | 開発・運用 | フードコートの5エージェントAI分析、予測の正本と解釈用統計の分離、統計拡張、品質評価ループ（§3-3）、日報Q&A組み込み（§3-4）、API使用料 |
 | [フードコート日報システム.md](./フードコート日報システム.md) | 開発・運用 | 現場日報ページ（foodcourt-report.html）の設計 — DBテーブル・API・動員数自動連携・Q&A分析への組み込み |
 | [フードコートAIループシステム全体解説.md](./フードコートAIループシステム全体解説.md) | 開発・運用 | **2つの自己改善ループの全体像** — 数値予測の5方式・事前台帳・月曜の安全な採用判定＋AI回答の品質評価ループ（Q&A段階導入・surface別制御） |
@@ -105,6 +108,7 @@
 | 管理 Bot Webhook | `supabase/functions/line-admin-webhook/index.ts` |
 | Journal AIチャット規約 | [JOURNAL-AI-CHAT-RULES.md](./JOURNAL-AI-CHAT-RULES.md) / `public/jnm/jnl2txt.html` / `.cursor/rules/ai-enrichment-additive.mdc` |
 | 分析の整合性・数値・3指標 | [ANALYSIS-INTEGRITY-AUDIT.md](./ANALYSIS-INTEGRITY-AUDIT.md) / [BUSINESS-GOAL-METRICS.md](./BUSINESS-GOAL-METRICS.md) / `supabase/functions/_shared/kpi_scenario.ts` |
+| フードコートQ&A・知識パック | [FOODCOURT-JOURNAL-LINK.md](./FOODCOURT-JOURNAL-LINK.md) / [management-warehouse/README.md](./management-warehouse/README.md) / `foodcourt_management_packs.ts` |
 
 ---
 
