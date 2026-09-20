@@ -296,6 +296,25 @@ test('全シナリオで A-1〜A-7 の数値が欠けない', () => {
   }
 })
 
+test('KGI/KPI/KFI mapping reuses computed scenario values and never invents action counts', () => {
+  for (const assumptions of [{}, filled, { ...filled, unitCostYen: 100000, setDrinkAddCostYen: 100000, setWineAddCostYen: 100000 }]) {
+    const pack = buildKpiScenarioPack({ assumptions })
+    const block = formatKpiScenarioBlock(pack)
+    for (const scenario of pack.scenarios) {
+      const section = block.split(`■ ${scenario.scenarioLabel}シナリオ`)[1].split('■ ')[0]
+      assert.match(section, /KGI候補: 商品の月間売上見込み/)
+      assert.ok(section.includes(`¥${scenario.monthlyRevenueYen.value.toLocaleString('ja-JP')}`))
+      assert.match(section, /KFI候補（現場行動）.*実施件数・提案率は未計測、数値目標は未設定/)
+      assert.match(section, /採算確認（KFIとは別）/)
+      assert.match(section, /店頭案内・セット提案（KFI）→販売数・セット率（KPI）→商品売上（KGI候補）/)
+      assert.match(section, /店舗の純増売上・最終利益ではない/)
+      assert.ok(section.includes(scenario.breakEvenAchievable ? '実現・利益を保証しない' : '価格・原価・生産条件を見直す'))
+      assert.ok(section.includes(`通常日の販売目標は損益分岐${scenario.normalDayOutlook.coversBreakEven ? 'に届く' : 'に届かない'}`))
+    }
+    assert.match(buildKpiScenarioReference(pack).goal_metrics.kfi, /現場行動（未計測）/)
+  }
+})
+
 test('sales_data には軽量な参照だけを載せ、数値の正本はブロック側に残す', () => {
   const pack = buildKpiScenarioPack({ assumptions: filled, productName: '焼き上げクロワッサン' })
   const reference = buildKpiScenarioReference(pack)

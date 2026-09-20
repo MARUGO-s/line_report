@@ -6,13 +6,14 @@ import vm from 'node:vm'
 import * as reliability from '../supabase/functions/_shared/foodcourt_ai_reliability.ts'
 import * as loop from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 import * as groq from '../supabase/functions/_shared/groq_model.ts'
+import { BUSINESS_GOAL_METRICS_POLICY } from '../supabase/functions/_shared/business_goal_metrics.ts'
 
 // Execute the real production functions, with external integrations isolated at the boundary.
 const source = readFileSync(new URL('../supabase/functions/_shared/foodcourt_compare.ts', import.meta.url), 'utf8')
 const executable = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*$/gm, '').replace(/^export /gm, ''))
 function runtime() {
   const context = vm.createContext({
-    ...reliability, ...loop, ...groq, console, AbortSignal, AbortController, Response,
+    ...reliability, ...loop, ...groq, BUSINESS_GOAL_METRICS_POLICY, console, AbortSignal, AbortController, Response,
     setTimeout, clearTimeout, URL, URLSearchParams, Uint8Array, TextDecoder,
     btoa: (s: string) => Buffer.from(s, 'binary').toString('base64'),
     Deno: { env: { get: (key: string) => ({ GEMINI_API_KEY: 'synthetic-key', FOODCOURT_LOOP_EVALUATOR_PROVIDER: 'claude' }[key]) } },

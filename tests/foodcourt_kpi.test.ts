@@ -7,6 +7,7 @@ import { prepareFoodCourtKpiScenario, FOODCOURT_KPI_POLICY, buildFoodCourtKpiInp
 import * as reliability from '../supabase/functions/_shared/foodcourt_ai_reliability.ts'
 import * as loop from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 import * as groq from '../supabase/functions/_shared/groq_model.ts'
+import { BUSINESS_GOAL_METRICS_POLICY } from '../supabase/functions/_shared/business_goal_metrics.ts'
 
 const input = {question:'新商品のKPIを試算してください',authorizedStore:'fixture_store',salesDates:['2026-06-01','2026-06-02']}
 const stored = {unitPriceYen:420,unitCostYen:126,bakeBatchUnits:20,bakeBatchesPerDay:3,prepStaffCount:1,wasteRateTolerancePct:8}
@@ -73,7 +74,7 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
   for(const mode of ['ordinary','inputs','kpi','empty']) {
     const enabled=mode==='kpi'||mode==='empty'
     const requests: any[]=[];let loopArgs: any
-    const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,
+    const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,BUSINESS_GOAL_METRICS_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,
       Deno:{env:{get:()=>''}},classifyJournalChatIntent:()=> 'data',
       captureChat:async(messages:any[],_key:string,_model:string,tokens:number)=>{requests.push({messages,tokens});return {content:'synthetic answer',usage:null}},
       captureLoop:async(args:any)=>{loopArgs=args;const result=await args.initialGenerate();return {answer:result.content,usages:[],loopScore:null,loopCount:1}},
@@ -87,6 +88,13 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
     assert.equal(requests.length,5)
     assert.equal(requests.slice(0,4).some(r=>JSON.stringify(r).includes('コード側で確定計算済み')),false)
     const final=JSON.stringify(requests.at(-1))
+    for (const prompt of [final]) {
+      assert.match(prompt,/KGI・KPI・KFI/)
+      assert.match(prompt,/KFI＝現場で実行・管理する行動指標/)
+      assert.match(prompt,/記録方法・単位/)
+      assert.match(prompt,/目標が無ければギャップ\/達成率を創作しない/)
+      assert.match(prompt,/採算は未判定/)
+    }
     assert.equal(final.includes('コード側で確定計算済み'),enabled)
     assert.match(final,/確認済み期間/)
     assert.match(final,/指定範囲別のコード集計/)
