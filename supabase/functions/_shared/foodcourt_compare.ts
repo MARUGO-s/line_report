@@ -3,6 +3,7 @@
 // 安全策: ①対象店舗を限定（FOODCOURT_STORE_KEYS）②マーカー判定 ③抽出が表として成立しなければ未処理を返し
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
+import { FOODCOURT_KPI_POLICY, type FoodCourtKpiContext } from './foodcourt_kpi.ts'
 import { FOODCOURT_DASHBOARD_SCOPE, issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
@@ -55,7 +56,7 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '【施策の書式・厳守】打ち手・次の一手を書くときは、各施策に必ず「対象客(誰の・どの来店動機)／実施条件(曜日・時間帯・イベント条件)／実施内容(具体的に)／観測KPI(何を見るか)／判定・中止ライン(いつ・どう成否判定するか)」を含める。' +
   '価格・客数・増加率などの数値は、提供データにある実績値・現場が決めた目標や判定ライン・コード側で事前計算された参考値だけを引用する。' +
   'AIが前提・係数・目標数値・施策効果の試算値を新たに作ることは禁止。専門AIメモの数値も提供データで裏付けできなければ採用しない。' +
-  '未設定の判定ラインは測定方法と設定に必要な情報を述べ、未計測とする。試算が必要ならJournal Reportで明示的にKPI試算を依頼するよう案内する。' +
+  '未設定の判定ラインは測定方法と設定に必要な情報を述べ、未計測とする。KPI試算は明示的な依頼でサーバーの確定計算ブロックがある場合だけ引用できる。' +
   '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。'
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
@@ -3125,6 +3126,9 @@ export async function answerFoodCourtQuestion(
   viewingDate?: string | null,
   dailyLogs: Array<Record<string, unknown>> = [],
   journalScope: FoodCourtJournalAnalysisScope | null = null,
+  kpiContext: FoodCourtKpiContext | null = null,
+  qaPeriodBlock = '',
+  qaRanges: Array<{ from: string; to: string }> = [],
 ): Promise<{ answer: string | null; loopScore: number | null; loopCount: number; xTrendBrief?: string | null }> {
   if (!groqApiKey) return { answer: null, loopScore: null, loopCount: 0 }
   const deadlineAt = fcRequestDeadlineAt()
@@ -3147,7 +3151,7 @@ export async function answerFoodCourtQuestion(
     }
     if (rows.length) blocks.push(`■${fcDayLabel(r)}\n${rows.join('\n')}`)
   }
-  if (!blocks.length) return { answer: 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。', loopScore: null, loopCount: 0 }
+  if (!blocks.length && !kpiContext) return { answer: 'まだ分析できるデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。', loopScore: null, loopCount: 0 }
   const journalScopeBlock = journalScope
     ? [
       "【Journal連携の対象範囲・サーバー確定】",
@@ -3158,10 +3162,15 @@ export async function answerFoodCourtQuestion(
       "Journal側の税込／税抜店舗売上とは税区分と日数を揃えない限り直接比較しない。売上差があっても、同期間のイベント・競合・順位・客層の事実は独立した背景根拠として分析する。",
     ].join("\n")
     : ""
-  const data = [journalScopeBlock, blocks.reverse().join('\n\n')].filter(Boolean).join('\n\n')
-  const journalScopeRule = journalScope
+  // 比較月の古い側が日別詳細45日の外でも、各範囲の集計は取得済み全日から計算する。
+  const qaRangeFacts = qaRanges.map(range => {
+    const scoped = reports.filter(report => { const date = fcSalesDate(report); return date >= range.from && date <= range.to })
+    return `【指定範囲別のコード集計】${range.from}〜${range.to}\n${buildBaseInsights(scoped, baseName) || '比較可能なデータなし（0円とは扱わない）'}`
+  }).join('\n\n')
+  const data = [journalScopeBlock, qaRangeFacts, blocks.reverse().join('\n\n')].filter(Boolean).join('\n\n')
+  const journalScopeRule = qaPeriodBlock + (journalScope
     ? "【Journal連携範囲】日報欠損日は0円扱いせず、部分日報の合計を対象期間全体の売上と呼ばない。Journalとの金額差だけを理由に、イベント・競合・順位の独立した背景事実まで捨てない。"
-    : ""
+    : "")
   const insights = buildBaseInsights(reports, baseName)
   const eventCorr = buildEventCorrelation(reports, baseName, events)
   const eventList = buildEventListText(events)
@@ -3223,7 +3232,7 @@ export async function answerFoodCourtQuestion(
     `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
     journalScopeRule,
     `担当は「明日から現場で試せる打ち手」に加え、日報に書かれた「こんなことをしてみた」施策の効果検証と次アクションへの接続。`,
-    `【厳守】データに無い販売点数・原価・スタッフ人数を、実績として述べない。前提として置く場合は「仮定」と明示し、前提値も一緒に書く。打ち手は必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
+    `【厳守】データに無い販売点数・原価・スタッフ人数を作らない。仮定ラベルを付けても独自の数値生成は禁止。KPI試算は統合担当へ渡されるサーバー確定計算に任せる。打ち手は必ず「狙う客層/来店動機」「実施条件」「見るべきKPI」をセットで書く。`,
     `【現場の大前提・重要】フードコート店舗であるため、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であり禁止します。デリバリーではなく、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案してください。`,
     nippouRules,
     `出力は最終回答ではなく「統合担当AIへの運営改善メモ」。見出し＋箇条書きで簡潔に（400字程度）。施策あり日は必ず1件以上、施策名を引用して効果仮説を書く。`,
@@ -3269,7 +3278,7 @@ export async function answerFoodCourtQuestion(
     `(3) 真の競合（代替関係）を特定する。席は共有なので“客の財布と滞在時間”の奪い合い。同じ来店動機・時間帯・価格帯で客を奪い合う相手はどの店か。同ジャンル競合の有無（ワインは自店がほぼ独占）も強み/弱みとして語る。`,
     `(4) 需要ドライバーの中でも【東京ドームのイベント】を最重要視し、具体的に深掘りする。提供データの「会場イベント相関」「直近の日別イベント（日付・客数・売上・イベント名つき）」を必ず使い、客数・売上に動きがある日は次を必ず述べる: (a) その日に**どんなイベントが・いつ（昼興行か夜公演か）あったかをイベント名・種別・規模・客層まで特定**する（例: NiziUライブ＝若年女性中心で物販・グッズ後の軽い飲食、巨人戦などプロ野球＝幅広い年齢の野球ファンで試合前後に長め滞在、大学野球＝昼開催で飲酒需要が薄い、コンサート＝開演前後に集中、等）。(b) そのイベントが${baseName}の客数・売上に**どれだけ・なぜ**効いた/効かなかったかを実数を引用してメカニズムで説明する（観客の客層・財布・滞在時間・開演時間帯と、ワイン×スパイスという高単価・大人向け業態の相性）。(c) 取り込めたイベント／取りこぼしたイベントを切り分け、次に同種のイベントが来たときの打ち手につなげる。「イベント日は客数が多い」で終わらせない。天気・曜日は補助要因として絡める。`,
     `(5) 自店の構造的な強み・弱みと打開仮説。打ち手は「誰の・どの来店動機を・どう取るか」まで具体化し、検証方法（次に何の数字を見れば効果が分かるか）も添える。なお、本店舗はフードコート（FOOD STADIUM TOKYO）であり、デリバリー（外部配達代行など）の新規導入や強化を提案することは非現実的であるため厳禁とする。代わりに、テイクアウト（持ち帰り）用の容器・セットメニューの工夫や、客席呼び込みによる自店集客を提案すること。`,
-    `(5-2) 施策効果の実績値が無い場合、AIが増収額・客数リフト率・客単価上昇額・目標や判定ラインの数値を新たに作ることは禁止。前提や仮定のラベルを付けても例外にはならない。提供された実績・現場設定値・コード側の事前計算値のみ出所を付けて引用し、参考値は実績と別にする。不足時は未計測と明記し、対象客・実施方法・観測KPI・必要な追加計測を具体化する。KPI試算はJournal Reportの明示的な試算依頼とサーバー側の確定計算を経る。`,
+    `(5-2) 施策効果の実績値が無い場合、AIが増収額・客数リフト率・客単価上昇額・目標や判定ラインの数値を新たに作ることは禁止。前提や仮定のラベルを付けても例外にはならない。提供された実績・現場設定値・コード側の事前計算値のみ出所を付けて引用し、参考値は実績と別にする。不足時は未計測と明記し、対象客・実施方法・観測KPI・必要な追加計測を具体化する。KPI試算は明示的な依頼とサーバー側の確定計算ブロックが揃う場合だけ引用する。`,
     `【分析フレームワーク（設計書準拠・必ず踏まえる）】`,
     `(6) 要因分解を最初に：売上＝客数×客単価。売上が動いたら必ず「客数要因」か「客単価要因」かを切り分ける（提供の「要因分解」ブロックの数値を使う）。集客が課題なら集客策、単価が課題なら単価策、と打ち手を取り違えない。`,
     `(7) 店舗間のカニバリ/アンカー：提供の「店舗間相関」を使い、負相関＝同じ来店動機の食い合い(カニバリ)候補、正相関＝連動/アンカー（人気店の集客が周辺も底上げ）候補として業態文脈で解釈する。ただし相関は因果ではない（曜日・イベント等の共通要因で連動しうる）ことを明示する。`,
@@ -3297,7 +3306,8 @@ export async function answerFoodCourtQuestion(
     const content = String((h && h.content) ?? '').trim().slice(0, 4000)
     if (role && content) convo.push({ role, content })
   }
-  const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
+  const kpiPolicy = kpiContext ? '\n\n' + FOODCOURT_KPI_POLICY + '\n\n' + kpiContext.block : ''
+  const systemFull = (viewingBlock ? viewingBlock + '\n\n' : '') + system + kpiPolicy + '\n\n# 分析の材料（この実データに基づき、直前までの会話の流れも踏まえて回答する）\n' + contextBlock
   const baseMessages = [{ role: 'system', content: systemFull }, ...convo, { role: 'user', content: q }]
   // AIループエンジニアリング（Phase 1・Q&Aのみ）: FOODCOURT_LOOP_ENABLED=true かつ FOODCOURT_LOOP_APPLY_TO_ASK=true の
   // ときだけ有効。既定はOFFで、無効時は従来どおり1回生成して返すだけ（挙動・使用量記録とも変わらない）。
@@ -3306,11 +3316,11 @@ export async function answerFoodCourtQuestion(
     initialGenerate: (feedback, previousAnswer) => foodCourtAiChat(
       feedback && previousAnswer ? appendLoopFeedback(baseMessages, feedback, previousAnswer) : baseMessages,
       // 改稿を廉価モデルに落とすと1周目より品質が下がり点数が伸びないため、両周ともOpenAI系で統一する。
-      groqApiKey, primary, 1800, 'openai', fallbackModel,
+      groqApiKey, primary, kpiContext ? 4200 : 1800, 'openai', fallbackModel,
       { deadlineAt, perProviderMs: 35000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'integrator' } },
     ),
-    evaluationContext: contextBlock,
-    numberAuditFacts: `# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
+    evaluationContext: kpiPolicy + '\n\n' + contextBlock,
+    numberAuditFacts: `${kpiContext?.block || ''}\n# コード計算・生データのみ\n${insights || ''}\n${decomposition || ''}\n${storeCorr || ''}\n${eventCorr || ''}\n${weatherCorr || ''}\n${anomalies || ''}\n${forecastCtx || ''}\n${patternBlock || ''}\n${nippou.block}\n${data}`,
     question: q,
     userInput: q,
     sourceRef: { viewing_date: viewingDate ?? null },

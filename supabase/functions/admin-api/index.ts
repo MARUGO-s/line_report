@@ -1,4 +1,8 @@
 import { fetchUnifiedSalesSummary, validSalesDate } from '../_shared/sales_reconciliation.ts'
+import { prepareFoodCourtKpiScenario, type FoodCourtKpiContext } from '../_shared/foodcourt_kpi.ts'
+import { isKpiScenarioRequest } from '../_shared/kpi_scenario.ts'
+import { loadJournalStoreContext } from '../_shared/journal_store_context.ts'
+import { resolveAiSalesPeriods } from '../_shared/sales_reconciliation_ai.ts'
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 // deploy re-trigger marker (2026-07-09)
 import {
@@ -2863,6 +2867,7 @@ Deno.serve(async (req, info) => {
       let question = rawQuestion
       const requestId = isJournalDeep ? crypto.randomUUID() : null
       const rangeRows = Array.isArray(body.requested_ranges) ? body.requested_ranges : []
+      const hasQaPeriod = !isJournalDeep && body.period_mode !== undefined
       const requestedRanges = rangeRows.map((row) => {
         const rec = row && typeof row === "object" ? row as Record<string, unknown> : {}
         const from = String(rec.from ?? "").slice(0, 10)
@@ -2870,6 +2875,15 @@ Deno.serve(async (req, info) => {
         if (!isStrictIsoDate(from) || !isStrictIsoDate(to)) return null
         return from <= to ? { from, to } : { from: to, to: from }
       }).filter((row): row is { from: string; to: string } => row != null).slice(0, 6)
+      if (hasQaPeriod) {
+        try {
+          if (!['all', 'range'].includes(String(body.period_mode)) || !Array.isArray(body.requested_ranges) || rangeRows.length > 6) throw new Error('Invalid mode')
+          if (body.period_mode === 'all' ? rangeRows.length !== 0 : rangeRows.length === 0) throw new Error('Invalid ranges')
+          if (rangeRows.length) resolveAiSalesPeriods({ salesPeriods: [{ label: 'Q&A', ranges: rangeRows }] })
+        } catch {
+          return json({ error: "分析期間を有効な開始日・終了日で指定してください（重複なし・最大6範囲・合計3660日以内）。", code: "invalid_date_range" }, 400)
+        }
+      }
       if (
         isJournalDeep &&
         (rangeRows.length > 6 || (rangeRows.length > 0 && requestedRanges.length !== rangeRows.length))
@@ -2908,8 +2922,8 @@ Deno.serve(async (req, info) => {
         .select("id, report_date, tenants, created_at, base_tenant_name")
         .ilike("store_partition_key", storeKey)
         .order("created_at", { ascending: false })
-        .limit(isJournalDeep ? 500 : 90)
-      if (isJournalDeep) {
+        .limit(isJournalDeep || hasQaPeriod ? 500 : 90)
+      if (requestedRanges.length && (isJournalDeep || hasQaPeriod)) {
         const from = requestedRanges.map((row) => row.from).sort()[0]
         const to = requestedRanges.map((row) => row.to).sort().at(-1) || from
         // tenant reportは売上日の翌朝発行なので、DB検索境界を1日進める。
@@ -2930,13 +2944,13 @@ Deno.serve(async (req, info) => {
         return json({ error: error.message }, 500)
       }
       const fetchedReports = Array.isArray(data) ? data as Array<Record<string, unknown>> : []
-      const reports = isJournalDeep
+      const reports = isJournalDeep || hasQaPeriod
         ? (() => {
           // created_at降順の先頭だけを売上日ごとの正本として使い、再取込・再解析履歴を二重集計しない。
           const seenSalesDates = new Set<string>()
           return fetchedReports.filter((report) => {
             const salesDate = fcSalesDate(report)
-            if (!requestedRanges.some((range) => salesDate >= range.from && salesDate <= range.to)) return false
+            if (requestedRanges.length && !requestedRanges.some((range) => salesDate >= range.from && salesDate <= range.to)) return false
             if (!salesDate || seenSalesDates.has(salesDate)) return false
             seenSalesDates.add(salesDate)
             return true
@@ -2949,7 +2963,7 @@ Deno.serve(async (req, info) => {
           reports.map((report) => fcSalesDate(report)).filter(Boolean),
         )
         : null
-      if (!reports.length) {
+      if (!reports.length && (isJournalDeep || !isKpiScenarioRequest(rawQuestion))) {
         if (isJournalDeep) {
           return json({
             error: "指定期間のフードコート比較データがありません。",
@@ -2958,31 +2972,51 @@ Deno.serve(async (req, info) => {
             coverage: { ...journalCoverage, report_count: 0 },
           }, 422)
         }
-        return json({ answer: "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
+        return json({ answer: hasQaPeriod ? "指定期間のフードコート比較データがありません。期間を変更するか、該当するテナント一覧画像を登録してください。" : "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
       }
-      const baseName = String((reports[0] as { base_tenant_name?: unknown }).base_tenant_name ?? "MARUGO S")
+      // Only this authorized Q&A route may load KPI inputs. Journal deep analysis keeps its own final-stage calculation.
+      let kpiContext: FoodCourtKpiContext | null = null
+      if (!isJournalDeep) {
+        try {
+          kpiContext = await prepareFoodCourtKpiScenario({
+            question: rawQuestion,
+            authorizedStore: normalizePosJournalStoreKey(storeKey),
+            salesDates: (hasQaPeriod ? reports : reports.slice(0, 45)).map(report => fcSalesDate(report)).filter(Boolean),
+            salesRanges: hasQaPeriod ? requestedRanges : undefined,
+            assumptions: body.kpi_assumptions,
+          }, {
+            loadProfile: store => loadJournalStoreContext(supabase, store, {}),
+            loadSales: (store, from, to) => fetchUnifiedSalesSummary(supabase, store, from, to),
+          })
+        } catch {
+          return json({ error: "KPI試算の店舗前提・統一売上を取得できませんでした。時間をおいて再試行してください。", code: "foodcourt_kpi_inputs_unavailable" }, 503)
+        }
+      }
+      const baseName = String((reports[0] as { base_tenant_name?: unknown } | undefined)?.base_tenant_name ?? "MARUGO S")
       // 会場イベント（東京ドーム）・天気も根拠に渡す。客数増減との相関を踏まえて回答させる。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
       const forecast = await loadForecastForStore(supabase, storeKey)
       // 現場日報（foodcourt_daily_logs）: Q&A分析の精度向上のため直近60日分を取得してAIに渡す。
       // 失敗時は空配列にせず error をレスポンス・ログに出し、サイレント劣化を防ぐ。
-      const todayForLogs = isJournalDeep
+      const todayForLogs = requestedRanges.length && (isJournalDeep || hasQaPeriod)
         ? requestedRanges.map((row) => row.to).sort().at(-1) || jstDateIso(0)
         : jstDateIso(0)
-      const logsFrom = isJournalDeep
+      const logsFrom = requestedRanges.length && (isJournalDeep || hasQaPeriod)
         ? requestedRanges.map((row) => row.from).sort()[0]
         : jstDateIso(-60)
       const { logs: dailyLogs, error: dailyLogsError, count: dailyLogsCount } = await loadFoodCourtDailyLogs(
         supabase,
         storeKey,
-        { from: logsFrom, to: todayForLogs, limit: isJournalDeep ? 120 : 60 },
+        { from: logsFrom, to: todayForLogs, limit: isJournalDeep || hasQaPeriod ? 120 : 60 },
       )
       if (dailyLogsError) {
         console.error(`${path} daily_logs load failed:`, dailyLogsError)
       }
       let analysisReports = reports
-      let analysisDailyLogs = dailyLogs
+      let analysisDailyLogs = hasQaPeriod && requestedRanges.length
+        ? dailyLogs.filter(log => requestedRanges.some(r => String(log.log_date) >= r.from && String(log.log_date) <= r.to))
+        : dailyLogs
       if (isJournalDeep) {
         // Journal経由では質問だけでなく、日報自由記述を含む分析材料も外部AI送信前に
         // 同じ仮名化テーブルで処理する。原本・DBは変更しない。
@@ -3006,7 +3040,18 @@ Deno.serve(async (req, info) => {
       const viewingReportIdRaw = (body as { viewing_report_id?: unknown }).viewing_report_id
       const viewingReportId = viewingReportIdRaw != null ? String(viewingReportIdRaw) : ""
       const viewingReport = viewingReportId ? reports.find((r) => String((r as { id?: unknown }).id ?? "") === viewingReportId) : null
-      const viewingDate = viewingReport ? fcSalesDate(viewingReport) : null
+      const viewingDate = !hasQaPeriod && viewingReport ? fcSalesDate(viewingReport) : null
+      const qaPeriod = hasQaPeriod ? {
+        mode: body.period_mode,
+        requested_ranges: requestedRanges,
+        label: requestedRanges.length ? requestedRanges.map(r => r.from+'〜'+r.to).join(' / ') : '保存済み全期間',
+        report_count: reports.length,
+        prompt_detail_days: Math.min(reports.length, 45),
+        truncated: fetchedReports.length >= 500,
+      } : null
+      const qaPeriodBlock = qaPeriod
+        ? `【Q&Aで確認済みの分析期間・最優先】${qaPeriod.label}。対象期間外の実績を混ぜず、比較の間にある未指定期間も含めない。比較レポート${reports.length}日、日別詳細は最大45日。${qaPeriod.truncated ? '取得上限500件に達しているため全件確認済みとは断定せず、期間を分けて確認するよう案内する。' : ''}データのない日は0円ではなく未確認。将来予測は対象期間の実績とは別に扱う。`
+        : ''
       try {
         const qaResult = await answerFoodCourtQuestion(
           analysisReports,
@@ -3022,6 +3067,9 @@ Deno.serve(async (req, info) => {
           viewingDate,
           analysisDailyLogs,
           journalCoverage,
+          kpiContext,
+          qaPeriodBlock,
+          hasQaPeriod ? requestedRanges : [],
         )
         if (isJournalDeep && !String(qaResult.answer ?? "").trim()) {
           return json({
@@ -3031,6 +3079,7 @@ Deno.serve(async (req, info) => {
           }, 502)
         }
         let answer = qaResult.answer || "回答を生成できませんでした。もう一度お試しください。"
+        if (qaPeriod) answer += `\n\n対象期間: ${qaPeriod.label}（比較レポート${reports.length}日${qaPeriod.truncated ? '・取得上限のため一部のみ' : ''}）`
         // 日報テーブル読込失敗時は回答末尾に注意を付与（AIは「日報なし」と誤認するため）。
         if (dailyLogsError) {
           answer += isJournalDeep
@@ -3083,6 +3132,8 @@ Deno.serve(async (req, info) => {
               viewing_report_id: viewingReportId || null,
               viewing_date: viewingDate ?? null,
               x_trend_brief: qaResult.xTrendBrief ?? null,
+              kpi_scenarios: kpiContext?.reference ?? null,
+              period: qaPeriod,
             },
           })
           .select("id, created_at")
@@ -3094,6 +3145,8 @@ Deno.serve(async (req, info) => {
           history_created_at: savedQa?.created_at ?? null,
           history_saved: !saveQaError,
           history_error: saveQaError?.message ?? null,
+          kpi_scenarios: kpiContext?.reference ?? null,
+          period: qaPeriod,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,
           loop_count: qaResult.loopCount,
