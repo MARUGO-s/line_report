@@ -1880,7 +1880,9 @@ Deno.serve(async (req: Request, info) => {
     }
     // One combined privacy pass also covers freshly fetched notes/calendar text.
     // The store payload goes to the existing OpenAI/Claude synthesizer only, not Web search.
-    let enrichedSales: ReturnType<typeof attachJournalStoreContext>;
+    let enrichedSales:
+      & ReturnType<typeof attachJournalStoreContext>
+      & { kpi_scenarios?: ReturnType<typeof buildKpiScenarioReference> };
     try {
       enrichedSales = attachJournalStoreContext(trustedSales, storeContext);
     } catch {
@@ -1894,12 +1896,12 @@ Deno.serve(async (req: Request, info) => {
       (enrichedSales as { unified_sales?: unknown }).unified_sales,
     );
     kpiScenarioBlock = kpiContext?.block ?? "";
-    const salesWithKpi = kpiContext
-      ? { ...enrichedSales, kpi_scenarios: kpiContext.reference }
-      : enrichedSales;
+    if (kpiContext) {
+      enrichedSales = { ...enrichedSales, kpi_scenarios: kpiContext.reference };
+    }
     const finalPrivacySafe = sanitizeJournalAiPayload({
       message, chatHistory, systemInstruction,
-      salesData: salesWithKpi,
+      salesData: enrichedSales,
       integrationReports: boundedRawIntegrationReports,
     });
     safeMessage = finalPrivacySafe.message;

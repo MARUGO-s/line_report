@@ -766,11 +766,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 42件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 105件
+- 共有TypeScriptモジュール: 106件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
 - SQL migrations: 306件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 104件
+- テストファイル: 105件
 
 ### 公開画面・ブラウザコード
 
@@ -887,6 +887,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/knowledge_memo_tag.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
 | `supabase/functions/_shared/knowledge_menu_extract.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
 | `supabase/functions/_shared/knowledge_menu_prompt.ts` | KNW-01 / KNW-02 / JAI-01 / DEV-02 |
+| `supabase/functions/_shared/kpi_scenario.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/line_admin_webhook.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/line_client.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
 | `supabase/functions/_shared/line_display_names.ts` | SAL-01 / OPS-02 / OPS-04 / ADM-01 / DEV-02 |
