@@ -5,7 +5,7 @@
 - KGI・KPI・KFIを全分析の必須骨格から外し、質問の目的に合う分析角度を選ぶ規則へ変更。改善策を書くときだけ目標・行動の対応を付ける。
 - 売上構成のABCと人気×採算の分類を分離。前者は原価不要。後者だけ原価不足で停止する。導入相談は既存商品の実績・時間帯・併売を先に見る。
 - 品質評価も観察回答へKPI節を要求しない。日次/期間キャッシュv23。保存済み回答は変わらないため再質問/再分析が必要。数値創作禁止と明示試算の境界は維持。
-- 正本: `docs/BUSINESS-GOAL-METRICS.md`。回帰は goal_metrics / foodcourt_kpi / Journal統合。配備結果は対応PR/Actions。
+- 正本: `docs/BUSINESS-GOAL-METRICS.md`。回帰は goal_metrics / foodcourt_kpi / Journal統合。本番: `972f516`、Pages `35514156846`、Edge `35514156878`、`admin-api v1212` / `ai-analyze v292`。未認証POSTは401。
 
 ### 2026-09-20 - フードコート全期間Q&Aとジャーナル明細を接続
 
