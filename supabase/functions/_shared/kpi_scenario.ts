@@ -1041,6 +1041,7 @@ export function buildKpiScenarioReference(pack: KpiScenarioPack) {
       KPI_ASSUMPTION_LABELS[key]
     ),
     baseline_source: pack.baseline.sourceNote,
+    goal_metrics: { kgi: "施策商品の売上見込み（目標候補）", kpi: "販売個数・セット率・テイクアウト比率", kfi: "店頭案内・セット提案などの現場行動（未計測）", financial_checks: "粗利率・貢献利益・損益分岐個数" },
     note:
       "数値の正本は system 側の【数値提案（KPI試算）】ブロックです。そこにある値をラベル付きでそのまま引用し、ここから再計算しないでください。",
   };
@@ -1094,6 +1095,12 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
   for (const s of pack.scenarios) {
     lines.push("");
     lines.push(`■ ${s.scenarioLabel}シナリオ`);
+    lines.push("  KGI・KPI・KFIの対応（数値は以下の確定値を引用）");
+    lines.push(`    - KGI候補: 商品の月間売上見込み ${show(s.monthlyRevenueYen)}。未合意の目標候補であり、店舗の純増売上・最終利益ではない。`);
+    lines.push(`    - KPI: 通常日の販売目標 ${show(s.normalDayOutlook.targetUnits)} / セット率 ${show(s.kpiTargets.setRatePct)} / テイクアウト比率 ${show(s.kpiTargets.takeoutRatePct)}。営業区分別・時間帯別目標は下記。`);
+    lines.push("    - KFI候補（現場行動）: 店頭案内・セット提案の実施。実施件数・提案率は未計測、数値目標は未設定。担当候補=販売担当、実施時=商品案内時、記録=案内/提案件数と購入/セット成立件数を同じ時間帯で記録。計算済み販売目標を行動実績へ読み替えない。");
+    lines.push(`    - 採算確認（KFIとは別）: 加重粗利率 ${show(s.blendedGrossMarginPct)} / 1個あたり貢献利益 ${show(s.contributionPerSoldUnitYen)} / 損益分岐 ${show(s.breakEvenUnitsPerDay)}。最終利益は未算出。`);
+    lines.push(`    - 関係・判断: 店頭案内・セット提案（KFI）→販売数・セット率（KPI）→商品売上（KGI候補）の仮説を検証する。採算確認では通常日の販売目標は損益分岐${s.normalDayOutlook.coversBreakEven ? "に届く" : "に届かない"}。${s.breakEvenAchievable ? "焼成上限内で損益分岐に到達可能な試算だが、実現・利益を保証しない。" : "焼成上限内では損益分岐に到達しないため、価格・原価・生産条件を見直す。"}廃棄・縮小条件も下記と照合する。`);
     lines.push("  A-1 価格設定案と粗利率");
     for (const p of s.prices) {
       lines.push(

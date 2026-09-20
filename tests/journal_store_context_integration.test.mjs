@@ -7,6 +7,7 @@ import { attachJournalStoreContext, loadJournalStoreContext, JOURNAL_STORE_CONTE
 import { buildTrustedAiSalesData, resolveAiSalesPeriods, UNIFIED_SALES_AI_POLICY } from '../supabase/functions/_shared/sales_reconciliation_ai.ts';
 import { sanitizeJournalAiPayload } from '../supabase/functions/_shared/journal_ai_privacy.ts';
 import * as kpiScenario from '../supabase/functions/_shared/kpi_scenario.ts';
+import { BUSINESS_GOAL_METRICS_POLICY } from '../supabase/functions/_shared/business_goal_metrics.ts';
 const read = p => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const source = stripTypeScriptTypes(read('supabase/functions/ai-analyze/index.ts').replace(/^import\s[\s\S]*?;\s*$/gm, ''));
 const profile = { notes: '予約者: 架空太郎\n090-1234-5678\nfixture@example.invalid', closedWeekdays: ['月'],
@@ -30,7 +31,7 @@ function runtime(options = {}) {
     authenticateAdminDashboardSessionToken:async()=>{calls.push(['auth']);return {ok:options.auth!==false,storeScope:options.admin?null:'fixture_store',scopeKind:options.admin?null:'chat_journal_ai',metadata:{}};},
     validateChatScopedSessionAccess:async(_db,_meta,flags)=>{calls.push(['member',flags]);return options.member!==false;},
     STORE_LOCATION_PROFILES:{fixture_store:{}},buildStoreLocationPromptBlock:()=> 'synthetic location',
-    loadJournalStoreContext,attachJournalStoreContext,JOURNAL_STORE_CONTEXT_POLICY,...kpiScenario,
+    loadJournalStoreContext,attachJournalStoreContext,JOURNAL_STORE_CONTEXT_POLICY,...kpiScenario,BUSINESS_GOAL_METRICS_POLICY,
     buildTrustedAiSalesData,resolveAiSalesPeriods,UNIFIED_SALES_AI_POLICY,sanitizeJournalAiPayload,
     fetchUnifiedSalesSummary:async(_db,store,from,to)=>{calls.push(['sales']);return {store_key:store,from,to,series:[],monthly_fallbacks:[],totals:{},reconciliation:{}};},
     normalizeJournalChatIntent:()=>options.strategy?'strategy':'data',
@@ -64,6 +65,9 @@ test('M-talk and standalone Journal synthesize the same freshly loaded, sanitize
     assert.match(result.body.note,/共有店舗情報: 確認済み/);
     assert.equal(result.body.store_context.profile,undefined);
     const prompt=JSON.stringify(app.outputs[0]);sent.push(prompt);
+    assert.match(prompt,/KFI＝現場で実行・管理する行動指標/);
+    assert.match(prompt,/KGIの目標との差→要因KPI→改善するKFI/);
+    assert.match(prompt,/採算は未判定/);
     assert.match(prompt,/対象施策/);assert.doesNotMatch(prompt,/期間外施策|forged-client-store|not-approved|架空太郎|090-1234-5678|fixture@example.invalid|99999/);
     assert.match(prompt,/estimated_from_shared_rates/);assert.match(prompt,/予約客A/);
     assert.deepEqual(app.calls.filter(c=>c[0]==='store'),[['store','fixture_store']]);
@@ -87,6 +91,8 @@ test('real handler only computes KPI scenarios with both the flag and an explici
       ['先月の廃棄率の実績は？',true,false],
       ['昨年のKPIを数字で教えて',true,false],
       ['KPIとは？',true,false],
+      ['KGI・KPI・KFIの関係を分析に入れて',true,false],
+      ['KFIの実績を教えて',true,false],
       ['KPIの目標を試算してください',false,false],
       ['KPIの目標を試算してください',true,true],
     ]) {

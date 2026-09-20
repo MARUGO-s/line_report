@@ -19,6 +19,7 @@ import {
   validateChatScopedSessionAccess,
 } from "../_shared/admin_dashboard_link_auth.ts";
 import { sanitizeJournalAiPayload } from "../_shared/journal_ai_privacy.ts";
+import { BUSINESS_GOAL_METRICS_POLICY } from "../_shared/business_goal_metrics.ts";
 import {
   buildStoreLocationPromptBlock,
   STORE_LOCATION_PROFILES,
@@ -646,7 +647,7 @@ function buildJournalAiServerPolicy(
   const kpiPolicy = kpiBlock
     ? `\n\n${KPI_SCENARIO_AI_POLICY_HEAD}\n\n${kpiBlock}`
     : "";
-  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}${integrationPolicy}\n\n${UNIFIED_SALES_AI_POLICY}\n\n${JOURNAL_STORE_CONTEXT_POLICY}${kpiPolicy}`;
+  return `${base}\n\n${locationBlock}\n\n${buildReservationImportCoveragePolicy(storeKey)}\n\n${JOURNAL_AI_SERVER_TRUST_POLICY}${integrationPolicy}\n\n${UNIFIED_SALES_AI_POLICY}\n\n${JOURNAL_STORE_CONTEXT_POLICY}\n\n${BUSINESS_GOAL_METRICS_POLICY}${kpiPolicy}`;
 }
 
 /**

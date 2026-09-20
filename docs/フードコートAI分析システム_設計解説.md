@@ -1,5 +1,7 @@
 # フードコート AI 分析システム 設計解説
 
+> 2026-09-20: Q&A・日次・期間・週次で [KGI/KPI/KFIの成果・要因・現場行動モデル](./BUSINESS-GOAL-METRICS.md) を使用。共通規則は `_shared/business_goal_metrics.ts`。財務は別枠、数値創作禁止・固定見出しを維持。日次/期間キャッシュv21。
+
 > 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
 
 > 数値予測の更新: 2026-09-10、本番反映済み。現行の詳細正本は [FOODCOURT-FORECAST-AUDIT.md](./FOODCOURT-FORECAST-AUDIT.md)。AI回答・RAGの品質設定とは別の評価系統です。数値予測以外のモデル名・運用設定・件数は各節の確認日時点の記録で、今回の再監査対象ではありません。

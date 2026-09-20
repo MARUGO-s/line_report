@@ -4,6 +4,8 @@ Journal Report（`public/jnm/jnl2txt.html` / `index.html`）の AI チャット�
 
 関連:
 
+- [KGI・KPI・KFIの分析モデル](./BUSINESS-GOAL-METRICS.md): KFIは現場行動指標。成果→要因→行動を分析・回答へ含め、財務は別途確認。数値利用の制約は維持する。
+
 - Cursor ルール（実装時の不変条件）: [`.cursor/rules/ai-enrichment-additive.mdc`](../.cursor/rules/ai-enrichment-additive.mdc)
 - 店舗ナレッジ（資料タブ）: [JOURNAL-STORE-KNOWLEDGE.md](./JOURNAL-STORE-KNOWLEDGE.md)
 - 障害・修正ログ: [店舗運用修正記録.md](./店舗運用修正記録.md)

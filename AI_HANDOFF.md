@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 KGI/KPI/KFIの分析モデル
+
+- KFIは利用者指定により現場行動。財務指標へ変更しない。定義・数値境界・出力は `business_goal_metrics.ts` と `docs/BUSINESS-GOAL-METRICS.md` を正本にする。指標名だけで試算起動しない。
+- 共通ルールはFC統合/品質評価、Journalサーバー固定規則へ接続。固定7/5見出しは増やさず、試算器の計算式・既定値・認可/入力取得は変更しない。日次/期間v21、保存済みQ&A/週次/Journal履歴は自動変更しない。
+- 回帰は `foodcourt_goal_metrics` / `foodcourt_kpi` / `kpi_scenario` / `journal_store_context_integration`。外部AIモックであり、実AI回答品質の検証と混同しない。
+
 ## 2026-09-20 Q&Aの入力参照と試算許可の分離
 
 - `buildFoodCourtKpiInputs` は今回入力を試算の有無によらず統合AI・評価・数値監査へ渡す。これを `isKpiScenarioRequest` の早期returnの後ろへ戻さない。入力は仮定であって実績ではない。

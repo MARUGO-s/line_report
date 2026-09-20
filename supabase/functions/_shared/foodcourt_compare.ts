@@ -4,6 +4,7 @@
 //   通常のレシート処理へフォールスルー（誤検知が売上に影響しない）。
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import { FOODCOURT_KPI_POLICY, type FoodCourtKpiContext, type FoodCourtKpiInputs } from './foodcourt_kpi.ts'
+import { BUSINESS_GOAL_METRICS_POLICY } from './business_goal_metrics.ts'
 import { FOODCOURT_DASHBOARD_SCOPE, issueAdminDashboardLoginLinkToken } from './admin_dashboard_link_auth.ts'
 import { fetchReceiptDailyAggForRange } from './admin_receipt_sales.ts'
 import {
@@ -48,7 +49,8 @@ const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-07-23: 数値監査(未根拠係数の不合格化)＋施策の固定フォーマットを導入したため v17 に上げ、旧キャッシュを再生成させる。
 // 2026-08-18: 規模帯・最大動員の数値は実測/手入力のみ。会場収容の推定はラベル専用にしたため v18。
 // 2026-09-20: 数値の出所制限＋通常営業日ベースラインの必須化で v20。旧キャッシュを再生成させる。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v20-scenario-kpi'
+// 2026-09-20: KGI/KPI/KFIによる成果・中間指標・現場行動の判断と出力を共通化。
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v21-goal-metrics'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
 // 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
@@ -57,12 +59,12 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '価格・客数・増加率などの数値は、提供データにある実績値・現場が決めた目標や判定ライン・コード側で事前計算された参考値だけを引用する。' +
   'AIが前提・係数・目標数値・施策効果の試算値を新たに作ることは禁止。専門AIメモの数値も提供データで裏付けできなければ採用しない。' +
   '未設定の判定ラインは測定方法と設定に必要な情報を述べ、未計測とする。KPI試算は明示的な依頼でサーバーの確定計算ブロックがある場合だけ引用できる。' +
-  '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。'
+  '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。' + '\n' + BUSINESS_GOAL_METRICS_POLICY
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v20-scenario-kpi'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v21-goal-metrics'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
-// 現行では通常版・loop版とも v20 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
+// 現行では通常版・loop版とも v21 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
   return (fcEnvFlag('FOODCOURT_LOOP_ENABLED', false) && fcEnvFlag('FOODCOURT_LOOP_APPLY_TO_DAILY', false))
     ? FOODCOURT_DAILY_ANALYSIS_AI_VERSION
@@ -1470,12 +1472,14 @@ async function evaluateFoodCourtAnswer(params: {
     'あなたはフードコート売上分析AIの品質評価者です。以下の実データ・分析メモ・最終回答を比較し、100点満点で採点してください。',
     'あなた自身は回答を書き直さない。採点と改善点のみを返す。',
     '評価軸: 1.正確性 2.論理性 3.専門性 4.実用性 5.根拠',
+    BUSINESS_GOAL_METRICS_POLICY,
     ...foodCourtEvaluationScoreAnchors(),
     '禁止（見つけたら improvement_points/risk_flags に指摘として書く）:',
     '- データに無い数字を正しいものとして扱っている',
     '- 相関を因果と断定している',
     '- 売上日とレポート発行日を混同している',
     '- 抽象的な打ち手だけで終えている（KPIに落とし込めていない）',
+    '- KGI（成果）・KPI（中間指標）・KFI（現場行動）の対応や関係、行動の記録方法がない、または未計測の行動・採算を断定している。単純照会は簡潔な対応でよい。',
     ...foodCourtEvaluationSurfaceRules(params.surface),
     // 出力が長いとトークン上限でJSONが途中で切れて採点不能になる。件数・文字数を厳しく制限して短いJSONに収めさせる。
     '【出力長の厳守】improvement_points は最重要のものだけ最大3件・各60字以内。risk_flags は最大2件・各40字以内。factuality_notes は最大2件・各40字以内。それ以上書かない。',
