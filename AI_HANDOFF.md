@@ -1,5 +1,12 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 フードコートQ&Aの全期間・商品明細連携
+
+- `/foodcourt/ask` は認可後、`foodcourt_sales_context.ts` で全保存範囲を解決しJournalと共通の `fetchUnifiedSalesSummary` を取得。KPIも同じ範囲・キャッシュを使用し、比較表の日数だけに戻さない。
+- `foodcourt_journal_detail.ts` はPOSと共有Journalの既存マージ/日計照合を利用し、商品・時間帯・併売をサーバー集計。原本伝票番号やテーブル番号はAIへ渡さない。時間帯は会計時刻で、注文/来店時刻とは異なる。
+- 他店比較と自店売上は別の出典/税区分。欠測・除外・商品抜粋を明示。通常相談は数値を仮置きせず、明示KPI試算のみ観測会計分布による時間別配分案を3シナリオで追加。
+- 回帰: `foodcourt_journal_link.test.ts`、実ルート/プロンプト接続テスト。POSのTypeScriptパラメータプロパティを読むためNodeテストは `--experimental-transform-types` を使用。詳細/上限/再質問手順は `docs/FOODCOURT-JOURNAL-LINK.md`。DB・認可変更なし。保存済み回答は更新しない。
+
 ## 2026-09-20 フードコートQ&AのEnter送信を停止
 
 - `public/foodcourt.html` のQ&A欄を`textarea`へ変更。Enterは改行、日本語入力中はブラウザ標準の変換確定として動作し、Q&A入力の`keydown`では`askQuestion()`を呼ばない。

@@ -1,4 +1,6 @@
 import { fetchUnifiedSalesSummary, validSalesDate } from '../_shared/sales_reconciliation.ts'
+import { discoverFoodCourtSalesRange, buildFoodCourtSalesContext, type FoodCourtSalesContext } from '../_shared/foodcourt_sales_context.ts'
+import { buildFoodCourtJournalDetail } from '../_shared/foodcourt_journal_detail.ts'
 import { buildFoodCourtKpiInputs, prepareFoodCourtKpiScenario, type FoodCourtKpiContext } from '../_shared/foodcourt_kpi.ts'
 import { isKpiScenarioRequest } from '../_shared/kpi_scenario.ts'
 import { loadJournalStoreContext } from '../_shared/journal_store_context.ts'
@@ -2964,7 +2966,36 @@ Deno.serve(async (req, info) => {
         )
         : null
       const currentKpiInputs = isJournalDeep ? null : buildFoodCourtKpiInputs(body.kpi_assumptions)
-      if (!reports.length && (isJournalDeep || (!isKpiScenarioRequest(rawQuestion) && !currentKpiInputs))) {
+      let salesContext: FoodCourtSalesContext | null = null
+      let salesRanges = requestedRanges
+      const salesCache = new Map<string, ReturnType<typeof fetchUnifiedSalesSummary>>()
+      const loadQaSales = (store: string, from: string, to: string) => {
+        const key = `${store.toLowerCase()}:${from}:${to}`
+        if (!salesCache.has(key)) salesCache.set(key, fetchUnifiedSalesSummary(supabase, store, from, to))
+        return salesCache.get(key)!
+      }
+      if (!isJournalDeep) {
+        try {
+          const store = normalizePosJournalStoreKey(storeKey)
+          salesRanges = requestedRanges.length ? requestedRanges : await discoverFoodCourtSalesRange(supabase, store, reports.map(fcSalesDate).filter(Boolean))
+          salesContext = await buildFoodCourtSalesContext(store, salesRanges, loadQaSales)
+          salesContext.journalDetail = await buildFoodCourtJournalDetail(salesRanges, rawQuestion, async month => {
+            const rows = await fetchPosJournalRows(supabase, store, month)
+            const primary = rows.map(row => ({ ...(isRecord(row.parsed_data) ? row.parsed_data : {}),
+              business_date: String(row.business_date), gross_sales: isRecord(row.parsed_data) ? row.parsed_data.gross_sales ?? row.gross_sales : row.gross_sales, groups: row.groups,
+              receipts: isRecord(row.parsed_data) && Array.isArray(row.parsed_data.receipts) ? row.parsed_data.receipts : [],
+              source: 'pos_journal_files',
+            }) as PosJournalDay)
+            const shared = await fetchSharedJournalReportState(supabase, store, month)
+            if (shared.error) throw new Error('Shared journal details unavailable')
+            return mergePosJournalDaysPreferPrimary(primary, shared.days)
+          })
+          salesContext.hasData ||= salesContext.journalDetail.coverage.verified_days > 0
+        } catch {
+          return json({ error: "ジャーナル連携の売上・商品明細・対象期間を取得できませんでした。時間をおいて再試行してください。", code: "foodcourt_sales_unavailable" }, 503)
+        }
+      }
+      if (!reports.length && (isJournalDeep || (!salesContext?.hasData && !isKpiScenarioRequest(rawQuestion) && !currentKpiInputs))) {
         if (isJournalDeep) {
           return json({
             error: "指定期間のフードコート比較データがありません。",
@@ -2973,7 +3004,7 @@ Deno.serve(async (req, info) => {
             coverage: { ...journalCoverage, report_count: 0 },
           }, 422)
         }
-        return json({ answer: hasQaPeriod ? "指定期間のフードコート比較データがありません。期間を変更するか、該当するテナント一覧画像を登録してください。" : "まだデータがありません。フードコートのテナント一覧画像を送ると蓄積されます。", reportCount: 0 }, 200)
+        return json({ answer: "指定期間の自店売上・フードコート比較データがありません。期間やジャーナル登録・売上同期状況を確認してください。", reportCount: 0, sales_coverage: salesContext?.coverage ?? null }, 200)
       }
       // Only this authorized Q&A route may load KPI inputs. Journal deep analysis keeps its own final-stage calculation.
       let kpiContext: FoodCourtKpiContext | null = null
@@ -2983,11 +3014,12 @@ Deno.serve(async (req, info) => {
             question: rawQuestion,
             authorizedStore: normalizePosJournalStoreKey(storeKey),
             salesDates: (hasQaPeriod ? reports : reports.slice(0, 45)).map(report => fcSalesDate(report)).filter(Boolean),
-            salesRanges: hasQaPeriod ? requestedRanges : undefined,
+            salesRanges,
+            journalDetail: salesContext?.journalDetail,
             assumptions: body.kpi_assumptions,
           }, {
             loadProfile: store => loadJournalStoreContext(supabase, store, {}),
-            loadSales: (store, from, to) => fetchUnifiedSalesSummary(supabase, store, from, to),
+            loadSales: loadQaSales,
           })
         } catch {
           return json({ error: "KPI試算の店舗前提・統一売上を取得できませんでした。時間をおいて再試行してください。", code: "foodcourt_kpi_inputs_unavailable" }, 503)
@@ -3048,6 +3080,8 @@ Deno.serve(async (req, info) => {
         requested_ranges: requestedRanges,
         label: requestedRanges.length ? requestedRanges.map(r => r.from+'〜'+r.to).join(' / ') : '保存済み全期間',
         report_count: reports.length,
+        resolved_sales_ranges: salesRanges,
+        sales_coverage: salesContext?.coverage ?? null,
         prompt_detail_days: Math.min(reports.length, 45),
         truncated: fetchedReports.length >= 500,
       } : null
@@ -3073,6 +3107,7 @@ Deno.serve(async (req, info) => {
           qaPeriodBlock,
           hasQaPeriod ? requestedRanges : [],
           usedKpiInputs,
+          salesContext,
         )
         if (isJournalDeep && !String(qaResult.answer ?? "").trim()) {
           return json({
@@ -3084,6 +3119,11 @@ Deno.serve(async (req, info) => {
         let answer = qaResult.answer || "回答を生成できませんでした。もう一度お試しください。"
         if (usedKpiInputs) answer += `\n\n今回、分析へ渡した前提\n${usedKpiInputs.summary}\n${kpiContext ? '上記の入力前提と不足項目の仮置きから3シナリオをコードで計算しました。' : '入力前提として参照しています。数値試算は実行していません。'}`
         if (qaPeriod) answer += `\n\n対象期間: ${qaPeriod.label}（比較レポート${reports.length}日${qaPeriod.truncated ? '・取得上限のため一部のみ' : ''}）`
+        if (salesContext) {
+          const dates = reports.map(fcSalesDate).filter(Boolean).sort()
+          answer += `\n\n参照したデータ\n${salesContext.summary}\n他店比較（税抜テナント比較表）: ${dates.length ? dates[0]+'〜'+dates.at(-1) : '記録なし'}・${reports.length}日。両資料は合算せず、記録のない日は未確認として扱います。`
+          if (salesContext.journalDetail) answer += '\n' + salesContext.journalDetail.summary
+        }
         // 日報テーブル読込失敗時は回答末尾に注意を付与（AIは「日報なし」と誤認するため）。
         if (dailyLogsError) {
           answer += isJournalDeep
@@ -3139,6 +3179,8 @@ Deno.serve(async (req, info) => {
               kpi_scenarios: kpiContext?.reference ?? null,
               kpi_inputs: usedKpiInputs?.reference ?? null,
               period: qaPeriod,
+              sales_coverage: salesContext?.coverage ?? null,
+              journal_detail_coverage: salesContext?.journalDetail?.coverage ?? null,
             },
           })
           .select("id, created_at")
@@ -3153,6 +3195,8 @@ Deno.serve(async (req, info) => {
           kpi_scenarios: kpiContext?.reference ?? null,
           kpi_inputs: usedKpiInputs?.reference ?? null,
           period: qaPeriod,
+          sales_coverage: salesContext?.coverage ?? null,
+          journal_detail_coverage: salesContext?.journalDetail?.coverage ?? null,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,
           loop_count: qaResult.loopCount,
@@ -11966,7 +12010,7 @@ function posJournalFileRow(value: unknown): Record<string, unknown> | null {
 }
 
 async function fetchPosJournalRows(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof createClient<any>>,
   storeKey: string,
   month: string,
 ): Promise<Record<string, unknown>[]> {
@@ -12024,7 +12068,7 @@ function savedReportCandidateMatchesMonth(
  * 不完全な再取込より総売上・伝票数が大きい候補を優先する。
  */
 async function fetchSharedJournalReportState(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof createClient<any>>,
   storeKey: string,
   month: string,
 ): Promise<SharedJournalReportState> {

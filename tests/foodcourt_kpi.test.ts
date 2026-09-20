@@ -8,6 +8,8 @@ import * as reliability from '../supabase/functions/_shared/foodcourt_ai_reliabi
 import * as loop from '../supabase/functions/_shared/foodcourt_loop_utils.ts'
 import * as groq from '../supabase/functions/_shared/groq_model.ts'
 import { BUSINESS_GOAL_METRICS_POLICY } from '../supabase/functions/_shared/business_goal_metrics.ts'
+import {FOODCOURT_SALES_POLICY,buildFoodCourtSalesContext} from '../supabase/functions/_shared/foodcourt_sales_context.ts'
+import {buildFoodCourtJournalDetail} from '../supabase/functions/_shared/foodcourt_journal_detail.ts'
 
 const input = {question:'新商品のKPIを試算してください',authorizedStore:'fixture_store',salesDates:['2026-06-01','2026-06-02']}
 const stored = {unitPriceYen:420,unitCostYen:126,bakeBatchUnits:20,bakeBatchesPerDay:3,prepStaffCount:1,wasteRateTolerancePct:8}
@@ -71,10 +73,10 @@ test('input errors, store/period mismatch and timeout stop calculation instead o
 test('real Q&A integrator, evaluator and numeric auditor receive inputs even without trial consent',async()=>{
   const source=readFileSync(new URL('../supabase/functions/_shared/foodcourt_compare.ts',import.meta.url),'utf8')
   const executable=stripTypeScriptTypes(source.replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*$/gm,'').replace(/^export /gm,''))
-  for(const mode of ['ordinary','inputs','kpi','empty']) {
+  for(const mode of ['ordinary','inputs','kpi','empty','journal']) {
     const enabled=mode==='kpi'||mode==='empty'
     const requests: any[]=[];let loopArgs: any
-    const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,BUSINESS_GOAL_METRICS_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,
+    const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,FOODCOURT_SALES_POLICY,BUSINESS_GOAL_METRICS_POLICY,console,URL,URLSearchParams,setTimeout,clearTimeout,
       Deno:{env:{get:()=>''}},classifyJournalChatIntent:()=> 'data',
       captureChat:async(messages:any[],_key:string,_model:string,tokens:number)=>{requests.push({messages,tokens});return {content:'synthetic answer',usage:null}},
       captureLoop:async(args:any)=>{loopArgs=args;const result=await args.initialGenerate();return {answer:result.content,usages:[],loopScore:null,loopCount:1}},
@@ -84,10 +86,23 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
     const kpi=enabled?await prepareFoodCourtKpiScenario(input,loaders()):null
     const inputs=mode==='inputs'?buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:123}):null
     const reports=mode==='empty'?[]:Array.from({length:60},(_,i)=>({report_date:new Date(Date.parse('2026-06-02')+i*86400000).toISOString().slice(0,10),tenants:[{name:'MARUGO S',sales:10000,guests:10},{name:'Other',sales:5000,guests:5}]})).reverse()
-    await ctx.answerFoodCourtQuestion(reports,'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}],inputs)
+    let salesContext=null
+    if(mode==='journal') {
+      const range=[{from:'2025-12-09',to:'2026-08-25'}]
+      salesContext=await buildFoodCourtSalesContext('fixture_store',range,loaders().loadSales)
+      salesContext.journalDetail=await buildFoodCourtJournalDetail(range,'クロワッサン',async month=>month==='2025-12'?[{business_date:'2025-12-09',gross_sales:833,receipts:[{total:833,time:'11:30',items:[{code:'1001',name:'クロワッサン',qty:1,unit:833,amount:833}]}]}]:[])
+    }
+    await ctx.answerFoodCourtQuestion(reports,'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}],inputs,salesContext)
     assert.equal(requests.length,5)
     assert.equal(requests.slice(0,4).some(r=>JSON.stringify(r).includes('コード側で確定計算済み')),false)
     const final=JSON.stringify(requests.at(-1))
+    if(salesContext) {
+      for(const r of requests) {assert.match(JSON.stringify(r),/2025-12-09/);assert.match(JSON.stringify(r),/クロワッサン/);assert.match(JSON.stringify(r),/hourly_quantity/)}
+      assert.match(loopArgs.numberAuditFacts,/クロワッサン/)
+      const compact=loop.compactFoodCourtEvaluationContext(loopArgs.evaluationContext+'long'.repeat(10000),14000,loopArgs.evaluationProtectedPrefixLength)
+      assert.match(compact,/2025-12-09/);assert.match(compact,/クロワッサン/);assert.match(compact,/hourly_quantity/)
+      assert.doesNotMatch(final,/以下の売上・客数は「テナント一覧/)
+    }
     for (const prompt of [final]) {
       assert.match(prompt,/KGI・KPI・KFI/)
       assert.match(prompt,/KFI＝現場で実行・管理する行動指標/)
