@@ -16,6 +16,22 @@
 export type KpiBasis = "actual" | "input" | "scenario";
 export type KpiScenarioName = "conservative" | "standard" | "aggressive";
 
+/** 指標名だけでは許可しない。ブラウザーの wantsKpiTargets と同じ保守的な判定。 */
+export function isKpiScenarioRequest(query: unknown): boolean {
+  const q = String(query || '').normalize('NFKC').toLowerCase();
+  if (!q || /(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/.test(q)) return false;
+  const metric = /kpi|損益分岐|粗利|原価率|販売|売上|撤退|縮小|単価|価格|値付け|セット率|廃棄率|テイクアウト比率|新商品|導入|採算/;
+  const simulation = /試算(?:して|する|を|したい|してください|しよう)|シミュレーション(?:して|する|を|したい)|シナリオ(?:を|で)|(?:試算|シミュレーション)$|試算してほしい/;
+  if (metric.test(q) && simulation.test(q)) return true;
+  // 実績照会・定義の説明は、明示的な試算依頼と区別する。
+  if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
+  const plan = /目標|狙う|決めたい|設定(?:したい|して|する)|提案|値付け|単価設定|価格設定/;
+  const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
+  return (metric.test(q) && plan.test(q)) ||
+    (/損益分岐/.test(q) && /教えて|計算|何個|何円/.test(q)) ||
+    (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q));
+}
+
 export type KpiNumber = {
   value: number;
   unit: string;

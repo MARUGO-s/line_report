@@ -2394,7 +2394,7 @@
 
   <div class="card" style="margin-top:14px;">
     <div class="card-kicker">新商品・KPI試算の前提条件（数値提案用）</div>
-    <p class="kn-note" style="margin-top:0;">「目標KPIを具体的な数字で」と聞いたときに、粗利率・損益分岐個数・目標販売個数・売上期待値をコード側で計算するための前提です。<strong>実績ではなく仮定</strong>として扱われ、AIの回答では必ず「仮定(入力)」と表示されます。空欄の項目は保守・標準・強気の3シナリオで仮置きされます。</p>
+    <p class="kn-note" style="margin-top:0;">「目標KPIを具体的な数字で」と聞いたときに、粗利率・損益分岐個数・目標販売個数・売上期待値をコード側で計算するための前提です。<strong>実績ではなく仮定</strong>として扱われ、AIの回答では必ず「仮定(入力)」と表示されます。空欄の項目は保守・標準・強気の3シナリオで仮置きされます。実績の質問や用語の説明では試算しません。</p>
     <div class="kn-form">
       <label class="kn-field kn-narrow">想定売価・単品（円）
         <input id="opsKpiUnitPrice" type="number" min="1" max="100000" step="1" placeholder="例: 420">
@@ -17323,12 +17323,17 @@ function resolveWineMetricClarificationReply(query, chatHistory) {
  */
 function wantsKpiTargets(query) {
   const q = String(query || '').normalize('NFKC').toLowerCase();
-  if (!q) return false;
-  const explicit = /kpi|損益分岐|粗利|原価率|目標販売|販売目標|目標個数|売上(?:の)?期待値|撤退(?:ライン|基準)|縮小(?:ライン|基準)|単価設定|価格設定|値付け|セット率|廃棄率|テイクアウト比率/;
-  if (explicit.test(q)) return true;
-  const numericAsk = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに/;
-  const planAsk = /目標|導入|新商品|試算|シミュレーション|採算|投資|回収/;
-  return numericAsk.test(q) && planAsk.test(q);
+  if (!q || /(?:試算|推測|推定|シミュレーション)(?:は|を)?(?:不要|しない|なし|やめ)|実績(?:だけ|のみ)/.test(q)) return false;
+  const metric = /kpi|損益分岐|粗利|原価率|販売|売上|撤退|縮小|単価|価格|値付け|セット率|廃棄率|テイクアウト比率|新商品|導入|採算/;
+  const simulation = /試算(?:して|する|を|したい|してください|しよう)|シミュレーション(?:して|する|を|したい)|シナリオ(?:を|で)|(?:試算|シミュレーション)$|試算してほしい/;
+  if (metric.test(q) && simulation.test(q)) return true;
+  // サーバーの isKpiScenarioRequest と同じ判定。実績・用語説明では試算しない。
+  if (/実績|推移|先月|昨年|去年|過去|実際|とは|意味|定義/.test(q)) return false;
+  const plan = /目標|狙う|決めたい|設定(?:したい|して|する)|提案|値付け|単価設定|価格設定/;
+  const numeric = /具体的な数字|数字で|数値で|定量|何個|いくつ売れ|何円に|いくらに|どれくらい/;
+  return (metric.test(q) && plan.test(q)) ||
+    (/損益分岐/.test(q) && /教えて|計算|何個|何円/.test(q)) ||
+    (numeric.test(q) && /kpi|導入|新商品|採算|投資|回収/.test(q));
 }
 
 /** 質問文から試算対象の商品名を拾う。取れなければ汎用名にする（推測で商品名を作らない）。 */

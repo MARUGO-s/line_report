@@ -32,6 +32,7 @@ import {
   buildKpiScenarioReference,
   deriveKpiBaselineFromUnifiedSales,
   formatKpiScenarioBlock,
+  isKpiScenarioRequest,
   KPI_ASSUMPTION_LABELS,
   type KpiAssumptionValues,
   missingRequiredKpiAssumptions,
@@ -671,12 +672,13 @@ function buildKpiScenarioContext(
   kpiRequest: unknown,
   storedAssumptions: unknown,
   unifiedSales: unknown,
+  query: unknown,
 ): {
   reference: ReturnType<typeof buildKpiScenarioReference>;
   block: string;
 } | null {
   const request = isRecord(kpiRequest) ? kpiRequest : null;
-  if (!request || request.requested !== true) return null;
+  if (!request || request.requested !== true || !isKpiScenarioRequest(query)) return null;
   const assumptions = resolveKpiAssumptionValues(request, storedAssumptions);
   const pack = buildKpiScenarioPack({
     assumptions,
@@ -1894,6 +1896,7 @@ Deno.serve(async (req: Request, info) => {
       kpiRequest,
       storeContext.profile?.kpiAssumptions ?? null,
       (enrichedSales as { unified_sales?: unknown }).unified_sales,
+      safeMessage,
     );
     kpiScenarioBlock = kpiContext?.block ?? "";
     if (kpiContext) {

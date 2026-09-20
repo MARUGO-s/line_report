@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { isKpiScenarioRequest } from '../supabase/functions/_shared/kpi_scenario.ts';
 
 const htmlPath = new URL('../public/jnm/jnl2txt.html', import.meta.url);
 const historyPath = new URL('../public/jnm/ai-chat-pdf-history.html', import.meta.url);
@@ -3035,6 +3036,31 @@ test('numeric-KPI questions are detected and the product name comes from the que
     '焼き上げクロワッサン',
   );
   assert.equal(context.resolveKpiProductName('KPIを数字で'), '検討中の新商品');
+});
+
+test('browser and server require a planning request, not a metric keyword', () => {
+  for (const [query, expected] of [
+    ['KPIを数字で', true],
+    ['粗利率はどれくらいを狙う？', true],
+    ['撤退ラインを決めたい', true],
+    ['損益分岐の販売個数を教えて', true],
+    ['先月の実績を基に来月のKPIを試算してください', true],
+    ['新商品の売上をシミュレーションして', true],
+    ['先月の廃棄率の実績は？', false],
+    ['昨年のKPIを数字で教えて', false],
+    ['原価率の推移', false],
+    ['粗利率とは？', false],
+    ['KPIとは？', false],
+    ['KPI', false],
+    ['セット率を教えて', false],
+    ['テイクアウト比率は？', false],
+    ['目標KPIの試算は不要、実績だけ', false],
+    ['粗利率の試算の意味を教えて', false],
+    ['', false],
+  ]) {
+    assert.equal(context.wantsKpiTargets(query), expected, `browser: ${query}`);
+    assert.equal(isKpiScenarioRequest(query), expected, `server: ${query}`);
+  }
 });
 
 test('free-text answers become assumptions; bare numbers are ignored', () => {
