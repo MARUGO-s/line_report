@@ -68,6 +68,7 @@ test('KPI asks period then methods, then sell-price and cost before analysis',()
   assert.equal(result.kind,'clarify');
   assert.equal(result.state.pending.kind,'assumptions');
   assert.match(result.message,/想定売価/);
+  assert.match(result.message,/最終目標KGI/);
   assert.ok(result.actions.includes('全部お任せ'));
   assert.ok(result.actions.includes('入力欄に書いて進む'));
   result=planner.nextTurn(result.state,'全部お任せ',options);
@@ -192,6 +193,12 @@ test('entered price and cost skip the extra question; chat numbers are accepted'
   const parsed=planner.parsePriceCostFromText('売価420円、原価126円');
   assert.equal(parsed.unitPriceYen,420);
   assert.equal(parsed.unitCostYen,126);
+  const kgi=planner.parsePriceCostFromText('月商50万円、売価400円');
+  assert.equal(kgi.kgiTargetYen,500000);
+  assert.equal(kgi.kgiHorizon,'month');
+  const daily=planner.parsePriceCostFromText('KGIは1日2000円、原価100円');
+  assert.equal(daily.kgiTargetYen,2000);
+  assert.equal(daily.kgiHorizon,'day');
   let asking=planner.nextTurn(planner.initialState(),'新商品のKPIを試算してください',options);
   asking=planner.nextTurn(asking.state,'全期間',options);
   asking=planner.nextTurn(asking.state,'おすすめ全部で進む',options);

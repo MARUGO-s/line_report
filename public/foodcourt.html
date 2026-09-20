@@ -730,6 +730,8 @@
             <label>1日の焼成回数<input data-kpi-key="bakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3"></label>
             <label>仕込み人員（人）<input data-kpi-key="prepStaffCount" type="number" min="0.5" max="50" step="0.5" placeholder="例: 1"></label>
             <label>廃棄許容率（％）<input data-kpi-key="wasteRateTolerancePct" type="number" min="0" max="100" step="0.1" placeholder="例: 8"></label>
+            <label>最終目標KGI（円）<input data-kpi-key="kgiTargetYen" type="number" min="1" max="100000000" step="1" placeholder="例: 2000"></label>
+            <label>KGIの単位<select data-kpi-key="kgiHorizon"><option value="">未設定</option><option value="day">1日あたり</option><option value="month">月間</option></select></label>
           </div>
           <p class="card-note">試算値は【仮定(入力)】または【仮定(シナリオ)】を付け、3シナリオを実績と分けて表示します。自由文中の金額はこの入力欄へ反映してください。</p>
         </details>
@@ -899,7 +901,7 @@
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
-<script src="foodcourt-qa-planner.js?v=20260921-price-ask"></script>
+<script src="foodcourt-qa-planner.js?v=20260921-kgi-ask"></script>
 <script>
 'use strict';
 (function(){
@@ -2826,7 +2828,9 @@
   function readQaKpiAssumptions(){
     const values = {};
     document.querySelectorAll('#qaKpiInputs [data-kpi-key]').forEach(input=>{
-      if(input.value.trim() && Number.isFinite(Number(input.value))) values[input.dataset.kpiKey]=Number(input.value);
+      const key=input.dataset.kpiKey;
+      if(key==='kgiHorizon'){ if(input.value==='day'||input.value==='month') values.kgiHorizon=input.value; return; }
+      if(input.value.trim() && Number.isFinite(Number(input.value))) values[key]=Number(input.value);
     });
     return values;
   }
@@ -2894,7 +2898,7 @@
   function clearQa(){
     if(dom.qBtn.disabled) return;
     qaHistory=[]; qaContextHistory=[]; qaPlanState=qaPlanner.initialState();
-    document.querySelectorAll('#qaKpiInputs input').forEach(input=>{input.value='';});
+    document.querySelectorAll('#qaKpiInputs [data-kpi-key]').forEach(input=>{input.value='';});
     updateQaPeriodLabel(); renderQaThread(false); dom.qInput.focus();
   }
   $('qaPeriodChange').addEventListener('click',()=>{
@@ -2911,7 +2915,7 @@
     const raw = String(q!=null?q:(dom.qInput.value||'')).trim();
     if (!raw){ dom.qInput.focus(); return; }
     if(raw.length>500){ alert('質問は500文字以内で入力してください。'); return; }
-    const fields=[...document.querySelectorAll('#qaKpiInputs input')];
+    const fields=[...document.querySelectorAll('#qaKpiInputs [data-kpi-key]')];
     const invalid=!/^(キャンセル|取り消し|やめる)$/.test(raw) && fields.find(input=>!input.checkValidity());
     if(invalid){ $('qaKpiInputs').open=true; invalid.reportValidity(); return; }
     const parsedAssumptions = qaPlanner.parsePriceCostFromText ? qaPlanner.parsePriceCostFromText(raw) : {};

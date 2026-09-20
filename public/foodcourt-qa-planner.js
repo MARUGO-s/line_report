@@ -129,6 +129,10 @@
     };
     const unitPrice = grab(/(?:売価|単価|価格|定価|単品)[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/, 1, 100000, true);
     const unitCost = grab(/原価[^0-9]{0,8}([0-9,]+(?:\.[0-9]+)?)\s*円/, 0, 100000, true);
+    const kgiMan = t.match(/(?:KGI|最終目標|月商|目標売上|売上目標)[^0-9]{0,12}([0-9,]+(?:\.[0-9]+)?)\s*万/);
+    const kgiYen = grab(/(?:KGI|最終目標|月商|目標売上|売上目標)[^0-9]{0,12}([0-9,]+)\s*円/, 1, 100000000, true);
+    const dailyGoal = grab(/(?:1|一)\s*日[^0-9]{0,16}([0-9,]+)\s*円/, 1, 100000000, true);
+    const upliftGoal = grab(/上積み[^0-9]{0,8}([0-9,]+)\s*円/, 1, 100000000, true);
     const batchUnits = grab(/(?:1|一)\s*回[^0-9]{0,8}([0-9,]+)\s*(?:個|本|枚)/, 1, 2000, true);
     const batchesPerDay = grab(/(?:1|一)\s*日[^0-9]{0,12}?([0-9,]+)\s*回/, 1, 48, true);
     const staff = grab(/([0-9,]+(?:\.[0-9]+)?)\s*(?:人|名)/, 0.5, 50, false);
@@ -139,6 +143,22 @@
     if (batchesPerDay != null) out.bakeBatchesPerDay = batchesPerDay;
     if (staff != null) out.prepStaffCount = staff;
     if (waste != null) out.wasteRateTolerancePct = waste;
+    if (kgiMan) {
+      const n = Number(String(kgiMan[1]).replace(/,/g, ''));
+      if (Number.isFinite(n) && n > 0) {
+        out.kgiTargetYen = Math.round(n * 10000);
+        out.kgiHorizon = /月商|月/.test(kgiMan[0]) || /月商/.test(t) ? 'month' : 'month';
+      }
+    } else if (kgiYen != null) {
+      out.kgiTargetYen = kgiYen;
+      out.kgiHorizon = /月商|月間|毎月/.test(t) ? 'month' : (/日/.test(t) ? 'day' : null);
+    } else if (dailyGoal != null) {
+      out.kgiTargetYen = dailyGoal;
+      out.kgiHorizon = 'day';
+    } else if (upliftGoal != null) {
+      out.kgiTargetYen = upliftGoal;
+      out.kgiHorizon = 'day';
+    }
     return out;
   }
   function hasPriceAndCost(options) {
@@ -158,7 +178,7 @@
     if (!options?.hasUnitPrice) missing.push('想定売価（その商品1個の店頭価格）');
     if (!options?.hasUnitCost) missing.push('予想原価（1個あたり）');
     const list = missing.length ? missing.map(item => '・'+item).join('\n') : '・想定売価と予想原価';
-    const message = 'この分析には、その商品自体の想定売価と予想原価が必要です。客単価や別商品の単価は使いません。\nまだ足りない項目:\n'+list+'\n下の「新商品・KPIの試算前提」に入力するか、チャットで「売価420円、原価126円」のように書いてください。分からなければ「全部お任せ」で、仮定(シナリオ)として仮置きします。';
+    const message = 'この分析には、その商品自体の想定売価と予想原価が必要です。客単価や別商品の単価は使いません。\nまだ足りない項目:\n'+list+'\nあるとギャップ（KGI−現状）が計算できます:\n・最終目標KGI（期間と金額。例: 1日2000円上積み、月商50万円）\n下の「新商品・KPIの試算前提」に入力するか、チャットで「売価420円、原価126円、KGIは1日2000円」のように書いてください。分からなければ「全部お任せ」で、仮定(シナリオ)として仮置きします。KGIが空なら未設定のまま進め、達成率は作りません。';
     return {state,kind:'clarify',message,choices:[],actions:ASSUMPTION_ACTIONS};
   }
   function normalizeMethodIds(ids) {

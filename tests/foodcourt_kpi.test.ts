@@ -197,6 +197,15 @@ test('follow-up detection treats later questions as about the previous answer un
   assert.equal(ctx.latestFoodCourtAssistantAnswer(history),'客数が伸び、客単価は横ばいです。')
 })
 
+test('KGI input shows the gap against actual daily sales and does not invent a hit rate without a goal',async()=>{
+  const withGoal=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420,unitCostYen:126,kgiTargetYen:200000,kgiHorizon:'day'}},loaders())
+  assert.match(withGoal!.userAppendix,/KGI【仮定\(入力\)】1日/)
+  assert.match(withGoal!.userAppendix,/¥200,000/)
+  assert.match(withGoal!.userAppendix,/ギャップ/)
+  const noGoal=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420}},loaders())
+  assert.match(noGoal!.userAppendix,/KGIは未設定/)
+})
+
 test('journal similar-item unit price is not copied as the new product selling price',async()=>{
   const io=loaders({missing:true})
   const journalDetail=await buildFoodCourtJournalDetail(
@@ -210,6 +219,7 @@ test('journal similar-item unit price is not copied as the new product selling p
   const priceRow=tableRows.find(line=>line.includes('予想売価'))||''
   assert.doesNotMatch(priceRow,/1,076|1076/)
   assert.match(result.userAppendix,/売価・原価は入力または仮定\(シナリオ\)/)
+  assert.match(result.userAppendix,/KGIは未設定/)
 })
 
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{

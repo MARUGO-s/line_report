@@ -24,6 +24,14 @@ export function buildFoodCourtKpiInputs(raw: unknown, currentInputKeys?: string[
 }
 export type FoodCourtKpiInputs = NonNullable<ReturnType<typeof buildFoodCourtKpiInputs>>
 
+export function readKpiGoalFromAssumptions(raw: unknown): { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null } {
+  const src = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+  const n = Number(src.kgiTargetYen)
+  const yen = Number.isFinite(n) && n >= 1 && n <= 100000000 ? Math.round(n) : null
+  const horizon = src.kgiHorizon === 'month' || src.kgiHorizon === 'day' ? src.kgiHorizon : null
+  return { kgiTargetYen: yen, kgiHorizon: horizon }
+}
+
 export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外】
 利用者が販売分析・目標・見込みを求めたため、以下のサーバー確定計算値だけを試算として引用できる。AIが別の係数で再計算することは禁止。
 新しい施策・新商品にその施策自体の実績は無い。数値未確認・未計測で止めない。今の店舗売上【実績】と類似商品の日次販売から、寄与率と上積みを【仮定(シナリオ)】として引用する。
@@ -32,7 +40,8 @@ export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外�
 必ず保守／標準／強気の3シナリオを併記する。表では【仮定(シナリオ)】をセルに繰り返さず、表の直上に注釈を1行だけ置く。箇条書きで個別引用するときだけ【実績】【仮定(入力)】【仮定(シナリオ)】を付ける。実績と仮定は別の表にし、同じ合計に混ぜない。
 試算の基準期間はブロックに記載した統一売上の期間であり、表示中の単日や質問中のイベントの実績に読み替えない。テナント比較表の税抜売上とも合算しない。
 価格・粗利率・損益分岐・営業区分別販売目標・日次/月次売上・寄与率・上積み・KPI目標・撤退ラインを簡潔に示す。見込み個数が損益分岐を下回れば撤退リスクとして述べる。未入力・粗利未登録は仮置きの推測値と述べ、最後に「この試算の精度を上げるために必要なデータ」を置く。
-今回入力欄と保存済みの店舗前提だけが入力値。質問や過去回答中の数字を入力値に昇格しない。質問で別の前提が示されていれば、入力欄への反映を案内する。重ね聞きでもこのブロックの目標・見込み・寄与・上積み・撤退ラインを省略しない。`
+今回入力欄と保存済みの店舗前提だけが入力値。質問や過去回答中の数字を入力値に昇格しない。質問で別の前提が示されていれば、入力欄への反映を案内する。重ね聞きでもこのブロックの目標・見込み・寄与・上積み・撤退ラインを省略しない。
+KGIが入力されていれば、現状【実績】とのギャップを先に示す。未入力ならKGI未設定とし達成率を作らない。プロセスを分解し、現場が動かせる最重要プロセス（CSF）を1つに絞り、その数値目標だけをKPIとする。悪化時はいつ・どれくらい・何をする・誰が決めるを判定・中止ラインへ。KFIはそのCSFを実行する行動。`
 
 /** 新しい施策の店舗売上への寄与と上積み。施策自体の実績は使わない。 */
 const INITIATIVE_INCREMENTAL_SHARE: Record<string, number> = {
@@ -104,6 +113,7 @@ export function formatKpiUserAppendix(
   pack: NonNullable<ReturnType<typeof buildKpiScenarioPack>>,
   uplift: ReturnType<typeof buildFoodCourtInitiativeUplift>,
   outlook: ReturnType<typeof buildFoodCourtJournalDemandOutlook>,
+  goal?: { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null },
 ) {
   const yen = (n: number | null | undefined) =>
     n == null || !Number.isFinite(n) ? '—' : `¥${Math.round(n).toLocaleString('ja-JP')}`
@@ -128,6 +138,23 @@ export function formatKpiUserAppendix(
   }
   if (outlook?.facts.product_names?.length) {
     lines.push(`類似/対象商品: ${outlook.facts.product_names.join('、')}。観測 1日 ${outlook.facts.daily_units}個・${yen(outlook.facts.daily_sales_yen)}を販売数の錨にする。`)
+  }
+  const horizonLabel = goal?.kgiHorizon === 'month' ? '月間' : goal?.kgiHorizon === 'day' ? '1日' : ''
+  if (goal?.kgiTargetYen != null) {
+    lines.push(`KGI【仮定(入力)】${horizonLabel || '金額'} ${yen(goal.kgiTargetYen)}`)
+    const actual = pack.baseline.averageDailySalesYen
+    if (actual != null && goal.kgiHorizon === 'day') {
+      const gap = goal.kgiTargetYen - actual
+      lines.push(`現状【実績】1日 ${yen(actual)}。ギャップ ${yen(gap)}（正なら不足、負なら超過）`)
+    } else if (actual != null && goal.kgiHorizon === 'month' && pack.baseline.operatingDaysPerMonth) {
+      const monthActual = Math.round(actual * pack.baseline.operatingDaysPerMonth)
+      const gap = goal.kgiTargetYen - monthActual
+      lines.push(`現状【実績】月換算 ${yen(monthActual)}（1日${yen(actual)}×${pack.baseline.operatingDaysPerMonth}日）。ギャップ ${yen(gap)}`)
+    } else {
+      lines.push('KGIの期間単位が未指定のため、達成率は作らない。ギャップは期間をそろえてから見る。')
+    }
+  } else {
+    lines.push('KGIは未設定。達成率・不足額は作らない。入力があればギャップからCSF（最重要プロセス）を1つに絞る。')
   }
   lines.push('')
   lines.push('シナリオ別KGI・KPI・採算の一覧')
@@ -226,7 +253,7 @@ export async function prepareFoodCourtKpiScenario(
       }),
     })
     const upliftBlock = uplift ? `\n\n${uplift.block}` : ''
-    const userAppendix = formatKpiUserAppendix(pack, uplift, outlook)
+    const userAppendix = formatKpiUserAppendix(pack, uplift, outlook, readKpiGoalFromAssumptions(input.assumptions))
     return {
       inputs: buildFoodCourtKpiInputs(assumptions, normalizeKpiAssumptions(input.assumptions).provided),
       block: formatKpiScenarioBlock(pack) + outlookBlock + hourlyBlock + upliftBlock,
