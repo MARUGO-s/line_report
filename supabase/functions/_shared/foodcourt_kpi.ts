@@ -29,7 +29,7 @@ export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外�
 新しい施策・新商品にその施策自体の実績は無い。数値未確認・未計測で止めない。今の店舗売上【実績】と類似商品の日次販売から、寄与率と上積みを【仮定(シナリオ)】として引用する。
 販売個数・売上見込みはジャーナルの類似/対象商品の日次実績と月次推移からコードが伸ばした【仮定(シナリオ)】である。実績そのものではない。
 商品売上見込みは「売れた場合の額」。上積みは置き換えを見込んだ増分。寄与率は今の店舗日次売上に対する見込みの割合。上積みを店舗全体の確定純増・営業利益と呼ばない。
-必ず保守／標準／強気の3シナリオを併記し、各数値の【実績】【仮定(入力)】【仮定(シナリオ)】を保持する。実績と仮定は別の表にし、同じ合計に混ぜない。
+必ず保守／標準／強気の3シナリオを併記する。表では【仮定(シナリオ)】をセルに繰り返さず、表の直上に注釈を1行だけ置く。箇条書きで個別引用するときだけ【実績】【仮定(入力)】【仮定(シナリオ)】を付ける。実績と仮定は別の表にし、同じ合計に混ぜない。
 試算の基準期間はブロックに記載した統一売上の期間であり、表示中の単日や質問中のイベントの実績に読み替えない。テナント比較表の税抜売上とも合算しない。
 価格・粗利率・損益分岐・営業区分別販売目標・日次/月次売上・寄与率・上積み・KPI目標・撤退ラインを簡潔に示す。見込み個数が損益分岐を下回れば撤退リスクとして述べる。未入力・粗利未登録は仮置きの推測値と述べ、最後に「この試算の精度を上げるために必要なデータ」を置く。
 今回入力欄と保存済みの店舗前提だけが入力値。質問や過去回答中の数字を入力値に昇格しない。質問で別の前提が示されていれば、入力欄への反映を案内する。重ね聞きでもこのブロックの目標・見込み・寄与・上積み・撤退ラインを省略しない。`
@@ -93,6 +93,13 @@ type Loaders = {
   timeoutMs?: number
 }
 
+const KPI_TABLE_NOTE = '注釈: この表の数値はすべて【仮定(シナリオ)】（入力済み前提がある項目はそれを使用）。実績ではない。ラベルはここにだけ書く。'
+
+function mdTable(headers: string[], rows: string[][]) {
+  const line = (cells: string[]) => `| ${cells.join(' | ')} |`
+  return [line(headers), line(headers.map(() => '---')), ...rows.map(line)].join('\n')
+}
+
 export function formatKpiUserAppendix(
   pack: NonNullable<ReturnType<typeof buildKpiScenarioPack>>,
   uplift: ReturnType<typeof buildFoodCourtInitiativeUplift>,
@@ -102,9 +109,18 @@ export function formatKpiUserAppendix(
     n == null || !Number.isFinite(n) ? '—' : `¥${Math.round(n).toLocaleString('ja-JP')}`
   const num = (n: number | null | undefined, unit = '') =>
     n == null || !Number.isFinite(n) ? '—' : `${Math.round(n * 10) / 10}${unit}`
+  const col = pack.scenarios.map((scenario) => {
+    const item = scenario.prices[0]
+    const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
+    const fromUplift = uplift?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
+    const units = fromOutlook?.daily_units ?? scenario.normalDayOutlook.targetUnits.value
+    const dailySales = fromOutlook?.daily_sales_yen ?? fromUplift?.initiative_daily_sales_yen ?? scenario.averageDailyRevenueYen.value
+    return { scenario, item, units, dailySales, fromUplift }
+  })
+  const labels = col.map((row) => row.scenario.scenarioLabel)
   const lines = [
-    '【新しい施策のKPI見込み（コード計算・仮定）】',
-    'この施策自体の販売実績はない。データ不足で分析を止めない。今の店舗売上と類似商品から売価・原価・販売数を推測した。【仮定(シナリオ)】であり実績ではない。',
+    '【新しい施策のKPI見込み（コード計算）】',
+    'この施策自体の販売実績はない。データ不足で分析を止めない。今の店舗売上と類似商品から売価・原価・販売数を推測した。',
   ]
   if (pack.baseline.averageDailySalesYen != null) {
     lines.push(`今の店舗 1日あたり売上【実績】${yen(pack.baseline.averageDailySalesYen)}（${pack.baseline.periodLabel}）`)
@@ -112,25 +128,28 @@ export function formatKpiUserAppendix(
   if (outlook?.facts.product_names?.length) {
     lines.push(`類似/対象商品: ${outlook.facts.product_names.join('、')}。観測 1日 ${outlook.facts.daily_units}個・${yen(outlook.facts.daily_sales_yen)}を販売数の錨にする。`)
   }
-  lines.push('シナリオ | 予想売価 | 予想原価 | 予想販売数/日 | 予想売上/日 | 今の売上への寄与 | 上積み/日 | 上積み/月')
-  for (const scenario of pack.scenarios) {
-    const item = scenario.prices[0]
-    const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
-    const fromUplift = uplift?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
-    const units = fromOutlook?.daily_units ?? scenario.normalDayOutlook.targetUnits.value
-    const dailySales = fromOutlook?.daily_sales_yen ?? fromUplift?.initiative_daily_sales_yen ?? scenario.averageDailyRevenueYen.value
-    const contribution = fromUplift?.store_contribution_pct
-    lines.push([
-      scenario.scenarioLabel,
-      yen(item?.price.value),
-      yen(item?.cost.value),
-      num(units, '個'),
-      yen(dailySales),
-      contribution == null ? '—' : `${contribution}%`,
-      yen(fromUplift?.daily_uplift_yen),
-      yen(fromUplift?.monthly_uplift_yen),
-    ].join(' | '))
-  }
+  lines.push('')
+  lines.push('シナリオ別KGI・KPI・採算の一覧')
+  lines.push(KPI_TABLE_NOTE)
+  lines.push(mdTable(
+    ['項目', ...labels],
+    [
+      ['予想売価', ...col.map((row) => yen(row.item?.price.value))],
+      ['予想原価', ...col.map((row) => yen(row.item?.cost.value))],
+      ['予想販売数/日', ...col.map((row) => num(row.units, '個'))],
+      ['予想売上/日', ...col.map((row) => yen(row.dailySales))],
+      ['月間売上見込み', ...col.map((row) => yen(row.scenario.monthlyRevenueYen.value))],
+      ['今の売上への寄与', ...col.map((row) => row.fromUplift?.store_contribution_pct == null ? '—' : `${row.fromUplift.store_contribution_pct}%`)],
+      ['上積み/日', ...col.map((row) => yen(row.fromUplift?.daily_uplift_yen))],
+      ['上積み/月', ...col.map((row) => yen(row.fromUplift?.monthly_uplift_yen))],
+      ['粗利率', ...col.map((row) => num(row.scenario.blendedGrossMarginPct.value, '%'))],
+      ['1個あたり貢献利益', ...col.map((row) => yen(row.scenario.contributionPerSoldUnitYen.value))],
+      ['損益分岐 個/日', ...col.map((row) => row.scenario.breakEvenUnitsPerDay ? num(row.scenario.breakEvenUnitsPerDay.value, '個') : '成立しない')],
+      ['セット率', ...col.map((row) => num(row.scenario.kpiTargets.setRatePct.value, '%'))],
+      ['テイクアウト比率', ...col.map((row) => num(row.scenario.kpiTargets.takeoutRatePct.value, '%'))],
+      ['廃棄率上限', ...col.map((row) => num(row.scenario.kpiTargets.wasteRatePct.value, '%'))],
+    ],
+  ))
   lines.push('寄与率＝見込み売上÷今の店舗日次売上。上積み＝見込み×置き換えを見込んだ増分（保守0.3／標準0.55／強気0.85）。確定の純増・営業利益ではない。')
   return lines.join('\n')
 }

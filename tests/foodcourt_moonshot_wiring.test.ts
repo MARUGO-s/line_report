@@ -53,6 +53,7 @@ test('all four final integrators share the fixed action format rule', () => {
   assert.match(source, /AIが前提・係数・目標数値・施策効果の試算値を新たに作ることは禁止/)
   assert.match(source, /新しい施策にその施策自体の実績が無いのは当然/)
   assert.match(source, /データがないので分析できません/)
+  assert.match(source, /セルへ【仮定\(シナリオ\)】を複製しない/)
   assert.doesNotMatch(source, /シナリオ試算として[^。]*数値(?:を|で)示?してよい/)
 })
 
