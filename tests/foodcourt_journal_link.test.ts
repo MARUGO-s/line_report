@@ -221,6 +221,44 @@ test("verified product/hour/co-purchase facts deduplicate days, filter ranges, e
   }
 });
 
+test("follow-up questions keep previously discussed products and their pairs", async () => {
+  const receipts = Array.from({ length: 31 }, (_, i) => ({
+    time: "12:00",
+    total: 3000,
+    items: [{
+      code: `P${i}`,
+      name: `主力${i}`,
+      qty: 1,
+      unit: 3000,
+      amount: 3000,
+    }],
+  }));
+  receipts[0].items.push({
+    code: "C",
+    name: "クロワッサン",
+    qty: 1,
+    unit: 400,
+    amount: 400,
+  });
+  receipts[0].total = 3400;
+  const gross = receipts.reduce((n, r) => n + r.total, 0);
+  const followUp = await buildFoodCourtJournalDetail(
+    [{ from: "2025-12-09", to: "2025-12-09" }],
+    "ドリンクとの同時購入は？",
+    async (month) =>
+      month === "2025-12"
+        ? [{ business_date: "2025-12-09", gross_sales: gross, receipts }]
+        : [],
+    "user: クロワッサンの導入はどう思う？\nassistant: 既存の軽食実績を先に見ます。",
+  );
+  assert.equal(followUp.coverage.verified_days, 1);
+  const names = followUp.facts.products.map((p) => p.name);
+  assert.ok(names.includes("クロワッサン"));
+  assert.ok(
+    followUp.facts.co_purchase.some((p) => p.products.includes("クロワッサン")),
+  );
+});
+
 test("unknown times stay unknown; KPI hourly targets are scenarios and preserve daily totals", async () => {
   const detail = await buildFoodCourtJournalDetail(
     ranges,

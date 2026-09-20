@@ -23,6 +23,7 @@ export async function buildFoodCourtJournalDetail(
   ranges: Range[],
   question: string,
   loadMonth: (month: string) => Promise<PosJournalDay[]>,
+  conversationText = "",
 ) {
   const months = new Set<string>();
   for (const range of ranges) {
@@ -131,14 +132,29 @@ export async function buildFoodCourtJournalDetail(
   const all = [...products.values()].sort((a, b) =>
     b.amount_yen - a.amount_yen
   );
-  const normalizedQuestion = question.normalize("NFKC").toLowerCase();
+  const haystack = `${question}\n${conversationText}`.normalize("NFKC")
+    .toLowerCase();
   const relevant = all.filter((p) =>
     p.name.length >= 2 &&
-    normalizedQuestion.includes(p.name.normalize("NFKC").toLowerCase())
+    haystack.includes(p.name.normalize("NFKC").toLowerCase())
   );
   const selected = [
     ...new Set([...relevant.slice(0, 10), ...all.slice(0, 30)]),
   ];
+  const selectedNames = new Set(selected.map((p) => p.name));
+  const rankedPairs = [...pairs.values()].sort((a, b) => b.checks - a.checks);
+  const relatedPairs = rankedPairs.filter((p) =>
+    p.products.some((name) => selectedNames.has(name))
+  );
+  const coPurchase: typeof rankedPairs = [];
+  const seenPairs = new Set<string>();
+  for (const pair of [...relatedPairs, ...rankedPairs]) {
+    const key = JSON.stringify(pair.products);
+    if (seenPairs.has(key)) continue;
+    seenPairs.add(key);
+    coPurchase.push(pair);
+    if (coPurchase.length >= 20) break;
+  }
   const hourly = [...hours].sort((a, b) => a[0] - b[0]).map(([hour, row]) => ({
     hour,
     ...row,
@@ -176,10 +192,7 @@ export async function buildFoodCourtJournalDetail(
         : null,
       hourly_quantity: [...p.hours].sort((a, b) => a[0] - b[0]),
     })),
-    co_purchase: [...pairs.values()].sort((a, b) => b.checks - a.checks).slice(
-      0,
-      20,
-    ),
+    co_purchase: coPurchase,
   };
   const summary = `ジャーナル商品・時間帯明細: ${
     coverage.from ? coverage.from + "〜" + coverage.to : "検証済み記録なし"

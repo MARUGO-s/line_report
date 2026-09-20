@@ -2979,7 +2979,10 @@ Deno.serve(async (req, info) => {
           const store = normalizePosJournalStoreKey(storeKey)
           salesRanges = requestedRanges.length ? requestedRanges : await discoverFoodCourtSalesRange(supabase, store, reports.map(fcSalesDate).filter(Boolean))
           salesContext = await buildFoodCourtSalesContext(store, salesRanges, loadQaSales)
-          salesContext.journalDetail = await buildFoodCourtJournalDetail(salesRanges, rawQuestion, async month => {
+          salesContext.journalDetail = await buildFoodCourtJournalDetail(
+            salesRanges,
+            rawQuestion,
+            async month => {
             const rows = await fetchPosJournalRows(supabase, store, month)
             const primary = rows.map(row => ({ ...(isRecord(row.parsed_data) ? row.parsed_data : {}),
               business_date: String(row.business_date), gross_sales: isRecord(row.parsed_data) ? row.parsed_data.gross_sales ?? row.gross_sales : row.gross_sales, groups: row.groups,
@@ -2989,7 +2992,9 @@ Deno.serve(async (req, info) => {
             const shared = await fetchSharedJournalReportState(supabase, store, month)
             if (shared.error) throw new Error('Shared journal details unavailable')
             return mergePosJournalDaysPreferPrimary(primary, shared.days)
-          })
+          },
+            history.map((row) => row.content).join('\n'),
+          )
           salesContext.hasData ||= salesContext.journalDetail.coverage.verified_days > 0
         } catch {
           return json({ error: "ジャーナル連携の売上・商品明細・対象期間を取得できませんでした。時間をおいて再試行してください。", code: "foodcourt_sales_unavailable" }, 503)

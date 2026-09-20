@@ -92,12 +92,19 @@ test('real Q&A integrator, evaluator and numeric auditor receive inputs even wit
       salesContext=await buildFoodCourtSalesContext('fixture_store',range,loaders().loadSales)
       salesContext.journalDetail=await buildFoodCourtJournalDetail(range,'クロワッサン',async month=>month==='2025-12'?[{business_date:'2025-12-09',gross_sales:833,receipts:[{total:833,time:'11:30',items:[{code:'1001',name:'クロワッサン',qty:1,unit:833,amount:833}]}]}]:[])
     }
-    await ctx.answerFoodCourtQuestion(reports,'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}],inputs,salesContext)
+    const history=mode==='journal'?[{role:'user',content:'クロワッサンの導入はどう思う？'},{role:'assistant',content:'既存の軽食実績を先に見ます。'}]:[]
+    await ctx.answerFoodCourtQuestion(reports,'MARUGO S',mode==='journal'?'ドリンクとの同時購入は？':input.question,'synthetic',[],[],undefined,'fixture_store',history,[],null,[],null,kpi,'【確認済み期間】2026年6月',[{from:'2026-06-01',to:'2026-06-30'}],inputs,salesContext)
     assert.equal(requests.length,5)
     assert.equal(requests.slice(0,4).some(r=>JSON.stringify(r).includes('コード側で確定計算済み')),false)
     const final=JSON.stringify(requests.at(-1))
     if(salesContext) {
       for(const r of requests) {assert.match(JSON.stringify(r),/2025-12-09/);assert.match(JSON.stringify(r),/クロワッサン/);assert.match(JSON.stringify(r),/hourly_quantity/)}
+      for(const r of requests.slice(0,4)) {
+        assert.match(JSON.stringify(r),/直前の会話・対象の引き継ぎ/)
+        assert.match(JSON.stringify(r),/クロワッサンの導入はどう思う/)
+      }
+      assert.match(final,/クロワッサンの導入はどう思う/)
+      assert.match(final,/追加質問は新しい別テーマとして始めず/)
       assert.match(loopArgs.numberAuditFacts,/クロワッサン/)
       const compact=loop.compactFoodCourtEvaluationContext(loopArgs.evaluationContext+'long'.repeat(10000),14000,loopArgs.evaluationProtectedPrefixLength)
       assert.match(compact,/2025-12-09/);assert.match(compact,/クロワッサン/);assert.match(compact,/hourly_quantity/)

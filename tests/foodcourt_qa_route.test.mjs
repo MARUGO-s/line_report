@@ -29,7 +29,7 @@ function runtime(options={}) {
     json:(body,status)=>({body,status}),crypto,console,
     isStrictIsoDate:d=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d).toISOString().slice(0,10)===d,
     resolveAiSalesPeriods,isKpiScenarioRequest,prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs,
-    buildFoodCourtSalesContext,buildFoodCourtJournalDetail,
+    buildFoodCourtSalesContext,buildFoodCourtJournalDetail:async(...args)=>{calls.push(['detail',args[1],args[3]||'']);return buildFoodCourtJournalDetail(...args)},
     discoverFoodCourtSalesRange:async()=>[{from:'2025-12-09',to:'2026-08-01'}],
     fetchPosJournalRows:async()=>{if(options.detailError)throw Error('synthetic');return []},
     fetchSharedJournalReportState:async()=>({days:[],error:null}),
@@ -62,6 +62,20 @@ test('real Q&A route filters comparison periods, shifts report dates once, remov
   assert.ok(app.queries.some(q=>q[0]==='lte' && q[2]==='2026-09-01'));
   assert.equal(app.calls.includes('profile'),false,'ordinary questions do not load assumptions');
   assert.equal(app.inserted.source_ref.period.report_count,2);
+});
+
+test('follow-up history is passed to journal product matching and the integrator',async()=>{
+  const app=runtime();
+  const result=await app.run({
+    period_mode:'all',requested_ranges:[],question:'ドリンクとの同時購入は？',
+    history:[{role:'user',content:'クロワッサンの導入はどう思う？'},{role:'assistant',content:'既存の軽食実績を先に見ます。'}],
+  });
+  assert.equal(result.status,200);
+  assert.equal(app.sent[2],'ドリンクとの同時購入は？');
+  assert.equal(app.sent[8][0].content,'クロワッサンの導入はどう思う？');
+  const detail=app.calls.find(c=>c[0]==='detail');
+  assert.ok(detail);
+  assert.match(String(detail[2]),/クロワッサンの導入はどう思う/);
 });
 
 test('ordinary all-period Q&A loads early journal data without tenant reports and persists coverage',async()=>{

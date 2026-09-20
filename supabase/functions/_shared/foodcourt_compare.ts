@@ -3210,6 +3210,15 @@ export async function answerFoodCourtQuestion(
   // 現場日報: 原文＋コード側「施策×実績」効果対照（普段の売上AI分析と日報をリンク）
   const nippou = buildFoodCourtNippouBlocks(dailyLogs, reports, baseName, events)
   const nippouRules = foodCourtNippouPromptRules(baseName)
+  const conversationLines: string[] = []
+  for (const h of (Array.isArray(history) ? history : []).slice(-8)) {
+    const role = h?.role === 'assistant' ? 'assistant' : h?.role === 'user' ? 'user' : ''
+    const content = String(h?.content ?? '').trim().slice(0, 1200)
+    if (role && content) conversationLines.push(`${role}: ${content}`)
+  }
+  const conversationBlock = conversationLines.length
+    ? `【直前の会話・対象の引き継ぎ】追加質問・指示語は直前の商品・店舗・期間・結論を指す。新しい別テーマとして始めない。金額・件数は今回の集計だけを使う。\n${conversationLines.join('\n')}\n\n`
+    : ''
 
   // --- 専門AI 2体を並列実行し、統合AIに渡す「分析メモ」を作らせる（同一プロンプト過積載を避けるための役割分担） ---
   const quantSystem = [
@@ -3226,7 +3235,7 @@ export async function answerFoodCourtQuestion(
     `(7) 「日報×実績 効果対照」がある場合、施策日の客数/売上が前日比・同曜日比でどう動いたかを数値で述べ、施策との関係は仮説として書く。`,
     `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
   ].join('\n')
-  const quantUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
+  const quantUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}${conversationBlock}質問: ${q}\n\n# 競合プロファイル\n${competitors}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 店舗間相関\n${storeCorr || '(データ不足)'}\n\n# 異常値\n${anomalies || '(外れ値なし)'}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
 
   const extSystem = [
     `あなたは「${baseName}」（東京ドーム内フードホール「FOOD STADIUM TOKYO」の1店舗）専属の、会場イベント・天気の需要ドライバー分析専門家です。`,
@@ -3239,7 +3248,7 @@ export async function answerFoodCourtQuestion(
     `(5) 日報施策がある日は、イベント/天気の影響と施策効果を切り分け候補として一言添える（施策単独の因果断定はしない）。`,
     `出力は最終回答ではなく「統合担当AIへの分析メモ」。見出し＋箇条書きで簡潔に（400字程度）。`,
   ].join('\n')
-  const extUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 会場イベント相関\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関\n${weatherCorr || '(天気データなし)'}\n\n${nippou.impactCtx ? nippou.impactCtx + '\n\n' : ''}# 日次生データ\n${data}`
+  const extUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}${conversationBlock}質問: ${q}\n\n# 会場イベント相関\n${eventCorr || '(イベントデータなし)'}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n# 天気相関\n${weatherCorr || '(天気データなし)'}\n\n${nippou.impactCtx ? nippou.impactCtx + '\n\n' : ''}# 日次生データ\n${data}`
 
   const opsSystem = [
     `あなたは「${baseName}」専属の、飲食店オペレーション改善責任者です。`,
@@ -3250,7 +3259,7 @@ export async function answerFoodCourtQuestion(
     nippouRules,
     `出力は最終回答ではなく「統合担当AIへの運営改善メモ」。見出し＋箇条書きで簡潔に（400字程度）。施策あり日は必ず1件以上、施策名を引用して効果仮説を書く。`,
   ].join('\n')
-  const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
+  const opsUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}${conversationBlock}質問: ${q}\n\n# 事前計算サマリー\n${insights || '(履歴不足)'}\n\n# 要因分解\n${decomposition || '(日数不足)'}\n\n# 競合プロファイル\n${competitors}\n\n# 来客予測\n${forecastCtx || '(蓄積中)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n# 今後の会場イベント予定\n${eventList || '(予定データなし)'}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
 
   const [quantRes, extRes, opsRes, xTrendBrief] = await Promise.all([
     foodCourtAiChat([{ role: 'system', content: quantSystem }, { role: 'user', content: quantUser }], groqApiKey, primary, 700, 'groq', fallbackModel, { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'specialist_quant' } }),
@@ -3274,7 +3283,7 @@ export async function answerFoodCourtQuestion(
     `担当者評価と実績の不一致を無視しているメモも指摘する。`,
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
   ].join('\n')
-  const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
+  const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}${conversationBlock}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
   const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, resolveFoodCourtCriticProvider(), fallbackModel, { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'critic' } })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
@@ -3303,7 +3312,7 @@ export async function answerFoodCourtQuestion(
     nippouRules,
     `(12) 出力では可能なら短い見出し「施策と実績」を1つ入れ、日報の施策→実績比→次アクションの順で書く（日報が無い場合は省略可）。`,
     `【出力スタイル】結論を先に → 根拠（数字は最小限＋競合/業態/利用シーンの文脈＋日報施策）→ 示唆・打ち手（具体的で検証可能な仮説）。短い見出し＋箇条書き。断定できないことは「仮説」と明示し、データに無いことは「データにありません」と述べ捏造しない。新規オープンで前年比は無いため、自店の履歴と業態特性を基準に語る。客単価の順位は業態由来なので単価の高低そのものを優劣にしない（集客＝客数で評価する）。`,
-    `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」等の指示語・省略は文脈から解決して自然に会話を続けること。前の回答と矛盾しないようにする。`,
+    `【会話の継続】これは継続的な対話です。直前までのやり取り（履歴）を踏まえて回答し、「その店」「それ」「さっきの」「もっと詳しく」「同時購入は」等の指示語・省略は文脈から解決して自然に会話を続けること。追加質問は新しい別テーマとして始めず、直前の対象商品・店舗・期間・結論を維持する。金額・件数は今回の集計ブロックだけを使い、過去回答の数字で上書きしない。前の回答と矛盾しないようにする。`,
     `【専門AIメモの統合】以下には「他店舗・過去データ分析メモ」「イベント・天気分析メモ」「運営改善メモ」「反証メモ」という、別担当の専門AIが書いた下書きが含まれる。これらは参考意見であり鵜呑みにしない。メモが矛盾する場合や誇張がある場合は、必ず生データ・事前計算ブロック・日報×実績対照の数値で裏取りしてから採否を判断し、1つの一貫した最終回答にまとめること。反証メモで禁止された断定は使わず、必要なら「仮説」「データ不足」と弱めること。`,
     ...foodCourtXTrendRule(xTrendBlock, '打ち手・メニューや商品の方向性・客層の見立て'),
     `【統計的パターンの多角的判断】「統計的パターン」が与えられている場合、これはコードが計算した客観的な集計(サンプル数n・確度つき)であり、AI自身が確度を判定したものではない。来客予測モデルの学習係数(自己採点済み)であれば、来客予測の自己採点(誤差%)と矛盾しない範囲で解釈する。対象日/対象期間に同時に成立する複数条件(曜日・イベント種別・天気)を横断的に見て、確度を踏まえながら多角的に判断する。nが少ない条件は「参考程度」と明示し、断定しない。`,
