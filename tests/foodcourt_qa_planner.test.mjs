@@ -12,6 +12,7 @@ const options={now:new Date('2026-09-20T08:00:00Z'),viewingDate:'2026-09-18'};
 test('period resolver supports exact dates, months, comparisons, relative months and default',()=>{
   for(const [text,ranges] of [
     ['2026年6月の分析',[{from:'2026-06-01',to:'2026-06-30'}]],
+    ['6月の店舗全部を比較',[{from:'2026-06-01',to:'2026-06-30'}]],
     ['2026-06',[{from:'2026-06-01',to:'2026-06-30'}]],
     ['6月と8月を比較',[{from:'2026-06-01',to:'2026-06-30'},{from:'2026-08-01',to:'2026-08-31'}]],
     ['2026年6月から8月',[{from:'2026-06-01',to:'2026-08-31'}]],
@@ -35,6 +36,8 @@ test('missing period asks once, clarification preserves question, follow-up reta
   assert.equal(result.kind,'ready');assert.equal(result.question,'売上の傾向を教えて');
   result=planner.nextTurn(result.state,'もっと詳しく',options);
   assert.equal(result.kind,'ready');assert.equal(result.period.ranges[0].from,'2026-06-01');
+  result=planner.nextTurn(result.state,'その日は何があった？',options);
+  assert.equal(result.period.ranges[0].from,'2026-06-01','follow-up must not switch to the unrelated viewing day');
   result=planner.nextTurn(result.state,'7月はどう？',options);
   assert.equal(result.period.ranges[0].from,'2026-07-01');
   result=planner.nextTurn(result.state,'直近3ヶ月は？',options);
