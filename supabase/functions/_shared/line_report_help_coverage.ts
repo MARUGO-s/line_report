@@ -20,6 +20,7 @@ export const PUBLIC_CODE_HELP_CODES: Record<string, string[]> = {
   'public/foodcourt-report.html': ['FCT-04', 'DEV-01'],
   'public/foodcourt-weekly-report.html': ['FCT-04', 'FCT-06', 'DEV-01'],
   'public/foodcourt.html': ['FCT-01', 'FCT-02', 'FCT-03', 'FCT-04', 'FCT-05', 'FCT-06', 'DEV-01'],
+  'public/foodcourt-qa-planner.js': ['FCT-02', 'DEV-01'],
   'public/index.html': ['ADM-01', 'ADM-02', 'DEV-01'],
   'public/jnl2txt.html': ['JRN-01', 'JRN-02', 'JAI-01', 'JAI-02', 'DEV-01'],
   'public/jnm/ai-chat-pdf-history.html': ['JAI-02', 'JAI-05', 'DEV-01'],

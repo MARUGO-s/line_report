@@ -116,7 +116,7 @@
     .mono{font-family:ui-monospace,"JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
     .num{font-variant-numeric:tabular-nums;}
     button{font-family:inherit;cursor:pointer;}
-    .wrap{max-width:1160px;margin:0 auto;padding:0 22px 80px;}
+    .wrap{width:100%;min-width:0;max-width:1160px;margin:0 auto;padding:0 22px 80px;}
 
     .phead{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:30px 0 18px;}
     .phead-l{min-width:0;}
@@ -289,6 +289,10 @@
     .qbar input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px 15px;font-family:inherit;font-size:14px;color:var(--tx-1);}
     .qbar input:focus{outline:none;border-color:var(--accent);}
     .qbar input::placeholder{color:var(--tx-3);}
+    .qa-kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:12px 0;}
+    .qa-kpi-grid label{font-size:12px;display:grid;gap:5px;min-width:0;}
+    .qa-kpi-grid input{box-sizing:border-box;width:100%;min-width:0;background:var(--bg);color:var(--tx-1);border:1px solid var(--line);border-radius:8px;padding:10px;}
+    .qa-choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
 
     .chart-wrap{margin-top:16px;}
     .chartbox{position:relative;height:200px;margin:6px 0 4px;}
@@ -417,6 +421,9 @@
     }
     @media (max-width:560px){
       .wrap{padding:0 14px 60px;}
+      .qbar{flex-wrap:wrap;}
+      .qbar input{flex-basis:100%;}
+      .qa-q,.qa-a{overflow-wrap:anywhere;}
       .hero{padding:18px;}
       .controls .ctl{flex:1 1 100%;}
       .controls .usel,.controls .idate{width:100%;}
@@ -701,13 +708,27 @@
       </div>
       <div class="card">
         <div class="card-h"><div class="card-t"><span class="em">💬</span>データに質問</div><span class="pill beta">試験版</span></div>
-        <div class="card-note" style="margin-top:4px">蓄積されたフードコートの日次データを根拠に、AIが回答します。<b>前の会話を踏まえて続けて質問できます</b>（例「その日は何があった？」「もっと詳しく」）。</div>
+        <div class="card-note" style="margin-top:4px">蓄積されたフードコートの日次データを根拠に、AIが回答します。<b>期間を対話で確認してから分析</b>し、続く質問では期間と会話を引き継ぎます。「2026年6月」「先月と今月を比較」のように質問内でも指定できます。確認中は分析AIを呼びません。</div>
+        <div class="card-note"><span id="qaPeriodLabel">分析期間: 未指定</span> <button type="button" class="btn ghost" id="qaPeriodChange">期間を変更</button></div>
         <div class="q-chips" id="qSuggest"></div>
         <div class="qbar">
           <input id="qInput" type="text" placeholder="例: 直近でマルゴSが一番売れた日は？ / その日は何があった？">
           <button class="btn primary" id="qBtn">質問する</button>
           <button class="btn ghost" id="qClear" type="button" style="display:none">会話をクリア</button>
         </div>
+        <details id="qaKpiInputs" style="margin-top:12px">
+          <summary>新商品・KPIの試算前提（この会話だけ）</summary>
+          <p class="card-note">「新商品のKPIを試算して」と明示したときだけ使用します。空欄は店舗営業情報の保存済み値、未登録なら保守・標準・強気の仮置きです。実績の質問では試算しません。店舗の保存値は変更しません。</p>
+          <div class="qa-kpi-grid">
+            <label>想定売価（円）<input data-kpi-key="unitPriceYen" type="number" min="1" max="100000" step="1" placeholder="例: 420"></label>
+            <label>原価・1個（円）<input data-kpi-key="unitCostYen" type="number" min="0" max="100000" step="1" placeholder="例: 126"></label>
+            <label>1回に焼ける個数<input data-kpi-key="bakeBatchUnits" type="number" min="1" max="2000" step="1" placeholder="例: 20"></label>
+            <label>1日の焼成回数<input data-kpi-key="bakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3"></label>
+            <label>仕込み人員（人）<input data-kpi-key="prepStaffCount" type="number" min="0.5" max="50" step="0.5" placeholder="例: 1"></label>
+            <label>廃棄許容率（％）<input data-kpi-key="wasteRateTolerancePct" type="number" min="0" max="100" step="0.1" placeholder="例: 8"></label>
+          </div>
+          <p class="card-note">試算値は【仮定(入力)】または【仮定(シナリオ)】を付け、3シナリオを実績と分けて表示します。自由文中の金額はこの入力欄へ反映してください。</p>
+        </details>
         <div id="qAnswer" style="font-size:14px;line-height:1.85;margin-top:14px;max-height:540px;overflow-y:auto;display:none;"></div>
       </div>
     </section>
@@ -874,6 +895,7 @@
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
+<script src="foodcourt-qa-planner.js?v=20260920"></script>
 <script>
 'use strict';
 (function(){
@@ -902,7 +924,7 @@
     dpModal:$('dpModal'), dpBody:$('dpBody'), dpClose:$('dpClose'), dpBackdrop:$('dpBackdrop'),
     wxCorrWrap:$('wxCorrWrap'), wxBreakdown:$('wxBreakdown'), wxNote:$('wxNote'), wxDaily:$('wxDaily'), wxDailyNote:$('wxDailyNote'),
   };
-  const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ'];
+  const SUGGESTED_Q = ['直近でマルゴSが一番売れた日は？','マルゴSの客単価を上げるには？','東京ドームのイベントは客数にどう効いている？','売上を伸ばすための提案を3つ','新商品の目標KPIを3シナリオで試算してください'];
 
   let reports = [];
   let events = [];                 // 東京ドームのイベント [{event_date,title,category}]
@@ -2331,11 +2353,26 @@
   }
   // データに質問：会話履歴を保持し、前のやり取りを踏まえて返信させる。
   let qaHistory = [];
+  let qaContextHistory = [];
+  const qaPlanner = window.FOODCOURT_QA_PLANNER;
+  let qaPlanState = qaPlanner.initialState();
+  function readQaKpiAssumptions(){
+    const values = {};
+    document.querySelectorAll('#qaKpiInputs [data-kpi-key]').forEach(input=>{
+      if(input.value.trim() && Number.isFinite(Number(input.value))) values[input.dataset.kpiKey]=Number(input.value);
+    });
+    return values;
+  }
+  function updateQaPeriodLabel(){ $('qaPeriodLabel').textContent='分析期間: '+(qaPlanState.period?.label||'未指定'); }
   function renderQaThread(thinking){
     const parts = qaHistory.map((m, idx) => {
       if (m.role === 'user') {
         return '<div class="qa-q">' + escapeHtml(m.content) + '</div>';
       } else {
+        if(m.clarification) {
+          const choices = (m.choices||[]).map(choice=>'<button type="button" class="qchip" data-qa-choice="'+escapeHtml(choice)+'">'+escapeHtml(choice)+'</button>').join('');
+          return '<div class="qa-a">'+escapeHtml(m.content)+'<div class="qa-choices">'+choices+'</div></div>';
+        }
         const scoreBadge = (m.score != null)
           ? '<span class="qa-score-badge" title="AI自己採点（100点満点）">⭐ ' + m.score + '点</span>'
           : '';
@@ -2358,14 +2395,46 @@
       });
     });
     dom.qAnswer.scrollTop = dom.qAnswer.scrollHeight;
+    dom.qAnswer.querySelectorAll('[data-qa-choice]').forEach(btn=>btn.addEventListener('click',()=>askQuestion(btn.dataset.qaChoice)));
   }
-  function clearQa(){ qaHistory = []; renderQaThread(false); dom.qInput.focus(); }
+  function clearQa(){
+    if(dom.qBtn.disabled) return;
+    qaHistory=[]; qaContextHistory=[]; qaPlanState=qaPlanner.initialState();
+    document.querySelectorAll('#qaKpiInputs input').forEach(input=>{input.value='';});
+    updateQaPeriodLabel(); renderQaThread(false); dom.qInput.focus();
+  }
+  $('qaPeriodChange').addEventListener('click',()=>{
+    if(dom.qBtn.disabled) return;
+    qaPlanState.period=null;
+    if(qaPlanState.pending) qaPlanState.pending.kind='period';
+    updateQaPeriodLabel();
+    qaHistory.push({role:'assistant',clarification:true,content:'期間を変更します。年月・日付範囲を含めて質問してください。確認中の質問があれば期間だけでも続けられます。'});
+    renderQaThread(false); dom.qInput.focus();
+  });
 
   async function askQuestion(q){
-    const question = String(q!=null?q:(dom.qInput.value||'')).trim();
-    if (!question){ dom.qInput.focus(); return; }
+    if(dom.qBtn.disabled) return;
+    const raw = String(q!=null?q:(dom.qInput.value||'')).trim();
+    if (!raw){ dom.qInput.focus(); return; }
+    if(raw.length>500){ alert('質問は500文字以内で入力してください。'); return; }
+    const fields=[...document.querySelectorAll('#qaKpiInputs input')];
+    const invalid=qaPlanner.wantsKpiTargets(qaPlanState.pending?.question||raw) && fields.find(input=>!input.checkValidity());
+    if(invalid){ $('qaKpiInputs').open=true; invalid.reportValidity(); return; }
+    const assumptions=readQaKpiAssumptions();
+    const viewingDate=currentViewedReport?salesDateOf(currentViewedReport):'';
+    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,assumptionsReady:fields.every(input=>input.value.trim()!=='')});
+    qaPlanState=plan.state;
+    updateQaPeriodLabel();
     dom.qInput.value = '';
-    qaHistory.push({ role:'user', content:question });
+    qaHistory.forEach(m=>{if(m.clarification) m.choices=[];});
+    qaHistory.push({ role:'user', content:raw });
+    if(plan.kind!=='ready') {
+      qaHistory.push({role:'assistant',content:plan.message,clarification:true,choices:plan.choices});
+      if(qaPlanState.pending?.kind==='kpi') $('qaKpiInputs').open=true;
+      renderQaThread(false); dom.qInput.focus(); return;
+    }
+    const question=plan.question;
+    const activePeriod=plan.period;
     renderQaThread(true);
     dom.qBtn.disabled = true;
 
@@ -2378,11 +2447,12 @@
     ]);
 
     try {
-      const hist = qaHistory.slice(0, -1).slice(-8); // 直前までの会話（今回の質問は除く）最大8件
-      // 画面に表示中の単日レポートIDを渡す。バックエンドはこれを「特に日付指定のない質問のデフォルト対象日」として使う
-      // （渡さないと、AIは全履歴のどの日の話をしているか画面と無関係に決めてしまい、時間軸がずれる原因になる）。
+      const hist = qaContextHistory.slice(-8); // 確認用の対話は分析履歴に混ぜない
+      // 表示日も送るが、対話で確定した period_mode/requested_ranges を優先する。
       const viewingReportId = currentViewedReport && currentViewedReport.id != null ? currentViewedReport.id : null;
-      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId });
+      const b = await apiPost('/foodcourt/ask', { store_key: currentStore(), question: question, history: hist, viewing_report_id: viewingReportId,
+        period_mode:activePeriod.mode, requested_ranges:activePeriod.ranges, kpi_assumptions:assumptions });
+      qaContextHistory.push({role:'user',content:question+'\n対象期間: '+activePeriod.label},{role:'assistant',content:b.answer||'(回答が空でした)'});
       // question を回答側にも保持（レポート出力時に分析サマリーと取り違えないため）
       qaHistory.push({
         role: 'assistant',

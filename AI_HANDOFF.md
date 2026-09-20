@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 フードコートQ&Aの期間対話・KPI試算
+
+- PR #240のJournal限定を拡張。通常Q&Aでは引き続きAIの数値創作は禁止し、明示的試算依頼のみ認可済み店舗の保存前提・統一売上＋画面入力で `kpi_scenario.ts` を使う。質問自由文・過去回答の数字を前提へ昇格しない。詳細は `docs/JOURNAL-AI-CHAT-RULES.md` §10、ヘルプFCT-02。
+- `public/foodcourt-qa-planner.js` が期間未指定・KPI前提不足を対話確認。確認文を分析質問へ置換しない。`period_mode/requested_ranges` をサーバー再検証し、売上日（報告日−1日）で抽出。履歴へ確定期間を残し、異なる期間の実績を合算しない。
+- 範囲比較は間の未指定月を除外。保存済み全期間は比較レポート500件・日別詳細45日上限。KPI店舗前提・売上取得失敗は503で停止。試算ブロックは統合・監査・評価だけに渡す。回帰は `foodcourt_kpi.test.ts` / `foodcourt_qa_planner.test.mjs` / `foodcourt_qa_route.test.mjs`。
+
 ## 2026-09-20 KPI試算の数値境界
 
 - 通常分析ではAIによる数値創作を禁止。例外は明示的なKPI目標設定・試算依頼時の `kpi_scenario.ts` による確定計算だけ。保守／標準／強気と【仮定(入力)】【仮定(シナリオ)】を実績から分離する。
