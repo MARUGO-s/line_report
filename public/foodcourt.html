@@ -718,7 +718,7 @@
         </div>
         <details id="qaKpiInputs" style="margin-top:12px">
           <summary>新商品・KPIの試算前提（この会話だけ）</summary>
-          <p class="card-note">「新商品のKPIを試算して」と明示したときだけ使用します。空欄は店舗営業情報の保存済み値、未登録なら保守・標準・強気の仮置きです。実績の質問では試算しません。店舗の保存値は変更しません。</p>
+          <p class="card-note">入力値は【仮定(入力)】として分析に反映します。導入相談では数値試算も行うかを確認します。「分析のみ」でも入力値は参照しますが、目標数値は作りません。明示的な試算時だけ、空欄を店舗営業情報の保存済み値→3シナリオの仮置きで補います。店舗の保存値は変更しません。</p>
           <div class="qa-kpi-grid">
             <label>想定売価（円）<input data-kpi-key="unitPriceYen" type="number" min="1" max="100000" step="1" placeholder="例: 420"></label>
             <label>原価・1個（円）<input data-kpi-key="unitCostYen" type="number" min="0" max="100000" step="1" placeholder="例: 126"></label>
@@ -895,7 +895,7 @@
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
-<script src="foodcourt-qa-planner.js?v=20260920"></script>
+<script src="foodcourt-qa-planner.js?v=20260920-input-fix"></script>
 <script>
 'use strict';
 (function(){
@@ -2418,11 +2418,11 @@
     if (!raw){ dom.qInput.focus(); return; }
     if(raw.length>500){ alert('質問は500文字以内で入力してください。'); return; }
     const fields=[...document.querySelectorAll('#qaKpiInputs input')];
-    const invalid=qaPlanner.wantsKpiTargets(qaPlanState.pending?.question||raw) && fields.find(input=>!input.checkValidity());
+    const invalid=!/^(キャンセル|取り消し|やめる)$/.test(raw) && fields.find(input=>!input.checkValidity());
     if(invalid){ $('qaKpiInputs').open=true; invalid.reportValidity(); return; }
     const assumptions=readQaKpiAssumptions();
     const viewingDate=currentViewedReport?salesDateOf(currentViewedReport):'';
-    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,assumptionsReady:fields.every(input=>input.value.trim()!=='')});
+    const plan=qaPlanner.nextTurn(qaPlanState,raw,{viewingDate,hasAssumptions:Object.keys(assumptions).length>0,assumptionsReady:fields.every(input=>input.value.trim()!=='')});
     qaPlanState=plan.state;
     updateQaPeriodLabel();
     dom.qInput.value = '';

@@ -1,5 +1,5 @@
 import { fetchUnifiedSalesSummary, validSalesDate } from '../_shared/sales_reconciliation.ts'
-import { prepareFoodCourtKpiScenario, type FoodCourtKpiContext } from '../_shared/foodcourt_kpi.ts'
+import { buildFoodCourtKpiInputs, prepareFoodCourtKpiScenario, type FoodCourtKpiContext } from '../_shared/foodcourt_kpi.ts'
 import { isKpiScenarioRequest } from '../_shared/kpi_scenario.ts'
 import { loadJournalStoreContext } from '../_shared/journal_store_context.ts'
 import { resolveAiSalesPeriods } from '../_shared/sales_reconciliation_ai.ts'
@@ -2963,7 +2963,8 @@ Deno.serve(async (req, info) => {
           reports.map((report) => fcSalesDate(report)).filter(Boolean),
         )
         : null
-      if (!reports.length && (isJournalDeep || !isKpiScenarioRequest(rawQuestion))) {
+      const currentKpiInputs = isJournalDeep ? null : buildFoodCourtKpiInputs(body.kpi_assumptions)
+      if (!reports.length && (isJournalDeep || (!isKpiScenarioRequest(rawQuestion) && !currentKpiInputs))) {
         if (isJournalDeep) {
           return json({
             error: "指定期間のフードコート比較データがありません。",
@@ -2993,6 +2994,7 @@ Deno.serve(async (req, info) => {
         }
       }
       const baseName = String((reports[0] as { base_tenant_name?: unknown } | undefined)?.base_tenant_name ?? "MARUGO S")
+      const usedKpiInputs = kpiContext?.inputs || currentKpiInputs
       // 会場イベント（東京ドーム）・天気も根拠に渡す。客数増減との相関を踏まえて回答させる。
       const events = await loadVenueEventsForReports(supabase, storeKey, reports)
       const weather = await loadWeatherForReports(supabase, storeKey, reports)
@@ -3070,6 +3072,7 @@ Deno.serve(async (req, info) => {
           kpiContext,
           qaPeriodBlock,
           hasQaPeriod ? requestedRanges : [],
+          usedKpiInputs,
         )
         if (isJournalDeep && !String(qaResult.answer ?? "").trim()) {
           return json({
@@ -3079,6 +3082,7 @@ Deno.serve(async (req, info) => {
           }, 502)
         }
         let answer = qaResult.answer || "回答を生成できませんでした。もう一度お試しください。"
+        if (usedKpiInputs) answer += `\n\n今回、分析へ渡した前提\n${usedKpiInputs.summary}\n${kpiContext ? '上記の入力前提と不足項目の仮置きから3シナリオをコードで計算しました。' : '入力前提として参照しています。数値試算は実行していません。'}`
         if (qaPeriod) answer += `\n\n対象期間: ${qaPeriod.label}（比較レポート${reports.length}日${qaPeriod.truncated ? '・取得上限のため一部のみ' : ''}）`
         // 日報テーブル読込失敗時は回答末尾に注意を付与（AIは「日報なし」と誤認するため）。
         if (dailyLogsError) {
@@ -3133,6 +3137,7 @@ Deno.serve(async (req, info) => {
               viewing_date: viewingDate ?? null,
               x_trend_brief: qaResult.xTrendBrief ?? null,
               kpi_scenarios: kpiContext?.reference ?? null,
+              kpi_inputs: usedKpiInputs?.reference ?? null,
               period: qaPeriod,
             },
           })
@@ -3146,6 +3151,7 @@ Deno.serve(async (req, info) => {
           history_saved: !saveQaError,
           history_error: saveQaError?.message ?? null,
           kpi_scenarios: kpiContext?.reference ?? null,
+          kpi_inputs: usedKpiInputs?.reference ?? null,
           period: qaPeriod,
           reportCount: reports.length,
           loop_score: qaResult.loopScore,

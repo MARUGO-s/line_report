@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from 'node:module';
-import {prepareFoodCourtKpiScenario} from '../supabase/functions/_shared/foodcourt_kpi.ts';
+import vm from 'node:vm';
+import {prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs} from '../supabase/functions/_shared/foodcourt_kpi.ts';
 import {isKpiScenarioRequest} from '../supabase/functions/_shared/kpi_scenario.ts';
 import {resolveAiSalesPeriods} from '../supabase/functions/_shared/sales_reconciliation_ai.ts';
 const source=readFileSync(new URL('../supabase/functions/admin-api/index.ts',import.meta.url),'utf8');
@@ -25,7 +26,7 @@ function runtime(options={}) {
     req:{method:'POST'},path:'/foodcourt/ask',url:new URL('https://test.invalid'),
     json:(body,status)=>({body,status}),crypto,console,
     isStrictIsoDate:d=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d).toISOString().slice(0,10)===d,
-    resolveAiSalesPeriods,isKpiScenarioRequest,prepareFoodCourtKpiScenario,
+    resolveAiSalesPeriods,isKpiScenarioRequest,prepareFoodCourtKpiScenario,buildFoodCourtKpiInputs,
     normalizePosJournalStoreKey:s=>s.toLowerCase(),
     Deno:{env:{get:()=> 'synthetic-only'}},addDaysIso:dateAdd,jstDateIso:n=>dateAdd('2026-09-20',n),
     fcSalesDate:r=>dateAdd(r.report_date,-1),
@@ -87,4 +88,30 @@ test('all-period cap is explicit and cannot claim full coverage',async()=>{
   const app=runtime({rows:Array.from({length:500},(_,i)=>({id:i,report_date:'2026-06-02'}))});
   const result=await app.run({period_mode:'all',requested_ranges:[]});
   assert.equal(result.body.period.truncated,true);assert.match(result.body.answer,/一部のみ/);
+});
+
+test('actual consultation carries inputs to AI and saved answer without silently starting scenarios',async()=>{
+  for(const rows of [undefined,[]]) {
+    const app=runtime({rows});const question='焼きたてのクロワッサンをお出ししようと思っています。どう思いますか？';
+    const result=await app.run({question,kpi_assumptions:{unitPriceYen:833,unitCostYen:123,notes:'UNTRUSTED'}});
+    assert.equal(result.status,200);assert.equal(app.sent[13],null);
+    assert.match(app.sent[16].block,/833円/);assert.match(app.sent[16].block,/123円/);
+    assert.match(result.body.answer,/今回、分析へ渡した前提/);assert.match(result.body.answer,/数値試算は実行していません/);
+    assert.equal(app.inserted.source_ref.kpi_inputs.items.length,2);
+    assert.equal(result.body.kpi_inputs.items.length,2);assert.equal(app.calls.includes('profile'),false);
+  }
+});
+
+test('dialogue consent reaches the real route with original consultation and overrides in calculation',async()=>{
+  const context=vm.createContext({Date});vm.runInContext(readFileSync(new URL('../public/foodcourt-qa-planner.js',import.meta.url),'utf8'),context);
+  const planner=context.FOODCOURT_QA_PLANNER;
+  const question='売り上げアップのために、焼きたてのクロワッサンをお出ししようと思っています。どう思いますか？';
+  const opts={now:new Date('2026-09-20T00:00:00Z'),hasAssumptions:true};
+  let turn=planner.nextTurn(planner.initialState(),question,opts);
+  turn=planner.nextTurn(turn.state,'2026年6月',opts);
+  turn=planner.nextTurn(turn.state,'入力値で3シナリオを試算',opts);
+  assert.equal(turn.kind,'ready');assert.ok(turn.question.includes(question));
+  const app=runtime();const result=await app.run({question:turn.question,period_mode:turn.period.mode,requested_ranges:turn.period.ranges,kpi_assumptions:{unitPriceYen:833,unitCostYen:123}});
+  assert.equal(result.status,200);assert.match(app.sent[13].block,/¥833/);assert.match(app.sent[13].block,/¥123/);
+  assert.equal(result.body.kpi_scenarios.status,'computed_server_side');assert.match(result.body.answer,/3シナリオをコードで計算/);
 });

@@ -1,5 +1,10 @@
 # LINE Report AI Handoff
 
+## 2026-09-20 Q&Aの入力参照と試算許可の分離
+
+- `buildFoodCourtKpiInputs` は今回入力を試算の有無によらず統合AI・評価・数値監査へ渡す。これを `isKpiScenarioRequest` の早期returnの後ろへ戻さない。入力は仮定であって実績ではない。
+- 導入相談＋今回入力は `kpi_use` 対話で試算同意を確認。同意時は元の相談を保持した明示依頼へ変換し、分析のみでは目標数値を生成しない。新しい実績照会へ試算同意を自動継承しない。回答末尾と `source_ref.kpi_inputs` に数値・出所を残す。
+
 ## 2026-09-20 フードコートQ&Aの期間対話・KPI試算
 
 - PR #240のJournal限定を拡張。通常Q&Aでは引き続きAIの数値創作は禁止し、明示的試算依頼のみ認可済み店舗の保存前提・統一売上＋画面入力で `kpi_scenario.ts` を使う。質問自由文・過去回答の数字を前提へ昇格しない。詳細は `docs/JOURNAL-AI-CHAT-RULES.md` §10、ヘルプFCT-02。
