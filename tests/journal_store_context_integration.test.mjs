@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import { attachJournalStoreContext, loadJournalStoreContext, JOURNAL_STORE_CONTEXT_POLICY } from '../supabase/functions/_shared/journal_store_context.ts';
 import { buildTrustedAiSalesData, resolveAiSalesPeriods, UNIFIED_SALES_AI_POLICY } from '../supabase/functions/_shared/sales_reconciliation_ai.ts';
 import { sanitizeJournalAiPayload } from '../supabase/functions/_shared/journal_ai_privacy.ts';
+import * as kpiScenario from '../supabase/functions/_shared/kpi_scenario.ts';
 const read = p => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const source = stripTypeScriptTypes(read('supabase/functions/ai-analyze/index.ts').replace(/^import\s[\s\S]*?;\s*$/gm, ''));
 const profile = { notes: '予約者: 架空太郎\n090-1234-5678\nfixture@example.invalid', closedWeekdays: ['月'],
@@ -29,7 +30,7 @@ function runtime(options = {}) {
     authenticateAdminDashboardSessionToken:async()=>{calls.push(['auth']);return {ok:options.auth!==false,storeScope:options.admin?null:'fixture_store',scopeKind:options.admin?null:'chat_journal_ai',metadata:{}};},
     validateChatScopedSessionAccess:async(_db,_meta,flags)=>{calls.push(['member',flags]);return options.member!==false;},
     STORE_LOCATION_PROFILES:{fixture_store:{}},buildStoreLocationPromptBlock:()=> 'synthetic location',
-    loadJournalStoreContext,attachJournalStoreContext,JOURNAL_STORE_CONTEXT_POLICY,
+    loadJournalStoreContext,attachJournalStoreContext,JOURNAL_STORE_CONTEXT_POLICY,...kpiScenario,
     buildTrustedAiSalesData,resolveAiSalesPeriods,UNIFIED_SALES_AI_POLICY,sanitizeJournalAiPayload,
     fetchUnifiedSalesSummary:async(_db,store,from,to)=>{calls.push(['sales']);return {store_key:store,from,to,series:[],monthly_fallbacks:[],totals:{},reconciliation:{}};},
     normalizeJournalChatIntent:()=>options.strategy?'strategy':'data',
@@ -78,6 +79,28 @@ test('unavailable shared data stops before AI and Web search; absent row is expl
   const absent=runtime({missing:true});const result=await absent.run();
   assert.equal(result.status,200);assert.equal(result.body.store_context.status,'not_registered');
   assert.match(JSON.stringify(absent.outputs),/conversion_unavailable/);
+});
+
+test('real handler only computes KPI scenarios with both the flag and an explicit planning request', async()=>{
+  for (const admin of [false,true]) {
+    for (const [message,requested,expected] of [
+      ['先月の廃棄率の実績は？',true,false],
+      ['昨年のKPIを数字で教えて',true,false],
+      ['KPIとは？',true,false],
+      ['KPIの目標を試算してください',false,false],
+      ['KPIの目標を試算してください',true,true],
+    ]) {
+      const app=runtime({admin});
+      const result=await app.run({message,kpiRequest:{requested}});
+      assert.equal(result.status,200,JSON.stringify(result.body));
+      const prompt=JSON.stringify(app.outputs);
+      assert.equal(prompt.includes('\\"kpi_scenarios\\"'),expected,`${admin}: ${message}`);
+      if(expected) {
+        assert.match(prompt,/仮定\(シナリオ\)/);
+        assert.match(prompt,/保守/);assert.match(prompt,/標準/);assert.match(prompt,/強気/);
+      }
+    }
+  }
 });
 
 test('shared profile does not enter strategy Web-search arguments', async()=>{

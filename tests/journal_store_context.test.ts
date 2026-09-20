@@ -108,6 +108,36 @@ Deno.test("missing row is not registered, while legacy missing fields never gain
   equal(legacy.closedWeekdays, null);
   equal(legacy.wineMl, null);
   equal(legacy.calendarEvents, null);
+  equal(legacy.kpiAssumptions, null);
+});
+
+Deno.test("KPI assumptions pass the allowlist, clamp, and never gain defaults", () => {
+  // 未入力は null のまま。既定値で埋めると「仮定(シナリオ)」が「仮定(入力)」に化ける。
+  equal(selectJournalStoreProfile({ kpiAssumptions: {} }, input).kpiAssumptions, null);
+  equal(
+    selectJournalStoreProfile({ kpiAssumptions: "not-an-object" }, input).kpiAssumptions,
+    null,
+  );
+
+  const selected = selectJournalStoreProfile({
+    kpiAssumptions: {
+      unitPriceYen: 420,
+      unitCostYen: 126,
+      bakeBatchUnits: 99999,
+      wasteRateTolerancePct: -5,
+      secretField: "ignored",
+    },
+  }, input);
+  assert(selected.kpiAssumptions, "registered assumptions must survive");
+  equal(selected.kpiAssumptions?.unitPriceYen, 420);
+  equal(selected.kpiAssumptions?.unitCostYen, 126);
+  equal(selected.kpiAssumptions?.bakeBatchUnits, 2000);
+  equal(selected.kpiAssumptions?.wasteRateTolerancePct, 0);
+  equal(selected.kpiAssumptions?.prepStaffCount, null);
+  assert(
+    !Object.prototype.hasOwnProperty.call(selected.kpiAssumptions, "secretField"),
+    "unknown fields must not reach the prompt",
+  );
 });
 
 Deno.test("DB errors, mismatched stores, missing revisions and invalid profiles fail closed", async () => {
