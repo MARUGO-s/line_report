@@ -21,3 +21,15 @@ test('only the Q&A button and explicit suggestion choices call askQuestion', () 
   assert.match(page, /qaChoiceLock/);
   assert.match(page, /askQuestion\(btn\.getAttribute\('data-qa-choice'\)\)/);
 });
+
+test('focusing the Q&A input after a chip click never yanks the page scroll position', () => {
+  // dom.qInput.focus() without {preventScroll:true} makes the browser scroll the input into
+  // view. Selecting an analysis-method chip re-renders the clarification message (still not
+  // "ready") and re-focuses the input on every single click, so a bare focus() here means the
+  // page jumps back up to the input on every chip toggle instead of staying where the chips are.
+  const focusCalls = page.match(/dom\.qInput\.focus\([^)]*\)/g) || [];
+  assert.ok(focusCalls.length >= 5, 'expected every dom.qInput.focus() call site to be present');
+  for (const call of focusCalls) {
+    assert.match(call, /\{preventScroll:true\}/, `${call} must pass {preventScroll:true}`);
+  }
+});
