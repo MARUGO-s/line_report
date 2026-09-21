@@ -1,6 +1,6 @@
 # フードコート AI 分析システム 設計解説
 
-> 2026-09-21: Q&Aは期間→手法→必要な売価/原価確認。選んだ手法の知識パックだけを分析前に読む（[management-warehouse](./management-warehouse/README.md)）。KGI/KPI/KFIは改善管理時のみ。共通規則は `_shared/business_goal_metrics.ts`。日次/期間キャッシュは `foodcourt-analysis-ai-v29-set-upsell`。
+> 2026-09-21: Q&Aは期間→手法→必要な売価/原価確認。選んだ手法の知識パックだけを分析前に読む（[management-warehouse](./management-warehouse/README.md)）。KGI/KPI/KFIは改善管理時のみ。共通規則は `_shared/business_goal_metrics.ts`。日次/期間キャッシュは `foodcourt-analysis-ai-v30-plausibility-check`。
 
 > 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
 
@@ -9,7 +9,7 @@
 MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売上・客数データを解析する
 **5エージェント構成のマルチAIパイプライン**の設計と動作を解説する。
 
-現行キャッシュ: `foodcourt-analysis-ai-v29-set-upsell`（Q&A・日次・期間）。旧表記 `v16-loop-learning` は履歴。
+現行キャッシュ: `foodcourt-analysis-ai-v30-plausibility-check`（Q&A・日次・期間）。旧表記 `v16-loop-learning` は履歴。
 関連ファイル: [`supabase/functions/_shared/foodcourt_compare.ts`](../supabase/functions/_shared/foodcourt_compare.ts)  
 関連ドキュメント: [フードコート学習システム構造.md](フードコート学習システム構造.md)、[フードコートAIループシステム全体解説.md](フードコートAIループシステム全体解説.md)、[フードコート売上分析_設計書.md](フードコート売上分析_設計書.md)、[フードコート日報システム.md](フードコート日報システム.md)
 
@@ -320,6 +320,9 @@ X の最新トレンドは後者が担当し、その結果を統合AIの材料�
 - 相関と因果の混同（「Aの日は売上が高いから→Aが原因」）
 - 対象日/期間の取り違え
 - データにない数字の混入（捏造）
+
+**2026-09-21〜: 新商品KPI試算の「前提の妥当性チェック」（過大/過小評価の判定）:**
+新しい施策のKPI試算そのもの（掛け算・割り算などの算術）は、これまで通りサーバー側の確定計算（`kpi_scenario.ts`）の担当であり、反証AI④はこれを再計算しない。ただし、想定売価・原価・セット率・置き換え率といった**前提（仮定シナリオ）が、この店の実態から見て過大／過小でないか**は、算術が正しいだけでは分からない。そこで `foodcourt_journal_detail.ts` の `assessFoodCourtNewItemPlausibility()` が、新商品の想定販売数（焼成上限で頭打ち済み）と、店内で最も個数の出ている既存商品の実績日次個数を機械的に比較し、その結果だけを短い参考ブロック（`formatFoodCourtNewItemPlausibilityBlock()`）として反証AI④に渡す。詳細なKPI表（`コード側で確定計算済み`ブロック）は従来通り渡さない。反証AI④は、想定が既存の最多販売商品の実績以上であれば「過大評価の可能性」として、極端に小さければ「前提が保守的すぎないか」として指摘する。比較は常にこの店自身の実測値どうしであり、業界の合格ラインや他店の目安は使わない。
 
 **出力形式:**
 ```

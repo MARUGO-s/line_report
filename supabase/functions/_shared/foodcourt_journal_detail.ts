@@ -315,6 +315,71 @@ export function buildFoodCourtJournalDemandOutlook(
   return { facts, block };
 }
 
+/**
+ * 新商品の想定販売数（焼成上限で頭打ち済み）が、店内で最も個数の出ている既存商品の実績と比べて
+ * 過大／過小でないかの参考チェック。業界目安ではなく、この店自身の実測値とだけ比較する。
+ * 反証AI・利用者の両方が「前提の妥当性」を判断できるよう、比率だけを機械的に計算して渡す
+ * （AIが独自係数で作り直さない）。
+ */
+export type FoodCourtNewItemPlausibilityCheck = {
+  top_existing_item_name: string;
+  top_existing_item_daily_units: number;
+  scenarios: Array<{
+    label: string;
+    daily_units: number | null;
+    ratio_to_top_existing_item: number | null;
+  }>;
+  // いずれかのシナリオが、店内最多販売商品の実績日次個数以上を想定している（＝過大評価の疑い）。
+  overestimate_flagged: boolean;
+};
+
+export function assessFoodCourtNewItemPlausibility(
+  detail: FoodCourtJournalDetail | null | undefined,
+  scenarioUnits: Array<{ label: string; daily_units: number | null }>,
+): FoodCourtNewItemPlausibilityCheck | null {
+  if (!detail || detail.coverage.verified_days <= 0 || !detail.facts.products.length) {
+    return null;
+  }
+  const days = detail.coverage.verified_days;
+  const ranked = detail.facts.products
+    .map((p) => ({ name: p.name, dailyUnits: p.quantity / days }))
+    .filter((p) => p.dailyUnits > 0)
+    .sort((a, b) => b.dailyUnits - a.dailyUnits);
+  const top = ranked[0];
+  if (!top) return null;
+  const scenarios = scenarioUnits.map((s) => ({
+    label: s.label,
+    daily_units: s.daily_units,
+    ratio_to_top_existing_item: s.daily_units != null && top.dailyUnits > 0
+      ? round2(s.daily_units / top.dailyUnits)
+      : null,
+  }));
+  const overestimate_flagged = scenarios.some((s) =>
+    s.ratio_to_top_existing_item != null && s.ratio_to_top_existing_item >= 1
+  );
+  return {
+    top_existing_item_name: top.name,
+    top_existing_item_daily_units: round2(top.dailyUnits),
+    scenarios,
+    overestimate_flagged,
+  };
+}
+
+/** 反証AI・統合AI向けの短い参考ブロック。KPIの確定計算そのものは含めない（算術は別ブロックの担当）。 */
+export function formatFoodCourtNewItemPlausibilityBlock(
+  check: FoodCourtNewItemPlausibilityCheck,
+): string {
+  const rows = check.scenarios
+    .map((s) =>
+      `${s.label}${s.daily_units ?? "—"}個/日→比${s.ratio_to_top_existing_item ?? "—"}倍`
+    )
+    .join("、");
+  const warn = check.overestimate_flagged
+    ? " いずれかのシナリオが店内最多販売商品の実績以上を想定しており、過大評価の可能性がある。統合AIは指摘すること。"
+    : "";
+  return `【前提の妥当性チェック・参考（実測比較）】店内で最も個数が出ている既存商品は「${check.top_existing_item_name}」（実績${check.top_existing_item_daily_units}個/日）。新商品の想定販売数との比較: ${rows}。業界目安ではなく当店の実測値との比較。${warn}`;
+}
+
 /** Prospective allocation stays a scenario, even when its weights are observed. */
 export function allocateFoodCourtHourlyTargets(
   total: number,

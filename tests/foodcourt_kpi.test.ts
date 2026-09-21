@@ -303,6 +303,81 @@ test('set-inclusive (drink/wine upsell) sales are shown alongside single-item sa
   )
 })
 
+test('new-item plausibility check compares the scenario estimate against the store\'s own best-selling item',async()=>{
+  const io=loaders()
+  // One product ("カレー2種") sold 20 units on the single verified day: the outlook anchor and the
+  // "top existing item" reference point are the same number on purpose, so the standard scenario's
+  // clamped estimate (20, unrounded) lands exactly at parity with the existing bestseller (ratio 1.0)
+  // and must trip the over-estimate flag; aggressive (30) trips it further, conservative (13.33) does not.
+  const journalDetail=await buildFoodCourtJournalDetail(
+    [{from:'2025-12-09',to:'2025-12-09'}],
+    'クロワッサン',
+    async()=>[{business_date:'2025-12-09',gross_sales:2000,receipts:[{total:2000,time:'11:30',items:[{code:'9001',name:'カレー2種',qty:20,unit:100,amount:2000}]}]}],
+  )
+  const result=await prepareFoodCourtKpiScenario({...input,salesDates:[],journalDetail},io)
+  assert.ok(result)
+  const check=(result.reference as any).new_item_plausibility
+  assert.ok(check,'plausibility check must be present when journalDetail has sellable products')
+  assert.equal(check.top_existing_item_name,'カレー2種')
+  assert.equal(check.top_existing_item_daily_units,20)
+  assert.equal(check.overestimate_flagged,true)
+  const standard=check.scenarios.find((s:any)=>s.label==='標準')
+  assert.equal(standard.daily_units,20)
+  assert.equal(standard.ratio_to_top_existing_item,1)
+  const conservative=check.scenarios.find((s:any)=>s.label==='保守')
+  assert.ok(conservative.ratio_to_top_existing_item<1)
+  // The plausibility block is exposed separately so foodcourt_compare.ts can hand it to the critic
+  // AI without also handing over the full deterministic KPI table.
+  assert.match(result.plausibilityBlock!,/前提の妥当性チェック/)
+  assert.match(result.plausibilityBlock!,/カレー2種/)
+  assert.match(result.plausibilityBlock!,/過大評価の可能性がある/)
+  assert.doesNotMatch(result.plausibilityBlock!,/コード側で確定計算済み/)
+  // ...and it reaches both the AI-facing block and the user-facing appendix.
+  assert.match(result.block,/前提の妥当性チェック/)
+  assert.match(result.userAppendix,/前提の妥当性チェック（当店の実測比較・業界目安ではない）/)
+  assert.match(result.userAppendix,/過大評価の可能性がある/)
+})
+
+test('new-item plausibility check stays silent without journal product detail',async()=>{
+  const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420}},loaders())
+  assert.ok(result)
+  assert.equal(result.reference.new_item_plausibility,null)
+  assert.equal(result.plausibilityBlock,'')
+  assert.doesNotMatch(result.userAppendix,/前提の妥当性チェック/)
+})
+
+test('the critic AI receives the plausibility comparison but not the full KPI table',async()=>{
+  const source=readFileSync(new URL('../supabase/functions/_shared/foodcourt_compare.ts',import.meta.url),'utf8')
+  const executable=stripTypeScriptTypes(source.replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*$/gm,'').replace(/^export /gm,''))
+  const requests: any[]=[]
+  const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,FOODCOURT_SALES_POLICY,BUSINESS_GOAL_METRICS_POLICY,foodCourtAnalysisMethodPrompt,console,URL,URLSearchParams,setTimeout,clearTimeout,
+    Deno:{env:{get:()=>''}},classifyJournalChatIntent:()=>'data',
+    captureChat:async(messages:any[],_key:string,_model:string,tokens:number)=>{requests.push({messages,tokens});return {content:'synthetic answer',usage:null}},
+    captureLoop:async(args:any)=>{const result=await args.initialGenerate();return {answer:result.content,usages:[],loopScore:null,loopCount:1}},
+  })
+  vm.runInContext(executable,ctx)
+  vm.runInContext(`foodCourtAiChat=captureChat;runFoodCourtLoopEngineering=captureLoop;buildForecastFactorsContext=async()=>'';loadFoodCourtLearningMemory=async()=>'';fetchFoodCourtXTrendBrief=async()=>null;recordFoodCourtAiUsage=async()=>{};`,ctx)
+  const journalDetail=await buildFoodCourtJournalDetail(
+    [{from:'2025-12-09',to:'2025-12-09'}],'クロワッサン',
+    async()=>[{business_date:'2025-12-09',gross_sales:2000,receipts:[{total:2000,time:'11:30',items:[{code:'9001',name:'カレー2種',qty:20,unit:100,amount:2000}]}]}],
+  )
+  const kpi=await prepareFoodCourtKpiScenario({...input,journalDetail},loaders())
+  assert.match(kpi!.plausibilityBlock!,/前提の妥当性チェック/)
+  await ctx.answerFoodCourtQuestion([],'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi)
+  assert.equal(requests.length,5)
+  // The critic is request index 3 (specialists 0-2 run in parallel first, critic runs after them,
+  // the integrator runs last): it must see the short plausibility comparison so it can flag an
+  // over/under-estimated scenario, but never the full deterministic KPI table (that stays the
+  // integrator/final answer's job).
+  const criticRequest=JSON.stringify(requests[3])
+  assert.match(criticRequest,/前提の妥当性チェック/)
+  assert.match(criticRequest,/カレー2種/)
+  assert.doesNotMatch(criticRequest,/コード側で確定計算済み/)
+  const final=JSON.stringify(requests.at(-1))
+  assert.match(final,/前提の妥当性チェック/)
+  assert.match(final,/コード側で確定計算済み/)
+})
+
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{
   assert.equal(buildFoodCourtKpiInputs({notes:'untrusted',unitPriceYen:'<script>',unitCostYen:null}),null)
   const context=buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:0,store_key:'other',requested:true,notes:'UNTRUSTED'})!

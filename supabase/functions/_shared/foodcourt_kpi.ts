@@ -4,7 +4,10 @@ import {
   KPI_ASSUMPTION_LABELS,
 } from './kpi_scenario.ts'
 import { buildTrustedAiSalesData, type UnifiedSalesSummary } from './sales_reconciliation_ai.ts'
-import { allocateFoodCourtHourlyTargets, buildFoodCourtJournalDemandOutlook, type FoodCourtJournalDetail } from './foodcourt_journal_detail.ts'
+import {
+  allocateFoodCourtHourlyTargets, assessFoodCourtNewItemPlausibility, buildFoodCourtJournalDemandOutlook,
+  formatFoodCourtNewItemPlausibilityBlock, type FoodCourtJournalDetail, type FoodCourtNewItemPlausibilityCheck,
+} from './foodcourt_journal_detail.ts'
 
 /** 入力の参照は試算の許可とは別。数値allowlist以外や自由文はここへ取り込まない。 */
 export function buildFoodCourtKpiInputs(raw: unknown, currentInputKeys?: string[]) {
@@ -52,6 +55,7 @@ export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外�
 販売個数・売上見込みはジャーナルの類似/対象商品の日次実績と月次推移からコードが伸ばした【仮定(シナリオ)】である。実績そのものではない。
 商品売上見込みは「売れた場合の額」。上積みは置き換えを見込んだ増分。寄与率は今の店舗日次売上に対する見込みの割合。上積みを店舗全体の確定純増・営業利益と呼ばない。
 予想売上・寄与率・上積みは「単品のみ」と「セット込み（ドリンク・ワインの上乗せを加重平均）」の2基準がある。どちらの数字を引用するときも必ずどちらの基準かを明記し、セット込みの数字にはセット選択比率・上乗せ額が仮定(シナリオ)で実測のセット購入率ではない旨を添える。基準を混在させて1つの数字であるかのように書かない。
+「前提の妥当性チェック」ブロックが渡されたら、新商品の想定販売数と店内最多販売商品の実績比を必ず引用する。過大評価フラグがあれば「実際に売れるかは未検証」と明記し、標準シナリオをそのまま目標にせず保守シナリオや縮小規模での検証を勧める。反証AIの指摘（前提が過大/過小の可能性）を無視して数値だけ通さない。
 必ず保守／標準／強気の3シナリオを併記する。表では【仮定(シナリオ)】をセルに繰り返さず、表の直上に注釈を1行だけ置く。箇条書きで個別引用するときだけ【実績】【仮定(入力)】【仮定(シナリオ)】を付ける。実績と仮定は別の表にし、同じ合計に混ぜない。
 試算の基準期間はブロックに記載した統一売上の期間であり、表示中の単日や質問中のイベントの実績に読み替えない。テナント比較表の税抜売上とも合算しない。
 価格・粗利率・損益分岐・営業区分別販売目標・日次/月次売上・寄与率・上積み・KPI目標・撤退ラインを簡潔に示す。見込み個数が損益分岐を下回れば撤退リスクとして述べる。未入力・粗利未登録は仮置きの推測値と述べ、最後に「この試算の精度を上げるために必要なデータ」を置く。
@@ -150,6 +154,7 @@ export function formatKpiUserAppendix(
   outlook: ReturnType<typeof buildFoodCourtJournalDemandOutlook>,
   goal?: { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null; kgiKind?: 'uplift' | 'store' | null },
   upliftWithSets?: ReturnType<typeof buildFoodCourtInitiativeUplift>,
+  plausibility?: FoodCourtNewItemPlausibilityCheck | null,
 ) {
   const yen = (n: number | null | undefined) =>
     n == null || !Number.isFinite(n) ? '—' : `¥${Math.round(n).toLocaleString('ja-JP')}`
@@ -235,6 +240,15 @@ export function formatKpiUserAppendix(
       return `${row.scenario.scenarioLabel}(観測${num(observed)}個→上限${num(row.capacityUnits)}個)`
     }).join('、')
     lines.push(`類似/対象商品の観測個数（他商品の合算実績）が焼成上限×廃棄控除を上回ったため、販売数見込みはその上限に丸めた: ${detail}。`)
+  }
+  if (plausibility) {
+    const ratioText = plausibility.scenarios
+      .map((s) => `${s.label}${num(s.daily_units, '個')}/日（比${num(s.ratio_to_top_existing_item)}倍）`)
+      .join('、')
+    lines.push(`前提の妥当性チェック（当店の実測比較・業界目安ではない）: 店内で最も個数が出ている既存商品は「${plausibility.top_existing_item_name}」実績${num(plausibility.top_existing_item_daily_units, '個')}/日。新商品の想定: ${ratioText}。`)
+    if (plausibility.overestimate_flagged) {
+      lines.push('いずれかのシナリオが店内最多販売商品の実績以上を想定しており、過大評価の可能性がある。実際に売れるかは未検証として扱うこと。')
+    }
   }
   lines.push('')
   lines.push('【セット込み予想売上の考え方・注釈】')
@@ -380,12 +394,21 @@ export async function prepareFoodCourtKpiScenario(
     })
     const upliftBlock = uplift ? `\n\n${uplift.block}` : ''
     const upliftWithSetsBlock = upliftWithSets ? `\n\n${upliftWithSets.block}` : ''
-    const userAppendix = formatKpiUserAppendix(pack, uplift, outlook, readKpiGoalFromAssumptions(input.assumptions), upliftWithSets)
+    // 前提の妥当性チェック: 店内最多販売商品の実績と比べて過大評価でないかの参考比較。
+    // 算術（掛け算・割り算）はここでは行わず、既に頭打ち済みの scenarioUnits をそのまま比較する。
+    const plausibility = assessFoodCourtNewItemPlausibility(
+      detail,
+      pack.scenarios.map((s) => ({ label: s.scenarioLabel, daily_units: scenarioUnits.get(s.scenarioLabel) ?? null })),
+    )
+    const plausibilityBlock = plausibility ? formatFoodCourtNewItemPlausibilityBlock(plausibility) : ''
+    const userAppendix = formatKpiUserAppendix(pack, uplift, outlook, readKpiGoalFromAssumptions(input.assumptions), upliftWithSets, plausibility)
     return {
       inputs: buildFoodCourtKpiInputs(assumptions, normalizeKpiAssumptions(input.assumptions).provided),
-      block: formatKpiScenarioBlock(pack) + outlookBlock + hourlyBlock + upliftBlock + upliftWithSetsBlock,
+      block: formatKpiScenarioBlock(pack) + outlookBlock + hourlyBlock + upliftBlock + upliftWithSetsBlock + (plausibilityBlock ? `\n\n${plausibilityBlock}` : ''),
+      // 反証AI（critic）はKPIの詳細計算ブロックを受け取らないため、この短い比較だけを別途渡す。
+      plausibilityBlock,
       userAppendix,
-      reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel, journal_detail_coverage: detail?.coverage ?? null, demand_outlook: outlook?.facts ?? null, hourly_targets: hourlyTargets, initiative_uplift: uplift?.facts ?? null, initiative_uplift_with_sets: upliftWithSets?.facts ?? null },
+      reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel, journal_detail_coverage: detail?.coverage ?? null, demand_outlook: outlook?.facts ?? null, hourly_targets: hourlyTargets, initiative_uplift: uplift?.facts ?? null, initiative_uplift_with_sets: upliftWithSets?.facts ?? null, new_item_plausibility: plausibility },
     }
   } finally {
     clearTimeout(timer)
