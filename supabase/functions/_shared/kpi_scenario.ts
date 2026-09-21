@@ -180,10 +180,10 @@ export const KPI_ASSUMPTION_LABELS: Record<keyof KpiAssumptionValues, string> = 
   unitCostYen: "原価（1個あたり）",
   setDrinkAddCostYen: "ドリンクセットの追加原価",
   setWineAddCostYen: "ワインセットの追加原価",
-  bakeBatchUnits: "設備で1回に焼ける個数",
-  bakeBatchesPerDay: "1日の焼成回数の上限",
-  prepStaffCount: "仕込み・焼成に割ける人員",
-  prepHoursPerDay: "1日の仕込み・焼成時間",
+  bakeBatchUnits: "1回の仕込みで作れる数量",
+  bakeBatchesPerDay: "1日の仕込み回数の上限",
+  prepStaffCount: "仕込み・提供に割ける人員",
+  prepHoursPerDay: "1日の仕込み・提供時間",
   staffHourlyCostYen: "人件費（時給）",
   wasteRateTolerancePct: "廃棄の許容範囲（％）",
 };
@@ -799,14 +799,14 @@ function computeScenario(
     round0(batchUnits.value * batchesPerDay.value),
     "個",
     mergeBasis(batchUnits.basis, batchesPerDay.basis),
-    "1回の焼成個数 × 1日の焼成回数上限",
+    "1回の仕込み数量 × 1日の仕込み回数上限",
   );
   const dailyFixedCost = round0(staffCount.value * prepHours.value * hourlyCost.value);
   const dailyFixedCostYen = num(
     round0(dailyFixedCost),
     "円",
     mergeBasis(staffCount.basis, prepHours.basis, hourlyCost.basis),
-    "人員 × 1日の仕込み・焼成時間 × 時給",
+    "人員 × 1日の仕込み・提供時間 × 時給",
   );
   const expectedWasteRate = Math.min(0.9, d.expectedWasteRate);
   const costPerSoldUnit = blendedCostValue / (1 - expectedWasteRate);
@@ -824,9 +824,9 @@ function computeScenario(
     breakEvenUnits,
     "個/日",
     mergeBasis(dailyFixedCostYen.basis, contributionPerSoldUnitYen.basis),
-    "仕込み・焼成人件費 ÷ 1個あたり貢献利益（切り上げ、他費用は未算入）",
+    "仕込み・提供人件費 ÷ 1個あたり貢献利益（切り上げ、他費用は未算入）",
   );
-  const sellableCapacityUnits = num(Math.floor(dailyCapacityUnits.value * (1 - expectedWasteRate)), "個/日", "scenario", "焼成上限 × (1 − 想定廃棄率)、整数切り捨て");
+  const sellableCapacityUnits = num(Math.floor(dailyCapacityUnits.value * (1 - expectedWasteRate)), "個/日", "scenario", "仕込み上限 × (1 − 想定廃棄率)、整数切り捨て");
   const breakEvenAchievable = breakEvenUnits !== null &&
     breakEvenUnits <= sellableCapacityUnits.value;
 
@@ -853,7 +853,7 @@ function computeScenario(
 
   const lunchGuests = guestsPerDayValue * d.lunchGuestShare;
   const dinnerGuests = guestsPerDayValue * (1 - d.lunchGuestShare);
-  // ランチは毎営業日、ディナー区分は同じ日に1つだけ立つ。1日の焼成上限は両者の合算に効く。
+  // ランチは毎営業日、ディナー区分は同じ日に1つだけ立つ。1日の仕込み上限は両者の合算に効く。
   const lunchUnitsRaw = lunchGuests * d.purchaseRate;
   const lunchCap = Math.floor(sellableCapacityUnits.value * d.lunchGuestShare);
   const lunchUnits = Math.min(round0(lunchUnitsRaw), lunchCap);
@@ -903,7 +903,7 @@ function computeScenario(
           ? `1営業日の来店客数 × ランチ比率${round0(d.lunchGuestShare * 100)}%`
           : `1営業日のディナー客数 × 需要指数${index}（指数は仮定）`,
       ),
-      targetUnits: num(round0(units), "個", unitsBasis, "想定客数 × 購入率（焼成上限で頭打ち）"),
+      targetUnits: num(round0(units), "個", unitsBasis, "想定客数 × 購入率（仕込み上限で頭打ち）"),
       capacityLimited: round0(rawUnits) > cap,
       slots,
       dailyRevenue: num(
@@ -1135,8 +1135,8 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
   const lines: string[] = [];
   lines.push("【数値提案（KPI試算・コード側で確定計算済み）】");
   lines.push(`対象: ${pack.productName}`);
-  lines.push("モデルの範囲: 焼成商品の導入を想定した参考試算。保守・標準・強気は作業仮説であり、実現確率・信頼区間ではない。既存商品の置き換えを控除していないため、商品購入額・商品売上は店舗の純増額ではない。");
-  lines.push("採算上の制限: 【仮定(シナリオ)】売価と原価は同じ税区分・単位と仮置き（税区分は未確認、税額換算なし）。仕込み・焼成人件費以外の家賃・光熱費・包装費・決済手数料等は未算入。損益分岐は算入費用の回収個数に限り、店舗全体の採算は未判定。廃棄は加重原価全体へ適用する簡易モデル。");
+  lines.push("モデルの範囲: 新商品の導入を想定した参考試算。保守・標準・強気は作業仮説であり、実現確率・信頼区間ではない。既存商品の置き換えを控除していないため、商品購入額・商品売上は店舗の純増額ではない。");
+  lines.push("採算上の制限: 【仮定(シナリオ)】売価と原価は同じ税区分・単位と仮置き（税区分は未確認、税額換算なし）。仕込み・提供人件費以外の家賃・光熱費・包装費・決済手数料等は未算入。損益分岐は算入費用の回収個数に限り、店舗全体の採算は未判定。廃棄は加重原価全体へ適用する簡易モデル。");
   lines.push("丸め規則: 加重売価・加重原価・貢献利益・人件費は円単位で四捨五入して以後の計算に使用。販売能力は廃棄後の整数切り捨て、時間帯個数と月日数の内訳は合計を保持して配分。セット率は販売個数ベース、テイクアウト比率は会計数ベース。");
   lines.push(
     `実績ベースライン: ${pack.baseline.periodLabel} / ${pack.baseline.sourceNote}`,
@@ -1177,7 +1177,7 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
     lines.push(`    - KPI: 通常日の販売目標 ${show(s.normalDayOutlook.targetUnits)} / セット率 ${show(s.kpiTargets.setRatePct)} / テイクアウト比率 ${show(s.kpiTargets.takeoutRatePct)}。営業区分別・時間帯別目標は下記。`);
     lines.push("    - KFI候補（現場行動）: 店頭案内・セット提案の実施。実施件数・提案率は未計測、数値目標は未設定。担当候補=販売担当、実施時=商品案内時、記録=案内/提案件数と購入/セット成立件数を同じ時間帯で記録。計算済み販売目標を行動実績へ読み替えない。");
     lines.push(`    - 採算確認（KFIとは別）: 加重粗利率 ${show(s.blendedGrossMarginPct)} / 1個あたり貢献利益 ${show(s.contributionPerSoldUnitYen)} / 損益分岐 ${s.breakEvenUnitsPerDay ? show(s.breakEvenUnitsPerDay) : "成立しない（貢献利益が非正）"}。最終利益は未算出。`);
-    lines.push(`    - 関係・判断: 店頭案内・セット提案（KFI）→販売数・セット率（KPI）→商品売上（KGI候補）の仮説を検証する。採算確認では通常日の販売目標は損益分岐${s.normalDayOutlook.coversBreakEven ? "に届く" : "に届かない"}。${s.breakEvenAchievable ? "焼成上限内で損益分岐に到達可能な試算だが、実現・利益を保証しない。" : "焼成上限内では損益分岐に到達しないため、価格・原価・生産条件を見直す。"}廃棄・縮小条件も下記と照合する。`);
+    lines.push(`    - 関係・判断: 店頭案内・セット提案（KFI）→販売数・セット率（KPI）→商品売上（KGI候補）の仮説を検証する。採算確認では通常日の販売目標は損益分岐${s.normalDayOutlook.coversBreakEven ? "に届く" : "に届かない"}。${s.breakEvenAchievable ? "仕込み上限内で損益分岐に到達可能な試算だが、実現・利益を保証しない。" : "仕込み上限内では損益分岐に到達しないため、価格・原価・生産条件を見直す。"}廃棄・縮小条件も下記と照合する。`);
     lines.push("  A-1 価格設定案と粗利率");
     for (const p of s.prices) {
       lines.push(
@@ -1193,10 +1193,10 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
     );
     lines.push("  A-2 損益分岐となる1日の販売個数");
     lines.push(
-      `    - 1日の焼成上限: ${show(s.dailyCapacityUnits)}（${s.dailyCapacityUnits.source}）`,
+      `    - 1日の仕込み上限: ${show(s.dailyCapacityUnits)}（${s.dailyCapacityUnits.source}）`,
     );
     lines.push(
-      `    - 1日の算入固定費（仕込み・焼成人件費のみ）: ${show(s.dailyFixedCostYen)}（${s.dailyFixedCostYen.source}）`,
+      `    - 1日の算入固定費（仕込み・提供人件費のみ）: ${show(s.dailyFixedCostYen)}（${s.dailyFixedCostYen.source}）`,
     );
     lines.push(
       `    - 1個あたり貢献利益: ${show(s.contributionPerSoldUnitYen)}（${s.contributionPerSoldUnitYen.source}）`,
@@ -1214,7 +1214,7 @@ export function formatKpiScenarioBlock(pack: KpiScenarioPack): string {
       lines.push(
         `    - ${seg.label}: 想定客数 ${show(seg.expectedGuests)} → 目標 ${
           show(seg.targetUnits)
-        }${seg.capacityLimited ? "（焼成上限で頭打ち）" : ""} / 時間帯配分 ${slotText} / 1日売上 ${
+        }${seg.capacityLimited ? "（仕込み上限で頭打ち）" : ""} / 時間帯配分 ${slotText} / 1日売上 ${
           show(seg.dailyRevenue)
         } / 月あたり ${show(seg.daysPerMonth)}`,
       );

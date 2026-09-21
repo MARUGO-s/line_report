@@ -3097,14 +3097,14 @@ test('missing required assumptions are listed for the clarification question', (
   const labels = context.missingKpiAssumptionLabels({});
   assert.equal(labels.length, context.KPI_REQUIRED_ASSUMPTION_KEYS.length);
   assert.ok(labels.includes('原価（1個あたり）'));
-  assert.ok(labels.includes('設備で1回に焼ける個数'));
+  assert.ok(labels.includes('1回の仕込みで作れる数量'));
   assert.ok(labels.includes('廃棄の許容範囲（％）'));
 
   const partial = context.normalizeStoreOpsKpiAssumptions({ unitPriceYen: 420, unitCostYen: 126 });
   const rest = context.missingKpiAssumptionLabels(partial);
   assert.ok(!rest.includes('想定売価（単品）'));
   assert.ok(!rest.includes('原価（1個あたり）'));
-  assert.ok(rest.includes('設備で1回に焼ける個数'));
+  assert.ok(rest.includes('1回の仕込みで作れる数量'));
 });
 
 test('the KPI assumption question explains the 3-scenario fallback and stays a single round', () => {

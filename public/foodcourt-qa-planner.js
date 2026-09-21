@@ -319,7 +319,7 @@
     }
     if(wantsKpiTargets(question, options.historyText) && !state.kpiConfirmed && !options.assumptionsReady && !state.methods) {
       state.pending={kind:'kpi',question};
-      return clarify('KPI試算の前提を確認します。売価・原価・焼成個数/回数・人員・廃棄許容率は分かりますか？ 下の「試算前提」に入力するか、保存済み値・仮置きで進められます。',['入力した前提で進む','保存済み前提・仮置きで進む','キャンセル']);
+      return clarify('KPI試算の前提を確認します。売価・原価・仕込み個数/回数・人員・廃棄許容率は分かりますか？ 下の「試算前提」に入力するか、保存済み値・仮置きで進められます。',['入力した前提で進む','保存済み前提・仮置きで進む','キャンセル']);
     }
     if(wantsKpiTargets(question, options.historyText)) {
       state.methods=normalizeMethodIds([...(state.methods||[]),'kpi']);
