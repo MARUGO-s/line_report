@@ -138,7 +138,7 @@ FOODCOURT_AI_REQUEST_BUDGET_MS=110000
 
 反証AI④は全surfaceでGemini 3.5 Flash（→ Groq）、評価AI⑥はGroq GPT-OSS（→ Gemini）が標準。統合はOpenAI→Gemini→Groq。旧Claude設定は新しい役割設定へ自動継承しない。Moonshotは構成外。
 
-**キャッシュ挙動**: 現行の通常版・loop版はどちらも `foodcourt-analysis-ai-v29-set-upsell`
+**キャッシュ挙動**: 現行の通常版・loop版はどちらも `foodcourt-analysis-ai-v30-plausibility-check`
 であり、日次ループをOFFにしてもキャッシュバージョンは変わらない。旧記録の `v16-loop-learning` は当時の値。
 
 ### 3-4. 記録テーブル

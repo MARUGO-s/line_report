@@ -55,7 +55,9 @@ const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-09-21: 新商品の販売数見込みを焼成上限×廃棄控除で頭打ちし、v27に上げ旧キャッシュを再生成させる。
 // 2026-09-21: 新商品KGIは店舗純増（現状＋増やしたい額）。v28。
 // 2026-09-21: 予想売上・寄与・上積みを単品のみ／セット込みの両基準で併記し、セット構成の前提を注釈。v29。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v29-set-upsell'
+// 2026-09-21: 新商品の想定販売数を店内最多販売商品の実績と比較する「前提の妥当性チェック」を追加し、
+// 反証AI④にも過大/過小評価の判定を担当させたため v30 に上げ旧キャッシュを再生成させる。
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v30-plausibility-check'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
 // 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
@@ -67,7 +69,7 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。' + '\n' + BUSINESS_GOAL_METRICS_POLICY
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v29-set-upsell'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v30-plausibility-check'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
 // 現行では通常版・loop版とも v28 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {
@@ -3328,12 +3330,13 @@ export async function answerFoodCourtQuestion(
     journalScopeRule,
     followUpSpecialistRule,
     methodRule,
-    `担当は、専門AIメモに含まれる言い過ぎ、根拠不足、相関と因果の混同、対象日/期間の取り違え、データに無い数字の混入を検出すること。新しい施策のKPI試算は後段のサーバー確定ブロックが担当する。施策未実施を理由に「分析できない」「数値未確認」へ落とす指摘はしない。`,
+    `担当は、専門AIメモに含まれる言い過ぎ、根拠不足、相関と因果の混同、対象日/期間の取り違え、データに無い数字の混入を検出すること。新しい施策のKPI試算の算術（掛け算・割り算そのもの）は後段のサーバー確定ブロックが担当するため再計算しない。施策未実施を理由に「分析できない」「数値未確認」へ落とす指摘はしない。`,
+    `「前提の妥当性チェック」が渡されたら必ず確認する。新商品の想定販売数が、店内で最も個数の出ている既存商品の実績以上になっている場合は過大評価の可能性として明記し、逆に極端に小さい場合も前提が保守的すぎないか一言添える。この比較は当店の実測値どうしであり、業界目安ではない。`,
     `日報施策の効果を断定している場合、「日報×実績 効果対照」の数値と照合していないなら「仮説に弱める」よう指摘する。`,
     `担当者評価と実績の不一致を無視しているメモも指摘する。`,
     `出力は最終回答ではなく「統合担当AIへの反証メモ」。採用してよい主張、弱めるべき主張、禁止すべき断定を箇条書きで短く書く（300字程度）。`,
   ].join('\n')
-  const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}${conversationBlock}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
+  const criticUser = `${viewingBlock ? viewingBlock + '\n\n' : ''}${conversationBlock}質問: ${q}\n\n# 専門AIメモ\n## 他店舗・過去データ\n${quantNote}\n\n## イベント・天気\n${extNote}\n\n## 運営改善\n${opsNote}\n\n# 検証用の根拠\n${insights || '(履歴不足)'}\n\n${decomposition || '(要因分解なし)'}\n\n${storeCorr || '(店舗間相関なし)'}\n\n${eventCorr || '(イベント相関なし)'}\n\n${weatherCorr || '(天気相関なし)'}\n\n${forecastCtx || '(予測なし)'}${patternBlock ? '\n\n' + patternBlock : ''}${kpiContext?.plausibilityBlock ? '\n\n' + kpiContext.plausibilityBlock : ''}\n\n${nippou.block}\n\n# 日次生データ\n${data}`
   const criticRes = await foodCourtAiChat([{ role: 'system', content: criticSystem }, { role: 'user', content: criticUser }], groqApiKey, primary, 650, resolveFoodCourtCriticProvider(), fallbackModel, { deadlineAt, perProviderMs: 25000, fallbackLog: { supabase, storeKey, surface: 'ask', role: 'critic' } })
   if (criticRes.usage) await recordFoodCourtAiUsage(supabase, String(storeKey ?? ''), null, criticRes.usage)
   const criticNote = criticRes.content || '(反証メモ: 取得失敗)'
