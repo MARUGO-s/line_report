@@ -532,6 +532,13 @@ export type KpiScenarioResult = {
   blendedPrice: KpiNumber;
   blendedCost: KpiNumber;
   blendedGrossMarginPct: KpiNumber;
+  setMix: {
+    singleSharePct: KpiNumber;
+    drinkSetSharePct: KpiNumber;
+    wineSetSharePct: KpiNumber;
+    drinkAddYen: KpiNumber;
+    wineAddYen: KpiNumber;
+  };
   dailyCapacityUnits: KpiNumber;
   dailyFixedCostYen: KpiNumber;
   contributionPerSoldUnitYen: KpiNumber;
@@ -767,6 +774,26 @@ function computeScenario(
     "加重粗利 ÷ 加重売価",
   );
 
+  // セット込み加重平均の内訳（単品/ドリンクセット/ワインセットの比率と上乗せ額）。
+  // 呼び出し側が「セットにするとどれだけ上乗せになるか」を独自に再計算せず、ここの値だけを引用する。
+  const setMix = {
+    singleSharePct: num(round1(singleShare * 100), "%", "scenario", "1 − セット率"),
+    drinkSetSharePct: num(round1(drinkSetShare * 100), "%", "scenario", "セット率 ×（1 − セット内ワイン比率）"),
+    wineSetSharePct: num(round1(wineSetShare * 100), "%", "scenario", "セット率 × セット内ワイン比率"),
+    drinkAddYen: num(
+      round0(drinkSetPrice.value - unitPrice.value),
+      "円",
+      mergeBasis(drinkSetPrice.basis, unitPrice.basis),
+      "ドリンクセット価格 − 単品価格",
+    ),
+    wineAddYen: num(
+      round0(wineSetPrice.value - unitPrice.value),
+      "円",
+      mergeBasis(wineSetPrice.basis, unitPrice.basis),
+      "ワインセット価格 − 単品価格",
+    ),
+  };
+
   // A-2 損益分岐となる1日の販売個数
   const dailyCapacityUnits = num(
     round0(batchUnits.value * batchesPerDay.value),
@@ -996,6 +1023,7 @@ function computeScenario(
     blendedPrice,
     blendedCost,
     blendedGrossMarginPct,
+    setMix,
     dailyCapacityUnits,
     dailyFixedCostYen,
     contributionPerSoldUnitYen,

@@ -54,7 +54,8 @@ const FOODCOURT_URI_MAX_LEN = 1000
 // 2026-09-20: 目的に応じた分析手法。KGI/KPI/KFIは改善管理時のみ。旧キャッシュを再生成させる。
 // 2026-09-21: 新商品の販売数見込みを焼成上限×廃棄控除で頭打ちし、v27に上げ旧キャッシュを再生成させる。
 // 2026-09-21: 新商品KGIは店舗純増（現状＋増やしたい額）。v28。
-export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v28-kgi-uplift'
+// 2026-09-21: 予想売上・寄与・上積みを単品のみ／セット込みの両基準で併記し、セット構成の前提を注釈。v29。
+export const FOODCOURT_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v29-set-upsell'
 
 // 全surface共通の「施策の固定フォーマット」。統合AIの最終出力で打ち手/次の一手を書く際に必ず守らせる。
 // 実用性・根拠の低スコア（抽象的な施策・根拠のない価格/客数目標）への対策。
@@ -66,7 +67,7 @@ const FOODCOURT_ACTION_FORMAT_RULE =
   '参考値には出所と仮定であることを添え、実績値と同じ表・同じ合計に混ぜない。' + '\n' + BUSINESS_GOAL_METRICS_POLICY
 // 日次サマリー専用のキャッシュバージョン（ループ有効時）。日報×実績・動員数リンクを含む。
 // 期間サマリー(foodcourt_period_ai_summary)は FOODCOURT_ANALYSIS_AI_VERSION を使う。
-export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v28-kgi-uplift'
+export const FOODCOURT_DAILY_ANALYSIS_AI_VERSION = 'foodcourt-analysis-ai-v29-set-upsell'
 // 日次サマリーの「実効」キャッシュバージョン。品質ループは未設定時OFF（fail closed）。
 // 現行では通常版・loop版とも v28 なので、ON/OFFによる不要なキャッシュ再生成は発生しない。
 export function resolveFoodCourtDailyAnalysisVersion(): string {

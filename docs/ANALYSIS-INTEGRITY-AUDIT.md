@@ -59,7 +59,7 @@ AIの自己採点は正確性の保証ではない。数値監査は主に数値
 - 認証: 両APIへの未認証POSTが401で拒否されることを確認。これは認証境界の確認であり、実AIの回答内容の検証ではない。
 - 保存済み回答は自動更新しない。画面更新後に再質問/再分析が必要。実AI文章の正確性と施策の経営効果は、今後の運用・実測で確認する。
 
-共通計算層 `kpi_scenario.ts` と共通分析規則 `business_goal_metrics.ts` を維持する。数値契約はversion 2へ更新し、損益分岐nullと商品購入額への改称を型に表す。DB migration・ファイル移動・公開URL変更は不要。この監査時点のFC日次/期間キャッシュはv22。手法選択以降の改訂を経て、現行は `foodcourt-analysis-ai-v27-capacity-cap`。保存済み回答は再質問/再分析が必要。
+共通計算層 `kpi_scenario.ts` と共通分析規則 `business_goal_metrics.ts` を維持する。数値契約はversion 2へ更新し、損益分岐nullと商品購入額への改称を型に表す。DB migration・ファイル移動・公開URL変更は不要。この監査時点のFC日次/期間キャッシュはv22。手法選択以降の改訂を経て、現行は `foodcourt-analysis-ai-v29-set-upsell`。保存済み回答は再質問/再分析が必要。
 
 - `kpi_scenario.test.ts`: 追加8件が修正前に失敗することを確認。部分月、母集団、競合、不成立、値引き、ラベル、単位、通常提案を回帰検証。能力1〜100個×3シナリオで内訳/日数/売上/上限の不変条件を確認。
 - `foodcourt_kpi` / `foodcourt_goal_metrics` / `journal_store_context_integration`: 実ルートと統合/評価プロンプトを合成データ・外部AIモックで検証。

@@ -259,6 +259,50 @@ test('journal similar-item quantity is capped at the store\'s baking capacity, n
   }
 })
 
+test('set-inclusive (drink/wine upsell) sales are shown alongside single-item sales, with the mix assumptions disclosed',async()=>{
+  const io=loaders()
+  const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420,unitCostYen:126,kgiTargetYen:10000,kgiHorizon:'day',kgiKind:'uplift'}},io)
+  assert.ok(result)
+  const appendix=result.userAppendix
+  // The reasoning annotation must explain the basis before the table, not inside a cell.
+  assert.match(appendix,/【セット込み予想売上の考え方・注釈】/)
+  assert.match(appendix,/実測のドリンク・ワイン同時購入率ではない/)
+  assert.match(appendix,/標準: 単品比率70%／ドリンクセット比率18%（単品\+¥350＝セット価格¥770）／ワインセット比率12%（単品\+¥700＝セット価格¥1,120）→ 加重平均売価¥567/)
+  // Both the single-item-only KGI gap and the set-inclusive KGI gap are shown, distinctly labelled.
+  assert.match(appendix,/純増ギャップ（標準シナリオ・単品のみ）/)
+  assert.match(appendix,/純増ギャップ（標準シナリオ・セット込み）/)
+  const tableRows=(appendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
+  const cells=(label:string)=>{
+    const row=tableRows.find(line=>line.includes(label))
+    assert.ok(row,`missing row: ${label}`)
+    return row!.split('|').map(c=>c.trim()).filter(Boolean).slice(1).map(c=>Number(c.replace(/[^0-9.-]/g,'')))
+  }
+  const single=cells('予想売上/日（単品のみ）')
+  const withSets=cells('予想売上/日（セット込み）')
+  const upsell=cells('セットによる上乗せ額/日')
+  for (let i=0;i<3;i++) {
+    assert.ok(withSets[i]>single[i],'set-inclusive sales must exceed single-item sales once sets carry a price premium')
+    assert.equal(upsell[i],withSets[i]-single[i])
+  }
+  // The single-item figure stays exactly what it was before this feature existed (no regression).
+  // units: 8/12/18 per day; blended (set-inclusive) price: ¥498/¥567/¥660.
+  assert.deepEqual(single,[3360,5040,7560])
+  assert.deepEqual(withSets,[3984,6804,11880])
+  // Set-inclusive uplift/contribution rows exist alongside the single-item ones, not replacing them.
+  const upliftSingle=cells('上積み/日（単品のみ）')
+  const upliftSets=cells('上積み/日（セット込み）')
+  for (let i=0;i<3;i++) assert.ok(upliftSets[i]>upliftSingle[i])
+  // Labels never leave the caveat unclear: the AI-facing block also distinguishes the two bases.
+  assert.match(result.block,/単品価格のみ（ドリンク・ワインのセット上乗せなし）/)
+  assert.match(result.block,/セット込み（ドリンクセット・ワインセットの上乗せを加重平均/)
+  assert.ok(result.reference.initiative_uplift)
+  assert.ok((result.reference as any).initiative_uplift_with_sets)
+  assert.notEqual(
+    (result.reference as any).initiative_uplift_with_sets.scenarios[1].initiative_daily_sales_yen,
+    result.reference.initiative_uplift!.scenarios[1].initiative_daily_sales_yen,
+  )
+})
+
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{
   assert.equal(buildFoodCourtKpiInputs({notes:'untrusted',unitPriceYen:'<script>',unitCostYen:null}),null)
   const context=buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:0,store_key:'other',requested:true,notes:'UNTRUSTED'})!
