@@ -240,10 +240,10 @@ test('原価・売価・焼成数を変えると損益分岐個数と目標個�
   assert.equal(smallOven.dailyCapacityUnits.value, 4)
   const baseTotal = base.segments.reduce((n, seg) => n + seg.targetUnits.value, 0)
   const smallTotal = smallOven.segments.reduce((n, seg) => n + seg.targetUnits.value, 0)
-  assert.ok(smallTotal < baseTotal, '焼成上限を絞ると目標個数が減る')
+  assert.ok(smallTotal < baseTotal, '仕込み上限を絞ると目標個数が減る')
   assert.ok(
     smallOven.segments.some((seg) => seg.capacityLimited),
-    '焼成上限で頭打ちになった区分に印が付く',
+    '仕込み上限で頭打ちになった区分に印が付く',
   )
 })
 
@@ -446,8 +446,8 @@ test('sales_data には軽量な参照だけを載せ、数値の正本はブロ
     [...partial.provided_assumptions],
     ['想定売価（単品）', '原価（1個あたり）'],
   )
-  assert.ok(partial.scenario_filled_assumptions.includes('1日の仕込み・焼成時間'))
-  assert.ok(partial.scenario_filled_assumptions.includes('設備で1回に焼ける個数'))
+  assert.ok(partial.scenario_filled_assumptions.includes('1日の仕込み・提供時間'))
+  assert.ok(partial.scenario_filled_assumptions.includes('1回の仕込みで作れる数量'))
 
   // 参照だけからは金額を再現できない＝AIが参照から再計算できない
   assert.ok(!json.includes('420'), '価格などの生の数値は参照へ含めない')

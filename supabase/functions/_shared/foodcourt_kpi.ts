@@ -56,7 +56,7 @@ export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外�
 商品売上見込みは「売れた場合の額」。上積みは置き換えを見込んだ増分。寄与率は今の店舗日次売上に対する見込みの割合。上積みを店舗全体の確定純増・営業利益と呼ばない。
 予想売上・寄与率・上積みは「単品のみ」と「セット込み（ドリンク・ワインの上乗せを加重平均）」の2基準がある。どちらの数字を引用するときも必ずどちらの基準かを明記し、セット込みの数字にはセット選択比率・上乗せ額が仮定(シナリオ)で実測のセット購入率ではない旨を添える。基準を混在させて1つの数字であるかのように書かない。
 「前提の妥当性チェック」ブロックが渡されたら、新商品の想定販売数と店内最多販売商品の実績比を必ず引用する。過大評価フラグがあれば「実際に売れるかは未検証」と明記し、標準シナリオをそのまま目標にせず保守シナリオや縮小規模での検証を勧める。反証AIの指摘（前提が過大/過小の可能性）を無視して数値だけ通さない。
-「予想販売数/日」のセルに（観測◯個／焼成上限◯個）が付いているシナリオは、生産能力（バッチ回数・バッチ個数・廃棄率）で頭打ちしている。保守／標準／強気の個数の差が小さいことを需要の差が小さいからだと述べず、上限に頭打ちしているためだと明記する。上限を上げたい場合はバッチ回数・バッチ個数・廃棄率のどれを変えるかを示す。これは対象商品を問わず、焼成・仕込み・提供数などに上限がある商品すべてに適用する共通ルールである。
+「予想販売数/日」のセルに（観測◯個／仕込み上限◯個）が付いているシナリオは、生産能力（仕込み回数・仕込み数量・廃棄率）で頭打ちしている。保守／標準／強気の個数の差が小さいことを需要の差が小さいからだと述べず、上限に頭打ちしているためだと明記する。上限を上げたい場合は仕込み回数・仕込み数量・廃棄率のどれを変えるかを示す。これは対象商品を問わず、仕込み・提供数などに上限がある商品すべてに適用する共通ルールである。
 必ず保守／標準／強気の3シナリオを併記する。表では【仮定(シナリオ)】をセルに繰り返さず、表の直上に注釈を1行だけ置く。箇条書きで個別引用するときだけ【実績】【仮定(入力)】【仮定(シナリオ)】を付ける。実績と仮定は別の表にし、同じ合計に混ぜない。
 試算の基準期間はブロックに記載した統一売上の期間であり、表示中の単日や質問中のイベントの実績に読み替えない。テナント比較表の税抜売上とも合算しない。
 価格・粗利率・損益分岐・営業区分別販売目標・日次/月次売上・寄与率・上積み・KPI目標・撤退ラインを簡潔に示す。見込み個数が損益分岐を下回れば撤退リスクとして述べる。未入力・粗利未登録は仮置きの推測値と述べ、最後に「この試算の精度を上げるために必要なデータ」を置く。
@@ -138,7 +138,7 @@ function mdTable(headers: string[], rows: string[][]) {
 
 /**
  * ジャーナル類似商品の観測個数（他商品の合算実績）を、新商品の販売数見込みにそのまま使わない。
- * 焼成上限×廃棄控除（sellableCapacityUnits）を新商品1品の物理的な上限として頭打ちする。
+ * 仕込み上限×廃棄控除（sellableCapacityUnits）を新商品1品の物理的な上限として頭打ちする。
  */
 function clampOutlookUnitsToCapacity(
   outlookUnits: number | null | undefined,
@@ -178,14 +178,14 @@ export function formatKpiUserAppendix(
     return { scenario, item, units, dailySales, dailySalesWithSets, setUpsellPerDay, fromUplift, fromUpliftWithSets, outlookExceedsCapacity, capacityUnits, observedUnits }
   })
   /**
-   * 生産能力（焼成上限×廃棄控除）に頭打ちしたシナリオは、丸め後の個数だけを見ると
+   * 生産能力（仕込み上限×廃棄控除）に頭打ちしたシナリオは、丸め後の個数だけを見ると
    * シナリオ間の差が小さく見え、需要そのものが変わらないと誤読されやすい。
    * 対象商品を問わず、頭打ちしたシナリオは表のセルに観測値（丸め前）と上限を併記する。
    */
   const unitsCell = (row: typeof col[number]) => {
     const base = num(row.units, '個')
     if (!row.outlookExceedsCapacity) return base
-    return `${base}（観測${num(row.observedUnits)}個／焼成上限${num(row.capacityUnits)}個）`
+    return `${base}（観測${num(row.observedUnits)}個／仕込み上限${num(row.capacityUnits)}個）`
   }
   const labels = col.map((row) => row.scenario.scenarioLabel)
   const lines = [
@@ -247,7 +247,7 @@ export function formatKpiUserAppendix(
   }
   const cappedRows = col.filter((row) => row.outlookExceedsCapacity)
   if (cappedRows.length) {
-    lines.push('類似/対象商品の観測個数（他商品の合算実績）が焼成上限×廃棄控除を上回ったシナリオがある。下表「予想販売数/日」の（観測◯個／焼成上限◯個）を参照。頭打ちの原因は需要ではなく生産能力（バッチ回数・バッチ個数・廃棄率）であり、シナリオ間の差が小さく見えるのはそのため。')
+    lines.push('類似/対象商品の観測個数（他商品の合算実績）が仕込み上限×廃棄控除を上回ったシナリオがある。下表「予想販売数/日」の（観測◯個／仕込み上限◯個）を参照。頭打ちの原因は需要ではなく生産能力（仕込み回数・仕込み数量・廃棄率）であり、シナリオ間の差が小さく見えるのはそのため。')
   }
   if (plausibility) {
     const ratioText = plausibility.scenarios
@@ -362,7 +362,7 @@ export async function prepareFoodCourtKpiScenario(
     }) : []
     const hourlyBlock = hourlyTargets.length ? `\n\n【ジャーナル実績を重みにした時間別KPI配分案】\n${detail!.summary}\n【実績】時刻が分かる会計の時間別件数を配分の重みとする。【仮定(シナリオ)】通常日の新商品販売目標を同じ時間構成で売ると仮定した配分案。将来の需要予測・イベント前後の実績・注文時刻ではない。時刻不明会計は重みから除外し、整数配分の合計は各シナリオの日次目標に一致させる。\n${JSON.stringify(hourlyTargets)}` : ''
     const outlookBlock = outlook ? `\n\n${outlook.block}` : ''
-    // 販売数（焼成上限で頭打ち済み）は両方の売上基準で共通。基準が違うのは単価だけ
+    // 販売数（仕込み上限で頭打ち済み）は両方の売上基準で共通。基準が違うのは単価だけ
     // （単品価格 vs ドリンク/ワインセットを加重したセット込み価格）。
     const scenarioUnits = new Map(pack.scenarios.map((s) => {
       const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === s.scenarioLabel)

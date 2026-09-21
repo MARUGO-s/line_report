@@ -1,6 +1,6 @@
 # フードコートQ&Aとジャーナルの連携
 
-2026-09-21。対象は「データに質問」の通常Q&AとKPI試算。Journal深掘りAPI・フードコートの日次/期間/週次サマリーの取得方式は変更しない。日次/期間キャッシュは `foodcourt-analysis-ai-v31-capacity-table`。
+2026-09-21。対象は「データに質問」の通常Q&AとKPI試算。Journal深掘りAPI・フードコートの日次/期間/週次サマリーの取得方式は変更しない。日次/期間キャッシュは `foodcourt-analysis-ai-v32-generic-kpi-labels`。
 
 ## 取得と出典
 
