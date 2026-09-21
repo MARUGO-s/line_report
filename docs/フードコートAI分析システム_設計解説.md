@@ -1,6 +1,6 @@
 # フードコート AI 分析システム 設計解説
 
-> 2026-09-21: Q&Aは期間→手法→必要な売価/原価確認。選んだ手法の知識パックだけを分析前に読む（[management-warehouse](./management-warehouse/README.md)）。KGI/KPI/KFIは改善管理時のみ。共通規則は `_shared/business_goal_metrics.ts`。日次/期間キャッシュは `foodcourt-analysis-ai-v30-plausibility-check`。
+> 2026-09-21: Q&Aは期間→手法→必要な売価/原価確認。選んだ手法の知識パックだけを分析前に読む（[management-warehouse](./management-warehouse/README.md)）。KGI/KPI/KFIは改善管理時のみ。共通規則は `_shared/business_goal_metrics.ts`。日次/期間キャッシュは `foodcourt-analysis-ai-v31-capacity-table`。
 
 > 2026-09-10 更新: 反証Gemini・評価Groq・画像Geminiが標準。設定・障害対策は [現行のモデル構成](./FOODCOURT-AI-RELIABILITY.md) を優先。以下に残るClaude構成・旧費用・旧実測は変更前の履歴であり、現在値ではない。
 
@@ -9,7 +9,7 @@
 MARUGO S（東京ドーム内フードホール「FOOD STADIUM TOKYO」）の売上・客数データを解析する
 **5エージェント構成のマルチAIパイプライン**の設計と動作を解説する。
 
-現行キャッシュ: `foodcourt-analysis-ai-v30-plausibility-check`（Q&A・日次・期間）。旧表記 `v16-loop-learning` は履歴。
+現行キャッシュ: `foodcourt-analysis-ai-v31-capacity-table`（Q&A・日次・期間）。旧表記 `v16-loop-learning` は履歴。
 関連ファイル: [`supabase/functions/_shared/foodcourt_compare.ts`](../supabase/functions/_shared/foodcourt_compare.ts)  
 関連ドキュメント: [フードコート学習システム構造.md](フードコート学習システム構造.md)、[フードコートAIループシステム全体解説.md](フードコートAIループシステム全体解説.md)、[フードコート売上分析_設計書.md](フードコート売上分析_設計書.md)、[フードコート日報システム.md](フードコート日報システム.md)
 
