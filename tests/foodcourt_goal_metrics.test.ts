@@ -51,7 +51,7 @@ test('daily, period and weekly production paths send the same framework to integ
     assert.match(finalSystem, /観察分析ではKPI節を付けず/)
     assert.doesNotMatch(finalSystem, /KPIに落とし込めていない/)
   }
-  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v28-kgi-uplift')
+  assert.equal(ctx.resolveFoodCourtDailyAnalysisVersion(), 'foodcourt-analysis-ai-v29-set-upsell')
   await ctx.evaluateFoodCourtAnswer({surface:'ask',question:'店舗売上の改善',contextBlock:'synthetic facts',finalAnswer:'synthetic analysis',groqApiKey:'synthetic',primary:'synthetic',fallbackModel:'synthetic',config:{evaluatorMaxTokens:500,evaluatorProvider:'groq'}})
   assert.ok(requests.at(-1)[0].content.includes(BUSINESS_GOAL_METRICS_POLICY))
   assert.match(requests.at(-1)[0].content, /観察・照会ではKPI節は不要/)

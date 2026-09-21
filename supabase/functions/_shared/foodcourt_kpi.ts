@@ -51,6 +51,7 @@ export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外�
 新しい施策・新商品にその施策自体の実績は無い。数値未確認・未計測で止めない。今の店舗売上【実績】と類似商品の日次販売から、寄与率と上積みを【仮定(シナリオ)】として引用する。
 販売個数・売上見込みはジャーナルの類似/対象商品の日次実績と月次推移からコードが伸ばした【仮定(シナリオ)】である。実績そのものではない。
 商品売上見込みは「売れた場合の額」。上積みは置き換えを見込んだ増分。寄与率は今の店舗日次売上に対する見込みの割合。上積みを店舗全体の確定純増・営業利益と呼ばない。
+予想売上・寄与率・上積みは「単品のみ」と「セット込み（ドリンク・ワインの上乗せを加重平均）」の2基準がある。どちらの数字を引用するときも必ずどちらの基準かを明記し、セット込みの数字にはセット選択比率・上乗せ額が仮定(シナリオ)で実測のセット購入率ではない旨を添える。基準を混在させて1つの数字であるかのように書かない。
 必ず保守／標準／強気の3シナリオを併記する。表では【仮定(シナリオ)】をセルに繰り返さず、表の直上に注釈を1行だけ置く。箇条書きで個別引用するときだけ【実績】【仮定(入力)】【仮定(シナリオ)】を付ける。実績と仮定は別の表にし、同じ合計に混ぜない。
 試算の基準期間はブロックに記載した統一売上の期間であり、表示中の単日や質問中のイベントの実績に読み替えない。テナント比較表の税抜売上とも合算しない。
 価格・粗利率・損益分岐・営業区分別販売目標・日次/月次売上・寄与率・上積み・KPI目標・撤退ラインを簡潔に示す。見込み個数が損益分岐を下回れば撤退リスクとして述べる。未入力・粗利未登録は仮置きの推測値と述べ、最後に「この試算の精度を上げるために必要なデータ」を置く。
@@ -70,6 +71,10 @@ export function buildFoodCourtInitiativeUplift(input: {
   storePeriodLabel: string
   operatingDaysPerMonth: number | null
   scenarios: Array<{ label: string; daily_sales_yen: number | null; daily_units: number | null }>
+  /** 単品のみ／セット込みなど、この計算がどの売上基準を使ったかを併記するときのラベル。 */
+  basisLabel?: string
+  /** basisLabel の内訳・前提を1文で添えるときの補足（例: セット選択比率と上乗せ額の出所）。 */
+  basisNote?: string
 }) {
   const usable = input.scenarios.filter((row) => row.daily_sales_yen != null && row.daily_sales_yen > 0)
   if (!usable.length) return null
@@ -103,9 +108,11 @@ export function buildFoodCourtInitiativeUplift(input: {
     scenarios: rows,
   }
   const block =
+    (input.basisLabel ? `【基準: ${input.basisLabel}】\n` : '') +
     `【新しい施策の店舗売上への寄与・上積み・仮定(シナリオ)】\n` +
     `新しい施策にその施策自体の実績は無い。数値未確認とはしない。今の店舗日次売上【実績】${storeYen}（${input.storePeriodLabel}）を分母にする。\n` +
-    `商品売上見込みは類似/対象商品の販売から伸ばした【仮定(シナリオ)】。寄与率＝見込み÷今の店舗日次売上。上積み＝見込み×置き換えを見込んだ増分率（保守0.3／標準0.55／強気0.85）。置き換え率は観測ではない。上積みを確定の純増売上・営業利益と呼ばない。\n` +
+    `商品売上見込みは類似/対象商品の販売から伸ばした【仮定(シナリオ)】。寄与率＝見込み÷今の店舗日次売上。上積み＝見込み×置き換えを見込んだ増分率（保守0.3／標準0.55／強気0.85）。置き換え率は観測ではない。上積みを確定の純増売上・営業利益と呼ばない。` +
+    (input.basisNote ? `\n${input.basisNote}` : '') + '\n' +
     JSON.stringify(facts)
   return { facts, block }
 }
@@ -142,6 +149,7 @@ export function formatKpiUserAppendix(
   uplift: ReturnType<typeof buildFoodCourtInitiativeUplift>,
   outlook: ReturnType<typeof buildFoodCourtJournalDemandOutlook>,
   goal?: { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null; kgiKind?: 'uplift' | 'store' | null },
+  upliftWithSets?: ReturnType<typeof buildFoodCourtInitiativeUplift>,
 ) {
   const yen = (n: number | null | undefined) =>
     n == null || !Number.isFinite(n) ? '—' : `¥${Math.round(n).toLocaleString('ja-JP')}`
@@ -151,12 +159,16 @@ export function formatKpiUserAppendix(
     const item = scenario.prices[0]
     const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
     const fromUplift = uplift?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
+    const fromUpliftWithSets = upliftWithSets?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
     const capacityUnits = scenario.sellableCapacityUnits.value
     const units = clampOutlookUnitsToCapacity(fromOutlook?.daily_units, capacityUnits) ?? scenario.normalDayOutlook.targetUnits.value
     const priced = item?.price.value != null && units != null ? Math.round(Number(units) * item.price.value) : null
     const dailySales = priced ?? fromUplift?.initiative_daily_sales_yen ?? scenario.averageDailyRevenueYen.value
+    const pricedWithSets = scenario.blendedPrice.value != null && units != null ? Math.round(Number(units) * scenario.blendedPrice.value) : null
+    const dailySalesWithSets = pricedWithSets ?? fromUpliftWithSets?.initiative_daily_sales_yen ?? null
+    const setUpsellPerDay = dailySalesWithSets != null && dailySales != null ? dailySalesWithSets - dailySales : null
     const outlookExceedsCapacity = fromOutlook?.daily_units != null && fromOutlook.daily_units > capacityUnits
-    return { scenario, item, units, dailySales, fromUplift, outlookExceedsCapacity, capacityUnits }
+    return { scenario, item, units, dailySales, dailySalesWithSets, setUpsellPerDay, fromUplift, fromUpliftWithSets, outlookExceedsCapacity, capacityUnits }
   })
   const labels = col.map((row) => row.scenario.scenarioLabel)
   const lines = [
@@ -174,7 +186,9 @@ export function formatKpiUserAppendix(
   const monthDays = pack.baseline.operatingDaysPerMonth
   if (goal?.kgiTargetYen != null) {
     const kind = resolveKgiKind({ kgiTargetYen: goal.kgiTargetYen, kgiKind: goal.kgiKind ?? null }, storeDaily)
-    const standardUplift = col.find((row) => row.scenario.scenarioLabel === '標準')?.fromUplift
+    const standardRow = col.find((row) => row.scenario.scenarioLabel === '標準')
+    const standardUplift = standardRow?.fromUplift
+    const standardUpliftWithSets = standardRow?.fromUpliftWithSets
     if (kind === 'uplift') {
       const dailyUplift = goal.kgiHorizon === 'month' && monthDays ? Math.round(goal.kgiTargetYen / monthDays) : goal.kgiTargetYen
       const storeKgiDaily = storeDaily != null ? storeDaily + dailyUplift : null
@@ -186,12 +200,17 @@ export function formatKpiUserAppendix(
       } else {
         lines.push(`KGI【仮定(入力)】店舗売上の純増 ${yen(goal.kgiTargetYen)}（${horizonLabel}）`)
       }
-      lines.push('施策の単品売上は店舗KGIではない。下表の予想売上/日はセット込みの施策売上【仮定(シナリオ)】。置き換えがあるため施策売上≠純増。成否は上積み/日を純増目標と比べる。')
-      const upliftYen = goal.kgiHorizon === 'month' ? standardUplift?.monthly_uplift_yen : standardUplift?.daily_uplift_yen
+      lines.push('施策の単品売上は店舗KGIではない。下表は単品のみとセット込み（ドリンク・ワインの上乗せを含む）の両方を併記する。セット込みはドリンク・ワイン同時購入率を仮定した見込みで実測ではない。置き換えがあるため施策売上≠純増。成否は上積み/日を純増目標と比べる。')
       const targetUplift = goal.kgiHorizon === 'month' ? goal.kgiTargetYen : dailyUplift
-      if (upliftYen != null) {
-        const gap = targetUplift - upliftYen
-        lines.push(`純増ギャップ（標準シナリオの上積みとの差） ${yen(gap)}（正なら不足、負なら超過）`)
+      const upliftYenSingle = goal.kgiHorizon === 'month' ? standardUplift?.monthly_uplift_yen : standardUplift?.daily_uplift_yen
+      if (upliftYenSingle != null) {
+        const gap = targetUplift - upliftYenSingle
+        lines.push(`純増ギャップ（標準シナリオ・単品のみ） ${yen(gap)}（正なら不足、負なら超過）`)
+      }
+      const upliftYenWithSets = goal.kgiHorizon === 'month' ? standardUpliftWithSets?.monthly_uplift_yen : standardUpliftWithSets?.daily_uplift_yen
+      if (upliftYenWithSets != null) {
+        const gap = targetUplift - upliftYenWithSets
+        lines.push(`純増ギャップ（標準シナリオ・セット込み） ${yen(gap)}（正なら不足、負なら超過。ドリンク・ワイン同時購入率は仮定であり実測ではない）`)
       }
     } else if (storeDaily != null && goal.kgiHorizon === 'month' && monthDays) {
       const monthActual = Math.round(storeDaily * monthDays)
@@ -218,28 +237,49 @@ export function formatKpiUserAppendix(
     lines.push(`類似/対象商品の観測個数（他商品の合算実績）が焼成上限×廃棄控除を上回ったため、販売数見込みはその上限に丸めた: ${detail}。`)
   }
   lines.push('')
+  lines.push('【セット込み予想売上の考え方・注釈】')
+  lines.push('予想売上/日には「単品のみ」と「セット込み」の2通りを併記する。単品のみは、来店客が全員クロワッサン単品しか買わなかった場合の下限の参考値。セット込みは、一部の客がドリンクセット・ワインセットを選ぶと仮定し、単品価格に上乗せ額を加重平均した参考値。計算式: 単品価格×単品比率 ＋ ドリンクセット価格×ドリンク比率 ＋ ワインセット価格×ワイン比率。')
+  lines.push('セット選択比率・上乗せ額はすべて【仮定(シナリオ)】であり、実測のドリンク・ワイン同時購入率ではない。根拠となる前提は次の通り:')
+  for (const row of col) {
+    const s = row.scenario
+    const drinkPrice = s.prices[1]?.price.value
+    const winePrice = s.prices[2]?.price.value
+    lines.push(
+      `- ${s.scenarioLabel}: 単品比率${num(s.setMix.singleSharePct.value, '%')}／` +
+      `ドリンクセット比率${num(s.setMix.drinkSetSharePct.value, '%')}（単品+${yen(s.setMix.drinkAddYen.value)}＝セット価格${yen(drinkPrice)}）／` +
+      `ワインセット比率${num(s.setMix.wineSetSharePct.value, '%')}（単品+${yen(s.setMix.wineAddYen.value)}＝セット価格${yen(winePrice)}）` +
+      `→ 加重平均売価${yen(s.blendedPrice.value)}`,
+    )
+  }
+  lines.push('実際のセット選択率・同時購入率を計測できたら、この仮定比率を置き換える。単品のみの数値は、セットが一切売れなかった場合の保守的な下限として引き続き参照できる。')
+  lines.push('')
   lines.push('シナリオ別KGI・KPI・採算の一覧')
   lines.push(KPI_TABLE_NOTE)
   lines.push(mdTable(
     ['項目', ...labels],
     [
-      ['予想売価', ...col.map((row) => yen(row.item?.price.value))],
-      ['予想原価', ...col.map((row) => yen(row.item?.cost.value))],
+      ['予想売価（単品）', ...col.map((row) => yen(row.item?.price.value))],
+      ['予想原価（単品）', ...col.map((row) => yen(row.item?.cost.value))],
       ['予想販売数/日', ...col.map((row) => num(row.units, '個'))],
-      ['予想売上/日', ...col.map((row) => yen(row.dailySales))],
+      ['予想売上/日（単品のみ）', ...col.map((row) => yen(row.dailySales))],
+      ['予想売上/日（セット込み）', ...col.map((row) => yen(row.dailySalesWithSets))],
+      ['セットによる上乗せ額/日', ...col.map((row) => yen(row.setUpsellPerDay))],
+      ['今の売上への寄与（単品のみ）', ...col.map((row) => row.fromUplift?.store_contribution_pct == null ? '—' : `${row.fromUplift.store_contribution_pct}%`)],
+      ['今の売上への寄与（セット込み）', ...col.map((row) => row.fromUpliftWithSets?.store_contribution_pct == null ? '—' : `${row.fromUpliftWithSets.store_contribution_pct}%`)],
+      ['上積み/日（単品のみ）', ...col.map((row) => yen(row.fromUplift?.daily_uplift_yen))],
+      ['上積み/日（セット込み）', ...col.map((row) => yen(row.fromUpliftWithSets?.daily_uplift_yen))],
+      ['上積み/月（単品のみ）', ...col.map((row) => yen(row.fromUplift?.monthly_uplift_yen))],
+      ['上積み/月（セット込み）', ...col.map((row) => yen(row.fromUpliftWithSets?.monthly_uplift_yen))],
       ['月間売上見込み', ...col.map((row) => yen(row.scenario.monthlyRevenueYen.value))],
-      ['今の売上への寄与', ...col.map((row) => row.fromUplift?.store_contribution_pct == null ? '—' : `${row.fromUplift.store_contribution_pct}%`)],
-      ['上積み/日', ...col.map((row) => yen(row.fromUplift?.daily_uplift_yen))],
-      ['上積み/月', ...col.map((row) => yen(row.fromUplift?.monthly_uplift_yen))],
-      ['粗利率', ...col.map((row) => num(row.scenario.blendedGrossMarginPct.value, '%'))],
-      ['1個あたり貢献利益', ...col.map((row) => yen(row.scenario.contributionPerSoldUnitYen.value))],
+      ['粗利率（セット込み加重）', ...col.map((row) => num(row.scenario.blendedGrossMarginPct.value, '%'))],
+      ['1個あたり貢献利益（セット込み加重）', ...col.map((row) => yen(row.scenario.contributionPerSoldUnitYen.value))],
       ['損益分岐 個/日', ...col.map((row) => row.scenario.breakEvenUnitsPerDay ? num(row.scenario.breakEvenUnitsPerDay.value, '個') : '成立しない')],
       ['セット率', ...col.map((row) => num(row.scenario.kpiTargets.setRatePct.value, '%'))],
       ['テイクアウト比率', ...col.map((row) => num(row.scenario.kpiTargets.takeoutRatePct.value, '%'))],
       ['廃棄率上限', ...col.map((row) => num(row.scenario.kpiTargets.wasteRatePct.value, '%'))],
     ],
   ))
-  lines.push('寄与率＝見込み売上÷今の店舗日次売上。上積み＝見込み×置き換えを見込んだ増分（保守0.3／標準0.55／強気0.85）。確定の純増・営業利益ではない。')
+  lines.push('寄与率＝見込み売上÷今の店舗日次売上。上積み＝見込み×置き換えを見込んだ増分（保守0.3／標準0.55／強気0.85）。確定の純増・営業利益ではない。単品のみ／セット込みの前提は表の上の注釈を参照。')
   return lines.join('\n')
 }
 
@@ -300,13 +340,20 @@ export async function prepareFoodCourtKpiScenario(
     }) : []
     const hourlyBlock = hourlyTargets.length ? `\n\n【ジャーナル実績を重みにした時間別KPI配分案】\n${detail!.summary}\n【実績】時刻が分かる会計の時間別件数を配分の重みとする。【仮定(シナリオ)】通常日の新商品販売目標を同じ時間構成で売ると仮定した配分案。将来の需要予測・イベント前後の実績・注文時刻ではない。時刻不明会計は重みから除外し、整数配分の合計は各シナリオの日次目標に一致させる。\n${JSON.stringify(hourlyTargets)}` : ''
     const outlookBlock = outlook ? `\n\n${outlook.block}` : ''
+    // 販売数（焼成上限で頭打ち済み）は両方の売上基準で共通。基準が違うのは単価だけ
+    // （単品価格 vs ドリンク/ワインセットを加重したセット込み価格）。
+    const scenarioUnits = new Map(pack.scenarios.map((s) => {
+      const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === s.scenarioLabel)
+      const units = clampOutlookUnitsToCapacity(fromOutlook?.daily_units, s.sellableCapacityUnits.value) ?? s.normalDayOutlook.targetUnits.value
+      return [s.scenarioLabel, units] as const
+    }))
     const uplift = buildFoodCourtInitiativeUplift({
       storeDailySalesYen: pack.baseline.averageDailySalesYen,
       storePeriodLabel: pack.baseline.periodLabel,
       operatingDaysPerMonth: pack.baseline.operatingDaysPerMonth,
+      basisLabel: '単品価格のみ（ドリンク・ワインのセット上乗せなし）',
       scenarios: pack.scenarios.map((s) => {
-        const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === s.scenarioLabel)
-        const units = clampOutlookUnitsToCapacity(fromOutlook?.daily_units, s.sellableCapacityUnits.value) ?? s.normalDayOutlook.targetUnits.value
+        const units = scenarioUnits.get(s.scenarioLabel) ?? null
         const price = s.prices[0]?.price.value
         return {
           label: s.scenarioLabel,
@@ -315,13 +362,30 @@ export async function prepareFoodCourtKpiScenario(
         }
       }),
     })
+    const upliftWithSets = buildFoodCourtInitiativeUplift({
+      storeDailySalesYen: pack.baseline.averageDailySalesYen,
+      storePeriodLabel: pack.baseline.periodLabel,
+      operatingDaysPerMonth: pack.baseline.operatingDaysPerMonth,
+      basisLabel: 'セット込み（ドリンクセット・ワインセットの上乗せを加重平均、選択比率は仮定(シナリオ)）',
+      basisNote: 'セット選択比率・上乗せ額は実測のドリンク・ワイン同時購入率ではない。ユーザー向け付録テーブルの【セット込み予想売上の考え方】に前提の内訳を記載する。',
+      scenarios: pack.scenarios.map((s) => {
+        const units = scenarioUnits.get(s.scenarioLabel) ?? null
+        const price = s.blendedPrice.value
+        return {
+          label: s.scenarioLabel,
+          daily_units: units,
+          daily_sales_yen: units != null && price != null ? Math.round(Number(units) * price) : null,
+        }
+      }),
+    })
     const upliftBlock = uplift ? `\n\n${uplift.block}` : ''
-    const userAppendix = formatKpiUserAppendix(pack, uplift, outlook, readKpiGoalFromAssumptions(input.assumptions))
+    const upliftWithSetsBlock = upliftWithSets ? `\n\n${upliftWithSets.block}` : ''
+    const userAppendix = formatKpiUserAppendix(pack, uplift, outlook, readKpiGoalFromAssumptions(input.assumptions), upliftWithSets)
     return {
       inputs: buildFoodCourtKpiInputs(assumptions, normalizeKpiAssumptions(input.assumptions).provided),
-      block: formatKpiScenarioBlock(pack) + outlookBlock + hourlyBlock + upliftBlock,
+      block: formatKpiScenarioBlock(pack) + outlookBlock + hourlyBlock + upliftBlock + upliftWithSetsBlock,
       userAppendix,
-      reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel, journal_detail_coverage: detail?.coverage ?? null, demand_outlook: outlook?.facts ?? null, hourly_targets: hourlyTargets, initiative_uplift: uplift?.facts ?? null },
+      reference: { ...buildKpiScenarioReference(pack), baseline_period: pack.baseline.periodLabel, journal_detail_coverage: detail?.coverage ?? null, demand_outlook: outlook?.facts ?? null, hourly_targets: hourlyTargets, initiative_uplift: uplift?.facts ?? null, initiative_uplift_with_sets: upliftWithSets?.facts ?? null },
     }
   } finally {
     clearTimeout(timer)
