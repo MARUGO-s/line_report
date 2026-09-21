@@ -68,7 +68,7 @@ test('KPI asks period then methods, then sell-price and cost before analysis',()
   assert.equal(result.kind,'clarify');
   assert.equal(result.state.pending.kind,'assumptions');
   assert.match(result.message,/想定売価/);
-  assert.match(result.message,/最終目標KGI/);
+  assert.match(result.message,/店舗売上の純増/);
   assert.ok(result.actions.includes('全部お任せ'));
   assert.ok(result.actions.includes('入力欄に書いて進む'));
   result=planner.nextTurn(result.state,'全部お任せ',options);

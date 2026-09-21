@@ -730,10 +730,11 @@
             <label>1日の焼成回数<input data-kpi-key="bakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3"></label>
             <label>仕込み人員（人）<input data-kpi-key="prepStaffCount" type="number" min="0.5" max="50" step="0.5" placeholder="例: 1"></label>
             <label>廃棄許容率（％）<input data-kpi-key="wasteRateTolerancePct" type="number" min="0" max="100" step="0.1" placeholder="例: 8"></label>
-            <label>最終目標KGI（円）<input data-kpi-key="kgiTargetYen" type="number" min="1" max="100000000" step="1" placeholder="例: 2000"></label>
-            <label>KGIの単位<select data-kpi-key="kgiHorizon"><option value="">未設定</option><option value="day">1日あたり</option><option value="month">月間</option></select></label>
+            <label>店舗KGIの純増（円）<input data-kpi-key="kgiTargetYen" type="number" min="1" max="100000000" step="1" placeholder="例: 10000"></label>
+            <label>KGIの単位<select data-kpi-key="kgiHorizon"><option value="day">1日あたり</option><option value="month">月間</option><option value="">未設定</option></select></label>
+            <label>KGIの意味<select data-kpi-key="kgiKind"><option value="uplift">店舗売上の純増（推奨）</option><option value="store">店舗全体の売上目標</option></select></label>
           </div>
-          <p class="card-note">試算値は【仮定(入力)】または【仮定(シナリオ)】を付け、3シナリオを実績と分けて表示します。自由文中の金額はこの入力欄へ反映してください。</p>
+          <p class="card-note">KGIは店の売上をいくら増やしたいか（純増）。例: 1日1万円なら現状19.6万→目標20.6万。クロワッサン単品の売上ではない。セット込みの施策売上は分析側で見込み、置き換え後の上積みと純増目標を比べます。試算値は【仮定(入力)】または【仮定(シナリオ)】です。</p>
         </details>
         <div id="qAnswer" style="font-size:14px;line-height:1.85;margin-top:14px;max-height:540px;overflow-y:auto;display:none;"></div>
       </div>
@@ -901,7 +902,7 @@
 <script src="auth-session.js?v=20260624"></script>
 <script src="access-log.js?v=20260817"></script>
 <script src="menu-logout.js?v=20260702"></script>
-<script src="foodcourt-qa-planner.js?v=20260921-kgi-ask"></script>
+<script src="foodcourt-qa-planner.js?v=20260921-kgi-uplift"></script>
 <script>
 'use strict';
 (function(){
@@ -2830,6 +2831,7 @@
     document.querySelectorAll('#qaKpiInputs [data-kpi-key]').forEach(input=>{
       const key=input.dataset.kpiKey;
       if(key==='kgiHorizon'){ if(input.value==='day'||input.value==='month') values.kgiHorizon=input.value; return; }
+      if(key==='kgiKind'){ if(input.value==='store'||input.value==='uplift') values.kgiKind=input.value; return; }
       if(input.value.trim() && Number.isFinite(Number(input.value))) values[key]=Number(input.value);
     });
     return values;

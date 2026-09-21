@@ -158,7 +158,10 @@
     } else if (upliftGoal != null) {
       out.kgiTargetYen = upliftGoal;
       out.kgiHorizon = 'day';
+      out.kgiKind = 'uplift';
     }
+    if (out.kgiTargetYen != null && /上積み|純増/.test(t)) out.kgiKind = 'uplift';
+    if (out.kgiTargetYen != null && /店舗全体|店全体|月商/.test(t)) out.kgiKind = 'store';
     return out;
   }
   function hasPriceAndCost(options) {
@@ -178,7 +181,7 @@
     if (!options?.hasUnitPrice) missing.push('想定売価（その商品1個の店頭価格）');
     if (!options?.hasUnitCost) missing.push('予想原価（1個あたり）');
     const list = missing.length ? missing.map(item => '・'+item).join('\n') : '・想定売価と予想原価';
-    const message = 'この分析には、その商品自体の想定売価と予想原価が必要です。客単価や別商品の単価は使いません。\nまだ足りない項目:\n'+list+'\nあるとギャップ（KGI−現状）が計算できます:\n・最終目標KGI（期間と金額。例: 1日2000円上積み、月商50万円）\n下の「新商品・KPIの試算前提」に入力するか、チャットで「売価420円、原価126円、KGIは1日2000円」のように書いてください。分からなければ「全部お任せ」で、仮定(シナリオ)として仮置きします。KGIが空なら未設定のまま進め、達成率は作りません。';
+    const message = 'この分析には、その商品自体の想定売価と予想原価が必要です。客単価や別商品の単価は使いません。\nまだ足りない項目:\n'+list+'\nKGIは店舗売上の純増です（単品の売上ではない）。例: 1日1万円増やしたい→現状19.6万なら店舗目標20.6万。セット込みの施策売上は分析で見込み、置き換え後の上積みと純増を比べます。\n下の「新商品・KPIの試算前提」に入力するか、「売価420円、原価126円、1日1万円上積み」と書いてください。分からなければ「全部お任せ」。KGIが空なら未設定のまま進めます。';
     return {state,kind:'clarify',message,choices:[],actions:ASSUMPTION_ACTIONS};
   }
   function normalizeMethodIds(ids) {

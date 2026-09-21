@@ -24,12 +24,26 @@ export function buildFoodCourtKpiInputs(raw: unknown, currentInputKeys?: string[
 }
 export type FoodCourtKpiInputs = NonNullable<ReturnType<typeof buildFoodCourtKpiInputs>>
 
-export function readKpiGoalFromAssumptions(raw: unknown): { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null } {
+export function readKpiGoalFromAssumptions(raw: unknown): {
+  kgiTargetYen: number | null
+  kgiHorizon: 'day' | 'month' | null
+  kgiKind: 'uplift' | 'store' | null
+} {
   const src = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
   const n = Number(src.kgiTargetYen)
   const yen = Number.isFinite(n) && n >= 1 && n <= 100000000 ? Math.round(n) : null
   const horizon = src.kgiHorizon === 'month' || src.kgiHorizon === 'day' ? src.kgiHorizon : null
-  return { kgiTargetYen: yen, kgiHorizon: horizon }
+  const kind = src.kgiKind === 'store' || src.kgiKind === 'uplift' ? src.kgiKind : null
+  return { kgiTargetYen: yen, kgiHorizon: horizon, kgiKind: kind }
+}
+
+function resolveKgiKind(
+  goal: { kgiTargetYen: number; kgiKind: 'uplift' | 'store' | null },
+  storeDailyYen: number | null | undefined,
+): 'uplift' | 'store' {
+  if (goal.kgiKind === 'store' || goal.kgiKind === 'uplift') return goal.kgiKind
+  if (storeDailyYen != null && Number.isFinite(storeDailyYen) && goal.kgiTargetYen >= storeDailyYen * 0.5) return 'store'
+  return 'uplift'
 }
 
 export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外】
@@ -41,7 +55,7 @@ export const FOODCOURT_KPI_POLICY = `【KPI試算・この質問だけの例外�
 試算の基準期間はブロックに記載した統一売上の期間であり、表示中の単日や質問中のイベントの実績に読み替えない。テナント比較表の税抜売上とも合算しない。
 価格・粗利率・損益分岐・営業区分別販売目標・日次/月次売上・寄与率・上積み・KPI目標・撤退ラインを簡潔に示す。見込み個数が損益分岐を下回れば撤退リスクとして述べる。未入力・粗利未登録は仮置きの推測値と述べ、最後に「この試算の精度を上げるために必要なデータ」を置く。
 今回入力欄と保存済みの店舗前提だけが入力値。質問や過去回答中の数字を入力値に昇格しない。質問で別の前提が示されていれば、入力欄への反映を案内する。重ね聞きでもこのブロックの目標・見込み・寄与・上積み・撤退ラインを省略しない。
-KGIが入力されていれば、現状【実績】とのギャップを先に示す。未入力ならKGI未設定とし達成率を作らない。プロセスを分解し、現場が動かせる最重要プロセス（CSF）を1つに絞り、その数値目標だけをKPIとする。悪化時はいつ・どれくらい・何をする・誰が決めるを判定・中止ラインへ。KFIはそのCSFを実行する行動。
+KGIは店舗の最終成果である。新商品のKGIは単品売上ではなく、現状の店舗日次売上＋純増目標（セットの置き換えを引いたあとに店が増える額）。施策のセット込み売上はKPIであり店舗KGIではない。施策売上≠純増。KGI未入力なら達成率を作らない。プロセスを分解し、現場が動かせる最重要プロセス（CSF）を1つに絞り、その数値目標だけをKPIとする。悪化時はいつ・どれくらい・何をする・誰が決めるを判定・中止ラインへ。KFIはそのCSFを実行する行動。
 売上だけで施策の成否を決めない。客数（新規/固定/頻度が分かる範囲）と客単価（何円の商品がいくつ売れたか）に分解する。人時売上は総労働時間があるときだけ。月末だけの振り返しにせず、日次・時間帯の先行指標を優先する。`
 
 /** 新しい施策の店舗売上への寄与と上積み。施策自体の実績は使わない。 */
@@ -127,7 +141,7 @@ export function formatKpiUserAppendix(
   pack: NonNullable<ReturnType<typeof buildKpiScenarioPack>>,
   uplift: ReturnType<typeof buildFoodCourtInitiativeUplift>,
   outlook: ReturnType<typeof buildFoodCourtJournalDemandOutlook>,
-  goal?: { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null },
+  goal?: { kgiTargetYen: number | null; kgiHorizon: 'day' | 'month' | null; kgiKind?: 'uplift' | 'store' | null },
 ) {
   const yen = (n: number | null | undefined) =>
     n == null || !Number.isFinite(n) ? '—' : `¥${Math.round(n).toLocaleString('ja-JP')}`
@@ -155,22 +169,45 @@ export function formatKpiUserAppendix(
   if (outlook?.facts.product_names?.length) {
     lines.push(`類似/対象商品: ${outlook.facts.product_names.join('、')}。観測 1日 ${outlook.facts.daily_units}個・${yen(outlook.facts.daily_sales_yen)}を販売数の錨にする。`)
   }
-  const horizonLabel = goal?.kgiHorizon === 'month' ? '月間' : goal?.kgiHorizon === 'day' ? '1日' : ''
+  const horizonLabel = goal?.kgiHorizon === 'month' ? '月間' : goal?.kgiHorizon === 'day' ? '1日' : '1日'
+  const storeDaily = pack.baseline.averageDailySalesYen
+  const monthDays = pack.baseline.operatingDaysPerMonth
   if (goal?.kgiTargetYen != null) {
-    lines.push(`KGI【仮定(入力)】${horizonLabel || '金額'} ${yen(goal.kgiTargetYen)}`)
-    const actual = pack.baseline.averageDailySalesYen
-    if (actual != null && goal.kgiHorizon === 'day') {
-      const gap = goal.kgiTargetYen - actual
-      lines.push(`現状【実績】1日 ${yen(actual)}。ギャップ ${yen(gap)}（正なら不足、負なら超過）`)
-    } else if (actual != null && goal.kgiHorizon === 'month' && pack.baseline.operatingDaysPerMonth) {
-      const monthActual = Math.round(actual * pack.baseline.operatingDaysPerMonth)
+    const kind = resolveKgiKind({ kgiTargetYen: goal.kgiTargetYen, kgiKind: goal.kgiKind ?? null }, storeDaily)
+    const standardUplift = col.find((row) => row.scenario.scenarioLabel === '標準')?.fromUplift
+    if (kind === 'uplift') {
+      const dailyUplift = goal.kgiHorizon === 'month' && monthDays ? Math.round(goal.kgiTargetYen / monthDays) : goal.kgiTargetYen
+      const storeKgiDaily = storeDaily != null ? storeDaily + dailyUplift : null
+      const storeKgiMonth = storeKgiDaily != null && monthDays ? Math.round(storeKgiDaily * monthDays) : null
+      if (goal.kgiHorizon === 'month' && storeKgiMonth != null && storeDaily != null && monthDays) {
+        lines.push(`KGI【仮定(入力)】店舗月間売上 ${yen(storeKgiMonth)}（現状【実績】月換算 ${yen(Math.round(storeDaily * monthDays))} ＋ 純増目標 ${yen(goal.kgiTargetYen)}）`)
+      } else if (storeKgiDaily != null && storeDaily != null) {
+        lines.push(`KGI【仮定(入力)】店舗1日売上 ${yen(storeKgiDaily)}（現状【実績】${yen(storeDaily)} ＋ 純増目標 ${yen(dailyUplift)}）`)
+      } else {
+        lines.push(`KGI【仮定(入力)】店舗売上の純増 ${yen(goal.kgiTargetYen)}（${horizonLabel}）`)
+      }
+      lines.push('施策の単品売上は店舗KGIではない。下表の予想売上/日はセット込みの施策売上【仮定(シナリオ)】。置き換えがあるため施策売上≠純増。成否は上積み/日を純増目標と比べる。')
+      const upliftYen = goal.kgiHorizon === 'month' ? standardUplift?.monthly_uplift_yen : standardUplift?.daily_uplift_yen
+      const targetUplift = goal.kgiHorizon === 'month' ? goal.kgiTargetYen : dailyUplift
+      if (upliftYen != null) {
+        const gap = targetUplift - upliftYen
+        lines.push(`純増ギャップ（標準シナリオの上積みとの差） ${yen(gap)}（正なら不足、負なら超過）`)
+      }
+    } else if (storeDaily != null && goal.kgiHorizon === 'month' && monthDays) {
+      const monthActual = Math.round(storeDaily * monthDays)
       const gap = goal.kgiTargetYen - monthActual
-      lines.push(`現状【実績】月換算 ${yen(monthActual)}（1日${yen(actual)}×${pack.baseline.operatingDaysPerMonth}日）。ギャップ ${yen(gap)}`)
+      lines.push(`KGI【仮定(入力)】店舗月間売上 ${yen(goal.kgiTargetYen)}`)
+      lines.push(`現状【実績】月換算 ${yen(monthActual)}（1日${yen(storeDaily)}×${monthDays}日）。ギャップ ${yen(gap)}（正なら不足、負なら超過）`)
+    } else if (storeDaily != null) {
+      const gap = goal.kgiTargetYen - storeDaily
+      lines.push(`KGI【仮定(入力)】店舗${horizonLabel}売上 ${yen(goal.kgiTargetYen)}`)
+      lines.push(`現状【実績】1日 ${yen(storeDaily)}。ギャップ ${yen(gap)}（正なら不足、負なら超過）`)
     } else {
-      lines.push('KGIの期間単位が未指定のため、達成率は作らない。ギャップは期間をそろえてから見る。')
+      lines.push(`KGI【仮定(入力)】店舗売上 ${yen(goal.kgiTargetYen)}（${horizonLabel}）`)
+      lines.push('店舗日次売上が無いためギャップは作らない。')
     }
   } else {
-    lines.push('KGIは未設定。達成率・不足額は作らない。入力があればギャップからCSF（最重要プロセス）を1つに絞る。')
+    lines.push('KGIは未設定。達成率・不足額は作らない。入力するなら店舗売上の純増（今の日次＋増やしたい額）を書く。施策の単品売上はKGIにしない。')
   }
   const cappedRows = col.filter((row) => row.outlookExceedsCapacity)
   if (cappedRows.length) {

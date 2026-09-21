@@ -2,7 +2,7 @@
 
 2026-09-21。KGI・KPI・KFIは**目標と行動を管理する枠組み**であり、売上分析の方法そのものの代わりではない。KFIは本アプリでは**現場で実行・管理する行動指標**であり、重要財務指標の意味ではない。
 
-質問 → 期間 → 分析手法 →（KPI/粗利なら売価・原価、任意でKGI）→ 選んだ手法の知識パックだけを読んで分析する。倉庫は [management-warehouse](./management-warehouse/README.md)。ベクトル検索で理論全文を載せない。
+質問 → 期間 → 分析手法 →（KPI/粗利なら売価・原価、任意で店舗KGIの純増）→ 選んだ手法の知識パックだけを読んで分析する。倉庫は [management-warehouse](./management-warehouse/README.md)。ベクトル検索で理論全文を載せない。新商品のKGIは単品売上ではなく、現状の店舗日次＋純増。セット込みの施策売上はKPI。施策売上≠純増。
 
 ## 分析の順番
 
@@ -69,6 +69,6 @@ KGI: 店舗売上などの最終成果
 | 手法ごとの知識パック（分析前に選択分だけ読む） | `docs/management-warehouse/` と `foodcourt_management_packs.ts` |
 | 実ルート/プロンプト・数値回帰 | `tests/foodcourt_goal_metrics.test.ts`、`foodcourt_kpi.test.ts`、`kpi_scenario.test.ts`、`journal_store_context_integration.test.mjs` |
 
-既存ファイル移動・公開URL変更・DB migration・新規のデータ取得はない。フードコート日次/期間キャッシュはv26。保存済みQ&A・Journal履歴・週次報告は遡及変更しないため、新しく質問/分析して確認する。
+既存ファイル移動・公開URL変更・DB migration・新規のデータ取得はない。フードコート日次/期間キャッシュはv28。保存済みQ&A・Journal履歴・週次報告は遡及変更しないため、新しく質問/分析して確認する。
 
 テストは外部AIをモックし、実処理から送るルール/入力/事前計算の接続を確認する。実AIの回答品質を実証するものではない。本番反映は対応PRと同一SHAのEdge/Pages Actionsで確認する。
