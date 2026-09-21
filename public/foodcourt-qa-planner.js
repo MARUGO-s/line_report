@@ -309,6 +309,13 @@
       state.allowEstimate=false;
     }
     const skipMethods = Boolean(options.hasPriorAnswer && state.methods?.length && !isRestartQuestion(raw) && !isRestartQuestion(question));
+    if(skipMethods && !wantsKpiTargets(question, options.historyText)) {
+      // KPI/採算試算は「この質問だけの例外」。話題が変わった重ね聞きへ、前回選んだ
+      // 「目標・損益分岐・撤退」「粗利・採算」を無条件で引き継ぐと、無関係な新しい質問にも
+      // 前の新商品トライアルのKPI表がそのまま付いてくる。今回の質問が改めてKPIを求めて
+      // いない限り、重い数値試算だけは引き継がない。他の軽い分析角度は引き継いでよい。
+      state.methods = state.methods.filter(id => id!=='kpi' && id!=='margin');
+    }
     if(!skipMethods && !state.methods) {
       state.pending={kind:'methods',question,recommended:recommendAnalysisMethods(question, options.historyText),selected:[],showAll:false};
       return methodsClarify(state);
