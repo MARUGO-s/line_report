@@ -241,12 +241,16 @@ test('journal similar-item quantity is capped at the store\'s baking capacity, n
   const result=await prepareFoodCourtKpiScenario({...input,salesDates:[],journalDetail},io)
   assert.ok(result)
   assert.match(result.userAppendix,/観測500個/)
-  assert.match(result.userAppendix,/焼成上限×廃棄控除を上回ったため、販売数見込みはその上限に丸めた/)
+  assert.match(result.userAppendix,/焼成上限×廃棄控除を上回ったシナリオがある/)
   const tableRows=(result.userAppendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
   const unitsRow=tableRows.find(line=>line.includes('予想販売数/日'))!
   const unitsCells=unitsRow.split('|').map(c=>c.trim()).filter(Boolean).slice(1)
   for (const cell of unitsCells) {
-    const value=Number(cell.replace(/[^0-9.]/g,''))
+    // Each cell shows the capped figure first, e.g. "54個（観測500個／焼成上限54個）" — only
+    // the leading capped number must respect capacity; the parenthetical observed/cap figures
+    // are disclosure text, not a second capped value.
+    assert.match(cell,/観測[\d.]+個／焼成上限\d+個/,`予想販売数/日 (${cell}) must disclose the observed vs. capacity figures inline`)
+    const value=Number(cell.split('（')[0].replace(/[^0-9.]/g,''))
     assert.ok(value<=60,`予想販売数/日 (${cell}) must not exceed the 60 units/day baking capacity`)
   }
   const upliftScenarios=result.reference.initiative_uplift!.scenarios
@@ -257,6 +261,23 @@ test('journal similar-item quantity is capped at the store\'s baking capacity, n
   for (const target of hourlyTargets) {
     assert.ok((target.daily_target_units??0)<=60,'hourly allocation daily target must not exceed capacity')
   }
+})
+
+test('the observed-vs-capacity table format is product-agnostic: no journal outlook means a plain cell, not an empty parenthetical',async()=>{
+  const io=loaders()
+  const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420,unitCostYen:126}},io)
+  assert.ok(result)
+  const tableRows=(result.userAppendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
+  const unitsRow=tableRows.find(line=>line.includes('予想販売数/日'))!
+  const unitsCells=unitsRow.split('|').map(c=>c.trim()).filter(Boolean).slice(1)
+  assert.ok(unitsCells.length>0)
+  for (const cell of unitsCells) {
+    assert.doesNotMatch(cell,/観測|焼成上限/,`予想販売数/日 (${cell}) must not disclose observed/capacity when there is no capacity-exceeding outlook`)
+  }
+  // The generic (product-agnostic) instruction lives in the shared policy text, not in
+  // per-product wording, so it automatically applies to any future product's KPI table.
+  assert.match(FOODCOURT_KPI_POLICY,/対象商品を問わず/)
+  assert.doesNotMatch(FOODCOURT_KPI_POLICY,/クロワッサン/)
 })
 
 test('set-inclusive (drink/wine upsell) sales are shown alongside single-item sales, with the mix assumptions disclosed',async()=>{
