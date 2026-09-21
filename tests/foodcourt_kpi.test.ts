@@ -222,6 +222,38 @@ test('journal similar-item unit price is not copied as the new product selling p
   assert.match(result.userAppendix,/KGIは未設定/)
 })
 
+test('journal similar-item quantity is capped at the store\'s baking capacity, not sold as-is',async()=>{
+  const io=loaders()
+  // A single day where one existing product (unrelated to the new item) sold 500 units.
+  // stored.bakeBatchUnits=20 x bakeBatchesPerDay=3 applies to all 3 scenarios, so capacity is
+  // 60/day before waste — far below 500, so the outlook anchor must never reach the table or
+  // the uplift as-is.
+  const journalDetail=await buildFoodCourtJournalDetail(
+    [{from:'2025-12-09',to:'2025-12-09'}],
+    'クロワッサン',
+    async()=>[{business_date:'2025-12-09',gross_sales:50000,receipts:[{total:50000,time:'11:30',items:[{code:'9001',name:'カレー2種',qty:500,unit:100,amount:50000}]}]}],
+  )
+  const result=await prepareFoodCourtKpiScenario({...input,salesDates:[],journalDetail},io)
+  assert.ok(result)
+  assert.match(result.userAppendix,/観測500個/)
+  assert.match(result.userAppendix,/焼成上限×廃棄控除を上回ったため、販売数見込みはその上限に丸めた/)
+  const tableRows=(result.userAppendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
+  const unitsRow=tableRows.find(line=>line.includes('予想販売数/日'))!
+  const unitsCells=unitsRow.split('|').map(c=>c.trim()).filter(Boolean).slice(1)
+  for (const cell of unitsCells) {
+    const value=Number(cell.replace(/[^0-9.]/g,''))
+    assert.ok(value<=60,`予想販売数/日 (${cell}) must not exceed the 60 units/day baking capacity`)
+  }
+  const upliftScenarios=result.reference.initiative_uplift!.scenarios
+  for (const scenario of upliftScenarios) {
+    assert.ok(scenario.daily_units!<=60,`uplift daily_units (${scenario.daily_units}) for ${scenario.label} must not exceed capacity`)
+  }
+  const hourlyTargets=result.reference.hourly_targets as Array<{daily_target_units:number|null}>
+  for (const target of hourlyTargets) {
+    assert.ok((target.daily_target_units??0)<=60,'hourly allocation daily target must not exceed capacity')
+  }
+})
+
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{
   assert.equal(buildFoodCourtKpiInputs({notes:'untrusted',unitPriceYen:'<script>',unitCostYen:null}),null)
   const context=buildFoodCourtKpiInputs({unitPriceYen:833,unitCostYen:0,store_key:'other',requested:true,notes:'UNTRUSTED'})!

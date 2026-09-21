@@ -110,6 +110,19 @@ function mdTable(headers: string[], rows: string[][]) {
   return [line(headers), line(headers.map(() => '---')), ...rows.map(line)].join('\n')
 }
 
+/**
+ * ジャーナル類似商品の観測個数（他商品の合算実績）を、新商品の販売数見込みにそのまま使わない。
+ * 焼成上限×廃棄控除（sellableCapacityUnits）を新商品1品の物理的な上限として頭打ちする。
+ */
+function clampOutlookUnitsToCapacity(
+  outlookUnits: number | null | undefined,
+  capacityUnits: number | null | undefined,
+): number | null {
+  if (outlookUnits == null || !Number.isFinite(outlookUnits)) return null
+  if (capacityUnits == null || !Number.isFinite(capacityUnits)) return outlookUnits
+  return Math.min(outlookUnits, capacityUnits)
+}
+
 export function formatKpiUserAppendix(
   pack: NonNullable<ReturnType<typeof buildKpiScenarioPack>>,
   uplift: ReturnType<typeof buildFoodCourtInitiativeUplift>,
@@ -124,10 +137,12 @@ export function formatKpiUserAppendix(
     const item = scenario.prices[0]
     const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
     const fromUplift = uplift?.facts.scenarios.find((row) => row.label === scenario.scenarioLabel)
-    const units = fromOutlook?.daily_units ?? scenario.normalDayOutlook.targetUnits.value
+    const capacityUnits = scenario.sellableCapacityUnits.value
+    const units = clampOutlookUnitsToCapacity(fromOutlook?.daily_units, capacityUnits) ?? scenario.normalDayOutlook.targetUnits.value
     const priced = item?.price.value != null && units != null ? Math.round(Number(units) * item.price.value) : null
     const dailySales = priced ?? fromUplift?.initiative_daily_sales_yen ?? scenario.averageDailyRevenueYen.value
-    return { scenario, item, units, dailySales, fromUplift }
+    const outlookExceedsCapacity = fromOutlook?.daily_units != null && fromOutlook.daily_units > capacityUnits
+    return { scenario, item, units, dailySales, fromUplift, outlookExceedsCapacity, capacityUnits }
   })
   const labels = col.map((row) => row.scenario.scenarioLabel)
   const lines = [
@@ -156,6 +171,14 @@ export function formatKpiUserAppendix(
     }
   } else {
     lines.push('KGIは未設定。達成率・不足額は作らない。入力があればギャップからCSF（最重要プロセス）を1つに絞る。')
+  }
+  const cappedRows = col.filter((row) => row.outlookExceedsCapacity)
+  if (cappedRows.length) {
+    const detail = cappedRows.map((row) => {
+      const observed = outlook?.facts.scenarios.find((s) => s.label === row.scenario.scenarioLabel)?.daily_units
+      return `${row.scenario.scenarioLabel}(観測${num(observed)}個→上限${num(row.capacityUnits)}個)`
+    }).join('、')
+    lines.push(`類似/対象商品の観測個数（他商品の合算実績）が焼成上限×廃棄控除を上回ったため、販売数見込みはその上限に丸めた: ${detail}。`)
   }
   lines.push('')
   lines.push('シナリオ別KGI・KPI・採算の一覧')
@@ -225,9 +248,11 @@ export async function prepareFoodCourtKpiScenario(
     // ジャーナル類似商品の単価（客単価や別SKU）を新商品の店頭価格に流用しない。
     const pack = buildKpiScenarioPack({ assumptions, baseline: deriveKpiBaselineFromUnifiedSales(sales.unified_sales) })
     const dailyUnits = (label: string) => {
+      const scenarioPack = pack.scenarios.find(s => s.scenarioLabel === label)
       const fromOutlook = outlook?.facts.scenarios.find(s => s.label === label)?.daily_units
-      if (fromOutlook != null) return Math.round(fromOutlook)
-      return pack.scenarios.find(s => s.scenarioLabel === label)?.normalDayOutlook.targetUnits.value
+      const clamped = clampOutlookUnitsToCapacity(fromOutlook, scenarioPack?.sellableCapacityUnits.value)
+      if (clamped != null) return Math.round(clamped)
+      return scenarioPack?.normalDayOutlook.targetUnits.value
     }
     const hourlyTargets = detail && detail.facts.hourly.length ? pack.scenarios.map(s => {
       const units = dailyUnits(s.scenarioLabel) ?? s.normalDayOutlook.targetUnits.value
@@ -244,7 +269,7 @@ export async function prepareFoodCourtKpiScenario(
       operatingDaysPerMonth: pack.baseline.operatingDaysPerMonth,
       scenarios: pack.scenarios.map((s) => {
         const fromOutlook = outlook?.facts.scenarios.find((row) => row.label === s.scenarioLabel)
-        const units = fromOutlook?.daily_units ?? s.normalDayOutlook.targetUnits.value
+        const units = clampOutlookUnitsToCapacity(fromOutlook?.daily_units, s.sellableCapacityUnits.value) ?? s.normalDayOutlook.targetUnits.value
         const price = s.prices[0]?.price.value
         return {
           label: s.scenarioLabel,
