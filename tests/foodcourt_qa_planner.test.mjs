@@ -81,6 +81,28 @@ test('KPI asks period then methods, then sell-price and cost before analysis',()
   assert.equal(result.kind,'ready');
 });
 
+test('an unrelated follow-up question does not drag the previous product\'s KPI/margin trial along',()=>{
+  let result=planner.nextTurn(planner.initialState(),'新商品のKPIを試算してください',options);
+  result=planner.nextTurn(result.state,'全期間',options);
+  result=planner.nextTurn(result.state,'おすすめ全部で進む',options);
+  result=planner.nextTurn(result.state,'全部お任せ',options);
+  assert.equal(result.kind,'ready');
+  assert.ok(result.methods.includes('kpi'));
+  const opts={...options,hasPriorAnswer:true};
+  const unrelated='単価はフードコート内で上位なのに総売上はずっと下位です。客数不足を解消する具体的な施策はありますか';
+  assert.equal(planner.wantsKpiTargets(unrelated),false,'the new question itself must not independently want a KPI trial');
+  const follow=planner.nextTurn(result.state,unrelated,opts);
+  assert.equal(follow.kind,'ready',follow.kind==='clarify'?follow.message:'');
+  assert.equal(follow.methods.includes('kpi'),false,'unrelated follow-up must not keep forcing the previous product\'s KPI trial');
+  assert.equal(follow.methods.includes('margin'),false);
+  // Asking again with wording that itself independently wants a KPI trial still re-triggers
+  // it, proving the drop above is scoped to stale carry-over, not a permanent ban.
+  assert.equal(planner.wantsKpiTargets('新しい施策としてKPIを試算してください'),true);
+  const askAgain=planner.nextTurn(follow.state,'新しい施策としてKPIを試算してください',opts);
+  const goAgain=askAgain.kind==='clarify' ? planner.nextTurn(askAgain.state,'全部お任せ',opts) : askAgain;
+  assert.ok(goAgain.methods.includes('kpi'),'explicitly asking for KPI again must still work');
+});
+
 test('cancel, invalid/overlapping ranges and replacement questions do not start a wrong analysis',()=>{
   let result=planner.nextTurn(planner.initialState(),'売上を分析',options);
   result=planner.nextTurn(result.state,'2026-07-31〜2026-07-01',options);assert.equal(result.kind,'clarify');
