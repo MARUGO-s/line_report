@@ -37,6 +37,7 @@ function pureContext() {
   vm.runInContext([
     constant('AI_ANALYSIS_BOT_USER_ID'),
     constant('AI_TYPING_TIMEOUT_MS'),
+    constant('AI_TYPING_NOTICE_MAX_MS'),
     extractFunction(messagesJs, 'isAiAnalysisRoom'),
     extractFunction(messagesJs, 'aiTypingCandidate'),
     'this.isAiAnalysisRoom = isAiAnalysisRoom; this.aiTypingCandidate = aiTypingCandidate;',
@@ -53,16 +54,18 @@ test('AI分析 Bot room is detected only for 1-to-1 rooms with the b073 bot', ()
   assert.equal(isAiAnalysisRoom(null), false);
 });
 
-test('typing candidate: own recent text shows, bot reply / old / non-text hides', () => {
+test('typing candidate: own recent text shows dots, then a notice after 120s; bot reply hides', () => {
   const { aiTypingCandidate } = pureContext();
   const now = Date.parse('2026-10-01T03:00:00Z');
   const mine = { id: 10, user_id: ME, kind: 'text', content: '先月のPVは？', created_at: '2026-10-01T02:59:30Z' };
-  assert.deepEqual({ ...aiTypingCandidate([mine], ME, now, null) }, { id: 10, remainingMs: 90000 });
-  // bot reply after the question → hidden
+  assert.deepEqual({ ...aiTypingCandidate([mine], ME, now, null) }, { id: 10, mode: 'typing', remainingMs: 90000 });
+  // bot reply after the question → nothing
   const reply = { id: 11, user_id: BOT, kind: 'text', content: '回答', created_at: '2026-10-01T02:59:50Z' };
   assert.equal(aiTypingCandidate([mine, reply], ME, now, null), null);
-  // 120s timeout
-  assert.equal(aiTypingCandidate([{ ...mine, created_at: '2026-10-01T02:57:59Z' }], ME, now, null), null);
+  // after 120s → local notice (until 30 min)
+  assert.equal(aiTypingCandidate([{ ...mine, created_at: '2026-10-01T02:57:59Z' }], ME, now, null).mode, 'notice');
+  assert.equal(aiTypingCandidate([{ ...mine, created_at: '2026-10-01T02:31:00Z' }], ME, now, null).mode, 'notice');
+  assert.equal(aiTypingCandidate([{ ...mine, created_at: '2026-10-01T02:29:59Z' }], ME, now, null), null);
   // non-text or empty
   assert.equal(aiTypingCandidate([{ ...mine, kind: 'image' }], ME, now, null), null);
   assert.equal(aiTypingCandidate([{ ...mine, content: '  ' }], ME, now, null), null);
@@ -75,11 +78,11 @@ test('typing candidate: own recent text shows, bot reply / old / non-text hides'
   assert.equal(aiTypingCandidate([{ ...mine, created_at: '2026-10-01T03:01:00Z' }], ME, now, null).remainingMs, 120000);
   // locally sent message uses the device send time even if created_at looks old (device clock ahead)
   const skewed = { ...mine, created_at: '2026-10-01T02:50:00Z' };
-  assert.equal(aiTypingCandidate([skewed], ME, now, { id: 10, at: now - 1000 }).remainingMs, 119000);
+  assert.deepEqual({ ...aiTypingCandidate([skewed], ME, now, { id: 10, at: now - 1000 }) }, { id: 10, mode: 'typing', remainingMs: 119000 });
 });
 
 class FakeNode {
-  constructor(className = '') { this.className = className; this.children = []; this.parent = null; this.attrs = {}; this.innerHTML = ''; }
+  constructor(className = '') { this.className = className; this.children = []; this.parent = null; this.attrs = {}; this.dataset = {}; this.innerHTML = ''; }
   setAttribute(k, v) { this.attrs[k] = v; }
   appendChild(node) {
     if (node.parent) node.parent.children = node.parent.children.filter((c) => c !== node);
@@ -116,7 +119,9 @@ function domContext({ group, messages, now }) {
   vm.runInContext([
     constant('AI_ANALYSIS_BOT_USER_ID'),
     constant('AI_TYPING_TIMEOUT_MS'),
-    'let aiTypingTimer = null; let aiTypingMessageId = null; let aiTypingExpiredMessageId = null; let aiTypingLiveMessage = null;',
+    constant('AI_TYPING_NOTICE_MAX_MS'),
+    constant('AI_TYPING_TIMEOUT_TEXT'),
+    "let aiTypingTimer = null; let aiTypingKey = ''; let aiTypingLiveMessage = null;",
     ...['isAiAnalysisRoom', 'aiTypingCandidate', 'buildAiTypingNode', 'hideAiTyping', 'syncAiTyping']
       .map((name) => extractFunction(messagesJs, name)),
     'this.syncAiTyping = syncAiTyping; this.hideAiTyping = hideAiTyping;',
@@ -125,40 +130,58 @@ function domContext({ group, messages, now }) {
   return { context, list, timers };
 }
 
-test('typing bubble stays last, hides on bot reply, and expires after the timeout', () => {
+test('typing bubble stays last, turns into a local notice at 120s, and hides when the bot replies', () => {
   const now = { value: Date.parse('2026-10-01T03:00:00Z') };
   const group = { is_direct: true, peer: { id: BOT, username: 'AI分析' } };
   const q = { id: 1, user_id: ME, kind: 'text', content: '質問', created_at: '2026-10-01T03:00:00Z' };
   const { context, list, timers } = domContext({ group, messages: [q], now });
   list.appendChild(new FakeNode('message own'));
   context.syncAiTyping();
-  assert.equal(list.children.at(-1).className, 'message ai-typing');
-  assert.equal(list.children.at(-1).attrs.role, 'status');
-  assert.match(list.children.at(-1).innerHTML, /typing-dots/);
-  assert.match(list.children.at(-1).innerHTML, /AI分析/);
-  assert.equal(timers.at(-1).ms, 120000);
+  const typing = list.children.at(-1);
+  assert.equal(typing.className, 'message ai-typing');
+  assert.equal(typing.dataset.aiTypingMode, 'typing');
+  assert.equal(typing.attrs.role, 'status');
+  assert.match(typing.innerHTML, /typing-dots/);
+  assert.match(typing.innerHTML, /AI分析/);
+  assert.equal(timers.length, 1);
+  assert.ok(timers[0].ms >= 120000 && timers[0].ms < 121000);
   // another render keeps a single bubble at the end without restarting the timer
   list.appendChild(new FakeNode('message own'));
   context.syncAiTyping();
   assert.equal(list.querySelectorAll('.ai-typing').length, 1);
   assert.equal(list.children.at(-1).className, 'message ai-typing');
   assert.equal(timers.length, 1);
-  // bot reply arrives → hidden
-  context.setMessages([q, { id: 2, user_id: BOT, kind: 'text', content: '回答', created_at: '2026-10-01T03:00:20Z' }]);
+
+  // 120s pass → the timer switches the dots to the local notice (same text as the server)
+  now.value += 120050;
+  timers[0].fn();
+  const notice = list.children.at(-1);
+  assert.equal(list.querySelectorAll('.ai-typing').length, 1);
+  assert.equal(notice.className, 'message ai-typing ai-typing-notice');
+  assert.equal(notice.dataset.aiTypingMode, 'notice');
+  assert.match(notice.innerHTML, /すみません、返事に時間がかかっています。エラーが起きた可能性があるので、もう一度送ってください。/);
+  assert.doesNotMatch(notice.innerHTML, /typing-dots/);
+  assert.equal(timers.length, 1, 'no further timer for the notice');
+  // re-render keeps the notice
+  context.syncAiTyping();
+  assert.equal(list.children.at(-1), notice);
+
+  // any bot message (e.g. the server timeout notice) → hidden
+  context.setMessages([q, { id: 2, user_id: BOT, kind: 'text', content: 'すみません…', created_at: '2026-10-01T03:02:10Z' }]);
   context.syncAiTyping();
   assert.equal(list.querySelectorAll('.ai-typing').length, 0);
-  assert.equal(timers[0].cleared, true);
 
-  // new question, then timeout fires → hidden and not re-shown for the same question
-  const q2 = { id: 3, user_id: ME, kind: 'text', content: '続き', created_at: '2026-10-01T03:01:00Z' };
-  now.value = Date.parse('2026-10-01T03:01:00Z');
+  // a new question shows the dots again with a fresh timer; bot reply clears the timer
+  const q2 = { id: 3, user_id: ME, kind: 'text', content: '続き', created_at: '2026-10-01T03:03:00Z' };
+  now.value = Date.parse('2026-10-01T03:03:00Z');
   context.setMessages([q, q2]);
   context.syncAiTyping();
-  assert.equal(list.querySelectorAll('.ai-typing').length, 1);
-  timers.at(-1).fn();
-  assert.equal(list.querySelectorAll('.ai-typing').length, 0);
+  assert.equal(list.children.at(-1).dataset.aiTypingMode, 'typing');
+  assert.equal(timers.length, 2);
+  context.setMessages([q, q2, { id: 4, user_id: BOT, kind: 'text', content: '回答', created_at: '2026-10-01T03:03:20Z' }]);
   context.syncAiTyping();
   assert.equal(list.querySelectorAll('.ai-typing').length, 0);
+  assert.equal(timers[1].cleared, true);
 });
 
 test('typing bubble is not shown in other rooms', () => {
@@ -189,4 +212,14 @@ test('typing animation respects reduced motion and assets are cache-busted', () 
   assert.match(chatHtml, /chat\/chat\.css\?v=20261001-ai-typing-1/);
   assert.match(serviceWorker, /'\.\/chat\/messages\.js\?v=20261001-ai-typing-1'/);
   assert.match(serviceWorker, /'\.\/chat\/chat\.css\?v=20261001-ai-typing-1'/);
+});
+
+test('client notice text matches the server timeout message exactly', () => {
+  const text = 'すみません、返事に時間がかかっています。エラーが起きた可能性があるので、もう一度送ってください。';
+  const shared = fs.readFileSync(new URL('../supabase/functions/_shared/mtalk_external_post.ts', import.meta.url), 'utf8');
+  const sweep = fs.readFileSync(new URL('../supabase/migrations/20261001030000_chat_ai_analysis_reply_timeouts.sql', import.meta.url), 'utf8');
+  assert.ok(messagesJs.includes(`const AI_TYPING_TIMEOUT_TEXT = '${text}';`));
+  assert.ok(shared.includes(`export const AI_CHAT_GENERIC_ERROR = '${text}'`));
+  assert.ok(sweep.includes(`v_text constant text := '${text}';`));
+  assert.match(chatCss, /\.message\.ai-typing-notice \.ai-typing-notice-bubble/);
 });

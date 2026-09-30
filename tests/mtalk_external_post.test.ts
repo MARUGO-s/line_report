@@ -6,6 +6,7 @@ import {
   AI_CHAT_GENERIC_ERROR,
   AI_CHAT_LIMITS,
   AI_CHAT_PATH,
+  AI_CHAT_STATUS,
   aiChatEligibility,
   aiChatErrorMessage,
   aiChatReplyParts,
@@ -279,4 +280,58 @@ test("chat-dispatch checks the internal secret first, dedupes, answers in backgr
   assert.match(src, /signExternalRequest\(token, \{ timestamp, method: "POST", path: AI_CHAT_PATH, body \}\)/)
   assert.doesNotMatch(src, /OPENAI_API_KEY|api\.openai\.com/)
   assert.doesNotMatch(src, /console\.\w+\([^)]*(token|secret|content|question|history)/i)
+})
+
+test("AI chat: failures and timeouts always end in a reply, answered/timed_out decided once", async () => {
+  // gourmet への問い合わせは Edge Function の実行時間の上限（150秒）と2分の見張りより前に打ち切る
+  assert.equal(AI_CHAT_LIMITS.timeoutMs, 100_000)
+  assert.ok(AI_CHAT_LIMITS.timeoutMs < AI_CHAT_LIMITS.replyDeadlineSeconds * 1000)
+  assert.equal(AI_CHAT_GENERIC_ERROR, "すみません、返事に時間がかかっています。エラーが起きた可能性があるので、もう一度送ってください。")
+  assert.equal(aiChatErrorMessage(504, null), AI_CHAT_GENERIC_ERROR)
+  assert.deepEqual({ ...AI_CHAT_STATUS }, { pending: "pending", answered: "answered", failed: "failed", timedOut: "timed_out" })
+
+  const src = await Deno.readTextFile(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  const dispatch = src.slice(src.indexOf("async function chatDispatch"), src.indexOf("async function finishDispatch"))
+  assert.match(dispatch, /dedupe_key: `msg:\$\{messageId\}`, status: AI_CHAT_STATUS\.pending/)
+  const finish = src.slice(src.indexOf("async function finishDispatch"), src.indexOf("async function recordReply"))
+  assert.match(finish, /\.update\(\{ status, finished_at:/)
+  assert.match(finish, /\.eq\("status", AI_CHAT_STATUS\.pending\)/)
+  assert.match(finish, /\.select\("id"\)/)
+  const answer = src.slice(src.indexOf("async function answerInBackground"), src.indexOf("Deno.serve("))
+  // 確定してから送る。確定できなければ（見張りが案内済み）答えを捨てる
+  assert.ok(answer.indexOf("finishDispatch(") < answer.indexOf("postBotText("))
+  assert.match(answer, /if \(!await finishDispatch\([^)]*\)\) \{\s+console\.error\([^)]*\)\s+return\s+\}/)
+  // 1通目を送ったらすぐ記録（見張りの二重送信を防ぐ）
+  assert.match(answer, /replyId = id\s+\/\/[^\n]*\n\s+await recordReply\(/)
+  // 例外時: 未確定なら failed に確定してから案内
+  assert.match(answer, /finished \|\| await finishDispatch\(supabase, groupId, messageId, AI_CHAT_STATUS\.failed\)/)
+  assert.match(answer, /postBotText\(supabase, groupId, AI_CHAT_GENERIC_ERROR\)/)
+  assert.match(src, /signal: AbortSignal\.timeout\(AI_CHAT_LIMITS\.timeoutMs\)/)
+})
+
+test("AI chat timeout sweep: pg_cron via the high-frequency dispatcher posts one notice per stuck question", async () => {
+  const sql = await Deno.readTextFile(new URL("../supabase/migrations/20261001030000_chat_ai_analysis_reply_timeouts.sql", import.meta.url))
+  assert.match(sql, /add column if not exists status text/)
+  assert.match(sql, /check \(status is null or status in \('pending', 'answered', 'failed', 'timed_out'\)\)/)
+  // 既存の行は見張りの対象外
+  assert.match(sql, /set status = case when message_id is null then 'timed_out' else 'answered' end/)
+  const fn = sql.slice(sql.indexOf("create or replace function public.chat_ai_analysis_reply_timeouts"), sql.indexOf("revoke all on function public.chat_ai_analysis_reply_timeouts"))
+  assert.match(fn, /security definer\s+set search_path = public/)
+  assert.match(fn, /d\.status = 'pending' and d\.created_at < now\(\) - interval '2 minutes'/)
+  assert.match(fn, /d\.status in \('answered', 'failed'\) and d\.finished_at < now\(\) - interval '2 minutes'/)
+  assert.match(fn, /d\.message_id is null/)
+  assert.match(fn, /for update skip locked/)
+  assert.match(fn, /set status = 'timed_out'/)
+  assert.match(fn, /values \(r\.chat_group_id, v_bot, 'AI分析', v_text, 'text'\)/)
+  assert.match(fn, /v_bot constant uuid := '00000000-0000-4000-8000-00000000b073'/)
+  assert.ok(fn.includes(`v_text constant text := '${AI_CHAT_GENERIC_ERROR}'`))
+  assert.match(fn, /exception when others then/)
+  assert.match(sql, /revoke all on function public\.chat_ai_analysis_reply_timeouts\(\) from public, anon, authenticated/)
+  // 既存ジョブへの組み込み。以前の呼び出しはすべて残す
+  const dispatcher = sql.slice(sql.indexOf("create or replace function public.invoke_high_frequency_dispatcher_cron"))
+  const previous = await Deno.readTextFile(new URL("../supabase/migrations/20260826010000_chat_schedule_cron_dispatch_integration.sql", import.meta.url))
+  assert.match(dispatcher, /perform public\.chat_ai_analysis_reply_timeouts\(\);/)
+  for (const call of previous.match(/perform public\.\w+\(\);/g) ?? []) assert.ok(dispatcher.includes(call), call)
+  assert.doesNotMatch(sql, /cron\.schedule\(/)
+  assert.match(sql, /revoke all on function public\.invoke_high_frequency_dispatcher_cron\(\) from public, anon, authenticated/)
 })

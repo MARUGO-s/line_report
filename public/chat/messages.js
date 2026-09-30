@@ -705,14 +705,17 @@ function addMessageToUI(msg) {
 // --- 「AI分析」Botの考え中表示 ---
 // 「AI分析」Botとの1対1で自分が文章を送ると、Botの返信が届くまで末尾に「・・・」を出す。
 // 画面だけの表示で、サーバーへは何も送らず、メッセージも作らない（編集済みも付かない）。
-// 消えるのは Bot の発言が届いたとき（最後の発言が自分でなくなる）、120秒たったとき、
-// トークを離れたとき。開き直したときも、最後が120秒以内の自分の文章なら出す。
+// 120秒たっても返信がなければ、「・・・」を同じ場所の案内（この端末だけの表示）に切り替える。
+// サーバー側も2分で同じ文の案内を Bot として送る（chat_ai_analysis_reply_timeouts）。
+// どちらも Bot の発言が届く（最後の発言が自分でなくなる）か、トークを離れると消える。
+// 開き直したときも、最後が自分の文章なら経過時間に応じて「・・・」か案内を出す（30分まで）。
 const AI_ANALYSIS_BOT_USER_ID = '00000000-0000-4000-8000-00000000b073';
 const AI_TYPING_TIMEOUT_MS = 120 * 1000;
+const AI_TYPING_NOTICE_MAX_MS = 30 * 60 * 1000;
+const AI_TYPING_TIMEOUT_TEXT = 'すみません、返事に時間がかかっています。エラーが起きた可能性があるので、もう一度送ってください。';
 let aiTypingTimer = null;
-let aiTypingMessageId = null;
-// 時間切れで閉じた質問。描き直しで同じ質問に再表示しない。
-let aiTypingExpiredMessageId = null;
+// 表示中の対象（自分の質問の id と表示の種類）。同じなら描き直しでタイマーを掛け直さない。
+let aiTypingKey = '';
 // この端末で追加した自分の発言と、その時刻（端末の時計がずれていても120秒を数えられるように）。
 let aiTypingLiveMessage = null;
 
@@ -722,7 +725,7 @@ function isAiAnalysisRoom(group) {
   return String(group.direct_key || '').split(':').includes(AI_ANALYSIS_BOT_USER_ID);
 }
 
-// 最後の発言が自分の文章で120秒以内なら { id, remainingMs } を返す。
+// 最後の発言が自分の文章なら { id, mode: 'typing' | 'notice', remainingMs } を返す。
 function aiTypingCandidate(messages, userId, nowMs, liveMessage) {
   const last = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
   if (!last || !userId || String(last.user_id) !== String(userId)) return null;
@@ -732,18 +735,27 @@ function aiTypingCandidate(messages, userId, nowMs, liveMessage) {
     : Date.parse(last.created_at);
   if (!Number.isFinite(startedMs)) return null;
   const age = Math.max(0, nowMs - startedMs);
-  if (age >= AI_TYPING_TIMEOUT_MS) return null;
-  return { id: last.id, remainingMs: AI_TYPING_TIMEOUT_MS - age };
+  if (age < AI_TYPING_TIMEOUT_MS) return { id: last.id, mode: 'typing', remainingMs: AI_TYPING_TIMEOUT_MS - age };
+  if (age < AI_TYPING_NOTICE_MAX_MS) return { id: last.id, mode: 'notice', remainingMs: 0 };
+  return null;
 }
 
-function buildAiTypingNode() {
+function buildAiTypingNode(mode) {
   const div = document.createElement('div');
-  div.className = 'message ai-typing';
+  div.className = mode === 'notice' ? 'message ai-typing ai-typing-notice' : 'message ai-typing';
+  div.dataset.aiTypingMode = mode;
   div.setAttribute('role', 'status');
   div.setAttribute('aria-live', 'polite');
   const group = currentGroup();
   const name = (group && group.peer && personName(group.peer)) || 'AI分析';
-  div.innerHTML = `
+  div.innerHTML = mode === 'notice'
+    ? `
+    <div class="message-content">
+      <div class="message-bubble ai-typing-notice-bubble"><span class="bubble-text">${escapeHtml(AI_TYPING_TIMEOUT_TEXT)}</span></div>
+      <div class="message-meta"><span class="username">${escapeHtml(name)}</span><span>この端末だけの表示</span></div>
+    </div>
+  `
+    : `
     <div class="message-content">
       <div class="message-bubble ai-typing-bubble" aria-label="${escapeHtml(name)}が回答を考えています">
         <span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>
@@ -757,7 +769,7 @@ function buildAiTypingNode() {
 function hideAiTyping() {
   if (aiTypingTimer) clearTimeout(aiTypingTimer);
   aiTypingTimer = null;
-  aiTypingMessageId = null;
+  aiTypingKey = '';
   const el = $('messages');
   if (el) el.querySelectorAll('.ai-typing').forEach((node) => node.remove());
 }
@@ -767,19 +779,29 @@ function syncAiTyping() {
   const candidate = el && currentUser && viewHasLatest && isAiAnalysisRoom(currentGroup())
     ? aiTypingCandidate(currentMessages, currentUser.id, Date.now(), aiTypingLiveMessage)
     : null;
-  if (!candidate || candidate.id === aiTypingExpiredMessageId) {
+  if (!candidate) {
     hideAiTyping();
     return;
   }
+  let node = el.querySelector('.ai-typing');
+  if (node && node.dataset.aiTypingMode !== candidate.mode) {
+    node.remove();
+    node = null;
+  }
   // 描き直し・新着のあとも常に末尾に置く。
-  el.appendChild(el.querySelector('.ai-typing') || buildAiTypingNode());
-  if (aiTypingMessageId !== candidate.id) {
+  el.appendChild(node || buildAiTypingNode(candidate.mode));
+  const key = `${candidate.id}:${candidate.mode}`;
+  if (aiTypingKey !== key) {
     if (aiTypingTimer) clearTimeout(aiTypingTimer);
-    aiTypingMessageId = candidate.id;
-    aiTypingTimer = setTimeout(() => {
-      aiTypingExpiredMessageId = candidate.id;
-      hideAiTyping();
-    }, candidate.remainingMs);
+    aiTypingTimer = null;
+    aiTypingKey = key;
+    // 120秒で「・・・」から案内へ切り替える（案内は Bot の発言が届くまで残す）。
+    if (candidate.mode === 'typing') {
+      aiTypingTimer = setTimeout(() => {
+        aiTypingTimer = null;
+        syncAiTyping();
+      }, candidate.remainingMs + 50);
+    }
   }
   if (followNewMessages) scrollMessagesToBottom();
 }

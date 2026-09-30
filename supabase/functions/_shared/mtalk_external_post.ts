@@ -275,10 +275,23 @@ export const AI_CHAT_LIMITS = {
   questionMax: 2000,
   replyMax: 2000,
   replyParts: 3,
-  timeoutMs: 140_000,
+  // gourmet への問い合わせを打ち切るまで。Edge Function の実行時間の上限（150秒）と
+  // 2分の見張り（chat_ai_analysis_reply_timeouts）より前に、関数自身が案内を出せるようにする。
+  timeoutMs: 100_000,
+  // この時間を過ぎても答えが出ていない質問には、見張り（pg_cron）が案内を出す。
+  replyDeadlineSeconds: 120,
 } as const
 
-export const AI_CHAT_GENERIC_ERROR = 'すみません、いまは回答できませんでした。時間をおいてもう一度送ってください。'
+/** 失敗・時間切れのときに Bot が送る案内（画面の「・・・」が時間切れになったときの表示と同じ文）。 */
+export const AI_CHAT_GENERIC_ERROR = 'すみません、返事に時間がかかっています。エラーが起きた可能性があるので、もう一度送ってください。'
+
+/** chat_alert_dispatches.status（kind = ai_chat_reply のときだけ使う）。pending から一度だけ変わる。 */
+export const AI_CHAT_STATUS = {
+  pending: 'pending',
+  answered: 'answered',
+  failed: 'failed',
+  timedOut: 'timed_out',
+} as const
 
 export type AiChatMessageRow = {
   id: number
