@@ -7,6 +7,8 @@
  *   POST /chat-dispatch { message_id }  ← DBトリガー（pg_net）専用。「AI分析」Botとの1対1への質問に答える。
  *                     認証は chat-search と同じ chat_push_internal_config.dispatch_secret（Bearer、定数時間比較）。
  *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
+ *                     答え・失敗の案内は chat_alert_dispatches.status を pending から1回だけ確定してから送る。
+ *                     2分たっても pending のままなら pg_cron の chat_ai_analysis_reply_timeouts() が案内を送る。
  *
  * verify_jwt = false（呼び出し元は Supabase の利用者JWTを持たない）。認可は関数内で
  * GOURMET_MTALK_TOKEN の定数時間比較 + HMAC 署名（±5分）で行い、欠けたら常に 401。
@@ -23,6 +25,7 @@ import {
   AI_CHAT_LIMITS,
   AI_CHAT_PATH,
   AI_CHAT_REPLY_KIND,
+  AI_CHAT_STATUS,
   aiChatEligibility,
   aiChatErrorMessage,
   aiChatReplyParts,
@@ -256,7 +259,7 @@ async function chatDispatch(req: Request, supabase: DbClient): Promise<Response>
 
   // 同じ発言には1回だけ答える（pg_net の再送・二重起動に備える）
   const { error: claimError } = await supabase.from("chat_alert_dispatches")
-    .insert({ kind: AI_CHAT_REPLY_KIND, chat_group_id: groupId, dedupe_key: `msg:${messageId}` })
+    .insert({ kind: AI_CHAT_REPLY_KIND, chat_group_id: groupId, dedupe_key: `msg:${messageId}`, status: AI_CHAT_STATUS.pending })
   if (claimError) {
     if (String(claimError.code ?? "") === "23505") return respond({ ok: true, skipped: "duplicate" })
     throw new Error("reply claim failed")
@@ -273,8 +276,29 @@ async function chatDispatch(req: Request, supabase: DbClient): Promise<Response>
   return respond({ ok: true, accepted: true }, 202)
 }
 
+/**
+ * pending → answered / failed を1回だけ確定する。見張り（chat_ai_analysis_reply_timeouts）が先に
+ * timed_out にしていれば false（案内は送信済みなので、遅れて届いた答えは送らない）。
+ */
+async function finishDispatch(supabase: DbClient, groupId: number, messageId: number, status: string): Promise<boolean> {
+  const { data, error } = await supabase.from("chat_alert_dispatches")
+    .update({ status, finished_at: new Date().toISOString() })
+    .eq("kind", AI_CHAT_REPLY_KIND).eq("chat_group_id", groupId).eq("dedupe_key", `msg:${messageId}`)
+    .eq("status", AI_CHAT_STATUS.pending)
+    .select("id")
+  if (error) throw new Error("reply finish failed")
+  return Array.isArray(data) && data.length > 0
+}
+
+async function recordReply(supabase: DbClient, groupId: number, messageId: number, replyId: number | null): Promise<void> {
+  if (replyId == null) return
+  await supabase.from("chat_alert_dispatches").update({ message_id: replyId })
+    .eq("kind", AI_CHAT_REPLY_KIND).eq("chat_group_id", groupId).eq("dedupe_key", `msg:${messageId}`)
+}
+
 async function answerInBackground(supabase: DbClient, row: AiChatMessageRow, groupId: number, messageId: number): Promise<void> {
   let replyId: number | null = null
+  let finished = false
   try {
     const { data: recent } = await supabase.from("chat_messages")
       .select("id, group_id, user_id, content, kind")
@@ -284,16 +308,28 @@ async function answerInBackground(supabase: DbClient, row: AiChatMessageRow, gro
     const answer = await askGourmet(aiChatRequestBody(row, history))
     const parts = answer.status === 200 ? aiChatReplyParts(answer.data) : []
     if (!parts.length) console.error("[mtalk-external-post] chat answer failed:", answer.status)
+    if (!await finishDispatch(supabase, groupId, messageId, parts.length ? AI_CHAT_STATUS.answered : AI_CHAT_STATUS.failed)) {
+      console.error("[mtalk-external-post] chat answer arrived after the timeout notice; dropped")
+      return
+    }
+    finished = true
     for (const part of parts.length ? parts : [aiChatErrorMessage(answer.status, answer.data)]) {
       const id = await postBotText(supabase, groupId, part)
-      replyId ??= id
+      if (replyId == null) {
+        replyId = id
+        // 1通目を送ったらすぐ記録する（ここで止まっても、見張りが重ねて案内を出さないように）。
+        await recordReply(supabase, groupId, messageId, replyId)
+      }
     }
   } catch (error) {
     console.error("[mtalk-external-post] chat dispatch failed:", error instanceof Error ? error.message.slice(0, 80) : "unknown")
-    if (replyId == null) replyId = await postBotText(supabase, groupId, AI_CHAT_GENERIC_ERROR).catch(() => null)
+    // まだ確定していなければ failed にしてから案内を出す（見張りと二重にならないように）。
+    const mayPost = finished || await finishDispatch(supabase, groupId, messageId, AI_CHAT_STATUS.failed).catch(() => false)
+    if (mayPost && replyId == null) {
+      replyId = await postBotText(supabase, groupId, AI_CHAT_GENERIC_ERROR).catch(() => null)
+      await recordReply(supabase, groupId, messageId, replyId).catch(() => undefined)
+    }
   }
-  await supabase.from("chat_alert_dispatches").update({ message_id: replyId })
-    .eq("kind", AI_CHAT_REPLY_KIND).eq("chat_group_id", groupId).eq("dedupe_key", `msg:${messageId}`)
 }
 
 Deno.serve(async (req) => {

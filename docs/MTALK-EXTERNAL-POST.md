@@ -65,6 +65,16 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
    gourmet へ署名つきで問い合わせる。署名は gourmet → M-talk と同じ規則・同じ `GOURMET_MTALK_TOKEN`（パスは `/mtalk-chat`、テストベクターは両リポジトリで同じ値）。
 4. 回答（プレーンテキスト、1 通 2000 文字以内・最大 3 通）を Bot の `text` 発言として投稿。通知は既存の `chat_messages_enqueue_push` が送る。
    失敗時は「すみません、…」の短い案内を 1 通返す（回数制限・準備中など gourmet が返した利用者向けの文だけを使い、内部の詳細は出さない）。
+5. 返事が必ず届くようにする（migration `20261001030000_chat_ai_analysis_reply_timeouts.sql`）:
+   - `chat_alert_dispatches.status`（`ai_chat_reply` のときだけ）は `pending` で確保し、答え・案内を送る前に `answered` / `failed` へ **pending のときだけ 1 回**確定する。
+   - gourmet への問い合わせは 100 秒で打ち切る（Edge Function の実行時間の上限 150 秒より前）。打ち切り・通信失敗・500 系・例外はすべて
+     「すみません、返事に時間がかかっています。エラーが起きた可能性があるので、もう一度送ってください。」を 1 通送る。
+   - 関数が止まったなどで 2 分たっても `pending` のまま、または確定したのに 1 通目が記録されていない（`message_id` なし）質問は、
+     `chat_ai_analysis_reply_timeouts()`（既存の `high-frequency-dispatcher-cron-job` から毎分）が `timed_out` に確定し、同じ文を Bot として 1 通送る。
+     確定と投稿は 1 行ずつまとめて行い、投稿に失敗したら確定も戻して次の回にやり直す（対象は 1 日以内）。
+   - 見張りが先に確定したら、遅れて届いた答えは関数側で捨てる（確定が 0 行）。案内と答えが重なることはない。
+   - 画面（`public/chat/messages.js`）は送信直後から末尾に「・・・」を出し、120 秒で同じ文の案内（端末だけの表示、保存しない）に切り替える。
+     どちらも Bot の発言が届くかトークを離れると消える。
 
 gourmet 側で決めること（README 参照）: 読むデータの持ち主は、その部屋へ最後にレポートを送った gourmet 利用者（無ければ `INGEST_USER_ID`）。
 回数は M-talk 利用者ごとに 1 時間 60 回（gourmet の `ai_usage`、`kind = 'mtalk'`）。OpenAI のキーは gourmet の秘密情報だけにあり、line_report には置きません。
