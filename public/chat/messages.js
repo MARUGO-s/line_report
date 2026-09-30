@@ -150,6 +150,7 @@ function resetMessageView() {
   $('mentionPop').classList.add('hidden');
   $('messages').innerHTML = '';
   $('jumpLatestBtn').classList.add('hidden');
+  hideAiTyping();
 }
 
 function updateJumpLatestButton() {
@@ -596,6 +597,7 @@ function renderMessageList() {
   hydrateMessageImages();
   hydrateMessageFiles();
   watchStickerLayout(el);
+  syncAiTyping();
   requestAnimationFrame(resolveUnloadedLatestGap);
 }
 
@@ -693,6 +695,92 @@ function addMessageToUI(msg) {
   hydrateMessageImages();
   hydrateMessageFiles();
   watchStickerLayout(el);
+  if (currentUser && String(msg.user_id) === String(currentUser.id)) {
+    aiTypingLiveMessage = { id: msg.id, at: Date.now() };
+  }
+  syncAiTyping();
+  if (followNewMessages) scrollMessagesToBottom();
+}
+
+// --- 「AI分析」Botの考え中表示 ---
+// 「AI分析」Botとの1対1で自分が文章を送ると、Botの返信が届くまで末尾に「・・・」を出す。
+// 画面だけの表示で、サーバーへは何も送らず、メッセージも作らない（編集済みも付かない）。
+// 消えるのは Bot の発言が届いたとき（最後の発言が自分でなくなる）、120秒たったとき、
+// トークを離れたとき。開き直したときも、最後が120秒以内の自分の文章なら出す。
+const AI_ANALYSIS_BOT_USER_ID = '00000000-0000-4000-8000-00000000b073';
+const AI_TYPING_TIMEOUT_MS = 120 * 1000;
+let aiTypingTimer = null;
+let aiTypingMessageId = null;
+// 時間切れで閉じた質問。描き直しで同じ質問に再表示しない。
+let aiTypingExpiredMessageId = null;
+// この端末で追加した自分の発言と、その時刻（端末の時計がずれていても120秒を数えられるように）。
+let aiTypingLiveMessage = null;
+
+function isAiAnalysisRoom(group) {
+  if (!group || !group.is_direct) return false;
+  if (group.peer && String(group.peer.id) === AI_ANALYSIS_BOT_USER_ID) return true;
+  return String(group.direct_key || '').split(':').includes(AI_ANALYSIS_BOT_USER_ID);
+}
+
+// 最後の発言が自分の文章で120秒以内なら { id, remainingMs } を返す。
+function aiTypingCandidate(messages, userId, nowMs, liveMessage) {
+  const last = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
+  if (!last || !userId || String(last.user_id) !== String(userId)) return null;
+  if ((last.kind || 'text') !== 'text' || !String(last.content || '').trim()) return null;
+  const startedMs = liveMessage && liveMessage.id === last.id
+    ? Number(liveMessage.at)
+    : Date.parse(last.created_at);
+  if (!Number.isFinite(startedMs)) return null;
+  const age = Math.max(0, nowMs - startedMs);
+  if (age >= AI_TYPING_TIMEOUT_MS) return null;
+  return { id: last.id, remainingMs: AI_TYPING_TIMEOUT_MS - age };
+}
+
+function buildAiTypingNode() {
+  const div = document.createElement('div');
+  div.className = 'message ai-typing';
+  div.setAttribute('role', 'status');
+  div.setAttribute('aria-live', 'polite');
+  const group = currentGroup();
+  const name = (group && group.peer && personName(group.peer)) || 'AI分析';
+  div.innerHTML = `
+    <div class="message-content">
+      <div class="message-bubble ai-typing-bubble" aria-label="${escapeHtml(name)}が回答を考えています">
+        <span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+      </div>
+      <div class="message-meta"><span class="username">${escapeHtml(name)}</span><span>考え中…</span></div>
+    </div>
+  `;
+  return div;
+}
+
+function hideAiTyping() {
+  if (aiTypingTimer) clearTimeout(aiTypingTimer);
+  aiTypingTimer = null;
+  aiTypingMessageId = null;
+  const el = $('messages');
+  if (el) el.querySelectorAll('.ai-typing').forEach((node) => node.remove());
+}
+
+function syncAiTyping() {
+  const el = $('messages');
+  const candidate = el && currentUser && viewHasLatest && isAiAnalysisRoom(currentGroup())
+    ? aiTypingCandidate(currentMessages, currentUser.id, Date.now(), aiTypingLiveMessage)
+    : null;
+  if (!candidate || candidate.id === aiTypingExpiredMessageId) {
+    hideAiTyping();
+    return;
+  }
+  // 描き直し・新着のあとも常に末尾に置く。
+  el.appendChild(el.querySelector('.ai-typing') || buildAiTypingNode());
+  if (aiTypingMessageId !== candidate.id) {
+    if (aiTypingTimer) clearTimeout(aiTypingTimer);
+    aiTypingMessageId = candidate.id;
+    aiTypingTimer = setTimeout(() => {
+      aiTypingExpiredMessageId = candidate.id;
+      hideAiTyping();
+    }, candidate.remainingMs);
+  }
   if (followNewMessages) scrollMessagesToBottom();
 }
 
