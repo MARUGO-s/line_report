@@ -21,6 +21,11 @@ import {
   signExternalRequest,
   validateSendInput,
   verifyExternalRequest,
+  alertUrl,
+  buildReviewAlertCards,
+  REVIEW_ALERT_KIND,
+  REVIEW_ALERT_LIMITS,
+  validateAlertInput,
 } from "../supabase/functions/_shared/mtalk_external_post.ts"
 
 const SECRET = "s".repeat(48)
@@ -334,4 +339,75 @@ test("AI chat timeout sweep: pg_cron via the high-frequency dispatcher posts one
   for (const call of previous.match(/perform public\.\w+\(\);/g) ?? []) assert.ok(dispatcher.includes(call), call)
   assert.doesNotMatch(sql, /cron\.schedule\(/)
   assert.match(sql, /revoke all on function public\.invoke_high_frequency_dispatcher_cron\(\) from public, anon, authenticated/)
+})
+
+// ---------- 口コミ通知（POST /alert） ----------
+const ALERT_RECIPIENT = "3186a986-547f-41c0-81c2-56f9427e123c"
+const PUBLIC_URL = "https://tabelog.com/tokyo/A1309/A130903/13245351/"
+const alertBody = (over: Record<string, unknown> = {}) => ({
+  recipient_user_id: ALERT_RECIPIENT,
+  dedupe_key: "gourmet-alert:00000000-0000-4000-8000-000000000001",
+  store_name: "BISTRO CAVA CAVA",
+  score_changes: [{ site: "食べログ", from: "3.26", to: "3.28", diff: "+0.02", date: "2026-10-01", review_count_from: 49, review_count_to: 50, url: PUBLIC_URL }],
+  reviews: [{ site: "食べログ", rating: "3.6", posted_date: "2026-09-30", visit: "2026-09", title: "また行きたい", text: "前菜が美味しかった。\n\nワインも良い。", text_note: null, url: `${PUBLIC_URL}dtlrvwlst/B123/`, url_label: "口コミを見る" }],
+  more_count: 0,
+  app_url: "https://marugo-s.github.io/gourmet/",
+  ...over,
+})
+
+test("alert input: recipient, dedupe key, store name and at least one item are required", () => {
+  const input = validateAlertInput(alertBody())
+  assert.equal(input.recipientUserId, ALERT_RECIPIENT)
+  assert.equal(input.scoreChanges[0].from, "3.26")
+  assert.equal(input.reviews[0].text, "前菜が美味しかった。\n\nワインも良い。")
+  assert.throws(() => validateAlertInput(alertBody({ recipient_user_id: "x" })), /送信先/)
+  assert.throws(() => validateAlertInput(alertBody({ dedupe_key: "short" })), /dedupe_key/)
+  assert.throws(() => validateAlertInput(alertBody({ store_name: " " })), /店舗名/)
+  assert.throws(() => validateAlertInput(alertBody({ score_changes: [], reviews: [] })), /内容/)
+  assert.throws(() => validateAlertInput(alertBody({ reviews: Array.from({ length: REVIEW_ALERT_LIMITS.reviewsMax + 1 }, () => ({})) })), /10件/)
+  assert.throws(() => validateAlertInput(alertBody({ score_changes: [{ from: "abc", to: "3.28" }] })), /総合点/)
+  assert.throws(() => validateAlertInput(alertBody({ more_count: -1 })), /more_count/)
+  assert.throws(() => validateAlertInput([]), /送信内容/)
+})
+
+test("alert links: only https on the allowed hosts", () => {
+  assert.equal(alertUrl(PUBLIC_URL), PUBLIC_URL)
+  assert.equal(alertUrl("https://restaurant.ikyu.com/rsOwner/v2/112789/legacy?path=/scriptO/rsOwnImpressions.asp")?.startsWith("https://restaurant.ikyu.com/"), true)
+  for (const bad of ["http://tabelog.com/x/", "https://tabelog.com.evil.example/", "https://evil.example/", "javascript:alert(1)", "https://user:pw@tabelog.com/", "https://tabelog.com:8443/", "", null]) {
+    assert.equal(alertUrl(bad), null, String(bad))
+  }
+  const input = validateAlertInput(alertBody({ reviews: [{ site: "食べログ", rating: "4", text: "x", url: "https://evil.example/" }] }))
+  assert.equal(input.reviews[0].url, null, "許可していないリンクは出さない（送信は続ける）")
+  assert.equal(input.reviews[0].rating, "4")
+})
+
+test("alert cards: score change first, then each review, then ほか N件 with the app link", () => {
+  const input = validateAlertInput(alertBody({ more_count: 3, reviews: [alertBody().reviews[0], { site: "一休", rating: "4.5", posted_date: "2026-09-29", text: "", text_note: "本文は取り込まれていません（評価だけ）", url: "https://restaurant.ikyu.com/rsOwner/v2/112789/legacy?path=/scriptO/rsOwnImpressions.asp", url_label: "管理画面で見る" }] }))
+  const { text, cards } = buildReviewAlertCards(input)
+  assert.equal(REVIEW_ALERT_KIND, "gourmet_review_alert")
+  assert.equal(cards.length, 4)
+  assert.equal(cards[0].header.eyebrow, "食べログ 総合点が変わりました")
+  assert.equal(cards[0].header.subtitle, "3.26 → 3.28（+0.02）")
+  assert.deepEqual(cards[0].sections[0], { type: "fields", rows: [{ label: "総合点", value: "3.26 → 3.28（+0.02）", weight: "bold" }, { label: "口コミ数", value: "49 → 50件" }, { label: "確認日", value: "2026-10-01" }] })
+  assert.deepEqual(cards[0].actions, [{ label: "食べログで見る", url: PUBLIC_URL, style: "secondary" }])
+  assert.equal(cards[1].header.eyebrow, "食べログ 新着口コミ")
+  assert.equal(cards[1].header.subtitle, "また行きたい")
+  assert.deepEqual(cards[1].sections[2], { type: "fields", rows: [{ label: "本文", value: "", paragraphs: ["前菜が美味しかった。", "ワインも良い。"] }] })
+  assert.equal(cards[1].actions[0].url, `${PUBLIC_URL}dtlrvwlst/B123/`)
+  assert.equal(cards[2].sections.length, 2, "本文なし＋注記")
+  assert.equal(cards[2].actions[0].label, "管理画面で見る")
+  assert.equal(cards[3].header.title, "ほか 3件")
+  assert.deepEqual(cards[3].actions, [{ label: "アプリで見る", url: "https://marugo-s.github.io/gourmet/", style: "primary" }])
+  assert.match(text, /^\[口コミ通知\] BISTRO CAVA CAVA\n食べログ 総合点 3\.26 → 3\.28\n新着口コミ 5件\n食べログ ★3\.6 また行きたい$/)
+  const scoreOnly = buildReviewAlertCards(validateAlertInput(alertBody({ reviews: [] })))
+  assert.equal(scoreOnly.cards.length, 1)
+  assert.equal(scoreOnly.text, "[口コミ通知] BISTRO CAVA CAVA\n食べログ 総合点 3.26 → 3.28")
+})
+
+test("mtalk-external-post routes POST /alert through the bot direct room with dedupe", () => {
+  const source = Deno.readTextFileSync(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  assert.match(source, /path === "\/alert" && req\.method === "POST"\) return respond\(await alert\(supabase, bodyText\)\)/)
+  assert.match(source, /kind: REVIEW_ALERT_KIND,\s*dedupeKey: input\.dedupeKey/)
+  // 署名の確認より前に /alert を処理しない
+  assert.ok(source.indexOf("if (!authorized)") < source.indexOf('path === "/alert"'))
 })

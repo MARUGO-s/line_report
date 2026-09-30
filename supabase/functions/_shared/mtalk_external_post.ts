@@ -233,6 +233,139 @@ export function buildAiReportCard(input: Pick<SendInput, 'title' | 'senderLabel'
   }
 }
 
+// ---------- 口コミ通知（gourmet agent-api → POST /alert） ----------
+// gourmet が取り込み時に検出した「新着口コミ」「食べログ総合点の変化」を、店舗ごとに1通（カードを重ねる）で
+// 「AI分析」Botとの1対1へ届ける。カードはここで組み立てる（gourmet から来るのは項目だけ）。リンクは許可したホストだけ。
+export const REVIEW_ALERT_KIND = 'gourmet_review_alert'
+export const REVIEW_ALERT_LIMITS = {
+  storeNameMax: 100,
+  siteMax: 30,
+  scoreChangesMax: 10,
+  reviewsMax: 10,
+  titleMax: 100,
+  textMax: 1000,
+  noteMax: 100,
+  urlMax: 500,
+  moreMax: 100_000,
+} as const
+const ALERT_URL_HOSTS = new Set(['tabelog.com', 'owner.tabelog.com', 'restaurant.ikyu.com', 'marugo-s.github.io'])
+const SCORE = /^[0-5](\.[0-9]{1,2})?$/
+const DIFF = /^[+-]?[0-5]\.[0-9]{2}$/
+const DAY_OR_MONTH = /^\d{4}-\d{2}(-\d{2})?$/
+
+/** https で許可したホストのURLだけ（それ以外は null＝リンクを出さない）。 */
+export function alertUrl(value: unknown): string | null {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > REVIEW_ALERT_LIMITS.urlMax) return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || !ALERT_URL_HOSTS.has(url.hostname)) return null
+    return url.href
+  } catch {
+    return null
+  }
+}
+const pick = (value: unknown, pattern: RegExp) => {
+  const s = String(value ?? '').trim()
+  return pattern.test(s) ? s : null
+}
+const count = (value: unknown) => (Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null)
+
+export type AlertScoreChange = { site: string; from: string; to: string; diff: string | null; date: string | null; reviewCountFrom: number | null; reviewCountTo: number | null; url: string | null }
+export type AlertReview = { site: string; rating: string | null; postedDate: string | null; visit: string | null; title: string; text: string; textNote: string; url: string | null; urlLabel: string }
+export type AlertInput = { recipientUserId: string; dedupeKey: string; storeName: string; scoreChanges: AlertScoreChange[]; reviews: AlertReview[]; moreCount: number; appUrl: string | null }
+
+export function validateAlertInput(raw: unknown): AlertInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ExternalPostError('送信内容が不正です')
+  const v = raw as Record<string, unknown>
+  const L = REVIEW_ALERT_LIMITS
+  if (!isUuid(v.recipient_user_id)) throw new ExternalPostError('送信先が不正です')
+  const dedupeKey = String(v.dedupe_key ?? '')
+  if (!DEDUPE.test(dedupeKey)) throw new ExternalPostError('dedupe_key が不正です')
+  const storeName = cleanText(v.store_name, L.storeNameMax)
+  if (!storeName) throw new ExternalPostError('店舗名が必要です')
+  const rows = (x: unknown, max: number, what: string) => {
+    if (x == null) return []
+    if (!Array.isArray(x) || x.length > max) throw new ExternalPostError(`${what}は${max}件までです`)
+    return x.map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? r as Record<string, unknown> : {}))
+  }
+  const scoreChanges = rows(v.score_changes, L.scoreChangesMax, '総合点の変化').map((r) => {
+    const from = pick(r.from, SCORE), to = pick(r.to, SCORE)
+    if (!from || !to) throw new ExternalPostError('総合点が不正です')
+    return {
+      site: cleanText(r.site, L.siteMax) || '食べログ', from, to, diff: pick(r.diff, DIFF), date: pick(r.date, DAY_OR_MONTH),
+      reviewCountFrom: count(r.review_count_from), reviewCountTo: count(r.review_count_to), url: alertUrl(r.url),
+    }
+  })
+  const reviews = rows(v.reviews, L.reviewsMax, '口コミ').map((r) => ({
+    site: cleanText(r.site, L.siteMax) || '口コミサイト',
+    rating: pick(r.rating, SCORE),
+    postedDate: pick(r.posted_date, DAY_OR_MONTH),
+    visit: pick(r.visit, DAY_OR_MONTH),
+    title: cleanText(r.title, L.titleMax),
+    text: cleanText(r.text, L.textMax, { multiline: true }),
+    textNote: cleanText(r.text_note, L.noteMax),
+    url: alertUrl(r.url),
+    urlLabel: cleanText(r.url_label, 20) || '口コミを見る',
+  }))
+  const moreCount = v.more_count == null ? 0 : count(v.more_count)
+  if (moreCount == null || moreCount > L.moreMax) throw new ExternalPostError('more_count が不正です')
+  if (!scoreChanges.length && !reviews.length) throw new ExternalPostError('通知する内容がありません')
+  return { recipientUserId: String(v.recipient_user_id).toLowerCase(), dedupeKey, storeName, scoreChanges, reviews, moreCount, appUrl: alertUrl(v.app_url) }
+}
+
+type AlertCard = {
+  header: { eyebrow: string; title: string; subtitle: string | null }
+  sections: CardSection[]
+  actions: { label: string; url: string; style: 'primary' | 'secondary' }[]
+}
+
+/** 口コミ通知のカード（総合点の変化 → 口コミ（新しい順）→「ほか N件」）とプレビュー用の文。 */
+export function buildReviewAlertCards(input: Omit<AlertInput, 'recipientUserId' | 'dedupeKey'>): { text: string; cards: AlertCard[] } {
+  const cards: AlertCard[] = []
+  for (const s of input.scoreChanges) {
+    const change = `${s.from} → ${s.to}${s.diff ? `（${s.diff}）` : ''}`
+    const rows: { label: string; value: string; weight?: 'bold' | null }[] = [{ label: '総合点', value: change, weight: 'bold' }]
+    if (s.reviewCountFrom != null && s.reviewCountTo != null) rows.push({ label: '口コミ数', value: s.reviewCountFrom === s.reviewCountTo ? `${s.reviewCountTo}件` : `${s.reviewCountFrom} → ${s.reviewCountTo}件` })
+    if (s.date) rows.push({ label: '確認日', value: s.date })
+    cards.push({
+      header: { eyebrow: `${s.site} 総合点が変わりました`, title: input.storeName, subtitle: change },
+      sections: [{ type: 'fields', rows }],
+      actions: s.url ? [{ label: `${s.site}で見る`, url: s.url, style: 'secondary' }] : [],
+    })
+  }
+  for (const r of input.reviews) {
+    const rows: { label: string; value: string; paragraphs?: string[]; weight?: 'bold' | null }[] = []
+    if (r.rating) rows.push({ label: '評価', value: `★${r.rating}`, weight: 'bold' })
+    if (r.postedDate) rows.push({ label: '投稿日', value: r.postedDate })
+    if (r.visit) rows.push({ label: '来店', value: r.visit })
+    const sections: CardSection[] = [{ type: 'fields', rows }]
+    if (r.text) sections.push({ type: 'separator' }, { type: 'fields', rows: [{ label: '本文', value: '', paragraphs: r.text.split('\n').filter(Boolean) }] })
+    if (r.textNote) sections.push({ type: 'note', size: 'xs', text: r.textNote })
+    cards.push({
+      header: { eyebrow: `${r.site} 新着口コミ`, title: input.storeName, subtitle: r.title || null },
+      sections,
+      actions: r.url ? [{ label: r.urlLabel, url: r.url, style: 'secondary' }] : [],
+    })
+  }
+  if (input.moreCount > 0) {
+    cards.push({
+      header: { eyebrow: '新着口コミ', title: `ほか ${input.moreCount}件`, subtitle: input.storeName },
+      sections: [{ type: 'note', size: 'xs', text: '残りの口コミはアプリのダッシュボードで確認できます。' }],
+      actions: input.appUrl ? [{ label: 'アプリで見る', url: input.appUrl, style: 'primary' }] : [],
+    })
+  }
+  const total = input.reviews.length + input.moreCount
+  const lines = [`[口コミ通知] ${input.storeName}`]
+  for (const s of input.scoreChanges) lines.push(`${s.site} 総合点 ${s.from} → ${s.to}`)
+  if (total) {
+    lines.push(`新着口コミ ${total}件`)
+    const first = input.reviews[0]
+    if (first) lines.push(`${first.site}${first.rating ? ` ★${first.rating}` : ''} ${first.title || first.text}`.trim())
+  }
+  return { text: cleanText(lines.join('\n'), 500, { multiline: true }), cards }
+}
+
 export type RecipientRow = { id: string; username: string; stores: string[] }
 
 /** 有効（利用可・未削除・制限なし）な人間の利用者だけを、名前順で返す。 */
