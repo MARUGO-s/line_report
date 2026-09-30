@@ -774,11 +774,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 43件
 - Edge Functions: 20件
-- 共有TypeScriptモジュール: 112件
+- 共有TypeScriptモジュール: 113件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
-- SQL migrations: 307件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 113件
+- SQL migrations: 308件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 114件
 
 ### 公開画面・ブラウザコード
 
@@ -934,6 +934,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/pos_journal_ai.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/pos_journal_lha.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/receipt_correction.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
+| `supabase/functions/_shared/receipt_delete_confirmation.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/receipt_duplicate.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/receipt_flex_reply.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
 | `supabase/functions/_shared/receipt_line_actions.ts` | SAL-02 / SAL-03 / SAL-04 / SAL-05 / SAL-06 / OPS-03 / DEV-02 |
