@@ -25,6 +25,12 @@ import {
   tryHandlePendingReceiptDuplicateConfirmation,
 } from './receipt_duplicate.ts'
 import {
+  clearPendingReceiptDeletion,
+  isReceiptDeletionConfirmation,
+  loadPendingReceiptDeletion,
+  savePendingReceiptDeletion,
+} from './receipt_delete_confirmation.ts'
+import {
   clearPendingStoreNameMismatch,
   tryHandlePendingStoreNameMismatchConfirmation,
 } from './receipt_store_mismatch.ts'
@@ -1023,6 +1029,32 @@ export async function handleStoreReceiptTextMessage(
   )
   if (duplicateReply) return duplicateReply
 
+const pendingDeletion = await loadPendingReceiptDeletion(supabase, roomId, userId)
+  if (pendingDeletion && isReceiptDeletionConfirmation(text)) {
+    if (pendingDeletion.receipt_table !== registry.receipt_table) {
+      await clearPendingReceiptDeletion(supabase, roomId, userId)
+      return '削除対象を確認できませんでした。解析結果カードからもう一度操作してください。'
+    }
+    const delResult = pendingDeletion.target_receipt_row_id != null
+      ? await deleteStoreReceiptById(
+        supabase,
+        registry.receipt_table,
+        pendingDeletion.target_receipt_row_id,
+      )
+      : await deleteStoreReceiptByLineMessageId(
+        supabase,
+        registry.receipt_table,
+        roomId,
+        pendingDeletion.target_line_message_id!,
+      )
+    if (!delResult.ok) return delResult.message
+    await clearPendingReceiptDeletion(supabase, roomId, userId)
+    await clearPendingCorrection(supabase, roomId, userId)
+    await clearPendingReceiptDuplicate(supabase, roomId, userId)
+    await clearPendingStoreNameMismatch(supabase, roomId, userId)
+    return 'レシート解析データを削除しました（このルームの保存から取り除きました）。'
+  }
+
   const deleteDirective = parseReceiptAnalysisDeleteDirective(text)
   if (deleteDirective.matched) {
     const targetLmid = deleteDirective.targetLineMessageId
@@ -1030,19 +1062,20 @@ export async function handleStoreReceiptTextMessage(
     if (!targetLmid && targetRid == null) {
       return '解析結果カードの「削除」ボタンから送るか、「レシート解析削除 RID:（行ID）」の形式で送ってください。'
     }
+    const saved = await savePendingReceiptDeletion(supabase, {
+      receipt_table: registry.receipt_table,
+      room_id: roomId,
+      user_id: userId,
+      target_line_message_id: targetLmid,
+      target_receipt_row_id: targetRid,
+    })
+    if (!saved) {
+      return '削除確認を保存できませんでした。もう一度解析結果カードから操作してください。'
+    }
     await clearPendingCorrection(supabase, roomId, userId)
     await clearPendingReceiptDuplicate(supabase, roomId, userId)
     await clearPendingStoreNameMismatch(supabase, roomId, userId)
-    const delResult = targetRid != null
-      ? await deleteStoreReceiptById(supabase, registry.receipt_table, targetRid)
-      : await deleteStoreReceiptByLineMessageId(
-        supabase,
-        registry.receipt_table,
-        roomId,
-        targetLmid!,
-      )
-    if (!delResult.ok) return delResult.message
-    return 'レシート解析データを削除しました（このルームの保存から取り除きました）。'
+    return '本当に削除しますか？削除する場合は「削除」と返信してください。確認は30分間有効です。'
   }
 
   const correctionStart = parseReceiptCorrectionStartDirective(text)
