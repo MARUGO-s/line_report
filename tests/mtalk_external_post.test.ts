@@ -3,6 +3,16 @@ import test from "node:test"
 import {
   activeRecipients,
   AI_ANALYSIS_BOT_ID,
+  AI_CHAT_GENERIC_ERROR,
+  AI_CHAT_LIMITS,
+  AI_CHAT_PATH,
+  aiChatEligibility,
+  aiChatErrorMessage,
+  aiChatReplyParts,
+  aiChatRequestBody,
+  buildAiChatHistory,
+  DEFAULT_GOURMET_AI_ANALYST_URL,
+  gourmetAiAnalystUrl,
   buildAiReportCard,
   decodePdfBase64,
   EXTERNAL_POST_LIMITS,
@@ -156,8 +166,117 @@ test("edge function is JWT-less but gated by the external token, without CORS", 
   assert.match(config, /\[functions\.mtalk-external-post\]\s+verify_jwt = false/)
   assert.match(src, /verifyExternalRequest\(/)
   assert.match(src, /GOURMET_MTALK_TOKEN/)
-  assert.ok(src.indexOf("verifyExternalRequest(") < src.indexOf("createClient(Deno.env"), "auth must run before any DB client is created")
+  // 外部（gourmet）向けのルートは、DBクライアントを作る前に署名を検証する。
+  // /chat-dispatch だけは DB の dispatch_secret で認証するため先に分岐し、秘密の照合前に他の表を読まない（下のテスト）。
+  const serve = src.slice(src.indexOf("Deno.serve("))
+  assert.ok(serve.indexOf("verifyExternalRequest(") < serve.lastIndexOf("createClient(Deno.env"), "auth must run before the external-route DB client is created")
+  assert.ok(serve.indexOf('path === "/chat-dispatch"') < serve.indexOf("verifyExternalRequest("), "chat-dispatch is routed before the external HMAC check")
   assert.doesNotMatch(src, /Access-Control-Allow-Origin/)
   assert.match(src, /is_silent: true/)
   assert.match(src, /groups\/\$\{groupId\}\/ai-reports\//)
+})
+
+// ---------- 「AI分析」Bot への質問 ----------
+const HUMAN = "3186a986-547f-41c0-81c2-56f9427e123c"
+const OTHER = "f97f9658-bab0-4b3c-aea2-52a4d48e42e8"
+const directKey = [HUMAN, AI_ANALYSIS_BOT_ID].sort().join(":")
+const okInput = () => ({
+  message: { id: 900, group_id: 44, user_id: HUMAN, content: "先月のPVは？", kind: "text" },
+  group: { id: 44, is_direct: true, direct_key: directKey, trashed_at: null },
+  sender: { id: HUMAN, is_bot: false },
+  access: { access_enabled: true, deleted_at: null, restricted_until: null },
+  botIsMember: true,
+})
+
+test("reverse direction (M-talk → gourmet /mtalk-chat) uses the same signature rule (shared test vector)", async () => {
+  // gourmet server/tests/mtalk-chat.test.js が同じ値を検証する
+  assert.equal(AI_CHAT_PATH, "/mtalk-chat")
+  assert.equal(await signExternalRequest("t".repeat(40), { timestamp: "1790000000", method: "POST", path: "/mtalk-chat", body: '{"x":1}' }),
+    "v1=7322a31eab25dfd2285f7d59eda5e40521e644ac5a90a22c2e9025b6425a5811")
+})
+
+test("AI chat answers only human text messages in the AI bot's own 1-to-1", () => {
+  assert.deepEqual(aiChatEligibility(okInput(), NOW), { ok: true })
+  const cases: [string, (i: ReturnType<typeof okInput>) => void][] = [
+    ["self", (i) => { i.message.user_id = AI_ANALYSIS_BOT_ID }],
+    ["kind", (i) => { i.message.kind = "card" }],
+    ["kind", (i) => { i.message.kind = "file" }],
+    ["empty", (i) => { i.message.content = "  " }],
+    ["room", (i) => { i.group.is_direct = false }],
+    ["room", (i) => { i.group.trashed_at = "2026-09-30T00:00:00Z" }],
+    ["room", (i) => { i.group.direct_key = [HUMAN, OTHER].sort().join(":") }],
+    ["room", (i) => { i.group.direct_key = [OTHER, AI_ANALYSIS_BOT_ID].sort().join(":") }],
+    ["room", (i) => { i.botIsMember = false }],
+    ["sender", (i) => { i.sender.is_bot = true }],
+    ["access", (i) => { i.access.access_enabled = false }],
+    ["access", (i) => { i.access.deleted_at = "2026-09-01T00:00:00Z" }],
+    ["access", (i) => { i.access.restricted_until = new Date(NOW + 60_000).toISOString() }],
+  ]
+  for (const [reason, mutate] of cases) {
+    const input = okInput()
+    mutate(input)
+    assert.deepEqual(aiChatEligibility(input, NOW), { ok: false, reason })
+  }
+  const expired = okInput()
+  expired.access.restricted_until = new Date(NOW - 60_000).toISOString()
+  assert.deepEqual(aiChatEligibility(expired, NOW), { ok: true })
+})
+
+test("AI chat history is chronological, role-mapped, bounded, and hides file contents", () => {
+  const rows = Array.from({ length: 14 }, (_, i) => ({
+    id: 100 + i, group_id: 44, user_id: i % 2 ? AI_ANALYSIS_BOT_ID : HUMAN, kind: "text", content: `m${i}`,
+  }))
+  rows.push({ id: 200, group_id: 44, user_id: AI_ANALYSIS_BOT_ID, kind: "card", content: "[AI分析レポート] 店A\n送信者: X" })
+  rows.push({ id: 201, group_id: 44, user_id: AI_ANALYSIS_BOT_ID, kind: "file", content: "[AI-report.pdf]" })
+  rows.push({ id: 202, group_id: 44, user_id: HUMAN, kind: "image", content: "[画像]" })
+  const h = buildAiChatHistory(rows.reverse())
+  assert.equal(h.length, AI_CHAT_LIMITS.historyMessages)
+  assert.deepEqual(h.at(-2), { role: "assistant", content: "[AI分析レポート] 店A\n送信者: X" })
+  assert.deepEqual(h.at(-1), { role: "assistant", content: "[PDFなどのファイル] [AI-report.pdf]" })
+  assert.ok(h.every((m) => m.role === "user" || m.role === "assistant"))
+  assert.ok(!h.some((m) => m.content === "[画像]"), "images are not sent")
+  const body = JSON.parse(aiChatRequestBody({ id: 900, group_id: 44, user_id: HUMAN, content: " 質問 ", kind: "text" }, h))
+  assert.deepEqual(Object.keys(body).sort(), ["history", "message_id", "mtalk_group_id", "mtalk_user_id", "question"])
+  assert.equal(body.question, "質問")
+})
+
+test("AI chat replies are bounded and failures become short friendly messages", () => {
+  assert.deepEqual(aiChatReplyParts({ parts: ["a", "", "b".repeat(2500), "c", "d"] }).map((p) => p.length), [1, 2000, 1])
+  assert.deepEqual(aiChatReplyParts(null), [])
+  assert.match(aiChatErrorMessage(429, { error: "質問は1時間に60回までです。" }), /^すみません、質問は1時間に60回まで/)
+  assert.equal(aiChatErrorMessage(500, { error: "SQL detail leak" }), AI_CHAT_GENERIC_ERROR)
+  assert.equal(aiChatErrorMessage(401, { error: "unauthorized" }), AI_CHAT_GENERIC_ERROR)
+  assert.equal(aiChatErrorMessage(504, null), AI_CHAT_GENERIC_ERROR)
+  assert.equal(gourmetAiAnalystUrl(null), DEFAULT_GOURMET_AI_ANALYST_URL)
+  assert.equal(gourmetAiAnalystUrl("http://evil.example/functions/v1/ai-analyst"), DEFAULT_GOURMET_AI_ANALYST_URL)
+  assert.equal(gourmetAiAnalystUrl("https://evil.example/steal"), DEFAULT_GOURMET_AI_ANALYST_URL)
+  assert.equal(gourmetAiAnalystUrl("https://x.supabase.co/functions/v1/ai-analyst/"), "https://x.supabase.co/functions/v1/ai-analyst")
+})
+
+test("AI chat trigger ignores bot messages and dispatches with the internal secret only", async () => {
+  const sql = await Deno.readTextFile(new URL("../supabase/migrations/20261001010000_chat_ai_analysis_bot_replies.sql", import.meta.url))
+  assert.match(sql, /new\.user_id = v_bot then\s+return new/)
+  assert.match(sql, /u\.is_bot\) then\s+return new/)
+  assert.match(sql, /coalesce\(new\.kind, 'text'\) <> 'text'/)
+  assert.match(sql, /g\.direct_key in \(v_bot::text \|\| ':' \|\| new\.user_id::text, new\.user_id::text \|\| ':' \|\| v_bot::text\)/)
+  assert.match(sql, /chat_push_internal_config/)
+  assert.match(sql, /mtalk-external-post\/chat-dispatch/)
+  assert.match(sql, /exception when others then\s+return new/)
+  assert.match(sql, /revoke all on function public\.chat_enqueue_ai_analysis_reply\(\) from public, anon, authenticated/)
+  assert.match(sql, /after insert on public\.chat_messages/)
+  assert.doesNotMatch(sql, /GOURMET_MTALK_TOKEN|OPENAI/)
+})
+
+test("chat-dispatch checks the internal secret first, dedupes, answers in background, and never holds the OpenAI key", async () => {
+  const src = await Deno.readTextFile(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  const fn = src.slice(src.indexOf("async function chatDispatch"), src.indexOf("async function answerInBackground"))
+  const auth = fn.indexOf("constantTimeEqualSecret(token, secret)")
+  assert.ok(auth > 0)
+  assert.ok(auth < fn.indexOf('from("chat_messages")'), "secret is checked before reading messages")
+  assert.ok(fn.indexOf("aiChatEligibility(") < fn.indexOf('from("chat_alert_dispatches")'))
+  assert.match(fn, /dedupe_key: `msg:\$\{messageId\}`/)
+  assert.match(fn, /waitUntil\(work\)/)
+  assert.match(src, /signExternalRequest\(token, \{ timestamp, method: "POST", path: AI_CHAT_PATH, body \}\)/)
+  assert.doesNotMatch(src, /OPENAI_API_KEY|api\.openai\.com/)
+  assert.doesNotMatch(src, /console\.\w+\([^)]*(token|secret|content|question|history)/i)
 })

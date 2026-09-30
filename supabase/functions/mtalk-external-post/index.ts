@@ -4,6 +4,9 @@
  *
  *   GET  /recipients  有効な人間の利用者（id, username, stores）
  *   POST /send        { recipient_user_id, report_id, sender_label, title, card, pdf_base64, filename, dedupe_key }
+ *   POST /chat-dispatch { message_id }  ← DBトリガー（pg_net）専用。「AI分析」Botとの1対1への質問に答える。
+ *                     認証は chat-search と同じ chat_push_internal_config.dispatch_secret（Bearer、定数時間比較）。
+ *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
  *
  * verify_jwt = false（呼び出し元は Supabase の利用者JWTを持たない）。認可は関数内で
  * GOURMET_MTALK_TOKEN の定数時間比較 + HMAC 署名（±5分）で行い、欠けたら常に 401。
@@ -12,9 +15,22 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { postChatCardIndependent } from "../_shared/chat_bridge.ts"
+import { constantTimeEqualSecret } from "../_shared/internal_cron_auth.ts"
 import {
   activeRecipients,
   AI_ANALYSIS_BOT_ID,
+  AI_CHAT_GENERIC_ERROR,
+  AI_CHAT_LIMITS,
+  AI_CHAT_PATH,
+  AI_CHAT_REPLY_KIND,
+  aiChatEligibility,
+  aiChatErrorMessage,
+  aiChatReplyParts,
+  aiChatRequestBody,
+  type AiChatMessageRow,
+  buildAiChatHistory,
+  gourmetAiAnalystUrl,
+  signExternalRequest,
   AI_ANALYSIS_BOT_USERNAME,
   AI_REPORT_CARD_KIND,
   AI_REPORT_FILE_KIND,
@@ -183,10 +199,114 @@ async function send(supabase: DbClient, bodyText: string) {
   }
 }
 
+// ---------- 「AI分析」Bot への質問 → gourmet の AI分析 → Bot の返信 ----------
+async function postBotText(supabase: DbClient, groupId: number, text: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .insert({ group_id: groupId, user_id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME, content: text, kind: "text" })
+    .select("id")
+    .single()
+  if (error) throw new Error("reply insert failed")
+  return Number(data?.id) || null
+}
+
+async function askGourmet(body: string): Promise<{ status: number; data: unknown }> {
+  const token = String(Deno.env.get("GOURMET_MTALK_TOKEN") ?? "").trim()
+  if (token.length < 32) return { status: 503, data: null }
+  const timestamp = String(Math.floor(Date.now() / 1000))
+  const signature = await signExternalRequest(token, { timestamp, method: "POST", path: AI_CHAT_PATH, body })
+  try {
+    const res = await fetch(`${gourmetAiAnalystUrl(Deno.env.get("GOURMET_AI_ANALYST_URL"))}${AI_CHAT_PATH}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "X-Mtalk-Timestamp": timestamp, "X-Mtalk-Signature": signature, "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(AI_CHAT_LIMITS.timeoutMs),
+    })
+    return { status: res.status, data: await res.json().catch(() => null) }
+  } catch {
+    return { status: 504, data: null }
+  }
+}
+
+async function chatDispatch(req: Request, supabase: DbClient): Promise<Response> {
+  const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")?.[1]?.trim() ?? ""
+  const { data: config } = await supabase.from("chat_push_internal_config").select("dispatch_secret").eq("id", true).maybeSingle()
+  const secret = String(config?.dispatch_secret ?? "")
+  if (!secret || !token || !constantTimeEqualSecret(token, secret)) return respond({ error: "unauthorized" }, 401)
+
+  const raw = await readBodyLimited(req, 4_096)
+  let messageId = 0
+  try { messageId = Number((JSON.parse(raw) as { message_id?: unknown }).message_id) } catch { messageId = 0 }
+  if (!Number.isSafeInteger(messageId) || messageId <= 0) return respond({ error: "message_id is required" }, 400)
+
+  const { data: message } = await supabase.from("chat_messages")
+    .select("id, group_id, user_id, content, kind").eq("id", messageId).maybeSingle()
+  const row = message as AiChatMessageRow | null
+  const groupId = Number(row?.group_id)
+  const [{ data: group }, { data: sender }, { data: access }, { data: botMember }] = row
+    ? await Promise.all([
+      supabase.from("chat_groups").select("id, is_direct, direct_key, trashed_at").eq("id", groupId).maybeSingle(),
+      supabase.from("chat_users").select("id, is_bot").eq("id", row.user_id).maybeSingle(),
+      supabase.from("chat_user_access").select("access_enabled, deleted_at, restricted_until").eq("user_id", row.user_id).maybeSingle(),
+      supabase.from("chat_group_members").select("user_id").eq("group_id", groupId).eq("user_id", AI_ANALYSIS_BOT_ID).maybeSingle(),
+    ])
+    : [{ data: null }, { data: null }, { data: null }, { data: null }]
+  const eligible = aiChatEligibility({ message: row, group, sender, access, botIsMember: Boolean(botMember) })
+  if (!eligible.ok) return respond({ ok: true, skipped: eligible.reason })
+
+  // 同じ発言には1回だけ答える（pg_net の再送・二重起動に備える）
+  const { error: claimError } = await supabase.from("chat_alert_dispatches")
+    .insert({ kind: AI_CHAT_REPLY_KIND, chat_group_id: groupId, dedupe_key: `msg:${messageId}` })
+  if (claimError) {
+    if (String(claimError.code ?? "") === "23505") return respond({ ok: true, skipped: "duplicate" })
+    throw new Error("reply claim failed")
+  }
+
+  // gourmet の回答には数十秒かかることがあるため、受け付けたら先に 202 を返し、続きはバックグラウンドで行う。
+  const work = answerInBackground(supabase, row!, groupId, messageId)
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil(value: Promise<unknown>): void } }).EdgeRuntime
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(work)
+    return respond({ ok: true, accepted: true }, 202)
+  }
+  await work
+  return respond({ ok: true, accepted: true }, 202)
+}
+
+async function answerInBackground(supabase: DbClient, row: AiChatMessageRow, groupId: number, messageId: number): Promise<void> {
+  let replyId: number | null = null
+  try {
+    const { data: recent } = await supabase.from("chat_messages")
+      .select("id, group_id, user_id, content, kind")
+      .eq("group_id", groupId).lt("id", messageId)
+      .order("id", { ascending: false }).limit(AI_CHAT_LIMITS.historyMessages)
+    const history = buildAiChatHistory((recent ?? []) as AiChatMessageRow[])
+    const answer = await askGourmet(aiChatRequestBody(row, history))
+    const parts = answer.status === 200 ? aiChatReplyParts(answer.data) : []
+    if (!parts.length) console.error("[mtalk-external-post] chat answer failed:", answer.status)
+    for (const part of parts.length ? parts : [aiChatErrorMessage(answer.status, answer.data)]) {
+      const id = await postBotText(supabase, groupId, part)
+      replyId ??= id
+    }
+  } catch (error) {
+    console.error("[mtalk-external-post] chat dispatch failed:", error instanceof Error ? error.message.slice(0, 80) : "unknown")
+    if (replyId == null) replyId = await postBotText(supabase, groupId, AI_CHAT_GENERIC_ERROR).catch(() => null)
+  }
+  await supabase.from("chat_alert_dispatches").update({ message_id: replyId })
+    .eq("kind", AI_CHAT_REPLY_KIND).eq("chat_group_id", groupId).eq("dedupe_key", `msg:${messageId}`)
+}
+
 Deno.serve(async (req) => {
   const path = new URL(req.url).pathname.replace(/^.*\/mtalk-external-post/, "") || "/"
   try {
     if (req.method !== "GET" && req.method !== "POST") return respond({ error: "method not allowed" }, 405)
+    if (path === "/chat-dispatch") {
+      if (req.method !== "POST") return respond({ error: "method not allowed" }, 405)
+      const service = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+      return await chatDispatch(req, service)
+    }
     const bodyText = req.method === "POST" ? await readBodyLimited(req, EXTERNAL_POST_LIMITS.bodyMaxBytes) : ""
     const authorized = await verifyExternalRequest({
       authorization: req.headers.get("authorization"),
