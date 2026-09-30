@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
-import { extractEventTimes, normalizeBaseballCategory, normalizeEventTime, parseTokyoDomeSchedule, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
+import { extractEventTimes, normalizeBaseballCategory, normalizeEventTime, parseTokyoDomeSchedule, planSnapshotReconcile, type ExtractedTokyoDomeEvent } from "../_shared/tokyo_dome_schedule.ts"
 import { GROQ_TEXT_FALLBACK_MODEL, resolveGroqTextModel } from "../_shared/groq_model.ts"
 import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
@@ -187,6 +187,60 @@ Deno.serve(async (req) => {
     }
   }
 
+  // 各ホール／IMMも同じ理由で突き合わせる。公演名が変わった日に旧名の行が残ると、
+  // 週次配信で同じ公演が「時刻あり」「時刻なし」の2行に見えてしまう。
+  // 過去日は売上相関分析の資料なので触らず、JSTの今日以降だけを対象にする。
+  const reconcileFromDate = jstTodayString()
+  const venueStaleDeleted: Record<string, number> = {}
+  const venueReconcileSkipped: Record<string, string> = {}
+  let venueReconcileError: string | null = null
+  const snapshotVenues: Array<{ venue: string; source: string; events: ExtractedEvent[]; error: string | null }> = [
+    ...hallResults,
+    { venue: "imm", source: "imm.theater", events: immEvents, error: immError },
+  ]
+  for (const v of snapshotVenues) {
+    if (v.error || v.events.length === 0) {
+      venueReconcileSkipped[v.venue] = v.error ? `fetch_failed(${v.error})` : "no_events"
+      continue
+    }
+    const { data: existing, error: existingError } = await supabase
+      .from("tokyo_dome_events")
+      .select("event_date,title")
+      .eq("venue", v.venue)
+      .eq("source", v.source)
+      .gte("event_date", reconcileFromDate)
+    if (existingError) {
+      venueReconcileError = `${v.venue} snapshot load failed: ${existingError.message}`
+      continue
+    }
+    const plan = planSnapshotReconcile({
+      fresh: v.events,
+      existing: (Array.isArray(existing) ? existing : []) as Array<{ event_date: string; title: string }>,
+      fetchFailed: false,
+      fromDate: reconcileFromDate,
+    })
+    if (plan.skipReason) {
+      venueReconcileSkipped[v.venue] = plan.skipReason
+      continue
+    }
+    let deleted = 0
+    for (const row of plan.stale) {
+      const { error: deleteError } = await supabase
+        .from("tokyo_dome_events")
+        .delete()
+        .eq("event_date", row.event_date)
+        .eq("venue", v.venue)
+        .eq("title", row.title)
+        .eq("source", v.source)
+      if (deleteError) {
+        venueReconcileError = `${v.venue} stale delete failed (${row.event_date} ${row.title}): ${deleteError.message}`
+        break
+      }
+      deleted++
+    }
+    venueStaleDeleted[v.venue] = deleted
+  }
+
   const allDates = rows.map((r) => r.event_date).sort()
 
   // 4) Pro-Baseball Giants Game details Sync (from baseball-freak.com/audience/giants.html & /game/giants.html)
@@ -365,6 +419,9 @@ Deno.serve(async (req) => {
     dome_error: domeError,
     dome_stale_deleted: domeStaleDeleted,
     dome_reconcile_error: domeReconcileError,
+    venue_stale_deleted: venueStaleDeleted,
+    venue_reconcile_skipped: venueReconcileSkipped,
+    venue_reconcile_error: venueReconcileError,
     hall_errors: Object.fromEntries(hallResults.map((r) => [r.venue, r.error])),
     giants_audience_synced: giantsSyncCount,
     giants_audience_error: giantsError,
@@ -583,6 +640,12 @@ async function extractEvents(scheduleText: string, apiKey: string): Promise<{ ev
   }
   out.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
   return { events: out, raw, usage }
+}
+
+// スナップショット突き合わせの起点。cronはUTC深夜に走るので、暦日はJSTで判定する。
+function jstTodayString(): string {
+  const jst = new Date(Date.now() + 9 * 60 * 60 * 1000)
+  return `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, "0")}-${String(jst.getUTCDate()).padStart(2, "0")}`
 }
 
 function normalizeIsoDate(value: unknown): string | null {

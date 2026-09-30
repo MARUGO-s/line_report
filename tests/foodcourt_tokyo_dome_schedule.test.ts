@@ -5,6 +5,7 @@ import {
   formatEventTimeLabel,
   normalizeEventTime,
   parseTokyoDomeSchedule,
+  planSnapshotReconcile,
 } from "../supabase/functions/_shared/tokyo_dome_schedule.ts"
 
 test("holiday weekday label starts a new Tokyo Dome calendar cell", () => {
@@ -106,4 +107,60 @@ test("formatEventTimeLabel prints only the known parts", () => {
   assert.equal(formatEventTimeLabel(null, "18:00"), "開始18:00")
   assert.equal(formatEventTimeLabel("16:00", null), "開場16:00")
   assert.equal(formatEventTimeLabel(null, null), "")
+})
+
+// 2026-09 のカナデビア重複の実例。公演名が変わった日に旧名の行が残り、週次配信で
+// 同じ公演が「時刻あり」「時刻なし」の2行に見えていた。
+test("planSnapshotReconcile flags rows the official calendar no longer lists", () => {
+  const fresh = [
+    { event_date: "2026-09-24", title: 'BELLE & SEBASTIAN -performing "Tigermilk"-' },
+    { event_date: "2026-09-25", title: 'BELLE & SEBASTIAN -performing "If You\'re Feeling Sinister"-' },
+    { event_date: "2026-09-27", title: 'DEZERT 15th ANNIVERSARY HALL TOUR 2026 "Welcome To My Beginning"' },
+  ]
+  const existing = [
+    ...fresh,
+    { event_date: "2026-09-24", title: '-performing "Tigermilk"-' },
+    { event_date: "2026-09-25", title: '-performing "If You\'re Feeling Sinister"-' },
+    { event_date: "2026-09-27", title: "DEZERT 15th ANNIVERSARY TOUR 2026" },
+  ]
+  const plan = planSnapshotReconcile({ fresh, existing, fetchFailed: false, fromDate: "2026-09-20" })
+  assert.equal(plan.skipReason, null)
+  assert.deepEqual(plan.stale, [
+    { event_date: "2026-09-24", title: '-performing "Tigermilk"-' },
+    { event_date: "2026-09-25", title: '-performing "If You\'re Feeling Sinister"-' },
+    { event_date: "2026-09-27", title: "DEZERT 15th ANNIVERSARY TOUR 2026" },
+  ])
+})
+
+test("planSnapshotReconcile never touches past days or dates beyond the snapshot", () => {
+  const fresh = [
+    { event_date: "2026-09-24", title: "A" },
+    { event_date: "2026-09-25", title: "B" },
+    { event_date: "2026-09-26", title: "C" },
+  ]
+  const existing = [
+    { event_date: "2026-09-10", title: "過去の公演" },       // 売上相関分析の資料。消さない
+    { event_date: "2026-09-24", title: "旧タイトル" },        // 対象
+    { event_date: "2026-12-01", title: "カレンダー未掲載" },  // 掲載範囲の外。消さない
+  ]
+  const plan = planSnapshotReconcile({ fresh, existing, fetchFailed: false, fromDate: "2026-09-20" })
+  assert.equal(plan.skipReason, null)
+  assert.deepEqual(plan.stale, [{ event_date: "2026-09-24", title: "旧タイトル" }])
+})
+
+test("planSnapshotReconcile stands down when the source looks broken", () => {
+  const existing = [{ event_date: "2026-09-24", title: "旧タイトル" }]
+  const failed = planSnapshotReconcile({ fresh: [], existing, fetchFailed: true, fromDate: "2026-09-20" })
+  assert.equal(failed.skipReason, "fetch_failed")
+  assert.deepEqual(failed.stale, [])
+
+  // サイト改修や一時的な空返しで件数が激減した回に、表を消し込まないための下限。
+  const thin = planSnapshotReconcile({
+    fresh: [{ event_date: "2026-09-24", title: "A" }],
+    existing,
+    fetchFailed: false,
+    fromDate: "2026-09-20",
+  })
+  assert.equal(thin.skipReason, "too_few_events(1)")
+  assert.deepEqual(thin.stale, [])
 })

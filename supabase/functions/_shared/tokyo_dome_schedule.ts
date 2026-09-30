@@ -161,3 +161,57 @@ export function parseTokyoDomeSchedule(text: string): ExtractedTokyoDomeEvent[] 
   events.sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
   return events
 }
+
+// --- 公式スナップショットとの突き合わせ ---
+// 各会場の公式カレンダーは「現時点の全予定」を載せたスナップショットだが、取り込みは upsert なので
+// 行を足す・更新することしかできない。公演名が変わったり掲載が取り下げられたりすると、古い行が
+// そのままDBに残り、週次配信で同じ公演が二重に出る。取得したスナップショットと突き合わせて、
+// もう載っていない行を洗い出す。
+export type SnapshotKeyRow = { event_date: string; title: string }
+
+export type SnapshotReconcilePlan = {
+  // 突き合わせを見送った理由。null なら stale を削除してよい。
+  skipReason: string | null
+  stale: SnapshotKeyRow[]
+}
+
+const DEFAULT_MIN_FRESH_EVENTS = 3
+
+function snapshotKey(row: SnapshotKeyRow): string {
+  return `${String(row.event_date ?? "").slice(0, 10)}__${String(row.title ?? "")}`
+}
+
+// fromDate 以降・スナップショットの最終日までの範囲だけを対象にする。
+// - 過去日を消さないのは、この表が客数・売上との相関分析の資料でもあるため。
+// - スナップショットの最終日より先を消さないのは、カレンダーが数ヶ月先までしか載せておらず、
+//   まだ掲載範囲に入っていない先の予定を「消えた」と誤判定しないため。
+// 取得に失敗した会場と、極端に件数が少ない（サイト改修・一時的な空返し）場合は何もしない。
+export function planSnapshotReconcile(input: {
+  fresh: SnapshotKeyRow[]
+  existing: SnapshotKeyRow[]
+  fetchFailed: boolean
+  fromDate: string
+  minFreshEvents?: number
+}): SnapshotReconcilePlan {
+  const minFresh = input.minFreshEvents ?? DEFAULT_MIN_FRESH_EVENTS
+  if (input.fetchFailed) return { skipReason: "fetch_failed", stale: [] }
+  const fresh = (Array.isArray(input.fresh) ? input.fresh : []).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(String(e?.event_date ?? "").slice(0, 10)) && String(e?.title ?? ""))
+  if (fresh.length < minFresh) return { skipReason: `too_few_events(${fresh.length})`, stale: [] }
+
+  const dates = fresh.map((e) => String(e.event_date).slice(0, 10)).sort()
+  const maxDate = dates[dates.length - 1]
+  const fromDate = String(input.fromDate ?? "").slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return { skipReason: "invalid_from_date", stale: [] }
+
+  const freshKeys = new Set(fresh.map(snapshotKey))
+  const stale: SnapshotKeyRow[] = []
+  for (const row of (Array.isArray(input.existing) ? input.existing : [])) {
+    const eventDate = String(row?.event_date ?? "").slice(0, 10)
+    const title = String(row?.title ?? "")
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate) || !title) continue
+    if (eventDate < fromDate || eventDate > maxDate) continue
+    if (freshKeys.has(snapshotKey({ event_date: eventDate, title }))) continue
+    stale.push({ event_date: eventDate, title })
+  }
+  return { skipReason: null, stale }
+}
