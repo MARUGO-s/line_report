@@ -4,9 +4,11 @@
  *
  *   GET  /recipients  有効な人間の利用者（id, username, stores）
  *   POST /send        { recipient_user_id, report_id, sender_label, title, card, pdf_base64, filename, dedupe_key }
- *   POST /alert       { recipient_user_id, dedupe_key, store_name, score_changes[], reviews[], more_count, app_url }
- *                     gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）。カードはこの関数が組み立て、リンクは許可したホストだけ。
- *                     同じ送信先に同じ dedupe_key は1回だけ（chat_alert_dispatches、kind = gourmet_review_alert）。
+ *   GET  /store-bots  店舗Bot（id, username, store_key）と、投稿できるルーム（参加しているグループ。1対1・ゴミ箱・管理者通知を除く）
+ *   POST /alert       { bot_id, room_ids?, dedupe_key, store_name, score_changes[], reviews[], more_count, app_url }
+ *                     gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）を店舗Botとしてルームへ。カードはこの関数が組み立て、
+ *                     リンクは許可したホストだけ。同じルームに同じ dedupe_key は1回だけ（chat_alert_dispatches、kind = gourmet_review_alert）。
+ *                     旧形式 { recipient_user_id, ... }（「AI分析」Botとの1対1）も互換のため受け付ける。
  *   POST /chat-dispatch { message_id }  ← DBトリガー（pg_net）専用。「AI分析」Botとの1対1への質問に答える。
  *                     認証は chat-search と同じ chat_push_internal_config.dispatch_secret（Bearer、定数時間比較）。
  *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
@@ -48,7 +50,11 @@ import {
   buildReviewAlertCards,
   REVIEW_ALERT_KIND,
   validateAlertInput,
+  alertRooms,
+  type BotRoomRow,
+  storeBotList,
 } from "../_shared/mtalk_external_post.ts"
+import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 
 // deno-lint-ignore no-explicit-any
 type DbClient = any
@@ -219,6 +225,31 @@ async function botDirectRoom(supabase: DbClient, recipientUserId: string): Promi
   return groupId
 }
 
+const ROOM_COLUMNS = "id, group_name, is_direct, trashed_at, is_admin_notice_room, is_store_room"
+
+async function listStoreBots(supabase: DbClient) {
+  const { data: bots, error } = await supabase.from("chat_users").select("id, username, store_key, is_bot, bot_deleted_at")
+    .eq("is_bot", true).not("store_key", "is", null).is("bot_deleted_at", null).limit(500)
+  if (error) throw new Error("store bots failed")
+  const ids = (bots ?? []).map((b: { id: string }) => b.id)
+  if (!ids.length) return []
+  const { data: memberships, error: mError } = await supabase.from("chat_group_members").select("user_id, group_id").in("user_id", ids).limit(5000)
+  if (mError) throw new Error("store bot rooms failed")
+  const groupIds = [...new Set((memberships ?? []).map((m: { group_id: number }) => Number(m.group_id)))]
+  const { data: groups, error: gError } = groupIds.length
+    ? await supabase.from("chat_groups").select(ROOM_COLUMNS).in("id", groupIds)
+    : { data: [], error: null }
+  if (gError) throw new Error("store bot rooms failed")
+  const roomIds = alertRooms((groups ?? []) as BotRoomRow[]).map((r) => r.id)
+  const { data: members, error: cError } = roomIds.length
+    ? await supabase.from("chat_group_members").select("group_id").in("group_id", roomIds).limit(20000)
+    : { data: [], error: null }
+  if (cError) throw new Error("room members failed")
+  const counts = new Map<number, number>()
+  for (const m of members ?? []) counts.set(Number(m.group_id), (counts.get(Number(m.group_id)) ?? 0) + 1)
+  return storeBotList(bots ?? [], memberships ?? [], (groups ?? []) as BotRoomRow[], counts)
+}
+
 // gourmet の口コミ通知（カードのみ・PDFなし）
 async function alert(supabase: DbClient, bodyText: string) {
   let raw: unknown
@@ -228,19 +259,49 @@ async function alert(supabase: DbClient, bodyText: string) {
     throw new ExternalPostError("送信内容が不正です")
   }
   const input = validateAlertInput(raw)
-  const groupId = await botDirectRoom(supabase, input.recipientUserId)
   const { text, cards } = buildReviewAlertCards(input)
-  const posted = await postChatCardIndependent(supabase, {
-    groupId,
-    text,
-    cards,
-    kind: REVIEW_ALERT_KIND,
-    dedupeKey: input.dedupeKey,
-    asUser: { id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME },
-  })
-  if (!posted.ok) throw new Error("card post failed")
-  const messageId = posted.skipped ? (await dispatchMessageId(supabase, REVIEW_ALERT_KIND, groupId, input.dedupeKey))?.message_id ?? null : posted.messageId ?? null
-  return { ok: true, group_id: groupId, message_id: messageId, deduplicated: Boolean(posted.skipped) }
+
+  if (input.target.kind === "user") {
+    // 旧形式: 「AI分析」Botとの1対1
+    const groupId = await botDirectRoom(supabase, input.target.recipientUserId)
+    const posted = await postChatCardIndependent(supabase, {
+      groupId, text, cards, kind: REVIEW_ALERT_KIND, dedupeKey: input.dedupeKey,
+      asUser: { id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME },
+    })
+    if (!posted.ok) throw new Error("card post failed")
+    const messageId = posted.skipped ? (await dispatchMessageId(supabase, REVIEW_ALERT_KIND, groupId, input.dedupeKey))?.message_id ?? null : posted.messageId ?? null
+    return { ok: true, group_id: groupId, message_id: messageId, deduplicated: Boolean(posted.skipped) }
+  }
+
+  // 店舗Botとして、Bot が参加しているグループのルームへ
+  const { botId, roomIds } = input.target
+  const { data: bot, error: botError } = await supabase.from("chat_users").select("id, username, store_key")
+    .eq("id", botId).eq("is_bot", true).not("store_key", "is", null).is("bot_deleted_at", null).maybeSingle()
+  if (botError) throw new Error("store bot lookup failed")
+  if (!bot) throw new ExternalPostError("店舗Botが見つからないか、削除されています", 404)
+  const asUser = await loadMtalkStoreBot(supabase, String(bot.store_key))
+  if (!asUser) throw new ExternalPostError("店舗Botが見つからないか、削除されています", 404)
+  const { data: memberships, error: mError } = await supabase.from("chat_group_members").select("group_id").eq("user_id", botId).limit(1000)
+  if (mError) throw new Error("store bot rooms failed")
+  const groupIds = (memberships ?? []).map((m: { group_id: number }) => Number(m.group_id))
+  const { data: groups, error: gError } = groupIds.length
+    ? await supabase.from("chat_groups").select(ROOM_COLUMNS).in("id", groupIds)
+    : { data: [], error: null }
+  if (gError) throw new Error("store bot rooms failed")
+  const rooms = alertRooms((groups ?? []) as BotRoomRow[], roomIds)
+  if (!rooms.length) throw new ExternalPostError(roomIds ? "選んだルームにこの店舗Botが参加していません" : "この店舗Botが参加しているグループのルームがありません", 404)
+
+  const results: { group_id: number; name: string; message_id: number | null; deduplicated: boolean }[] = []
+  let failed = 0
+  for (const room of rooms) {
+    const posted = await postChatCardIndependent(supabase, { groupId: room.id, text, cards, kind: REVIEW_ALERT_KIND, dedupeKey: input.dedupeKey, asUser })
+    if (!posted.ok) { failed++; continue }
+    const messageId = posted.skipped ? (await dispatchMessageId(supabase, REVIEW_ALERT_KIND, room.id, input.dedupeKey))?.message_id ?? null : posted.messageId ?? null
+    results.push({ group_id: room.id, name: room.name, message_id: messageId, deduplicated: Boolean(posted.skipped) })
+  }
+  // 1つでも失敗したら 502（gourmet は同じ dedupe_key でやり直す。投稿済みのルームは chat_alert_dispatches が飛ばす）
+  if (failed) throw new Error("card post failed")
+  return { ok: true, bot_id: botId, bot_name: asUser.username, rooms: results, deduplicated: results.every((r) => r.deduplicated) }
 }
 
 // ---------- 「AI分析」Bot への質問 → gourmet の AI分析 → Bot の返信 ----------
@@ -399,6 +460,7 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     })
     if (path === "/recipients" && req.method === "GET") return respond({ recipients: await listRecipients(supabase) })
+    if (path === "/store-bots" && req.method === "GET") return respond({ bots: await listStoreBots(supabase) })
     if (path === "/send" && req.method === "POST") return respond(await send(supabase, bodyText))
     if (path === "/alert" && req.method === "POST") return respond(await alert(supabase, bodyText))
     return respond({ error: "not found" }, 404)

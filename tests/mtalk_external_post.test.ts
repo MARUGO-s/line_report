@@ -21,8 +21,10 @@ import {
   signExternalRequest,
   validateSendInput,
   verifyExternalRequest,
+  alertRooms,
   alertUrl,
   buildReviewAlertCards,
+  storeBotList,
   REVIEW_ALERT_KIND,
   REVIEW_ALERT_LIMITS,
   validateAlertInput,
@@ -357,7 +359,7 @@ const alertBody = (over: Record<string, unknown> = {}) => ({
 
 test("alert input: recipient, dedupe key, store name and at least one item are required", () => {
   const input = validateAlertInput(alertBody())
-  assert.equal(input.recipientUserId, ALERT_RECIPIENT)
+  assert.deepEqual(input.target, { kind: "user", recipientUserId: ALERT_RECIPIENT }, "旧形式（個人宛て）も受け付ける")
   assert.equal(input.scoreChanges[0].from, "3.26")
   assert.equal(input.reviews[0].text, "前菜が美味しかった。\n\nワインも良い。")
   assert.throws(() => validateAlertInput(alertBody({ recipient_user_id: "x" })), /送信先/)
@@ -410,4 +412,67 @@ test("mtalk-external-post routes POST /alert through the bot direct room with de
   assert.match(source, /kind: REVIEW_ALERT_KIND,\s*dedupeKey: input\.dedupeKey/)
   // 署名の確認より前に /alert を処理しない
   assert.ok(source.indexOf("if (!authorized)") < source.indexOf('path === "/alert"'))
+})
+
+// ---------- 店舗Bot として グループのルームへ ----------
+const CAVA_BOT = "285666af-5fbb-43a9-88e2-998740b0e042"
+const botBody = (over: Record<string, unknown> = {}) => {
+  const { recipient_user_id: _r, ...rest } = alertBody()
+  return { ...rest, bot_id: CAVA_BOT, ...over }
+}
+
+test("alert input: bot_id with optional room_ids; not both bot and recipient", () => {
+  assert.deepEqual(validateAlertInput(botBody()).target, { kind: "bot", botId: CAVA_BOT, roomIds: null })
+  assert.deepEqual(validateAlertInput(botBody({ room_ids: [5, 30, 5] })).target, { kind: "bot", botId: CAVA_BOT, roomIds: [5, 30] })
+  assert.throws(() => validateAlertInput(botBody({ bot_id: "x" })), /店舗Bot/)
+  assert.throws(() => validateAlertInput(botBody({ recipient_user_id: ALERT_RECIPIENT })), /店舗Bot/)
+  for (const bad of [[], [0], [1.5], "5", Array.from({ length: REVIEW_ALERT_LIMITS.roomsMax + 1 }, (_, i) => i + 1)]) {
+    assert.throws(() => validateAlertInput(botBody({ room_ids: bad })), /room_ids/, JSON.stringify(bad))
+  }
+})
+
+const ROOMS = [
+  { id: 34, group_name: "bot", is_direct: false, trashed_at: null, is_store_room: false },
+  { id: 5, group_name: "Bistro CAVACAVA", is_direct: false, trashed_at: null, is_store_room: true },
+  { id: 32, group_name: "Bistro CAVACAVA・itagawa yoshito", is_direct: true, trashed_at: null },
+  { id: 30, group_name: "BistroCAVACAVA", is_direct: false, trashed_at: null },
+  { id: 8, group_name: "ゴミ箱のルーム", is_direct: false, trashed_at: "2026-09-01T00:00:00Z" },
+  { id: 38, group_name: "管理者通知", is_direct: false, trashed_at: null, is_admin_notice_room: true },
+]
+
+test("alert rooms: groups the bot is in, without 1:1 / trashed / admin notice; room_ids narrows", () => {
+  assert.deepEqual(alertRooms(ROOMS).map((r) => [r.id, r.name, r.isStoreRoom]), [[5, "Bistro CAVACAVA", true], [30, "BistroCAVACAVA", false], [34, "bot", false]])
+  assert.deepEqual(alertRooms(ROOMS, [30, 32, 8, 999]).map((r) => r.id), [30], "1対1・ゴミ箱・参加していないルームは選んでも送らない")
+  assert.deepEqual(alertRooms(ROOMS, [32]), [])
+})
+
+test("store bot list: live store bots only, with their postable rooms and member counts", () => {
+  const list = storeBotList(
+    [
+      { id: CAVA_BOT, username: "Bistro CAVACAVA", store_key: "bistrocavacava", is_bot: true, bot_deleted_at: null },
+      { id: "b2", username: "予約通知", store_key: null, is_bot: true, bot_deleted_at: null },
+      { id: "b3", username: "消したBot", store_key: "gone", is_bot: true, bot_deleted_at: "2026-09-01T00:00:00Z" },
+      { id: "b4", username: "バルぺロタ", store_key: "barpelota", is_bot: true, bot_deleted_at: null },
+    ],
+    [...ROOMS.map((r) => ({ user_id: CAVA_BOT, group_id: r.id })), { user_id: "b2", group_id: 5 }],
+    ROOMS,
+    new Map([[5, 6], [30, 5], [34, 4]]),
+  )
+  assert.deepEqual(list.map((b) => b.store_key), ["bistrocavacava", "barpelota"])
+  assert.deepEqual(list[0].rooms, [
+    { id: 5, name: "Bistro CAVACAVA", is_store_room: true, members: 6 },
+    { id: 30, name: "BistroCAVACAVA", is_store_room: false, members: 5 },
+    { id: 34, name: "bot", is_store_room: false, members: 4 },
+  ])
+  assert.deepEqual(list[1].rooms, [])
+})
+
+test("mtalk-external-post: /store-bots and bot /alert are behind the signature; posts as the store bot per room with dedupe", () => {
+  const source = Deno.readTextFileSync(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  assert.match(source, /path === "\/store-bots" && req\.method === "GET"\) return respond\(\{ bots: await listStoreBots\(supabase\) \}\)/)
+  assert.ok(source.indexOf("if (!authorized)") < source.indexOf('path === "/store-bots"'))
+  assert.match(source, /for \(const room of rooms\)[\s\S]*postChatCardIndependent\(supabase, \{ groupId: room\.id, text, cards, kind: REVIEW_ALERT_KIND, dedupeKey: input\.dedupeKey, asUser \}\)/)
+  assert.match(source, /loadMtalkStoreBot\(supabase, String\(bot\.store_key\)\)/, "既存の店舗Botの投稿と同じ名前（〜 bot）")
+  assert.match(source, /\.eq\("is_bot", true\)\.not\("store_key", "is", null\)\.is\("bot_deleted_at", null\)\.maybeSingle\(\)/, "店舗Bot以外（AI分析・予約通知・利用者）では投稿しない")
+  assert.match(source, /if \(failed\) throw new Error\("card post failed"\)/)
 })
