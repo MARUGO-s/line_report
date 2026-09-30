@@ -260,3 +260,110 @@ export function activeRecipients(
     .map((u) => ({ id: u.id, username: String(u.username).trim(), stores: [...new Set(storesOf.get(u.id) ?? [])].sort() }))
     .sort((a, b) => a.username.localeCompare(b.username, 'ja'))
 }
+
+// ---------- 「AI分析」Bot への質問（M-talk → gourmet ai-analyst POST /mtalk-chat） ----------
+// 利用者が「AI分析」Botとの1対1に書いた文章を、DBトリガー（pg_net、chat_push_internal_config.dispatch_secret）が
+// mtalk-external-post /chat-dispatch へ渡す。ここで対象かを確かめ、直近の会話を付けて gourmet へ署名つきで問い合わせ、
+// 回答を Bot の発言として投稿する。署名は gourmet → M-talk と同じ規則・同じ GOURMET_MTALK_TOKEN（逆方向）。
+
+export const AI_CHAT_REPLY_KIND = 'ai_chat_reply'
+export const AI_CHAT_PATH = '/mtalk-chat'
+export const DEFAULT_GOURMET_AI_ANALYST_URL = 'https://ycsqfajidusuibqljjwr.supabase.co/functions/v1/ai-analyst'
+export const AI_CHAT_LIMITS = {
+  historyMessages: 10,
+  historyCharsEach: 1500,
+  questionMax: 2000,
+  replyMax: 2000,
+  replyParts: 3,
+  timeoutMs: 140_000,
+} as const
+
+export const AI_CHAT_GENERIC_ERROR = 'すみません、いまは回答できませんでした。時間をおいてもう一度送ってください。'
+
+export type AiChatMessageRow = {
+  id: number
+  group_id: number
+  user_id: string | null
+  content: string | null
+  kind: string | null
+  payload?: unknown
+}
+
+/** gourmet の AI分析 の URL（https の …/functions/v1/ai-analyst だけ受け付ける。秘密情報ではない）。 */
+export function gourmetAiAnalystUrl(value: string | null | undefined): string {
+  const url = String(value ?? '').trim().replace(/\/+$/, '') || DEFAULT_GOURMET_AI_ANALYST_URL
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'https:' && /\/functions\/v1\/ai-analyst$/.test(u.pathname)) return url
+  } catch { /* 既定へ */ }
+  return DEFAULT_GOURMET_AI_ANALYST_URL
+}
+
+/** 返信の対象か（Bot自身・他のBot・文章以外・空・1対1でない・利用停止中は対象外）。理由はログ用の短い語だけ。 */
+export function aiChatEligibility(
+  input: {
+    message: AiChatMessageRow | null
+    group: { id: number; is_direct: boolean | null; direct_key: string | null; trashed_at: string | null } | null
+    sender: { id: string; is_bot: boolean | null } | null
+    access: { access_enabled: boolean | null; deleted_at: string | null; restricted_until: string | null } | null
+    botIsMember: boolean
+  },
+  nowMs = Date.now(),
+): { ok: true } | { ok: false; reason: string } {
+  const { message, group, sender, access } = input
+  if (!message || !group) return { ok: false, reason: 'missing' }
+  if (String(message.user_id ?? '') === AI_ANALYSIS_BOT_ID) return { ok: false, reason: 'self' }
+  if (String(message.kind ?? 'text') !== 'text') return { ok: false, reason: 'kind' }
+  if (!String(message.content ?? '').trim()) return { ok: false, reason: 'empty' }
+  if (group.is_direct !== true || group.trashed_at) return { ok: false, reason: 'room' }
+  const key = String(group.direct_key ?? '').split(':')
+  if (key.length !== 2 || !key.includes(AI_ANALYSIS_BOT_ID) || !key.includes(String(message.user_id))) return { ok: false, reason: 'room' }
+  if (!input.botIsMember) return { ok: false, reason: 'room' }
+  if (!sender || sender.is_bot === true) return { ok: false, reason: 'sender' }
+  if (!access || access.access_enabled !== true || access.deleted_at || (access.restricted_until && Date.parse(access.restricted_until) > nowMs)) {
+    return { ok: false, reason: 'access' }
+  }
+  return { ok: true }
+}
+
+/** 直前の会話（古い順）。Bot の発言は assistant、利用者は user。カードは本文（プレーンテキスト版）、PDFはファイル名だけ。 */
+export function buildAiChatHistory(rows: AiChatMessageRow[], limit: number = AI_CHAT_LIMITS.historyMessages): { role: 'user' | 'assistant'; content: string }[] {
+  return [...rows]
+    .sort((a, b) => Number(a.id) - Number(b.id))
+    .map((r) => {
+      const role = String(r.user_id ?? '') === AI_ANALYSIS_BOT_ID ? 'assistant' as const : 'user' as const
+      const kind = String(r.kind ?? 'text')
+      let content = ''
+      if (kind === 'text' || kind === 'card') content = cleanText(r.content, AI_CHAT_LIMITS.historyCharsEach, { multiline: true })
+      else if (kind === 'file') content = `[PDFなどのファイル] ${cleanText(r.content, 200)}`
+      return { role, content }
+    })
+    .filter((m) => m.content)
+    .slice(-limit)
+}
+
+export function aiChatRequestBody(message: AiChatMessageRow, history: { role: string; content: string }[]): string {
+  return JSON.stringify({
+    mtalk_user_id: String(message.user_id),
+    mtalk_group_id: Number(message.group_id),
+    message_id: Number(message.id),
+    question: cleanText(message.content, AI_CHAT_LIMITS.questionMax, { multiline: true }),
+    history,
+  })
+}
+
+/** gourmet の回答（parts）を M-talk の発言に収まる形へ。空なら []。 */
+export function aiChatReplyParts(data: unknown): string[] {
+  const parts = (data && typeof data === 'object' && Array.isArray((data as { parts?: unknown }).parts)) ? (data as { parts: unknown[] }).parts : []
+  return parts
+    .map((p) => cleanText(p, AI_CHAT_LIMITS.replyMax, { multiline: true }))
+    .filter(Boolean)
+    .slice(0, AI_CHAT_LIMITS.replyParts)
+}
+
+/** 失敗時に Bot が返す短い案内。gourmet が返した利用者向けの文（回数制限など）だけ使い、それ以外は定型文。 */
+export function aiChatErrorMessage(status: number, data: unknown): string {
+  const msg = data && typeof data === 'object' ? cleanText((data as { error?: unknown }).error, 200) : ''
+  if (msg && [400, 404, 413, 429, 503].includes(status)) return `すみません、${msg.replace(/^すみません、?/, '')}`
+  return AI_CHAT_GENERIC_ERROR
+}

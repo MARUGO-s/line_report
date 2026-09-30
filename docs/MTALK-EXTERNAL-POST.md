@@ -50,3 +50,24 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 2. `supabase secrets set GOURMET_MTALK_TOKEN=... --project-ref hocbnifuactbvmyjraxy`
 3. `mtalk-external-post` を配備（Actions が `knowledge/supabase-ownership.json` の一覧から配備）
 4. gourmet 側に同じトークンと `MTALK_API_URL=https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/mtalk-external-post` を設定
+
+## 「AI分析」Bot への質問（`POST /chat-dispatch`、migration `20261001010000_chat_ai_analysis_bot_replies.sql`）
+
+利用者が「AI分析」Bot との 1 対 1 に文章を書くと、Bot が gourmet の AI分析（`ai-analyst POST /mtalk-chat`。画面の AI分析と同じモデル・同じ 7 つの集計関数）で答えます。
+扱うのは PV・予約・口コミの分析だけで、再取得（スクレイピング）や PDF レポートの作成はしません（PDF は gourmet の画面から送ります）。
+
+1. トリガー `chat_messages_enqueue_ai_analysis_reply`（after insert）が、次をすべて満たす発言だけを pg_net で `/chat-dispatch` へ渡す:
+   `kind = 'text'`・本文あり・送信者が Bot でない・部屋が「AI分析」Bot と送信者の 1 対 1（`direct_key`）でゴミ箱でない。
+   Bot 自身の返信は渡さないので、返信が返信を呼ぶことはありません。
+2. `/chat-dispatch` は `chat_push_internal_config.dispatch_secret`（chat-search と同じ。Bearer、固定時間比較）で認証し、
+   送信者が利用中の人間か・Bot がその部屋の参加者かを改めて確認、`chat_alert_dispatches`（kind `ai_chat_reply`、`msg:<message id>`）で同じ発言への二重回答を防ぐ。
+3. 受け付けたら 202 を返し、バックグラウンド（`EdgeRuntime.waitUntil`）で直前 10 件の発言（Bot は assistant、利用者は user。カードは本文、PDF はファイル名だけ、画像は送らない）を付けて
+   gourmet へ署名つきで問い合わせる。署名は gourmet → M-talk と同じ規則・同じ `GOURMET_MTALK_TOKEN`（パスは `/mtalk-chat`、テストベクターは両リポジトリで同じ値）。
+4. 回答（プレーンテキスト、1 通 2000 文字以内・最大 3 通）を Bot の `text` 発言として投稿。通知は既存の `chat_messages_enqueue_push` が送る。
+   失敗時は「すみません、…」の短い案内を 1 通返す（回数制限・準備中など gourmet が返した利用者向けの文だけを使い、内部の詳細は出さない）。
+
+gourmet 側で決めること（README 参照）: 読むデータの持ち主は、その部屋へ最後にレポートを送った gourmet 利用者（無ければ `INGEST_USER_ID`）。
+回数は M-talk 利用者ごとに 1 時間 60 回（gourmet の `ai_usage`、`kind = 'mtalk'`）。OpenAI のキーは gourmet の秘密情報だけにあり、line_report には置きません。
+問い合わせ先は既定で `https://ycsqfajidusuibqljjwr.supabase.co/functions/v1/ai-analyst`（秘密情報ではない。`GOURMET_AI_ANALYST_URL` で https の `…/functions/v1/ai-analyst` だけ上書き可）。
+
+配備の順番: gourmet（migration 016・ai-analyst）→ line_report（main へのマージで migration と `mtalk-external-post` を配備）。新しい秘密情報はありません。
