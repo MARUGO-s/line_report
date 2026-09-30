@@ -13,6 +13,7 @@
     "gmail-alert-cron",
     "line-admin-webhook",
     "line-webhook",
+    "mtalk-external-post",
     "pv-japan-alert-cron",
     "receipt-midreport-cron",
     "receipt-sheets-sync-cron",

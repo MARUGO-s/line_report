@@ -1,0 +1,163 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import {
+  activeRecipients,
+  AI_ANALYSIS_BOT_ID,
+  buildAiReportCard,
+  decodePdfBase64,
+  EXTERNAL_POST_LIMITS,
+  sanitizePdfFileName,
+  signExternalRequest,
+  validateSendInput,
+  verifyExternalRequest,
+} from "../supabase/functions/_shared/mtalk_external_post.ts"
+
+const SECRET = "s".repeat(48)
+const NOW = 1_790_000_000_000
+const pdfBytes = new TextEncoder().encode("%PDF-1.7\n" + "x".repeat(200) + "\n%%EOF")
+const pdfB64 = btoa(String.fromCharCode(...pdfBytes))
+
+async function signed(overrides: Partial<{ authorization: string | null; timestamp: string | null; signature: string | null; method: string; path: string; body: string }> = {}) {
+  const timestamp = String(Math.floor(NOW / 1000))
+  const base = { method: "POST", path: "/send", body: '{"a":1}', timestamp }
+  const signature = await signExternalRequest(SECRET, base)
+  return { authorization: `Bearer ${SECRET}`, signature, ...base, ...overrides }
+}
+
+test("external post auth requires token, fresh timestamp, and a matching HMAC", async () => {
+  assert.equal(await verifyExternalRequest(await signed(), SECRET, NOW), true)
+  assert.equal(await verifyExternalRequest(await signed({ authorization: null }), SECRET, NOW), false)
+  assert.equal(await verifyExternalRequest(await signed({ authorization: `Bearer ${"t".repeat(48)}` }), SECRET, NOW), false)
+  assert.equal(await verifyExternalRequest(await signed({ signature: null }), SECRET, NOW), false)
+  // 本文・パス・メソッドの改ざん
+  assert.equal(await verifyExternalRequest(await signed({ body: '{"a":2}' }), SECRET, NOW), false)
+  assert.equal(await verifyExternalRequest(await signed({ path: "/recipients" }), SECRET, NOW), false)
+  assert.equal(await verifyExternalRequest(await signed({ method: "GET" }), SECRET, NOW), false)
+  // 5分を超える時刻ずれ
+  assert.equal(await verifyExternalRequest(await signed(), SECRET, NOW + 301_000), false)
+  assert.equal(await verifyExternalRequest(await signed(), SECRET, NOW - 301_000), false)
+  assert.equal(await verifyExternalRequest(await signed(), SECRET, NOW + 299_000), true)
+  // 未設定・短い秘密情報では常に拒否
+  assert.equal(await verifyExternalRequest(await signed(), "", NOW), false)
+  assert.equal(await verifyExternalRequest({ ...(await signed()), authorization: "Bearer short" }, "short", NOW), false)
+})
+
+test("signature matches the gourmet ai-analyst client (shared test vector)", async () => {
+  // gourmet server/tests/mtalk-share.test.js が同じ値を検証する
+  assert.equal(
+    await signExternalRequest("t".repeat(40), { timestamp: "1790000000", method: "POST", path: "/send", body: '{"x":1}' }),
+    "v1=3c1f2de63d53099311e5d2618d4349120bad3133005317b5810d823f885e8ca4",
+  )
+})
+
+test("send input is validated and bounded", () => {
+  const good = {
+    recipient_user_id: "11111111-2222-4333-8444-555555555555",
+    report_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    sender_label: "山田 太郎",
+    title: "BISTRO CAVACAVA 分析レポート",
+    dedupe_key: "gourmet:share:0123456789",
+    card: {
+      subtitle: "2026-07-01〜2026-09-29",
+      fields: [{ label: "店舗", value: "BISTRO CAVACAVA" }, { label: "", value: "x" }, ...Array.from({ length: 20 }, (_, i) => ({ label: `L${i}`, value: "v" }))],
+      highlights: Array.from({ length: 9 }, (_, i) => `要点${i}`.padEnd(400, "あ")),
+      recommendations: ["口コミへ返信する"],
+    },
+    pdf_base64: pdfB64,
+    filename: "BISTRO CAVACAVA レポート 2026-09.pdf",
+  }
+  const v = validateSendInput(good)
+  assert.equal(v.card.fields.length, EXTERNAL_POST_LIMITS.fieldsMax - 1)
+  assert.equal(v.card.highlights.length, EXTERNAL_POST_LIMITS.listItemsMax)
+  assert.ok([...v.card.highlights[0]].length <= EXTERNAL_POST_LIMITS.listItemMax)
+  assert.equal(v.fileName, "BISTRO CAVACAVA _ 2026-09.pdf")
+  assert.equal(v.pdf.byteLength, pdfBytes.byteLength)
+  assert.throws(() => validateSendInput({ ...good, recipient_user_id: "x" }), /送信先/)
+  assert.throws(() => validateSendInput({ ...good, dedupe_key: "a b" }), /dedupe_key/)
+  assert.throws(() => validateSendInput({ ...good, sender_label: " " }), /送信者/)
+  assert.throws(() => validateSendInput({ ...good, pdf_base64: btoa("hello world, not a pdf at all".repeat(4)) }), /PDF/)
+  assert.throws(() => validateSendInput({ ...good, pdf_base64: "@@@" }), /PDF/)
+  assert.throws(() => decodePdfBase64(pdfB64, 10), /大きすぎ/)
+})
+
+test("pdf file names keep only characters M-talk accepts for uploads", () => {
+  assert.equal(sanitizePdfFileName("../../etc/passwd"), "etc_passwd.pdf")
+  assert.equal(sanitizePdfFileName("日本語だけ"), "ai-report.pdf")
+  assert.match(sanitizePdfFileName("a".repeat(500)), /^a{116}\.pdf$/)
+})
+
+test("card shows sender, fields, key points and recommendations without actions", () => {
+  const { text, cards } = buildAiReportCard({
+    title: "BISTRO CAVACAVA 分析レポート",
+    senderLabel: "山田 太郎",
+    fileName: "report.pdf",
+    card: { subtitle: "期間", fields: [{ label: "店舗", value: "BISTRO CAVACAVA" }], highlights: ["PVが増加"], recommendations: ["返信率を上げる"], note: "" },
+  })
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].header.eyebrow, "AI分析レポート")
+  assert.deepEqual(cards[0].actions, [])
+  const first = cards[0].sections[0] as { type: string; rows: { label: string; value: string }[] }
+  assert.deepEqual(first.rows[0], { label: "送信者", value: "山田 太郎", weight: "bold" })
+  assert.match(JSON.stringify(cards), /・PVが増加/)
+  assert.match(JSON.stringify(cards), /1\. 返信率を上げる/)
+  assert.match(JSON.stringify(cards), /report\.pdf/)
+  assert.match(text, /^\[AI分析レポート\] BISTRO CAVACAVA/)
+  assert.match(text, /送信者: 山田 太郎/)
+  assert.ok(text.length <= 2000)
+})
+
+test("recipients are active non-bot users with store names", () => {
+  const rows = activeRecipients(
+    [
+      { id: "u1", username: "佐藤", is_bot: false },
+      { id: "u2", username: "鈴木", is_bot: false },
+      { id: "u3", username: "停止中", is_bot: false },
+      { id: "u4", username: "削除", is_bot: false },
+      { id: AI_ANALYSIS_BOT_ID, username: "AI分析", is_bot: true },
+      { id: "u5", username: "制限中", is_bot: false },
+      { id: "u6", username: "アクセス行なし", is_bot: false },
+    ],
+    [
+      { user_id: "u1", access_enabled: true, deleted_at: null, restricted_until: null },
+      { user_id: "u2", access_enabled: true, deleted_at: null, restricted_until: new Date(NOW - 1000).toISOString() },
+      { user_id: "u3", access_enabled: false, deleted_at: null, restricted_until: null },
+      { user_id: "u4", access_enabled: true, deleted_at: new Date(NOW).toISOString(), restricted_until: null },
+      { user_id: AI_ANALYSIS_BOT_ID, access_enabled: true, deleted_at: null, restricted_until: null },
+      { user_id: "u5", access_enabled: true, deleted_at: null, restricted_until: new Date(NOW + 60_000).toISOString() },
+    ],
+    [{ user_id: "u1", store_key: "cavacava" }, { user_id: "u1", store_key: "unknown_key" }],
+    [{ store_key: "cavacava", display_name: "BISTRO CAVACAVA" }],
+    NOW,
+  )
+  assert.deepEqual(rows.map((r) => r.id).sort(), ["u1", "u2"])
+  assert.deepEqual(rows.find((r) => r.id === "u1")?.stores, ["BISTRO CAVACAVA", "unknown_key"])
+})
+
+test("migration adds a store-less AI bot and a service_role-only direct RPC", async () => {
+  const sql = await Deno.readTextFile(new URL("../supabase/migrations/20261001000000_chat_ai_analysis_bot.sql", import.meta.url))
+  assert.match(sql, /00000000-0000-4000-8000-00000000b073/)
+  assert.match(sql, /ai-analysis-bot@marugo\.invalid/)
+  assert.match(sql, /'infinity'/)
+  assert.match(sql, /values \('00000000-0000-4000-8000-00000000b073', 'AI分析', true\)/)
+  assert.match(sql, /create or replace function public\.chat_ensure_bot_direct\(p_bot uuid, p_user uuid\)/)
+  assert.match(sql, /security definer\s+set search_path = pg_catalog, public/)
+  assert.match(sql, /chat_has_active_access\(p_user\)/)
+  assert.match(sql, /bot_deleted_at is null/)
+  assert.match(sql, /hidden_at = null/)
+  assert.match(sql, /trashed_at = null/)
+  assert.match(sql, /revoke all on function public\.chat_ensure_bot_direct\(uuid, uuid\)\s+from public, anon, authenticated/)
+  assert.match(sql, /grant execute on function public\.chat_ensure_bot_direct\(uuid, uuid\) to service_role;/)
+  assert.doesNotMatch(sql, /to authenticated/)
+})
+
+test("edge function is JWT-less but gated by the external token, without CORS", async () => {
+  const src = await Deno.readTextFile(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  const config = await Deno.readTextFile(new URL("../supabase/config.toml", import.meta.url))
+  assert.match(config, /\[functions\.mtalk-external-post\]\s+verify_jwt = false/)
+  assert.match(src, /verifyExternalRequest\(/)
+  assert.match(src, /GOURMET_MTALK_TOKEN/)
+  assert.ok(src.indexOf("verifyExternalRequest(") < src.indexOf("createClient(Deno.env"), "auth must run before any DB client is created")
+  assert.doesNotMatch(src, /Access-Control-Allow-Origin/)
+  assert.match(src, /is_silent: true/)
+  assert.match(src, /groups\/\$\{groupId\}\/ai-reports\//)
+})
