@@ -16,7 +16,7 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 | `X-Mtalk-Timestamp` | UNIX 秒。前後 300 秒以内 |
 | `X-Mtalk-Signature` | `v1=` + HMAC-SHA256(key=token, `v1:<ts>:<METHOD>:<path>:<body>`) の hex |
 
-`path` は `/recipients`・`/send`・`/alert`。署名のテストベクターは `tests/mtalk_external_post.test.ts` と gourmet の `server/tests/mtalk-share.test.js` で同じ値を使います。
+`path` は `/recipients`・`/store-bots`・`/send`・`/alert`。署名のテストベクターは `tests/mtalk_external_post.test.ts` と gourmet の `server/tests/mtalk-share.test.js` で同じ値を使います。
 
 ## ルート
 
@@ -39,13 +39,15 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 応答: `{ ok, group_id, card_message_id, file_message_id, deduplicated }`。
 同じ `dedupe_key` の再送は `chat_alert_dispatches` で重複を防ぎます（カードと PDF を別々に記録）。
 
-- `POST /alert` — gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）。カードのみ（PDFなし）。gourmet の agent-api が取り込みの直後に店舗×送信先ごとに1回呼びます。
+- `GET /store-bots` — 削除されていない店舗Bot（`is_bot` かつ `store_key` あり）と、投稿できるルーム（Bot が参加しているグループ。1対1・ゴミ箱・管理者通知は除く）。`{ bots: [{ id, username, store_key, rooms: [{ id, name, is_store_room, members }] }] }`（名前順）。gourmet の口コミ通知の設定画面と自動判定が使います。
+- `POST /alert` — gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）。カードのみ（PDFなし）。gourmet の agent-api が取り込みの直後に店舗ごとに1回呼び、**店舗Bot として** Bot が参加しているグループのルームへ投稿します（ルームの全員に届く。Web Push は通常の投稿と同じ）。
 
 ```json
 {
-  "recipient_user_id": "uuid",
+  "bot_id": "<店舗Bot の chat_users.id>",
+  "room_ids": [5, 30],
   "dedupe_key": "gourmet-alert:<batch id>",
-  "store_name": "BISTRO CAVA CAVA",
+  "store_name": "BISTRO CAVACAVA",
   "score_changes": [{ "site": "食べログ", "from": "3.26", "to": "3.28", "diff": "+0.02", "date": "2026-10-01", "review_count_from": 49, "review_count_to": 50, "url": "https://tabelog.com/…/13245351/" }],
   "reviews": [{ "site": "食べログ", "rating": "3.6", "posted_date": "2026-09-30", "visit": "2026-09", "title": "…", "text": "本文（1000文字まで）", "text_note": null, "url": "https://tabelog.com/…/13245351/dtlrvwlst/B…/", "url_label": "口コミを見る" }],
   "more_count": 0,
@@ -53,8 +55,10 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 }
 ```
 
+`room_ids` を省くと Bot が参加している全グループ（1対1・ゴミ箱・管理者通知を除く）。指定しても参加していないルーム・1対1には送りません。投稿者名は既存の店舗Botの投稿と同じ「<店舗名> bot」（`loadMtalkStoreBot`）。店舗Bot以外（AI分析・予約通知・利用者）の id は 404。
 カードはこの関数が組み立てます（総合点の変化 → 口コミごと（10件まで）→「ほか N件」とアプリへのリンク）。リンクは `https` の `tabelog.com`・`owner.tabelog.com`・`restaurant.ikyu.com`・`marugo-s.github.io` だけで、それ以外はリンクなしで送ります。
-応答: `{ ok, group_id, message_id, deduplicated }`。同じ送信先に同じ `dedupe_key` は `chat_alert_dispatches`（`kind = gourmet_review_alert`）で1回だけ。送信先が見つからない・利用停止は 404（gourmet はやり直しません）。新しい migration・秘密情報はありません。
+応答: `{ ok, bot_id, bot_name, rooms: [{ group_id, name, message_id, deduplicated }], deduplicated }`。同じルームに同じ `dedupe_key` は `chat_alert_dispatches`（`kind = gourmet_review_alert`）で1回だけ。1つでもルームへの投稿に失敗すると 502（gourmet は同じ `dedupe_key` でやり直し、投稿済みのルームは飛ばされる）。Bot が見つからない・投稿できるルームが無いは 404（gourmet はやり直しません）。
+旧形式 `{ recipient_user_id, ... }`（「AI分析」Botとの1対1、応答 `{ ok, group_id, message_id, deduplicated }`）も互換のため受け付けます。新しい migration・秘密情報はありません。
 
 ## DB（migration `20261001000000_chat_ai_analysis_bot.sql`）
 

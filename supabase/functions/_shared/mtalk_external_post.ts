@@ -233,9 +233,11 @@ export function buildAiReportCard(input: Pick<SendInput, 'title' | 'senderLabel'
   }
 }
 
-// ---------- 口コミ通知（gourmet agent-api → POST /alert） ----------
-// gourmet が取り込み時に検出した「新着口コミ」「食べログ総合点の変化」を、店舗ごとに1通（カードを重ねる）で
-// 「AI分析」Botとの1対1へ届ける。カードはここで組み立てる（gourmet から来るのは項目だけ）。リンクは許可したホストだけ。
+// ---------- 口コミ通知（gourmet agent-api → POST /alert、GET /store-bots） ----------
+// gourmet が取り込み時に検出した「新着口コミ」「食べログ総合点の変化」を、店舗ごとに1通（カードを重ねる）で届ける。
+// 送り先は その店舗の店舗Bot（bot_id）として Bot が参加しているグループのルーム（1対1・ゴミ箱・管理者通知は除く。
+// room_ids で絞れる）。旧形式の recipient_user_id（「AI分析」Botとの1対1）も互換のため受け付ける。
+// カードはここで組み立てる（gourmet から来るのは項目だけ）。リンクは許可したホストだけ。
 export const REVIEW_ALERT_KIND = 'gourmet_review_alert'
 export const REVIEW_ALERT_LIMITS = {
   storeNameMax: 100,
@@ -247,6 +249,7 @@ export const REVIEW_ALERT_LIMITS = {
   noteMax: 100,
   urlMax: 500,
   moreMax: 100_000,
+  roomsMax: 20,
 } as const
 const ALERT_URL_HOSTS = new Set(['tabelog.com', 'owner.tabelog.com', 'restaurant.ikyu.com', 'marugo-s.github.io'])
 const SCORE = /^[0-5](\.[0-9]{1,2})?$/
@@ -273,13 +276,28 @@ const count = (value: unknown) => (Number.isSafeInteger(value) && Number(value) 
 
 export type AlertScoreChange = { site: string; from: string; to: string; diff: string | null; date: string | null; reviewCountFrom: number | null; reviewCountTo: number | null; url: string | null }
 export type AlertReview = { site: string; rating: string | null; postedDate: string | null; visit: string | null; title: string; text: string; textNote: string; url: string | null; urlLabel: string }
-export type AlertInput = { recipientUserId: string; dedupeKey: string; storeName: string; scoreChanges: AlertScoreChange[]; reviews: AlertReview[]; moreCount: number; appUrl: string | null }
+export type AlertTarget = { kind: 'bot'; botId: string; roomIds: number[] | null } | { kind: 'user'; recipientUserId: string }
+export type AlertInput = { target: AlertTarget; dedupeKey: string; storeName: string; scoreChanges: AlertScoreChange[]; reviews: AlertReview[]; moreCount: number; appUrl: string | null }
 
 export function validateAlertInput(raw: unknown): AlertInput {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ExternalPostError('送信内容が不正です')
   const v = raw as Record<string, unknown>
   const L = REVIEW_ALERT_LIMITS
-  if (!isUuid(v.recipient_user_id)) throw new ExternalPostError('送信先が不正です')
+  let target: AlertTarget
+  if (v.bot_id != null) {
+    if (!isUuid(v.bot_id) || v.recipient_user_id != null) throw new ExternalPostError('店舗Botが不正です')
+    let roomIds: number[] | null = null
+    if (v.room_ids != null) {
+      if (!Array.isArray(v.room_ids) || !v.room_ids.length || v.room_ids.length > L.roomsMax || v.room_ids.some((id) => !Number.isSafeInteger(id) || Number(id) <= 0)) {
+        throw new ExternalPostError(`room_ids は1〜${L.roomsMax}件のルームIDで指定してください`)
+      }
+      roomIds = [...new Set(v.room_ids as number[])]
+    }
+    target = { kind: 'bot', botId: String(v.bot_id).toLowerCase(), roomIds }
+  } else {
+    if (!isUuid(v.recipient_user_id)) throw new ExternalPostError('送信先が不正です')
+    target = { kind: 'user', recipientUserId: String(v.recipient_user_id).toLowerCase() }
+  }
   const dedupeKey = String(v.dedupe_key ?? '')
   if (!DEDUPE.test(dedupeKey)) throw new ExternalPostError('dedupe_key が不正です')
   const storeName = cleanText(v.store_name, L.storeNameMax)
@@ -311,7 +329,39 @@ export function validateAlertInput(raw: unknown): AlertInput {
   const moreCount = v.more_count == null ? 0 : count(v.more_count)
   if (moreCount == null || moreCount > L.moreMax) throw new ExternalPostError('more_count が不正です')
   if (!scoreChanges.length && !reviews.length) throw new ExternalPostError('通知する内容がありません')
-  return { recipientUserId: String(v.recipient_user_id).toLowerCase(), dedupeKey, storeName, scoreChanges, reviews, moreCount, appUrl: alertUrl(v.app_url) }
+  return { target, dedupeKey, storeName, scoreChanges, reviews, moreCount, appUrl: alertUrl(v.app_url) }
+}
+
+export type BotRoomRow = { id: number; group_name: string | null; is_direct: boolean | null; trashed_at: string | null; is_admin_notice_room?: boolean | null; is_store_room?: boolean | null }
+
+/** 店舗Botが投稿してよいルーム: 参加しているグループ（1対1・ゴミ箱・管理者通知は除く）。requested があればその中だけ（ID順）。 */
+export function alertRooms(rooms: BotRoomRow[], requested: number[] | null = null): { id: number; name: string; isStoreRoom: boolean }[] {
+  const wanted = requested ? new Set(requested) : null
+  return rooms
+    .filter((r) => Number.isSafeInteger(Number(r.id)) && r.is_direct !== true && !r.trashed_at && r.is_admin_notice_room !== true)
+    .filter((r) => !wanted || wanted.has(Number(r.id)))
+    .map((r) => ({ id: Number(r.id), name: cleanText(r.group_name, 100) || `ルーム${r.id}`, isStoreRoom: r.is_store_room === true }))
+    .sort((a, b) => a.id - b.id)
+}
+
+/** GET /store-bots: 削除されていない店舗Bot（store_key あり）と、投稿できるルーム（名前・人数）。名前順。 */
+export function storeBotList(
+  bots: { id: string; username: string | null; store_key: string | null; is_bot: boolean | null; bot_deleted_at: string | null }[],
+  memberships: { user_id: string; group_id: number }[],
+  groups: BotRoomRow[],
+  memberCounts: Map<number, number>,
+): { id: string; username: string; store_key: string; rooms: { id: number; name: string; is_store_room: boolean; members: number | null }[] }[] {
+  const byId = new Map(groups.map((g) => [Number(g.id), g]))
+  return bots
+    .filter((b) => b.is_bot === true && !b.bot_deleted_at && String(b.store_key ?? '').trim() && String(b.username ?? '').trim())
+    .map((b) => ({
+      id: b.id,
+      username: String(b.username).trim(),
+      store_key: String(b.store_key).trim(),
+      rooms: alertRooms(memberships.filter((m) => m.user_id === b.id).map((m) => byId.get(Number(m.group_id))).filter((g): g is BotRoomRow => !!g))
+        .map((r) => ({ id: r.id, name: r.name, is_store_room: r.isStoreRoom, members: memberCounts.get(r.id) ?? null })),
+    }))
+    .sort((a, b) => a.username.localeCompare(b.username, 'ja'))
 }
 
 type AlertCard = {
@@ -321,7 +371,7 @@ type AlertCard = {
 }
 
 /** 口コミ通知のカード（総合点の変化 → 口コミ（新しい順）→「ほか N件」）とプレビュー用の文。 */
-export function buildReviewAlertCards(input: Omit<AlertInput, 'recipientUserId' | 'dedupeKey'>): { text: string; cards: AlertCard[] } {
+export function buildReviewAlertCards(input: Omit<AlertInput, 'target' | 'dedupeKey'>): { text: string; cards: AlertCard[] } {
   const cards: AlertCard[] = []
   for (const s of input.scoreChanges) {
     const change = `${s.from} → ${s.to}${s.diff ? `（${s.diff}）` : ''}`
