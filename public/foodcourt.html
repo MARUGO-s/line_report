@@ -726,8 +726,8 @@
           <div class="qa-kpi-grid">
             <label>想定売価（円）<input data-kpi-key="unitPriceYen" type="number" min="1" max="100000" step="1" placeholder="例: 420"></label>
             <label>原価・1個（円）<input data-kpi-key="unitCostYen" type="number" min="0" max="100000" step="1" placeholder="例: 126"></label>
-            <label>1回に焼ける個数<input data-kpi-key="bakeBatchUnits" type="number" min="1" max="2000" step="1" placeholder="例: 20"></label>
-            <label>1日の焼成回数<input data-kpi-key="bakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3"></label>
+            <label>1回の仕込みで作れる数量<input data-kpi-key="bakeBatchUnits" type="number" min="1" max="2000" step="1" placeholder="例: 20"></label>
+            <label>1日の仕込み回数<input data-kpi-key="bakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3"></label>
             <label>仕込み人員（人）<input data-kpi-key="prepStaffCount" type="number" min="0.5" max="50" step="0.5" placeholder="例: 1"></label>
             <label>廃棄許容率（％）<input data-kpi-key="wasteRateTolerancePct" type="number" min="0" max="100" step="0.1" placeholder="例: 8"></label>
             <label>店舗KGIの純増（円）<input data-kpi-key="kgiTargetYen" type="number" min="1" max="100000000" step="1" placeholder="例: 10000"></label>
@@ -2901,7 +2901,7 @@
     if(dom.qBtn.disabled) return;
     qaHistory=[]; qaContextHistory=[]; qaPlanState=qaPlanner.initialState();
     document.querySelectorAll('#qaKpiInputs [data-kpi-key]').forEach(input=>{input.value='';});
-    updateQaPeriodLabel(); renderQaThread(false); dom.qInput.focus();
+    updateQaPeriodLabel(); renderQaThread(false); dom.qInput.focus({preventScroll:true});
   }
   $('qaPeriodChange').addEventListener('click',()=>{
     if(dom.qBtn.disabled) return;
@@ -2909,13 +2909,13 @@
     if(qaPlanState.pending) qaPlanState.pending.kind='period';
     updateQaPeriodLabel();
     qaHistory.push({role:'assistant',clarification:true,content:'期間を変更します。年月・日付範囲を含めて質問してください。確認中の質問があれば期間だけでも続けられます。'});
-    renderQaThread(false); dom.qInput.focus();
+    renderQaThread(false); dom.qInput.focus({preventScroll:true});
   });
 
   async function askQuestion(q){
     if(dom.qBtn.disabled) return;
     const raw = String(q!=null?q:(dom.qInput.value||'')).trim();
-    if (!raw){ dom.qInput.focus(); return; }
+    if (!raw){ dom.qInput.focus({preventScroll:true}); return; }
     if(raw.length>500){ alert('質問は500文字以内で入力してください。'); return; }
     const fields=[...document.querySelectorAll('#qaKpiInputs [data-kpi-key]')];
     const invalid=!/^(キャンセル|取り消し|やめる)$/.test(raw) && fields.find(input=>!input.checkValidity());
@@ -2946,7 +2946,7 @@
       setTimeout(()=>{ qaChoiceLock=false; }, 400);
       qaHistory.push({role:'assistant',content:plan.message,clarification:true,choices:plan.choices,actions:plan.actions});
       if(qaPlanState.pending?.kind==='kpi' || qaPlanState.pending?.kind==='assumptions') $('qaKpiInputs').open=true;
-      renderQaThread(false); dom.qInput.focus(); return;
+      renderQaThread(false); dom.qInput.focus({preventScroll:true}); return;
     }
     const question=plan.question;
     const activePeriod=plan.period;
@@ -2997,7 +2997,7 @@
 
   function renderSuggestions(){
     dom.qSuggest.innerHTML = SUGGESTED_Q.map(s=>'<button class="qchip">'+escapeHtml(s)+'</button>').join('');
-    dom.qSuggest.querySelectorAll('.qchip').forEach(b=>b.addEventListener('click', ()=>{ dom.qInput.value=b.textContent; dom.qInput.focus(); }));
+    dom.qSuggest.querySelectorAll('.qchip').forEach(b=>b.addEventListener('click', ()=>{ dom.qInput.value=b.textContent; dom.qInput.focus({preventScroll:true}); }));
   }
   function fmtWhen(r){
     const iso = r.created_at || '';

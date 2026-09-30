@@ -2414,16 +2414,16 @@
       <label class="kn-field kn-narrow">ワインセットの追加原価（円）
         <input id="opsKpiSetWineAddCost" type="number" min="0" max="100000" step="1" placeholder="例: 210">
       </label>
-      <label class="kn-field kn-narrow">1回に焼ける個数
+      <label class="kn-field kn-narrow">1回の仕込みで作れる数量
         <input id="opsKpiBakeBatchUnits" type="number" min="1" max="2000" step="1" placeholder="例: 20">
       </label>
-      <label class="kn-field kn-narrow">1日の焼成回数の上限
+      <label class="kn-field kn-narrow">1日の仕込み回数の上限
         <input id="opsKpiBakeBatchesPerDay" type="number" min="1" max="48" step="1" placeholder="例: 3">
       </label>
-      <label class="kn-field kn-narrow">仕込み・焼成に割ける人員（人）
+      <label class="kn-field kn-narrow">仕込み・提供に割ける人員（人）
         <input id="opsKpiPrepStaffCount" type="number" min="0.5" max="50" step="0.5" placeholder="例: 1">
       </label>
-      <label class="kn-field kn-narrow">1日の仕込み・焼成時間（時間）
+      <label class="kn-field kn-narrow">1日の仕込み・提供時間（時間）
         <input id="opsKpiPrepHoursPerDay" type="number" min="0.5" max="24" step="0.5" placeholder="例: 3">
       </label>
       <label class="kn-field kn-narrow">人件費（円／時）
@@ -9540,10 +9540,10 @@ const KPI_ASSUMPTION_FIELDS = Object.freeze({
   unitCostYen: { min: 0, max: 100000, integer: true, label: '原価（1個あたり）', inputId: 'opsKpiUnitCost' },
   setDrinkAddCostYen: { min: 0, max: 100000, integer: true, label: 'ドリンクセットの追加原価', inputId: 'opsKpiSetDrinkAddCost' },
   setWineAddCostYen: { min: 0, max: 100000, integer: true, label: 'ワインセットの追加原価', inputId: 'opsKpiSetWineAddCost' },
-  bakeBatchUnits: { min: 1, max: 2000, integer: true, label: '設備で1回に焼ける個数', inputId: 'opsKpiBakeBatchUnits' },
-  bakeBatchesPerDay: { min: 1, max: 48, integer: true, label: '1日の焼成回数の上限', inputId: 'opsKpiBakeBatchesPerDay' },
-  prepStaffCount: { min: 0.5, max: 50, integer: false, label: '仕込み・焼成に割ける人員', inputId: 'opsKpiPrepStaffCount' },
-  prepHoursPerDay: { min: 0.5, max: 24, integer: false, label: '1日の仕込み・焼成時間', inputId: 'opsKpiPrepHoursPerDay' },
+  bakeBatchUnits: { min: 1, max: 2000, integer: true, label: '1回の仕込みで作れる数量', inputId: 'opsKpiBakeBatchUnits' },
+  bakeBatchesPerDay: { min: 1, max: 48, integer: true, label: '1日の仕込み回数の上限', inputId: 'opsKpiBakeBatchesPerDay' },
+  prepStaffCount: { min: 0.5, max: 50, integer: false, label: '仕込み・提供に割ける人員', inputId: 'opsKpiPrepStaffCount' },
+  prepHoursPerDay: { min: 0.5, max: 24, integer: false, label: '1日の仕込み・提供時間', inputId: 'opsKpiPrepHoursPerDay' },
   staffHourlyCostYen: { min: 1, max: 100000, integer: true, label: '人件費（時給）', inputId: 'opsKpiStaffHourlyCost' },
   wasteRateTolerancePct: { min: 0, max: 100, integer: false, label: '廃棄の許容範囲（％）', inputId: 'opsKpiWasteTolerance' }
 });

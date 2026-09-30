@@ -241,12 +241,16 @@ test('journal similar-item quantity is capped at the store\'s baking capacity, n
   const result=await prepareFoodCourtKpiScenario({...input,salesDates:[],journalDetail},io)
   assert.ok(result)
   assert.match(result.userAppendix,/観測500個/)
-  assert.match(result.userAppendix,/焼成上限×廃棄控除を上回ったため、販売数見込みはその上限に丸めた/)
+  assert.match(result.userAppendix,/仕込み上限×廃棄控除を上回ったシナリオがある/)
   const tableRows=(result.userAppendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
   const unitsRow=tableRows.find(line=>line.includes('予想販売数/日'))!
   const unitsCells=unitsRow.split('|').map(c=>c.trim()).filter(Boolean).slice(1)
   for (const cell of unitsCells) {
-    const value=Number(cell.replace(/[^0-9.]/g,''))
+    // Each cell shows the capped figure first, e.g. "54個（観測500個／仕込み上限54個）" — only
+    // the leading capped number must respect capacity; the parenthetical observed/cap figures
+    // are disclosure text, not a second capped value.
+    assert.match(cell,/観測[\d.]+個／仕込み上限\d+個/,`予想販売数/日 (${cell}) must disclose the observed vs. capacity figures inline`)
+    const value=Number(cell.split('（')[0].replace(/[^0-9.]/g,''))
     assert.ok(value<=60,`予想販売数/日 (${cell}) must not exceed the 60 units/day baking capacity`)
   }
   const upliftScenarios=result.reference.initiative_uplift!.scenarios
@@ -257,6 +261,142 @@ test('journal similar-item quantity is capped at the store\'s baking capacity, n
   for (const target of hourlyTargets) {
     assert.ok((target.daily_target_units??0)<=60,'hourly allocation daily target must not exceed capacity')
   }
+})
+
+test('the observed-vs-capacity table format is product-agnostic: no journal outlook means a plain cell, not an empty parenthetical',async()=>{
+  const io=loaders()
+  const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420,unitCostYen:126}},io)
+  assert.ok(result)
+  const tableRows=(result.userAppendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
+  const unitsRow=tableRows.find(line=>line.includes('予想販売数/日'))!
+  const unitsCells=unitsRow.split('|').map(c=>c.trim()).filter(Boolean).slice(1)
+  assert.ok(unitsCells.length>0)
+  for (const cell of unitsCells) {
+    assert.doesNotMatch(cell,/観測|仕込み上限/,`予想販売数/日 (${cell}) must not disclose observed/capacity when there is no capacity-exceeding outlook`)
+  }
+  // The generic (product-agnostic) instruction lives in the shared policy text, not in
+  // per-product wording, so it automatically applies to any future product's KPI table.
+  assert.match(FOODCOURT_KPI_POLICY,/対象商品を問わず/)
+  assert.doesNotMatch(FOODCOURT_KPI_POLICY,/クロワッサン/)
+})
+
+test('set-inclusive (drink/wine upsell) sales are shown alongside single-item sales, with the mix assumptions disclosed',async()=>{
+  const io=loaders()
+  const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420,unitCostYen:126,kgiTargetYen:10000,kgiHorizon:'day',kgiKind:'uplift'}},io)
+  assert.ok(result)
+  const appendix=result.userAppendix
+  // The reasoning annotation must explain the basis before the table, not inside a cell.
+  assert.match(appendix,/【セット込み予想売上の考え方・注釈】/)
+  assert.match(appendix,/実測のドリンク・ワイン同時購入率ではない/)
+  assert.match(appendix,/標準: 単品比率70%／ドリンクセット比率18%（単品\+¥350＝セット価格¥770）／ワインセット比率12%（単品\+¥700＝セット価格¥1,120）→ 加重平均売価¥567/)
+  // Both the single-item-only KGI gap and the set-inclusive KGI gap are shown, distinctly labelled.
+  assert.match(appendix,/純増ギャップ（標準シナリオ・単品のみ）/)
+  assert.match(appendix,/純増ギャップ（標準シナリオ・セット込み）/)
+  const tableRows=(appendix.split('シナリオ別KGI・KPI・採算の一覧')[1]||'').split('\n').filter(line=>line.startsWith('|'))
+  const cells=(label:string)=>{
+    const row=tableRows.find(line=>line.includes(label))
+    assert.ok(row,`missing row: ${label}`)
+    return row!.split('|').map(c=>c.trim()).filter(Boolean).slice(1).map(c=>Number(c.replace(/[^0-9.-]/g,'')))
+  }
+  const single=cells('予想売上/日（単品のみ）')
+  const withSets=cells('予想売上/日（セット込み）')
+  const upsell=cells('セットによる上乗せ額/日')
+  for (let i=0;i<3;i++) {
+    assert.ok(withSets[i]>single[i],'set-inclusive sales must exceed single-item sales once sets carry a price premium')
+    assert.equal(upsell[i],withSets[i]-single[i])
+  }
+  // The single-item figure stays exactly what it was before this feature existed (no regression).
+  // units: 8/12/18 per day; blended (set-inclusive) price: ¥498/¥567/¥660.
+  assert.deepEqual(single,[3360,5040,7560])
+  assert.deepEqual(withSets,[3984,6804,11880])
+  // Set-inclusive uplift/contribution rows exist alongside the single-item ones, not replacing them.
+  const upliftSingle=cells('上積み/日（単品のみ）')
+  const upliftSets=cells('上積み/日（セット込み）')
+  for (let i=0;i<3;i++) assert.ok(upliftSets[i]>upliftSingle[i])
+  // Labels never leave the caveat unclear: the AI-facing block also distinguishes the two bases.
+  assert.match(result.block,/単品価格のみ（ドリンク・ワインのセット上乗せなし）/)
+  assert.match(result.block,/セット込み（ドリンクセット・ワインセットの上乗せを加重平均/)
+  assert.ok(result.reference.initiative_uplift)
+  assert.ok((result.reference as any).initiative_uplift_with_sets)
+  assert.notEqual(
+    (result.reference as any).initiative_uplift_with_sets.scenarios[1].initiative_daily_sales_yen,
+    result.reference.initiative_uplift!.scenarios[1].initiative_daily_sales_yen,
+  )
+})
+
+test('new-item plausibility check compares the scenario estimate against the store\'s own best-selling item',async()=>{
+  const io=loaders()
+  // One product ("カレー2種") sold 20 units on the single verified day: the outlook anchor and the
+  // "top existing item" reference point are the same number on purpose, so the standard scenario's
+  // clamped estimate (20, unrounded) lands exactly at parity with the existing bestseller (ratio 1.0)
+  // and must trip the over-estimate flag; aggressive (30) trips it further, conservative (13.33) does not.
+  const journalDetail=await buildFoodCourtJournalDetail(
+    [{from:'2025-12-09',to:'2025-12-09'}],
+    'クロワッサン',
+    async()=>[{business_date:'2025-12-09',gross_sales:2000,receipts:[{total:2000,time:'11:30',items:[{code:'9001',name:'カレー2種',qty:20,unit:100,amount:2000}]}]}],
+  )
+  const result=await prepareFoodCourtKpiScenario({...input,salesDates:[],journalDetail},io)
+  assert.ok(result)
+  const check=(result.reference as any).new_item_plausibility
+  assert.ok(check,'plausibility check must be present when journalDetail has sellable products')
+  assert.equal(check.top_existing_item_name,'カレー2種')
+  assert.equal(check.top_existing_item_daily_units,20)
+  assert.equal(check.overestimate_flagged,true)
+  const standard=check.scenarios.find((s:any)=>s.label==='標準')
+  assert.equal(standard.daily_units,20)
+  assert.equal(standard.ratio_to_top_existing_item,1)
+  const conservative=check.scenarios.find((s:any)=>s.label==='保守')
+  assert.ok(conservative.ratio_to_top_existing_item<1)
+  // The plausibility block is exposed separately so foodcourt_compare.ts can hand it to the critic
+  // AI without also handing over the full deterministic KPI table.
+  assert.match(result.plausibilityBlock!,/前提の妥当性チェック/)
+  assert.match(result.plausibilityBlock!,/カレー2種/)
+  assert.match(result.plausibilityBlock!,/過大評価の可能性がある/)
+  assert.doesNotMatch(result.plausibilityBlock!,/コード側で確定計算済み/)
+  // ...and it reaches both the AI-facing block and the user-facing appendix.
+  assert.match(result.block,/前提の妥当性チェック/)
+  assert.match(result.userAppendix,/前提の妥当性チェック（当店の実測比較・業界目安ではない）/)
+  assert.match(result.userAppendix,/過大評価の可能性がある/)
+})
+
+test('new-item plausibility check stays silent without journal product detail',async()=>{
+  const result=await prepareFoodCourtKpiScenario({...input,assumptions:{unitPriceYen:420}},loaders())
+  assert.ok(result)
+  assert.equal(result.reference.new_item_plausibility,null)
+  assert.equal(result.plausibilityBlock,'')
+  assert.doesNotMatch(result.userAppendix,/前提の妥当性チェック/)
+})
+
+test('the critic AI receives the plausibility comparison but not the full KPI table',async()=>{
+  const source=readFileSync(new URL('../supabase/functions/_shared/foodcourt_compare.ts',import.meta.url),'utf8')
+  const executable=stripTypeScriptTypes(source.replace(/^import[\s\S]*?from ['"][^'"]+['"]\s*$/gm,'').replace(/^export /gm,''))
+  const requests: any[]=[]
+  const ctx=vm.createContext({...reliability,...loop,...groq,FOODCOURT_KPI_POLICY,FOODCOURT_SALES_POLICY,BUSINESS_GOAL_METRICS_POLICY,foodCourtAnalysisMethodPrompt,console,URL,URLSearchParams,setTimeout,clearTimeout,
+    Deno:{env:{get:()=>''}},classifyJournalChatIntent:()=>'data',
+    captureChat:async(messages:any[],_key:string,_model:string,tokens:number)=>{requests.push({messages,tokens});return {content:'synthetic answer',usage:null}},
+    captureLoop:async(args:any)=>{const result=await args.initialGenerate();return {answer:result.content,usages:[],loopScore:null,loopCount:1}},
+  })
+  vm.runInContext(executable,ctx)
+  vm.runInContext(`foodCourtAiChat=captureChat;runFoodCourtLoopEngineering=captureLoop;buildForecastFactorsContext=async()=>'';loadFoodCourtLearningMemory=async()=>'';fetchFoodCourtXTrendBrief=async()=>null;recordFoodCourtAiUsage=async()=>{};`,ctx)
+  const journalDetail=await buildFoodCourtJournalDetail(
+    [{from:'2025-12-09',to:'2025-12-09'}],'クロワッサン',
+    async()=>[{business_date:'2025-12-09',gross_sales:2000,receipts:[{total:2000,time:'11:30',items:[{code:'9001',name:'カレー2種',qty:20,unit:100,amount:2000}]}]}],
+  )
+  const kpi=await prepareFoodCourtKpiScenario({...input,journalDetail},loaders())
+  assert.match(kpi!.plausibilityBlock!,/前提の妥当性チェック/)
+  await ctx.answerFoodCourtQuestion([],'MARUGO S',input.question,'synthetic',[],[],undefined,'fixture_store',[],[],null,[],null,kpi)
+  assert.equal(requests.length,5)
+  // The critic is request index 3 (specialists 0-2 run in parallel first, critic runs after them,
+  // the integrator runs last): it must see the short plausibility comparison so it can flag an
+  // over/under-estimated scenario, but never the full deterministic KPI table (that stays the
+  // integrator/final answer's job).
+  const criticRequest=JSON.stringify(requests[3])
+  assert.match(criticRequest,/前提の妥当性チェック/)
+  assert.match(criticRequest,/カレー2種/)
+  assert.doesNotMatch(criticRequest,/コード側で確定計算済み/)
+  const final=JSON.stringify(requests.at(-1))
+  assert.match(final,/前提の妥当性チェック/)
+  assert.match(final,/コード側で確定計算済み/)
 })
 
 test('input context is numeric allowlist only; zero cost is preserved and no defaults are invented',()=>{

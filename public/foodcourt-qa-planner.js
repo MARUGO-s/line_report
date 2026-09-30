@@ -309,6 +309,13 @@
       state.allowEstimate=false;
     }
     const skipMethods = Boolean(options.hasPriorAnswer && state.methods?.length && !isRestartQuestion(raw) && !isRestartQuestion(question));
+    if(skipMethods && !wantsKpiTargets(question, options.historyText)) {
+      // KPI/採算試算は「この質問だけの例外」。話題が変わった重ね聞きへ、前回選んだ
+      // 「目標・損益分岐・撤退」「粗利・採算」を無条件で引き継ぐと、無関係な新しい質問にも
+      // 前の新商品トライアルのKPI表がそのまま付いてくる。今回の質問が改めてKPIを求めて
+      // いない限り、重い数値試算だけは引き継がない。他の軽い分析角度は引き継いでよい。
+      state.methods = state.methods.filter(id => id!=='kpi' && id!=='margin');
+    }
     if(!skipMethods && !state.methods) {
       state.pending={kind:'methods',question,recommended:recommendAnalysisMethods(question, options.historyText),selected:[],showAll:false};
       return methodsClarify(state);
@@ -319,7 +326,7 @@
     }
     if(wantsKpiTargets(question, options.historyText) && !state.kpiConfirmed && !options.assumptionsReady && !state.methods) {
       state.pending={kind:'kpi',question};
-      return clarify('KPI試算の前提を確認します。売価・原価・焼成個数/回数・人員・廃棄許容率は分かりますか？ 下の「試算前提」に入力するか、保存済み値・仮置きで進められます。',['入力した前提で進む','保存済み前提・仮置きで進む','キャンセル']);
+      return clarify('KPI試算の前提を確認します。売価・原価・仕込み個数/回数・人員・廃棄許容率は分かりますか？ 下の「試算前提」に入力するか、保存済み値・仮置きで進められます。',['入力した前提で進む','保存済み前提・仮置きで進む','キャンセル']);
     }
     if(wantsKpiTargets(question, options.historyText)) {
       state.methods=normalizeMethodIds([...(state.methods||[]),'kpi']);
