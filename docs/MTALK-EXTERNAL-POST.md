@@ -16,7 +16,7 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 | `X-Mtalk-Timestamp` | UNIX 秒。前後 300 秒以内 |
 | `X-Mtalk-Signature` | `v1=` + HMAC-SHA256(key=token, `v1:<ts>:<METHOD>:<path>:<body>`) の hex |
 
-`path` は `/recipients` か `/send`。署名のテストベクターは `tests/mtalk_external_post.test.ts` と gourmet の `server/tests/mtalk-share.test.js` で同じ値を使います。
+`path` は `/recipients`・`/send`・`/alert`。署名のテストベクターは `tests/mtalk_external_post.test.ts` と gourmet の `server/tests/mtalk-share.test.js` で同じ値を使います。
 
 ## ルート
 
@@ -38,6 +38,23 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 
 応答: `{ ok, group_id, card_message_id, file_message_id, deduplicated }`。
 同じ `dedupe_key` の再送は `chat_alert_dispatches` で重複を防ぎます（カードと PDF を別々に記録）。
+
+- `POST /alert` — gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）。カードのみ（PDFなし）。gourmet の agent-api が取り込みの直後に店舗×送信先ごとに1回呼びます。
+
+```json
+{
+  "recipient_user_id": "uuid",
+  "dedupe_key": "gourmet-alert:<batch id>",
+  "store_name": "BISTRO CAVA CAVA",
+  "score_changes": [{ "site": "食べログ", "from": "3.26", "to": "3.28", "diff": "+0.02", "date": "2026-10-01", "review_count_from": 49, "review_count_to": 50, "url": "https://tabelog.com/…/13245351/" }],
+  "reviews": [{ "site": "食べログ", "rating": "3.6", "posted_date": "2026-09-30", "visit": "2026-09", "title": "…", "text": "本文（1000文字まで）", "text_note": null, "url": "https://tabelog.com/…/13245351/dtlrvwlst/B…/", "url_label": "口コミを見る" }],
+  "more_count": 0,
+  "app_url": "https://marugo-s.github.io/gourmet/"
+}
+```
+
+カードはこの関数が組み立てます（総合点の変化 → 口コミごと（10件まで）→「ほか N件」とアプリへのリンク）。リンクは `https` の `tabelog.com`・`owner.tabelog.com`・`restaurant.ikyu.com`・`marugo-s.github.io` だけで、それ以外はリンクなしで送ります。
+応答: `{ ok, group_id, message_id, deduplicated }`。同じ送信先に同じ `dedupe_key` は `chat_alert_dispatches`（`kind = gourmet_review_alert`）で1回だけ。送信先が見つからない・利用停止は 404（gourmet はやり直しません）。新しい migration・秘密情報はありません。
 
 ## DB（migration `20261001000000_chat_ai_analysis_bot.sql`）
 

@@ -4,6 +4,9 @@
  *
  *   GET  /recipients  有効な人間の利用者（id, username, stores）
  *   POST /send        { recipient_user_id, report_id, sender_label, title, card, pdf_base64, filename, dedupe_key }
+ *   POST /alert       { recipient_user_id, dedupe_key, store_name, score_changes[], reviews[], more_count, app_url }
+ *                     gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）。カードはこの関数が組み立て、リンクは許可したホストだけ。
+ *                     同じ送信先に同じ dedupe_key は1回だけ（chat_alert_dispatches、kind = gourmet_review_alert）。
  *   POST /chat-dispatch { message_id }  ← DBトリガー（pg_net）専用。「AI分析」Botとの1対1への質問に答える。
  *                     認証は chat-search と同じ chat_push_internal_config.dispatch_secret（Bearer、定数時間比較）。
  *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
@@ -42,6 +45,9 @@ import {
   ExternalPostError,
   validateSendInput,
   verifyExternalRequest,
+  buildReviewAlertCards,
+  REVIEW_ALERT_KIND,
+  validateAlertInput,
 } from "../_shared/mtalk_external_post.ts"
 
 // deno-lint-ignore no-explicit-any
@@ -202,6 +208,41 @@ async function send(supabase: DbClient, bodyText: string) {
   }
 }
 
+async function botDirectRoom(supabase: DbClient, recipientUserId: string): Promise<number> {
+  const { data: gid, error } = await supabase.rpc("chat_ensure_bot_direct", { p_bot: AI_ANALYSIS_BOT_ID, p_user: recipientUserId })
+  if (error) {
+    if (String(error.code ?? "") === "22023") throw new ExternalPostError("送信先の利用者が見つからないか、利用停止中です", 404)
+    throw new Error("direct room failed")
+  }
+  const groupId = Number(gid)
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) throw new Error("direct room failed")
+  return groupId
+}
+
+// gourmet の口コミ通知（カードのみ・PDFなし）
+async function alert(supabase: DbClient, bodyText: string) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(bodyText)
+  } catch {
+    throw new ExternalPostError("送信内容が不正です")
+  }
+  const input = validateAlertInput(raw)
+  const groupId = await botDirectRoom(supabase, input.recipientUserId)
+  const { text, cards } = buildReviewAlertCards(input)
+  const posted = await postChatCardIndependent(supabase, {
+    groupId,
+    text,
+    cards,
+    kind: REVIEW_ALERT_KIND,
+    dedupeKey: input.dedupeKey,
+    asUser: { id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME },
+  })
+  if (!posted.ok) throw new Error("card post failed")
+  const messageId = posted.skipped ? (await dispatchMessageId(supabase, REVIEW_ALERT_KIND, groupId, input.dedupeKey))?.message_id ?? null : posted.messageId ?? null
+  return { ok: true, group_id: groupId, message_id: messageId, deduplicated: Boolean(posted.skipped) }
+}
+
 // ---------- 「AI分析」Bot への質問 → gourmet の AI分析 → Bot の返信 ----------
 async function postBotText(supabase: DbClient, groupId: number, text: string): Promise<number | null> {
   const { data, error } = await supabase
@@ -359,6 +400,7 @@ Deno.serve(async (req) => {
     })
     if (path === "/recipients" && req.method === "GET") return respond({ recipients: await listRecipients(supabase) })
     if (path === "/send" && req.method === "POST") return respond(await send(supabase, bodyText))
+    if (path === "/alert" && req.method === "POST") return respond(await alert(supabase, bodyText))
     return respond({ error: "not found" }, 404)
   } catch (error) {
     if (error instanceof ExternalPostError) return respond({ error: error.message }, error.status)
