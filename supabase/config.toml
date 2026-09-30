@@ -110,3 +110,10 @@ verify_jwt = false
 # pg_net の共有シークレットを関数内で定数時間比較する。
 [functions.chat-search]
 verify_jwt = false
+
+# mtalk-external-post は外部アプリ（gourmet の AI分析）からの受け口。呼び出し元は Supabase の
+# 利用者JWTを持たないため verify_jwt = false。関数入口で GOURMET_MTALK_TOKEN（Bearer、定数時間比較）と
+# X-Mtalk-Timestamp / X-Mtalk-Signature（HMAC-SHA256、±5分）を必須にし、欠けたら 401。
+# 送信先は有効な人間の利用者のみ、送信元は店舗に属さない「AI分析」Bot（…b073）の1対1に限る。
+[functions.mtalk-external-post]
+verify_jwt = false
