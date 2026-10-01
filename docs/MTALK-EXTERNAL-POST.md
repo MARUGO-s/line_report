@@ -130,3 +130,24 @@ gourmet 側で決めること（README 参照）: 読むデータの持ち主は
 - gourmet の返事の `live_close`（「2」で答えた・新しい質問で置き換えた lookup_id）は、その見張りを `failed` にして閉じる。
 
 配備の順番: gourmet migration 019 → line_report（main へのマージで migration と `mtalk-external-post`）→ gourmet の `agent-api`・`ai-analyst`。新しい秘密情報はありません。
+
+## 「ログイン情報を更新」のボタンと gourmet からのお知らせ（`/chat-reply` の `links`・`POST /chat-notice`）
+
+gourmet の取得がログイン情報の問題（gourmet の `failure_kind = needs_relogin`）で失敗したとき、「最新を調べる」の回答に店舗×サイトごとの
+「ログイン情報を更新」のボタンを添えます。パスワードはトークに書かせず、トークを通しません（ボタンは gourmet のアプリの登録画面を開くだけ）。
+
+- `/chat-reply` は任意で `links: [{ kind: "relogin", source, store_name, url }]` を受け取る。答え（parts）を送ったあと、カード
+  （kind `ai_chat_login_links`、dedupe は `live:<lookup_id>`）を 1 回だけ投稿する。ボタンの文（`ログイン情報を更新（一休（BISTRO CAVACAVA））`）と
+  注意書き（「パスワードはこのトークに書かないでください」）はこの関数が決め、gourmet からは受け取らない。
+- URL は gourmet のアプリ（`https://marugo-s.github.io/gourmet/?view=accounts&source=<サイト>&store=<店舗コード>&retry=<依頼のUUID>`）だけを通す
+  （https・ホスト・パス・問い合わせのキーが完全に一致しないもの、`source` が `links` の値と違うもの、`kind` が `relogin` 以外のものは捨てる）。最大 6 個。
+  チャット画面では URL のボタンとして新しいタブで開く（既存のカードの表示のまま。画面の変更なし）。
+- カードを送れなくても答えは届いているので失敗にしない（ログだけ）。`links` の無い呼び出し（いまの gourmet）はこれまでどおり。
+- 「私は人間です」の確認（gourmet の `needs_human_check`）にはボタンを付けない（gourmet が本文で「次の回に自動でやり直します。続くときは Grok Bot のアプリで SiteBot に伝えてください」と案内する）。
+
+`POST /chat-notice`（署名つき）`{ notice_id, mtalk_user_id, mtalk_group_id, parts[1..3], links? }`: 「最新を調べる」とは別の gourmet からのお知らせ
+（例: ログイン情報を更新したあとの「【再ログイン後の取得結果】」）。送り先はその利用者と「AI分析」Bot の 1 対 1 だけ（違えば 404）。
+`chat_alert_dispatches`（kind `ai_chat_notice`、`notice:<notice_id>`）を先に確保してから送るので、同じ `notice_id` の再送は送らず成功扱い。
+1 通目を送る前に失敗したら確保を取り消す（gourmet が 3 回までやり直す）。`links` があれば同じ規則でカードを付ける。見張り（20 分・2 分）とは関係しない。
+
+配備の順番: gourmet migration 020 → line_report（main へのマージで `mtalk-external-post`）→ gourmet の `agent-api`・`review-api`・Pages。新しい秘密情報・migration はありません。

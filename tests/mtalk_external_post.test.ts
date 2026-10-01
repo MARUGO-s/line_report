@@ -41,6 +41,14 @@ import {
   buildAiChoiceCard,
   chatReplyDecision,
   validateChatReplyInput,
+  AI_CHAT_LOGIN_LINKS_KIND,
+  AI_CHAT_NOTICE_KIND,
+  AI_CHAT_NOTICE_PATH,
+  aiChatNoticeDedupeKey,
+  buildLoginLinksCard,
+  gourmetCredentialUrl,
+  loginLinksFrom,
+  validateChatNoticeInput,
 } from "../supabase/functions/_shared/mtalk_external_post.ts"
 
 const SECRET = "s".repeat(48)
@@ -580,4 +588,66 @@ test("live timeout migration: 20 minutes pending → timed_out + card with the �
     assert.match(fn, new RegExp(`perform public\\.${call}\\(\\)`), call)
   }
   assert.equal(AI_CHOICE_COMMANDS.now, "2：今あるデータですぐ答える", "SQL のボタンと同じ文")
+})
+
+// ---------- 「ログイン情報を更新」のボタン・お知らせ（/chat-notice） ----------
+const RETRY = "a9f5c78b-fb5d-4dfc-9125-47567ad83329"
+const CRED_URL = `https://marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=112789&retry=${RETRY}`
+
+test("login links: only gourmet's credential screen URL passes; labels are decided here", () => {
+  assert.equal(gourmetCredentialUrl(CRED_URL), CRED_URL)
+  assert.equal(gourmetCredentialUrl("https://marugo-s.github.io/gourmet/?view=accounts&source=tabelog&store="), "https://marugo-s.github.io/gourmet/?view=accounts&source=tabelog&store=")
+  for (const bad of [
+    "http://marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=112789",
+    "https://evil.example/gourmet/?view=accounts&source=ikyu&store=112789",
+    "https://marugo-s.github.io/line_report/?view=accounts&source=ikyu&store=112789",
+    "https://marugo-s.github.io/gourmet/?view=dashboard&source=ikyu&store=112789",
+    "https://marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=112789&password=x",
+    "https://marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=112789&retry=nope",
+    "https://user:pw@marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=1",
+    "https://marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=1#x",
+    "javascript:alert(1)", "",
+  ]) assert.equal(gourmetCredentialUrl(bad), null, bad)
+  const links = loginLinksFrom([
+    { kind: "relogin", source: "ikyu", store_name: "BISTRO CAVACAVA", url: CRED_URL },
+    { kind: "relogin", source: "ikyu", store_name: "dup", url: CRED_URL },
+    { kind: "relogin", source: "tabelog", store_name: "x", url: CRED_URL },
+    { kind: "needs_human_check", source: "ikyu", url: CRED_URL },
+    { kind: "relogin", source: "ikyu", url: "https://evil.example/" },
+    "x", null,
+  ])
+  assert.deepEqual(links, [{ kind: "relogin", source: "ikyu", storeName: "BISTRO CAVACAVA", url: CRED_URL }])
+  assert.deepEqual(loginLinksFrom(undefined), [])
+  assert.equal(loginLinksFrom(Array(20).fill(0).map((_, i) => ({ kind: "relogin", source: "tabelog", url: `https://marugo-s.github.io/gourmet/?view=accounts&source=tabelog&store=s${i}` }))).length, 6)
+  const { text, cards } = buildLoginLinksCard(links)
+  assert.match(text, /一休（BISTRO CAVACAVA）/)
+  assert.match(text, /パスワードはこのトークに書かないでください/)
+  assert.equal(cards[0].actions[0].label, "ログイン情報を更新（一休（BISTRO CAVACAVA））")
+  assert.equal(cards[0].actions[0].url, CRED_URL)
+  assert.equal(cards[0].actions[0].command, undefined, "押しても文は送らない（リンクを開くだけ）")
+  assert.equal(AI_CHAT_LOGIN_LINKS_KIND, "ai_chat_login_links")
+})
+
+test("chat-reply keeps working without links; chat-notice validates like chat-reply with its own id", () => {
+  assert.deepEqual(validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] }).links, [])
+  assert.equal(validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"], links: [{ kind: "relogin", source: "ikyu", url: CRED_URL }] }).links.length, 1)
+  const n = validateChatNoticeInput({ notice_id: RETRY.toUpperCase(), mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["【再ログイン後の取得結果】"] })
+  assert.deepEqual([n.noticeId, n.groupId, n.parts.length, n.links.length], [RETRY, 42, 1, 0])
+  for (const bad of [null, { mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] }, { notice_id: "x", mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] },
+    { notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [] }]) assert.throws(() => validateChatNoticeInput(bad))
+  assert.equal(aiChatNoticeDedupeKey(RETRY.toUpperCase()), `notice:${RETRY}`)
+  assert.equal(AI_CHAT_NOTICE_KIND, "ai_chat_notice")
+  assert.equal(AI_CHAT_NOTICE_PATH, "/chat-notice")
+})
+
+test("mtalk-external-post: /chat-notice is signed, DM-only, once per notice_id; links card after the answer", async () => {
+  const src = await Deno.readTextFile(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  const auth = src.indexOf("if (!authorized) return respond")
+  assert.ok(src.indexOf("if (path === AI_CHAT_NOTICE_PATH") > auth, "署名の検証より後")
+  const notice = src.slice(src.indexOf("async function chatNotice"), src.indexOf("Deno.serve("))
+  assert.match(notice, /const groupId = await botDirectRoom\(supabase, input\.mtalkUserId\)\n  if \(groupId !== input\.groupId\) throw new ExternalPostError\("送信先のトークが見つかりません", 404\)/)
+  assert.ok(notice.indexOf(".insert({ kind: AI_CHAT_NOTICE_KIND") < notice.indexOf("postBotText("), "先に1回だけを確保してから送る")
+  const reply = src.slice(src.indexOf("async function chatReply"), src.indexOf("async function postLoginLinks"))
+  assert.ok(reply.indexOf("postBotText(") < reply.indexOf("postLoginLinks(supabase, groupId, input.links, key)"), "答えのあとにボタン")
+  assert.match(src, /kind: AI_CHAT_LOGIN_LINKS_KIND, dedupeKey/)
 })
