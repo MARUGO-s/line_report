@@ -49,6 +49,9 @@ import {
   gourmetCredentialUrl,
   loginLinksFrom,
   validateChatNoticeInput,
+  INTERNAL_TERMS,
+  SCRUBBED_FALLBACK,
+  scrubInternalLines,
 } from "../supabase/functions/_shared/mtalk_external_post.ts"
 
 const SECRET = "s".repeat(48)
@@ -650,4 +653,19 @@ test("mtalk-external-post: /chat-notice is signed, DM-only, once per notice_id; 
   const reply = src.slice(src.indexOf("async function chatReply"), src.indexOf("async function postLoginLinks"))
   assert.ok(reply.indexOf("postBotText(") < reply.indexOf("postLoginLinks(supabase, groupId, input.links, key)"), "答えのあとにボタン")
   assert.match(src, /kind: AI_CHAT_LOGIN_LINKS_KIND, dedupeKey/)
+})
+
+test("AI分析: gourmet の取得の内部の言葉（computerUse・サブエージェント・Shell・claim など）を含む行は M-talk へ出さない", () => {
+  const leak = "最新のデータを取得できませんでした（一休（BISTRO CAVACAVA）: ブラウザ用computerUseサブエージェントがこの実行環境で利用できず、ルール上Shellからの操作も不可のため取得…）。前回までに取得したデータで答えます。"
+  assert.equal(scrubInternalLines(`ご質問：「今月は？」\n${leak}\n\n予約は12件です`), "ご質問：「今月は？」\n\n予約は12件です")
+  for (const t of ["subagent", "executor", "claimId 不一致", "Playwright", "--fail", "INGEST_TOKEN", "親エージェントで再実行"]) assert.ok(INTERNAL_TERMS.test(t), t)
+  for (const t of ["今月の予約は12件です", "Shellfish platter", "シェルフィッシュ", "一休（BISTRO CAVACAVA）：ログイン情報の確認が必要です"]) assert.ok(!INTERNAL_TERMS.test(t), t)
+  const reply = validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [`ご質問\n${leak}`, "予約は12件です"] })
+  assert.deepEqual(reply.parts, ["ご質問", "予約は12件です"])
+  const all = validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [leak] })
+  assert.deepEqual(all.parts, [SCRUBBED_FALLBACK])
+  const notice = validateChatNoticeInput({ notice_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["【再ログイン後の取得結果】", "claim not found"] })
+  assert.deepEqual(notice.parts, ["【再ログイン後の取得結果】"])
+  assert.deepEqual(aiChatReplyParts({ parts: ["予約は12件です", "executor failed"] }), ["予約は12件です"])
+  assert.deepEqual(aiChatReplyParts({ parts: [] }), [])
 })
