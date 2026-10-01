@@ -634,7 +634,80 @@ export function buildAiChoiceCard(choice: { question: string }, fallbackText: st
   }
 }
 
-export type ChatReplyInput = { lookupId: string; mtalkUserId: string; groupId: number; parts: string[] }
+// ---------- 「ログイン情報を更新」のボタン（gourmet の取得がログインの問題で失敗したとき） ----------
+// gourmet は { kind: 'relogin', source, store_name, url } を送る。ボタンの文はここで決め、URL は gourmet のアプリ
+// （https://marugo-s.github.io/gourmet/ の ?view=accounts&source=…&store=…&retry=…）だけを通す。パスワードはトークを通らない
+// （ボタンはアプリの登録画面を開くだけ）。不正なボタンは捨てる（回答の本文は送る）。
+
+export const AI_CHAT_LOGIN_LINKS_KIND = 'ai_chat_login_links'
+export const AI_CHAT_NOTICE_KIND = 'ai_chat_notice'
+export const AI_CHAT_NOTICE_PATH = '/chat-notice'
+export const GOURMET_APP_URL = 'https://marugo-s.github.io/gourmet/'
+export const LOGIN_LINK_LIMITS = { max: 6, urlMax: 500, storeNameMax: 60 } as const
+const GOURMET_SITE_LABELS: Record<string, string> = { tabelog: '食べログ', ikyu: '一休', hotpepper: 'ホットペッパー', google: 'Google', toreta: 'トレタ', retty: 'Retty' }
+const LINK_QUERY_KEYS = new Set(['view', 'source', 'store', 'retry'])
+
+export type LoginLink = { kind: 'relogin'; source: string; storeName: string; url: string }
+
+/** gourmet のアプリの「ログイン情報を更新」の URL だけを通す（それ以外は null）。 */
+export function gourmetCredentialUrl(value: unknown): string | null {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > LOGIN_LINK_LIMITS.urlMax) return null
+  let u: URL
+  try { u = new URL(raw) } catch { return null }
+  const app = new URL(GOURMET_APP_URL)
+  if (u.protocol !== 'https:' || u.host !== app.host || u.pathname !== app.pathname || u.username || u.password || u.hash) return null
+  for (const key of u.searchParams.keys()) if (!LINK_QUERY_KEYS.has(key)) return null
+  const source = u.searchParams.get('source') ?? ''
+  const store = u.searchParams.get('store') ?? ''
+  const retry = u.searchParams.get('retry')
+  if (u.searchParams.get('view') !== 'accounts' || !/^[a-z]{2,20}$/.test(source) || !/^[0-9A-Za-z_-]{0,40}$/.test(store) || (retry != null && !UUID.test(retry))) return null
+  return u.toString()
+}
+
+/** gourmet から届いた links → 表示してよいボタン（kind = relogin だけ、同じ URL は1つ、最大6）。 */
+export function loginLinksFrom(raw: unknown): LoginLink[] {
+  if (!Array.isArray(raw)) return []
+  const out: LoginLink[] = []
+  for (const item of raw.slice(0, LOGIN_LINK_LIMITS.max * 2)) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as Record<string, unknown>
+    const url = gourmetCredentialUrl(r.url)
+    const source = String(r.source ?? '')
+    if (r.kind !== 'relogin' || !url || new URL(url).searchParams.get('source') !== source) continue
+    if (out.some((l) => l.url === url)) continue
+    out.push({ kind: 'relogin', source, storeName: cleanText(r.store_name, LOGIN_LINK_LIMITS.storeNameMax), url })
+    if (out.length >= LOGIN_LINK_LIMITS.max) break
+  }
+  return out
+}
+
+const siteLabel = (source: string) => GOURMET_SITE_LABELS[source] ?? 'サイト'
+const linkTarget = (l: LoginLink) => `${siteLabel(l.source)}${l.storeName ? `（${l.storeName}）` : ''}`
+
+/** 「ログイン情報を更新」のカード（店舗×サイトごとにボタン1つ。押すと gourmet のアプリの登録画面が開く）。 */
+export function buildLoginLinksCard(links: LoginLink[]): { text: string; cards: LinkCard[] } {
+  const targets = links.map(linkTarget)
+  return {
+    text: `ログイン情報の更新が必要です（${targets.join('、')}）。gourmet のアプリで登録し直してください。パスワードはこのトークに書かないでください。`,
+    cards: [{
+      header: { eyebrow: AI_ANALYSIS_BOT_USERNAME, title: 'ログイン情報の更新が必要です', subtitle: targets.join('、') },
+      sections: [
+        { type: 'note', text: 'ボタンを押すと gourmet のアプリが開きます（ログインしていなければ、ふつうにログインしてください）。保存すると、最新のデータを取り直してこのトークでお知らせします。', size: 'sm' },
+        { type: 'note', text: 'パスワードはこのトークに書かないでください。', size: 'xs' },
+      ],
+      actions: links.map((l, i) => ({ label: `ログイン情報を更新（${linkTarget(l)}）`, url: l.url, style: i === 0 ? 'primary' : 'secondary' })),
+    }],
+  }
+}
+
+type LinkCard = {
+  header: { eyebrow: string; title: string; subtitle: string | null }
+  sections: CardSection[]
+  actions: { label: string; url?: string; command?: string; style: 'primary' | 'secondary' }[]
+}
+
+export type ChatReplyInput = { lookupId: string; mtalkUserId: string; groupId: number; parts: string[]; links: LoginLink[] }
 
 /** gourmet → M-talk: 「最新を調べる」の回答。{ lookup_id, mtalk_user_id, mtalk_group_id, parts[1..3] } */
 export function validateChatReplyInput(raw: unknown): ChatReplyInput {
@@ -649,7 +722,23 @@ export function validateChatReplyInput(raw: unknown): ChatReplyInput {
   if (!Array.isArray(r.parts)) throw new ExternalPostError('parts が不正です')
   const parts = r.parts.map((p) => cleanText(p, AI_CHAT_LIMITS.replyMax, { multiline: true })).filter(Boolean)
   if (!parts.length || r.parts.length > AI_CHAT_LIMITS.replyParts) throw new ExternalPostError(`parts は1〜${AI_CHAT_LIMITS.replyParts}通です`)
-  return { lookupId: lookupId.toLowerCase(), mtalkUserId: mtalkUserId.toLowerCase(), groupId, parts }
+  return { lookupId: lookupId.toLowerCase(), mtalkUserId: mtalkUserId.toLowerCase(), groupId, parts, links: loginLinksFrom(r.links) }
+}
+
+export type ChatNoticeInput = { noticeId: string; mtalkUserId: string; groupId: number; parts: string[]; links: LoginLink[] }
+export const aiChatNoticeDedupeKey = (noticeId: string) => `notice:${String(noticeId).toLowerCase()}`
+
+/**
+ * gourmet → M-talk: 「最新を調べる」とは別のお知らせ（例: ログイン情報を更新したあとの「再ログイン後の取得結果」）。
+ * { notice_id, mtalk_user_id, mtalk_group_id, parts[1..3], links? }。notice_id ごとに1回だけ送る。
+ */
+export function validateChatNoticeInput(raw: unknown): ChatNoticeInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ExternalPostError('送信内容が不正です')
+  const r = raw as Record<string, unknown>
+  const noticeId = String(r.notice_id ?? '')
+  if (!UUID.test(noticeId)) throw new ExternalPostError('notice_id が不正です')
+  const base = validateChatReplyInput({ ...r, lookup_id: noticeId })
+  return { noticeId: noticeId.toLowerCase(), mtalkUserId: base.mtalkUserId, groupId: base.groupId, parts: base.parts, links: base.links }
 }
 
 /**

@@ -19,6 +19,10 @@
  *   POST /chat-reply  { lookup_id, mtalk_user_id, mtalk_group_id, parts[] }  gourmet → 「最新を調べる」の回答を「AI分析」Botとして1対1へ。
  *                     見張りを pending → answered に1回だけ確定してから送る。20分の見張り（chat_ai_analysis_live_timeouts）が
  *                     先に案内していれば 409（答えは送らない）。同じ lookup_id の再送は送らずに成功扱い。
+ *                     links（取得がログイン情報の問題で失敗した店舗×サイト）があれば、答えのあとに「ログイン情報を更新」の
+ *                     カード（gourmet のアプリの登録画面を開くボタン。URL は gourmet のアプリだけ）を1回だけ送る。
+ *   POST /chat-notice { notice_id, mtalk_user_id, mtalk_group_id, parts[], links? }  gourmet → お知らせ（例: 「再ログイン後の取得結果」）を
+ *                     「AI分析」Botとして1対1へ。notice_id ごとに1回だけ（chat_alert_dispatches、kind = ai_chat_notice）。
  *
  * verify_jwt = false（呼び出し元は Supabase の利用者JWTを持たない）。認可は関数内で
  * GOURMET_MTALK_TOKEN の定数時間比較 + HMAC 署名（±5分）で行い、欠けたら常に 401。
@@ -68,6 +72,13 @@ import {
   buildAiChoiceCard,
   chatReplyDecision,
   validateChatReplyInput,
+  AI_CHAT_LOGIN_LINKS_KIND,
+  AI_CHAT_NOTICE_KIND,
+  AI_CHAT_NOTICE_PATH,
+  aiChatNoticeDedupeKey,
+  buildLoginLinksCard,
+  type LoginLink,
+  validateChatNoticeInput,
 } from "../_shared/mtalk_external_post.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 
@@ -537,6 +548,60 @@ async function chatReply(supabase: DbClient, bodyText: string) {
     if (first == null) await setLiveWatch(supabase, groupId, key, AI_CHAT_STATUS.answered, { status: AI_CHAT_STATUS.pending, finished_at: null }).catch(() => false)
     throw error
   }
+  await postLoginLinks(supabase, groupId, input.links, key)
+  return { ok: true, group_id: groupId, message_id: first, deduplicated: false }
+}
+
+// 「ログイン情報を更新」のカード（答えのあと・同じ dedupe ごとに1回だけ）。送れなくても答えは届いているので失敗にしない
+async function postLoginLinks(supabase: DbClient, groupId: number, links: LoginLink[], dedupeKey: string): Promise<void> {
+  if (!links.length) return
+  const { text, cards } = buildLoginLinksCard(links)
+  const posted = await postChatCardIndependent(supabase, {
+    groupId, text, cards, kind: AI_CHAT_LOGIN_LINKS_KIND, dedupeKey,
+    asUser: { id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME },
+  }).catch(() => ({ ok: false }))
+  if (!posted.ok) console.error("[mtalk-external-post] login links card failed")
+}
+
+// ---------- gourmet からのお知らせ（「再ログイン後の取得結果」など） ----------
+async function chatNotice(supabase: DbClient, bodyText: string) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(bodyText)
+  } catch {
+    throw new ExternalPostError("送信内容が不正です")
+  }
+  const input = validateChatNoticeInput(raw)
+  // 送り先は、その利用者と「AI分析」Botの1対1だけ
+  const groupId = await botDirectRoom(supabase, input.mtalkUserId)
+  if (groupId !== input.groupId) throw new ExternalPostError("送信先のトークが見つかりません", 404)
+  const key = aiChatNoticeDedupeKey(input.noticeId)
+  const { error: claimError } = await supabase.from("chat_alert_dispatches")
+    .insert({ kind: AI_CHAT_NOTICE_KIND, chat_group_id: groupId, dedupe_key: key })
+  if (claimError) {
+    if (String(claimError.code ?? "") !== "23505") throw new Error("notice claim failed")
+    const { data } = await supabase.from("chat_alert_dispatches").select("message_id")
+      .eq("kind", AI_CHAT_NOTICE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", key).maybeSingle()
+    return { ok: true, group_id: groupId, message_id: (data as { message_id: number | null } | null)?.message_id ?? null, deduplicated: true }
+  }
+  let first: number | null = null
+  try {
+    for (const part of input.parts) {
+      const id = await postBotText(supabase, groupId, part)
+      if (first == null) {
+        first = id
+        await supabase.from("chat_alert_dispatches").update({ message_id: first })
+          .eq("kind", AI_CHAT_NOTICE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", key)
+      }
+    }
+  } catch (error) {
+    // 1通も送れていなければ取り消す（gourmet がやり直す）
+    if (first == null) {
+      await supabase.from("chat_alert_dispatches").delete().eq("kind", AI_CHAT_NOTICE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", key)
+    }
+    throw error
+  }
+  await postLoginLinks(supabase, groupId, input.links, key)
   return { ok: true, group_id: groupId, message_id: first, deduplicated: false }
 }
 
@@ -570,6 +635,7 @@ Deno.serve(async (req) => {
     if (path === "/send" && req.method === "POST") return respond(await send(supabase, bodyText))
     if (path === "/alert" && req.method === "POST") return respond(await alert(supabase, bodyText))
     if (path === AI_CHAT_LIVE_REPLY_PATH && req.method === "POST") return respond(await chatReply(supabase, bodyText))
+    if (path === AI_CHAT_NOTICE_PATH && req.method === "POST") return respond(await chatNotice(supabase, bodyText))
     return respond({ error: "not found" }, 404)
   } catch (error) {
     if (error instanceof ExternalPostError) return respond({ error: error.message }, error.status)
