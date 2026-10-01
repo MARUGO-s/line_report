@@ -75,7 +75,7 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 ## 「AI分析」Bot への質問（`POST /chat-dispatch`、migration `20261001010000_chat_ai_analysis_bot_replies.sql`）
 
 利用者が「AI分析」Bot との 1 対 1 に文章を書くと、Bot が gourmet の AI分析（`ai-analyst POST /mtalk-chat`。画面の AI分析と同じモデル・同じ 7 つの集計関数）で答えます。
-扱うのは PV・予約・口コミの分析だけで、再取得（スクレイピング）や PDF レポートの作成はしません（PDF は gourmet の画面から送ります）。
+扱うのは PV・予約・口コミの分析だけで、PDF レポートの作成はしません（PDF は gourmet の画面から送ります）。データの質問には、先に「最新を調べる／今あるデータで答える」を選んでもらいます（下記）。
 
 1. トリガー `chat_messages_enqueue_ai_analysis_reply`（after insert）が、次をすべて満たす発言だけを pg_net で `/chat-dispatch` へ渡す:
    `kind = 'text'`・本文あり・送信者が Bot でない・部屋が「AI分析」Bot と送信者の 1 対 1（`direct_key`）でゴミ箱でない。
@@ -102,3 +102,31 @@ gourmet 側で決めること（README 参照）: 読むデータの持ち主は
 問い合わせ先は既定で `https://ycsqfajidusuibqljjwr.supabase.co/functions/v1/ai-analyst`（秘密情報ではない。`GOURMET_AI_ANALYST_URL` で https の `…/functions/v1/ai-analyst` だけ上書き可）。
 
 配備の順番: gourmet（migration 016・ai-analyst）→ line_report（main へのマージで migration と `mtalk-external-post` を配備）。新しい秘密情報はありません。
+
+## 「最新を調べる／今あるデータで答える」（`POST /chat-reply`、migration `20261001050000_chat_ai_analysis_live_timeouts.sql`）
+
+データの質問には、Bot はすぐ答えず次の 2 つを選んでもらいます。
+
+1. サイトにログインして最新を調べる（時間がかかります：5〜10分ほど）
+2. 今あるデータですぐ答える（少し正確性が落ちることがあります）
+
+- 選択肢を出すかどうかと、選択待ちの質問の保存（30 分で期限切れ・新しい質問で置き換え）は gourmet（`/mtalk-chat`、`mtalk_live_lookups`）が決める。
+  あいさつ・お礼・使い方の質問と、最新を取り直せる店舗×サイトが無い場合はすぐ答える（gourmet README 参照）。
+- 表示: gourmet の返事に `choice` があれば、Bot はカード（kind `ai_chat_choice`、`msg:<message id>`）を投稿する。ボタンは
+  `1：サイトにログインして最新を調べる`（primary）と `2：今あるデータですぐ答える`（secondary）。押すとその文が利用者の発言として送られ
+  （`data-card-command`）、ふつうの質問と同じく `/chat-dispatch` → gourmet へ届く。「1」「２」「①」などを手で送っても選べる。ボタンの文は
+  この関数が決め、gourmet からは受け取らない。カードの本文（プレビュー・通知・古い表示）は gourmet の `parts[0]`（番号での選び方つき）。
+- 「2」: gourmet が保存した質問に今あるデータで答え、ふつうの返事として投稿する。
+- 「1」: gourmet が取得を依頼して `live.lookup_id` を返す。関数は先に見張り（`chat_alert_dispatches`、kind `ai_chat_live`、`live:<lookup_id>`、
+  `pending`）を作り、続けて「調べています。終わったらお知らせします」を投稿する。選択肢も「調べています」も `ai_chat_reply` の返事として
+  `answered` に確定するので、2 分の見張り・画面の「・・・」は誤って時間切れにならない。
+- 取得が終わると gourmet が `POST /chat-reply`（署名つき）`{ lookup_id, mtalk_user_id, mtalk_group_id, parts[1..3] }` を送る。送り先はその利用者と
+  「AI分析」Bot の 1 対 1（`chat_ensure_bot_direct` の部屋と一致しなければ 404）。見張りを `pending` → `answered` に **1 回だけ**確定してから送る。
+  同じ `lookup_id` の再送は送らず成功扱い、見張りが `timed_out`（案内済み）または `failed`（「2」で答えた・置き換えた）なら 409（gourmet は答えを捨てる）。
+  見張りが無い（作るのに失敗した）場合は作ってから送る。1 通目を送る前に失敗したら確定を戻す（gourmet がやり直す）。
+- 20 分たっても `pending` のまま、または `answered` なのに 1 通目が記録されていないまま 2 分たった見張りは、`chat_ai_analysis_live_timeouts()`
+  （`high-frequency-dispatcher-cron-job` から毎分）が `timed_out` に確定し、「最新データの取得が20分以内に終わりませんでした…「2」を送ってください」の
+  カード（「2 今あるデータですぐ答える」のボタンつき）を Bot として 1 通送る。
+- gourmet の返事の `live_close`（「2」で答えた・新しい質問で置き換えた lookup_id）は、その見張りを `failed` にして閉じる。
+
+配備の順番: gourmet migration 019 → line_report（main へのマージで migration と `mtalk-external-post`）→ gourmet の `agent-api`・`ai-analyst`。新しい秘密情報はありません。

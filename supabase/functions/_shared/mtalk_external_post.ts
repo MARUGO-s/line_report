@@ -563,3 +563,104 @@ export function aiChatErrorMessage(status: number, data: unknown): string {
   if (msg && [400, 404, 413, 429, 503].includes(status)) return `すみません、${msg.replace(/^すみません、?/, '')}`
   return AI_CHAT_GENERIC_ERROR
 }
+
+// ---------- 「最新を調べる／今あるデータで答える」（gourmet の /mtalk-chat が choice / live を返す） ----------
+// データの質問には、gourmet が先に選択肢を返す（choice）。ここではカードの2つのボタン（押すとその文が利用者の発言として
+// 送られる = data-card-command）と、古い表示でも選べる文（parts）を投稿する。ボタンの文はここで決め、gourmet からは受け取らない。
+// 「1」を選ぶと gourmet が live.lookup_id を返す。その質問の見張り（chat_alert_dispatches、kind = ai_chat_live、
+// dedupe_key = live:<lookup_id>、status = pending）を作り、20分たっても POST /chat-reply が届かなければ
+// pg_cron の chat_ai_analysis_live_timeouts() が「「2」を送ってください」と案内する。
+
+export const AI_CHAT_CHOICE_KIND = 'ai_chat_choice'
+export const AI_CHAT_LIVE_KIND = 'ai_chat_live'
+export const AI_CHAT_LIVE_REPLY_PATH = '/chat-reply'
+export const AI_CHAT_LIVE_LIMITS = { deadlineSeconds: 1200, closeMax: 5 } as const
+export const AI_CHOICE_COMMANDS = {
+  live: '1：サイトにログインして最新を調べる',
+  now: '2：今あるデータですぐ答える',
+} as const
+export const AI_CHOICE_LABELS = {
+  live: '1. サイトにログインして最新を調べる（時間がかかります：5〜10分ほど）',
+  now: '2. 今あるデータですぐ答える（少し正確性が落ちることがあります）',
+} as const
+
+export const aiChatLiveDedupeKey = (lookupId: string) => `live:${String(lookupId).toLowerCase()}`
+
+/** gourmet の返事に選択肢があれば、質問の抜粋（表示用）を返す。無ければ null。 */
+export function aiChatChoice(data: unknown): { question: string } | null {
+  const choice = data && typeof data === 'object' ? (data as { choice?: unknown }).choice : null
+  if (!choice || typeof choice !== 'object') return null
+  return { question: cleanText((choice as { question?: unknown }).question, 100) }
+}
+
+/** 「1」を選んだときの見張りの対象（lookup_id）。 */
+export function aiChatLiveStart(data: unknown): { lookupId: string } | null {
+  const live = data && typeof data === 'object' ? (data as { live?: unknown }).live : null
+  const id = live && typeof live === 'object' ? String((live as { lookup_id?: unknown }).lookup_id ?? '') : ''
+  return UUID.test(id) ? { lookupId: id.toLowerCase() } : null
+}
+
+/** 見張りを閉じる質問（「2」で答えた・新しい質問で置き換えた）。 */
+export function aiChatLiveClose(data: unknown): string[] {
+  const list = data && typeof data === 'object' ? (data as { live_close?: unknown }).live_close : null
+  return (Array.isArray(list) ? list : []).map((v) => String(v ?? '')).filter((v) => UUID.test(v))
+    .map((v) => v.toLowerCase()).slice(0, AI_CHAT_LIVE_LIMITS.closeMax)
+}
+
+type ChoiceCard = {
+  header: { eyebrow: string; title: string; subtitle: string | null }
+  sections: CardSection[]
+  actions: { label: string; command: string; style: 'primary' | 'secondary' }[]
+}
+
+/** 選択肢のカード（ボタン2つ）。text はプレビュー・通知・古い表示用（gourmet の parts[0]、無ければ定型文）。 */
+export function buildAiChoiceCard(choice: { question: string }, fallbackText: string): { text: string; cards: ChoiceCard[] } {
+  const text = cleanText(fallbackText, AI_CHAT_LIMITS.replyMax, { multiline: true }) ||
+    ['どちらで調べますか？ 番号（1 または 2）を送ってください。', AI_CHOICE_LABELS.live, AI_CHOICE_LABELS.now].join('\n')
+  return {
+    text,
+    cards: [{
+      header: { eyebrow: AI_ANALYSIS_BOT_USERNAME, title: 'どちらで調べますか？', subtitle: choice.question ? `ご質問：「${choice.question}」` : null },
+      sections: [
+        { type: 'note', text: AI_CHOICE_LABELS.live, size: 'sm' },
+        { type: 'note', text: AI_CHOICE_LABELS.now, size: 'sm' },
+        { type: 'note', text: 'ボタンを押すか、番号（1 または 2）を送ってください。30分以内に選んでください。', size: 'xs' },
+      ],
+      actions: [
+        { label: '1 最新を調べる（5〜10分）', command: AI_CHOICE_COMMANDS.live, style: 'primary' },
+        { label: '2 今あるデータですぐ答える', command: AI_CHOICE_COMMANDS.now, style: 'secondary' },
+      ],
+    }],
+  }
+}
+
+export type ChatReplyInput = { lookupId: string; mtalkUserId: string; groupId: number; parts: string[] }
+
+/** gourmet → M-talk: 「最新を調べる」の回答。{ lookup_id, mtalk_user_id, mtalk_group_id, parts[1..3] } */
+export function validateChatReplyInput(raw: unknown): ChatReplyInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ExternalPostError('送信内容が不正です')
+  const r = raw as Record<string, unknown>
+  const lookupId = String(r.lookup_id ?? '')
+  const mtalkUserId = String(r.mtalk_user_id ?? '')
+  const groupId = Number(r.mtalk_group_id)
+  if (!UUID.test(lookupId)) throw new ExternalPostError('lookup_id が不正です')
+  if (!UUID.test(mtalkUserId)) throw new ExternalPostError('mtalk_user_id が不正です')
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) throw new ExternalPostError('mtalk_group_id が不正です')
+  if (!Array.isArray(r.parts)) throw new ExternalPostError('parts が不正です')
+  const parts = r.parts.map((p) => cleanText(p, AI_CHAT_LIMITS.replyMax, { multiline: true })).filter(Boolean)
+  if (!parts.length || r.parts.length > AI_CHAT_LIMITS.replyParts) throw new ExternalPostError(`parts は1〜${AI_CHAT_LIMITS.replyParts}通です`)
+  return { lookupId: lookupId.toLowerCase(), mtalkUserId: mtalkUserId.toLowerCase(), groupId, parts }
+}
+
+/**
+ * /chat-reply の見張りの状態 → 送ってよいか。
+ *   pending → 送る（answered に確定してから）／無い → 見張りを作って送る（見張りを作る前の版・作るのに失敗した場合）
+ *   answered（送信済み）→ 二重に送らない／timed_out（案内済み）・failed（「2」で答えた・置き換え）→ 409
+ */
+export function chatReplyDecision(row: { status: string | null; message_id: number | null } | null):
+  { action: 'post' } | { action: 'claim' } | { action: 'duplicate' } | { action: 'reject'; reason: string } {
+  if (!row) return { action: 'claim' }
+  if (row.status === AI_CHAT_STATUS.pending) return { action: 'post' }
+  if (row.status === AI_CHAT_STATUS.answered) return { action: 'duplicate' }
+  return { action: 'reject', reason: row.status === AI_CHAT_STATUS.timedOut ? 'timed_out' : 'closed' }
+}
