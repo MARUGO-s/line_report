@@ -14,6 +14,11 @@
  *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
  *                     答え・失敗の案内は chat_alert_dispatches.status を pending から1回だけ確定してから送る。
  *                     2分たっても pending のままなら pg_cron の chat_ai_analysis_reply_timeouts() が案内を送る。
+ *                     データの質問には gourmet が先に選択肢（choice）を返す → カードのボタン2つ（「1」最新を調べる／「2」今あるデータで答える）。
+ *                     「1」なら gourmet が live.lookup_id を返す → 見張り（kind = ai_chat_live、dedupe live:<id>）を作ってから「調べています」を送る。
+ *   POST /chat-reply  { lookup_id, mtalk_user_id, mtalk_group_id, parts[] }  gourmet → 「最新を調べる」の回答を「AI分析」Botとして1対1へ。
+ *                     見張りを pending → answered に1回だけ確定してから送る。20分の見張り（chat_ai_analysis_live_timeouts）が
+ *                     先に案内していれば 409（答えは送らない）。同じ lookup_id の再送は送らずに成功扱い。
  *
  * verify_jwt = false（呼び出し元は Supabase の利用者JWTを持たない）。認可は関数内で
  * GOURMET_MTALK_TOKEN の定数時間比較 + HMAC 署名（±5分）で行い、欠けたら常に 401。
@@ -53,6 +58,16 @@ import {
   alertRooms,
   type BotRoomRow,
   storeBotList,
+  AI_CHAT_CHOICE_KIND,
+  AI_CHAT_LIVE_KIND,
+  AI_CHAT_LIVE_REPLY_PATH,
+  aiChatChoice,
+  aiChatLiveClose,
+  aiChatLiveDedupeKey,
+  aiChatLiveStart,
+  buildAiChoiceCard,
+  chatReplyDecision,
+  validateChatReplyInput,
 } from "../_shared/mtalk_external_post.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 
@@ -409,12 +424,32 @@ async function answerInBackground(supabase: DbClient, row: AiChatMessageRow, gro
     const history = buildAiChatHistory((recent ?? []) as AiChatMessageRow[])
     const answer = await askGourmet(aiChatRequestBody(row, history))
     const parts = answer.status === 200 ? aiChatReplyParts(answer.data) : []
-    if (!parts.length) console.error("[mtalk-external-post] chat answer failed:", answer.status)
-    if (!await finishDispatch(supabase, groupId, messageId, parts.length ? AI_CHAT_STATUS.answered : AI_CHAT_STATUS.failed)) {
+    const choice = answer.status === 200 ? aiChatChoice(answer.data) : null
+    const live = answer.status === 200 ? aiChatLiveStart(answer.data) : null
+    const closes = answer.status === 200 ? aiChatLiveClose(answer.data) : []
+    const ok = parts.length > 0 || choice != null
+    if (!ok) console.error("[mtalk-external-post] chat answer failed:", answer.status)
+    // 選択肢・「調べています」も返事として確定する（2分の見張りが誤って時間切れにしない）
+    if (!await finishDispatch(supabase, groupId, messageId, ok ? AI_CHAT_STATUS.answered : AI_CHAT_STATUS.failed)) {
       console.error("[mtalk-external-post] chat answer arrived after the timeout notice; dropped")
       return
     }
     finished = true
+    // 「2」で答えた・新しい質問で置き換えた「最新を調べる」の見張りを閉じる
+    if (closes.length) await closeLiveWatches(supabase, groupId, closes)
+    // 「1」: 「調べています」を送る前に20分の見張りを作る
+    if (live) await openLiveWatch(supabase, groupId, live.lookupId)
+    if (choice) {
+      const { text, cards } = buildAiChoiceCard(choice, parts[0] ?? "")
+      const posted = await postChatCardIndependent(supabase, {
+        groupId, text, cards, kind: AI_CHAT_CHOICE_KIND, dedupeKey: `msg:${messageId}`,
+        asUser: { id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME },
+      })
+      if (!posted.ok) throw new Error("choice card post failed")
+      replyId = posted.skipped ? (await dispatchMessageId(supabase, AI_CHAT_CHOICE_KIND, groupId, `msg:${messageId}`))?.message_id ?? null : posted.messageId ?? null
+      await recordReply(supabase, groupId, messageId, replyId)
+      return
+    }
     for (const part of parts.length ? parts : [aiChatErrorMessage(answer.status, answer.data)]) {
       const id = await postBotText(supabase, groupId, part)
       if (replyId == null) {
@@ -432,6 +467,77 @@ async function answerInBackground(supabase: DbClient, row: AiChatMessageRow, gro
       await recordReply(supabase, groupId, messageId, replyId).catch(() => undefined)
     }
   }
+}
+
+// ---------- 「最新を調べる」（gourmet が取得後に答える） ----------
+async function openLiveWatch(supabase: DbClient, groupId: number, lookupId: string): Promise<void> {
+  const { error } = await supabase.from("chat_alert_dispatches")
+    .insert({ kind: AI_CHAT_LIVE_KIND, chat_group_id: groupId, dedupe_key: aiChatLiveDedupeKey(lookupId), status: AI_CHAT_STATUS.pending })
+  // 作れなくても「調べています」は送る（回答は /chat-reply が見張り無しでも受け付ける。時間切れの案内だけ出ない）
+  if (error && String(error.code ?? "") !== "23505") console.error("[mtalk-external-post] live watch insert failed")
+}
+
+async function closeLiveWatches(supabase: DbClient, groupId: number, lookupIds: string[]): Promise<void> {
+  const { error } = await supabase.from("chat_alert_dispatches")
+    .update({ status: AI_CHAT_STATUS.failed, finished_at: new Date().toISOString() })
+    .eq("kind", AI_CHAT_LIVE_KIND).eq("chat_group_id", groupId).in("dedupe_key", lookupIds.map(aiChatLiveDedupeKey))
+    .eq("status", AI_CHAT_STATUS.pending)
+  if (error) console.error("[mtalk-external-post] live watch close failed")
+}
+
+async function liveWatch(supabase: DbClient, groupId: number, key: string) {
+  const { data, error } = await supabase.from("chat_alert_dispatches").select("status, message_id")
+    .eq("kind", AI_CHAT_LIVE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", key).maybeSingle()
+  if (error) throw new Error("live watch lookup failed")
+  return data as { status: string | null; message_id: number | null } | null
+}
+
+async function setLiveWatch(supabase: DbClient, groupId: number, key: string, from: string, patch: Record<string, unknown>): Promise<boolean> {
+  const { data, error } = await supabase.from("chat_alert_dispatches").update(patch)
+    .eq("kind", AI_CHAT_LIVE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", key).eq("status", from).select("id")
+  if (error) throw new Error("live watch update failed")
+  return Array.isArray(data) && data.length > 0
+}
+
+async function chatReply(supabase: DbClient, bodyText: string) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(bodyText)
+  } catch {
+    throw new ExternalPostError("送信内容が不正です")
+  }
+  const input = validateChatReplyInput(raw)
+  // 送り先は、その利用者と「AI分析」Botの1対1だけ（ほかのトークへは送らない）
+  const groupId = await botDirectRoom(supabase, input.mtalkUserId)
+  if (groupId !== input.groupId) throw new ExternalPostError("送信先のトークが見つかりません", 404)
+  const key = aiChatLiveDedupeKey(input.lookupId)
+  const answered = { status: AI_CHAT_STATUS.answered, finished_at: new Date().toISOString() }
+  if (!await setLiveWatch(supabase, groupId, key, AI_CHAT_STATUS.pending, answered)) {
+    const row = await liveWatch(supabase, groupId, key)
+    const decision = chatReplyDecision(row)
+    if (decision.action === "duplicate") return { ok: true, group_id: groupId, message_id: row?.message_id ?? null, deduplicated: true }
+    if (decision.action === "reject") {
+      throw new ExternalPostError(decision.reason === "timed_out" ? "時間切れの案内を送り済みです" : "この質問の「最新を調べる」は終了しています", 409)
+    }
+    const { error } = await supabase.from("chat_alert_dispatches").insert({ kind: AI_CHAT_LIVE_KIND, chat_group_id: groupId, dedupe_key: key, ...answered })
+    if (error) throw new ExternalPostError("同じ送信を処理中です。しばらくしてから再度お試しください", 409)
+  }
+  let first: number | null = null
+  try {
+    for (const part of input.parts) {
+      const id = await postBotText(supabase, groupId, part)
+      if (first == null) {
+        first = id
+        await supabase.from("chat_alert_dispatches").update({ message_id: first })
+          .eq("kind", AI_CHAT_LIVE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", key)
+      }
+    }
+  } catch (error) {
+    // 1通も送れていなければ確定を戻す（gourmet がやり直す。20分の見張りもそのまま働く）
+    if (first == null) await setLiveWatch(supabase, groupId, key, AI_CHAT_STATUS.answered, { status: AI_CHAT_STATUS.pending, finished_at: null }).catch(() => false)
+    throw error
+  }
+  return { ok: true, group_id: groupId, message_id: first, deduplicated: false }
 }
 
 Deno.serve(async (req) => {
@@ -463,6 +569,7 @@ Deno.serve(async (req) => {
     if (path === "/store-bots" && req.method === "GET") return respond({ bots: await listStoreBots(supabase) })
     if (path === "/send" && req.method === "POST") return respond(await send(supabase, bodyText))
     if (path === "/alert" && req.method === "POST") return respond(await alert(supabase, bodyText))
+    if (path === AI_CHAT_LIVE_REPLY_PATH && req.method === "POST") return respond(await chatReply(supabase, bodyText))
     return respond({ error: "not found" }, 404)
   } catch (error) {
     if (error instanceof ExternalPostError) return respond({ error: error.message }, error.status)
