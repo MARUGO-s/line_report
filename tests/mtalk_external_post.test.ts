@@ -28,20 +28,8 @@ import {
   REVIEW_ALERT_KIND,
   REVIEW_ALERT_LIMITS,
   validateAlertInput,
-  AI_CHAT_CHOICE_KIND,
-  AI_CHAT_LIVE_KIND,
-  AI_CHAT_LIVE_LIMITS,
-  AI_CHAT_LIVE_REPLY_PATH,
-  AI_CHOICE_COMMANDS,
-  AI_CHOICE_LABELS,
-  aiChatChoice,
-  aiChatLiveClose,
-  aiChatLiveDedupeKey,
-  aiChatLiveStart,
-  buildAiChoiceCard,
-  chatReplyDecision,
-  validateChatReplyInput,
   AI_CHAT_LOGIN_LINKS_KIND,
+  aiChatLinks,
   AI_CHAT_NOTICE_KIND,
   AI_CHAT_NOTICE_PATH,
   aiChatNoticeDedupeKey,
@@ -501,96 +489,40 @@ test("mtalk-external-post: /store-bots and bot /alert are behind the signature; 
   assert.match(source, /if \(failed\) throw new Error\("card post failed"\)/)
 })
 
-// ---------- 「最新を調べる／今あるデータで答える」 ----------
+// ---------- 「最新を調べる／今あるデータで答える」の選択は廃止（2026-10-01） ----------
 const LOOKUP = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 const MUSER = "11111111-2222-4333-8444-555555555555"
 
-test("choice card: two command buttons with fixed commands (not taken from gourmet) + text fallback", () => {
-  assert.equal(aiChatChoice({ parts: ["x"] }), null)
-  const choice = aiChatChoice({ parts: ["どちらで…"], choice: { question: "今月のPVは？" + "あ".repeat(300), options: [{ value: 1, label: "<script>" }] } })
-  assert.ok(choice && choice.question.length <= 100)
-  const { text, cards } = buildAiChoiceCard(choice!, "ご質問：「今月のPVは？」\n1. …\n2. …")
-  assert.match(text, /^ご質問：「今月のPVは？」/)
-  assert.equal(cards.length, 1)
-  assert.deepEqual(cards[0].actions.map((a) => [a.command, a.style]), [[AI_CHOICE_COMMANDS.live, "primary"], [AI_CHOICE_COMMANDS.now, "secondary"]])
-  assert.equal(AI_CHOICE_COMMANDS.live, "1：サイトにログインして最新を調べる")
-  assert.equal(AI_CHOICE_COMMANDS.now, "2：今あるデータですぐ答える")
-  assert.match(AI_CHOICE_LABELS.live, /サイトにログインして最新を調べる（時間がかかります：5〜10分ほど）/)
-  assert.match(AI_CHOICE_LABELS.now, /今あるデータですぐ答える（少し正確性が落ちることがあります）/)
-  assert.doesNotMatch(JSON.stringify(cards), /<script>/)
-  assert.match(buildAiChoiceCard({ question: "" }, "").text, /番号（1 または 2）/, "gourmet の文が無くても選べる")
-  assert.equal(cards[0].header.subtitle, `ご質問：「${choice!.question}」`)
-})
-
-test("live start / close: only well-formed lookup ids", () => {
-  assert.deepEqual(aiChatLiveStart({ live: { lookup_id: LOOKUP.toUpperCase(), deadline_seconds: 1200 } }), { lookupId: LOOKUP })
-  assert.equal(aiChatLiveStart({ live: { lookup_id: "x" } }), null)
-  assert.equal(aiChatLiveStart({ parts: ["a"] }), null)
-  assert.deepEqual(aiChatLiveClose({ live_close: [LOOKUP, "nope", 3] }), [LOOKUP])
-  assert.equal(aiChatLiveClose({ live_close: Array(20).fill(LOOKUP) }).length, AI_CHAT_LIVE_LIMITS.closeMax)
-  assert.equal(aiChatLiveDedupeKey(LOOKUP.toUpperCase()), `live:${LOOKUP}`)
-  assert.equal(AI_CHAT_LIVE_LIMITS.deadlineSeconds, 1200)
-})
-
-test("chat-reply input: lookup id, user, room, 1..3 parts each clipped to 2000", () => {
-  const ok = validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a", "b".repeat(3000)] })
-  assert.deepEqual([ok.lookupId, ok.mtalkUserId, ok.groupId, ok.parts.length, ok.parts[1].length], [LOOKUP, MUSER, 42, 2, AI_CHAT_LIMITS.replyMax])
-  for (const bad of [
-    null, [], { mtalk_user_id: MUSER, mtalk_group_id: 1, parts: ["a"] },
-    { lookup_id: LOOKUP, mtalk_user_id: "x", mtalk_group_id: 1, parts: ["a"] },
-    { lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 0, parts: ["a"] },
-    { lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 1, parts: [] },
-    { lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 1, parts: ["a", "b", "c", "d"] },
-    { lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 1, parts: "a" },
-  ]) assert.throws(() => validateChatReplyInput(bad))
-})
-
-test("chat-reply decision: pending → post, missing → claim, answered → duplicate, timed_out / closed → reject (409)", () => {
-  assert.deepEqual(chatReplyDecision(null), { action: "claim" })
-  assert.deepEqual(chatReplyDecision({ status: "pending", message_id: null }), { action: "post" })
-  assert.deepEqual(chatReplyDecision({ status: "answered", message_id: 9 }), { action: "duplicate" })
-  assert.deepEqual(chatReplyDecision({ status: "timed_out", message_id: 9 }), { action: "reject", reason: "timed_out" })
-  assert.deepEqual(chatReplyDecision({ status: "failed", message_id: null }), { action: "reject", reason: "closed" })
-})
-
-test("mtalk-external-post: choice/ack close the 2-minute watch, live watch before the ack, /chat-reply is signed and DM-only", async () => {
+test("mtalk-external-post: no choice card / live watch / /chat-reply; answers are posted as plain replies right away", async () => {
   const src = await Deno.readTextFile(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
-  const bg = src.slice(src.indexOf("async function answerInBackground"), src.indexOf("// ---------- 「最新を調べる」"))
-  assert.match(bg, /const ok = parts\.length > 0 \|\| choice != null/)
-  assert.ok(bg.indexOf("finishDispatch(supabase, groupId, messageId, ok ? AI_CHAT_STATUS.answered") < bg.indexOf("openLiveWatch("), "確定してから見張りを作る")
-  assert.ok(bg.indexOf("openLiveWatch(") < bg.indexOf("postBotText("), "見張りを作ってから「調べています」を送る")
-  assert.match(bg, /kind: AI_CHAT_CHOICE_KIND, dedupeKey: `msg:\$\{messageId\}`/)
-  assert.match(bg, /closeLiveWatches\(supabase, groupId, closes\)/)
-  assert.equal(AI_CHAT_CHOICE_KIND, "ai_chat_choice")
-  assert.equal(AI_CHAT_LIVE_KIND, "ai_chat_live")
-  assert.equal(AI_CHAT_LIVE_REPLY_PATH, "/chat-reply")
-  // /chat-reply は署名の検証より後（/chat-dispatch だけが署名の前）
-  const auth = src.indexOf("if (!authorized) return respond")
-  assert.ok(src.indexOf("if (path === AI_CHAT_LIVE_REPLY_PATH") > auth)
-  const reply = src.slice(src.indexOf("async function chatReply"), src.indexOf("Deno.serve("))
-  assert.match(reply, /const groupId = await botDirectRoom\(supabase, input\.mtalkUserId\)\n  if \(groupId !== input\.groupId\) throw new ExternalPostError\("送信先のトークが見つかりません", 404\)/)
-  assert.ok(reply.indexOf("setLiveWatch(supabase, groupId, key, AI_CHAT_STATUS.pending, answered)") < reply.indexOf("postBotText("), "確定してから送る")
-  assert.match(reply, /409\)/)
-  assert.match(reply, /if \(first == null\) await setLiveWatch\(supabase, groupId, key, AI_CHAT_STATUS\.answered, \{ status: AI_CHAT_STATUS\.pending/)
-  assert.doesNotMatch(reply, /console\.\w+\([^)]*(parts|bodyText|token)/)
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+  for (const gone of ["ai_chat_choice", "AI_CHAT_CHOICE_KIND", "buildAiChoiceCard", "openLiveWatch", "closeLiveWatches", "AI_CHAT_LIVE_KIND", "/chat-reply", "AI_CHAT_LIVE_REPLY_PATH", "chatReply("]) {
+    assert.ok(!code.includes(gone), gone)
+  }
+  const bg = src.slice(src.indexOf("async function answerInBackground"), src.indexOf("// 「ログイン情報を更新」のカード"))
+  assert.match(bg, /const ok = parts\.length > 0\n/)
+  assert.ok(bg.indexOf("finishDispatch(supabase, groupId, messageId, ok ? AI_CHAT_STATUS.answered") < bg.indexOf("postBotText("), "確定してから送る")
+  assert.ok(bg.indexOf("postBotText(") < bg.indexOf("postLoginLinks(supabase, groupId, links, `msg:${messageId}`)"), "答えのあとにボタン")
+  // gourmet の古い版の choice / live は無視して parts の文だけ送る
+  assert.deepEqual(aiChatReplyParts({ parts: ["ご質問：「今月のPVは？」\n1. …\n2. …"], choice: { question: "今月のPVは？" }, live: { lookup_id: LOOKUP } }), ["ご質問：「今月のPVは？」\n1. …\n2. …"])
 })
 
-test("live timeout migration: 20 minutes pending → timed_out + card with the 「2」 button; wired into the per-minute dispatcher", async () => {
-  const sql = await Deno.readTextFile(new URL("../supabase/migrations/20261001050000_chat_ai_analysis_live_timeouts.sql", import.meta.url))
-  assert.match(sql, /create or replace function public\.chat_ai_analysis_live_timeouts\(\)/)
-  assert.match(sql, /d\.kind = 'ai_chat_live'/)
-  assert.match(sql, /d\.status = 'pending' and d\.created_at < now\(\) - interval '20 minutes'/)
-  assert.match(sql, /d\.status = 'answered' and d\.finished_at < now\(\) - interval '2 minutes'/)
-  assert.match(sql, /for update skip locked/)
-  assert.match(sql, /'command', '2：今あるデータですぐ答える'/)
-  assert.match(sql, /今あるデータですぐ答える場合は「2」を送ってください/)
+test("/mtalk-chat links: only gourmet credential buttons pass (relogin), others are dropped", () => {
+  const url = "https://marugo-s.github.io/gourmet/?view=accounts&source=ikyu&store=112789"
+  assert.deepEqual(aiChatLinks({ parts: ["a"], links: [{ kind: "relogin", source: "ikyu", store_name: "BISTRO CAVACAVA", url }, { kind: "relogin", source: "ikyu", url: "https://evil.example/" }] }),
+    [{ kind: "relogin", source: "ikyu", storeName: "BISTRO CAVACAVA", url }])
+  assert.deepEqual(aiChatLinks({ parts: ["a"] }), [])
+  assert.deepEqual(aiChatLinks(null), [])
+})
+
+test("live watch migration: chat_ai_analysis_live_timeouts() becomes a no-op that only closes leftover watches; dispatcher untouched", async () => {
+  const sql = await Deno.readTextFile(new URL("../supabase/migrations/20261001190000_chat_ai_analysis_live_watch_noop.sql", import.meta.url))
+  assert.match(sql, /create or replace function public\.chat_ai_analysis_live_timeouts\(\)\nreturns integer/)
+  assert.doesNotMatch(sql, /insert into public\.chat_messages/, "案内を投稿しない")
+  assert.match(sql, /set status = 'failed'/)
+  assert.match(sql, /return 0;/)
+  assert.doesNotMatch(sql, /invoke_high_frequency_dispatcher_cron/, "毎分の見張りの定義は変えない（呼び出し先だけ置き換える）")
   assert.match(sql, /revoke all on function public\.chat_ai_analysis_live_timeouts\(\) from public, anon, authenticated/)
-  const fn = sql.slice(sql.indexOf("create or replace function public.invoke_high_frequency_dispatcher_cron()"))
-  for (const call of ["chat_ai_analysis_reply_timeouts", "chat_ai_analysis_live_timeouts", "chat_dispatch_scheduled_messages", "invoke_gmail_alert_cron", "invoke_receipt_midreport_cron",
-    "invoke_reservation_today_cron", "invoke_review_alert_cron", "invoke_tokyo_dome_weekly_cron", "invoke_foodcourt_weekly_report_cron", "invoke_pv_japan_alert_cron"]) {
-    assert.match(fn, new RegExp(`perform public\\.${call}\\(\\)`), call)
-  }
-  assert.equal(AI_CHOICE_COMMANDS.now, "2：今あるデータですぐ答える", "SQL のボタンと同じ文")
 })
 
 // ---------- 「ログイン情報を更新」のボタン・お知らせ（/chat-notice） ----------
@@ -631,13 +563,16 @@ test("login links: only gourmet's credential screen URL passes; labels are decid
   assert.equal(AI_CHAT_LOGIN_LINKS_KIND, "ai_chat_login_links")
 })
 
-test("chat-reply keeps working without links; chat-notice validates like chat-reply with its own id", () => {
-  assert.deepEqual(validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] }).links, [])
-  assert.equal(validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"], links: [{ kind: "relogin", source: "ikyu", url: CRED_URL }] }).links.length, 1)
+test("chat-notice validates the room, user, parts and links with its own id", () => {
+  assert.deepEqual(validateChatNoticeInput({ notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] }).links, [])
+  assert.equal(validateChatNoticeInput({ notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"], links: [{ kind: "relogin", source: "ikyu", url: CRED_URL }] }).links.length, 1)
   const n = validateChatNoticeInput({ notice_id: RETRY.toUpperCase(), mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["【再ログイン後の取得結果】"] })
   assert.deepEqual([n.noticeId, n.groupId, n.parts.length, n.links.length], [RETRY, 42, 1, 0])
-  for (const bad of [null, { mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] }, { notice_id: "x", mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] },
-    { notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [] }]) assert.throws(() => validateChatNoticeInput(bad))
+  assert.equal(validateChatNoticeInput({ notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a", "b".repeat(3000)] }).parts[1].length, AI_CHAT_LIMITS.replyMax)
+  for (const bad of [null, [], { mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] }, { notice_id: "x", mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a"] },
+    { notice_id: RETRY, mtalk_user_id: "x", mtalk_group_id: 42, parts: ["a"] }, { notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 0, parts: ["a"] },
+    { notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [] }, { notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["a", "b", "c", "d"] },
+    { notice_id: RETRY, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: "a" }]) assert.throws(() => validateChatNoticeInput(bad))
   assert.equal(aiChatNoticeDedupeKey(RETRY.toUpperCase()), `notice:${RETRY}`)
   assert.equal(AI_CHAT_NOTICE_KIND, "ai_chat_notice")
   assert.equal(AI_CHAT_NOTICE_PATH, "/chat-notice")
@@ -650,8 +585,7 @@ test("mtalk-external-post: /chat-notice is signed, DM-only, once per notice_id; 
   const notice = src.slice(src.indexOf("async function chatNotice"), src.indexOf("Deno.serve("))
   assert.match(notice, /const groupId = await botDirectRoom\(supabase, input\.mtalkUserId\)\n  if \(groupId !== input\.groupId\) throw new ExternalPostError\("送信先のトークが見つかりません", 404\)/)
   assert.ok(notice.indexOf(".insert({ kind: AI_CHAT_NOTICE_KIND") < notice.indexOf("postBotText("), "先に1回だけを確保してから送る")
-  const reply = src.slice(src.indexOf("async function chatReply"), src.indexOf("async function postLoginLinks"))
-  assert.ok(reply.indexOf("postBotText(") < reply.indexOf("postLoginLinks(supabase, groupId, input.links, key)"), "答えのあとにボタン")
+  assert.ok(notice.indexOf("postBotText(") < notice.indexOf("postLoginLinks(supabase, groupId, input.links, key)"), "答えのあとにボタン")
   assert.match(src, /kind: AI_CHAT_LOGIN_LINKS_KIND, dedupeKey/)
 })
 
@@ -660,9 +594,9 @@ test("AI分析: gourmet の取得の内部の言葉（computerUse・サブエー
   assert.equal(scrubInternalLines(`ご質問：「今月は？」\n${leak}\n\n予約は12件です`), "ご質問：「今月は？」\n\n予約は12件です")
   for (const t of ["subagent", "executor", "claimId 不一致", "Playwright", "--fail", "INGEST_TOKEN", "親エージェントで再実行"]) assert.ok(INTERNAL_TERMS.test(t), t)
   for (const t of ["今月の予約は12件です", "Shellfish platter", "シェルフィッシュ", "一休（BISTRO CAVACAVA）：ログイン情報の確認が必要です"]) assert.ok(!INTERNAL_TERMS.test(t), t)
-  const reply = validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [`ご質問\n${leak}`, "予約は12件です"] })
+  const reply = validateChatNoticeInput({ notice_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [`ご質問\n${leak}`, "予約は12件です"] })
   assert.deepEqual(reply.parts, ["ご質問", "予約は12件です"])
-  const all = validateChatReplyInput({ lookup_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [leak] })
+  const all = validateChatNoticeInput({ notice_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: [leak] })
   assert.deepEqual(all.parts, [SCRUBBED_FALLBACK])
   const notice = validateChatNoticeInput({ notice_id: LOOKUP, mtalk_user_id: MUSER, mtalk_group_id: 42, parts: ["【再ログイン後の取得結果】", "claim not found"] })
   assert.deepEqual(notice.parts, ["【再ログイン後の取得結果】"])

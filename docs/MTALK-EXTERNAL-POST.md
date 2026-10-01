@@ -75,7 +75,7 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 ## 「AI分析」Bot への質問（`POST /chat-dispatch`、migration `20261001010000_chat_ai_analysis_bot_replies.sql`）
 
 利用者が「AI分析」Bot との 1 対 1 に文章を書くと、Bot が gourmet の AI分析（`ai-analyst POST /mtalk-chat`。画面の AI分析と同じモデル・同じ 7 つの集計関数）で答えます。
-扱うのは PV・予約・口コミの分析だけで、PDF レポートの作成はしません（PDF は gourmet の画面から送ります）。データの質問には、先に「最新を調べる／今あるデータで答える」を選んでもらいます（下記）。
+扱うのは PV・予約・口コミの分析だけで、PDF レポートの作成はしません（PDF は gourmet の画面から送ります）。データの質問にも常にすぐ、gourmet の取り込み済みのデータ（毎日の取得でためた確定値）で答えます。答えの最後に各サイトの最終取得日時（日本時間）と対象期間（例「データ：一休 10/1 18:30取得（9/1〜9/30）」）が付き、36 時間より古い・未取得のサイトはそう書かれます。
 
 1. トリガー `chat_messages_enqueue_ai_analysis_reply`（after insert）が、次をすべて満たす発言だけを pg_net で `/chat-dispatch` へ渡す:
    `kind = 'text'`・本文あり・送信者が Bot でない・部屋が「AI分析」Bot と送信者の 1 対 1（`direct_key`）でゴミ箱でない。
@@ -103,58 +103,44 @@ gourmet 側で決めること（README 参照）: 読むデータの持ち主は
 
 配備の順番: gourmet（migration 016・ai-analyst）→ line_report（main へのマージで migration と `mtalk-external-post` を配備）。新しい秘密情報はありません。
 
-## 「最新を調べる／今あるデータで答える」（`POST /chat-reply`、migration `20261001050000_chat_ai_analysis_live_timeouts.sql`）
+## 「最新を調べる／今あるデータで答える」の選択（廃止、migration `20261001190000_chat_ai_analysis_live_watch_noop.sql`）
 
-データの質問には、Bot はすぐ答えず次の 2 つを選んでもらいます。
+2026-10-01 18:40 の利用者の決定で、選択のカードは廃止しました。gourmet の DB は毎日の取得で確定した数値をためておく保存場所で、
+「AI分析」Bot はデータの質問にも常にすぐ、そのデータで答えます（推測・予想は「（推測）」「（予想）」と明記して事実と分ける）。
 
-1. サイトにログインして最新を調べる（時間がかかります：5〜10分ほど）
-2. 今あるデータですぐ答える（少し正確性が落ちることがあります）
+- `/chat-dispatch` は選択のカード（kind `ai_chat_choice`）も「最新を調べる」の見張り（kind `ai_chat_live`）も作らない。gourmet の古い版が
+  `choice` / `live` / `live_close` を返しても無視し、`parts` の文をふつうの返事として送る。
+- `POST /chat-reply` は削除（404）。gourmet も送らない。
+- `chat_ai_analysis_live_timeouts()` は何も投稿しない関数に置き換え、閉じ忘れの `ai_chat_live` の行を `failed` で閉じるだけにした。
+  毎分の `high-frequency-dispatcher-cron-job`（`invoke_high_frequency_dispatcher_cron()`）の定義は変えていない。過去の行・カードは履歴として残る。
+- 以前のカードの「1」「2」のボタンを押した場合は、gourmet が直前の質問にすぐ答えるか、「質問をそのまま送ってください」と案内する。
 
-- 選択肢を出すかどうかと、選択待ちの質問の保存（30 分で期限切れ・新しい質問で置き換え）は gourmet（`/mtalk-chat`、`mtalk_live_lookups`）が決める。
-  あいさつ・お礼・使い方の質問と、最新を取り直せる店舗×サイトが無い場合はすぐ答える（gourmet README 参照）。
-- 表示: gourmet の返事に `choice` があれば、Bot はカード（kind `ai_chat_choice`、`msg:<message id>`）を投稿する。ボタンは
-  `1：サイトにログインして最新を調べる`（primary）と `2：今あるデータですぐ答える`（secondary）。押すとその文が利用者の発言として送られ
-  （`data-card-command`）、ふつうの質問と同じく `/chat-dispatch` → gourmet へ届く。「1」「２」「①」などを手で送っても選べる。ボタンの文は
-  この関数が決め、gourmet からは受け取らない。カードの本文（プレビュー・通知・古い表示）は gourmet の `parts[0]`（番号での選び方つき）。
-- 「2」: gourmet が保存した質問に今あるデータで答え、ふつうの返事として投稿する。
-- 「1」: gourmet が取得を依頼して `live.lookup_id` を返す。関数は先に見張り（`chat_alert_dispatches`、kind `ai_chat_live`、`live:<lookup_id>`、
-  `pending`）を作り、続けて「調べています。終わったらお知らせします」を投稿する。選択肢も「調べています」も `ai_chat_reply` の返事として
-  `answered` に確定するので、2 分の見張り・画面の「・・・」は誤って時間切れにならない。
-- 取得が終わると gourmet が `POST /chat-reply`（署名つき）`{ lookup_id, mtalk_user_id, mtalk_group_id, parts[1..3] }` を送る。送り先はその利用者と
-  「AI分析」Bot の 1 対 1（`chat_ensure_bot_direct` の部屋と一致しなければ 404）。見張りを `pending` → `answered` に **1 回だけ**確定してから送る。
-  同じ `lookup_id` の再送は送らず成功扱い、見張りが `timed_out`（案内済み）または `failed`（「2」で答えた・置き換えた）なら 409（gourmet は答えを捨てる）。
-  見張りが無い（作るのに失敗した）場合は作ってから送る。1 通目を送る前に失敗したら確定を戻す（gourmet がやり直す）。
-- 20 分たっても `pending` のまま、または `answered` なのに 1 通目が記録されていないまま 2 分たった見張りは、`chat_ai_analysis_live_timeouts()`
-  （`high-frequency-dispatcher-cron-job` から毎分）が `timed_out` に確定し、「最新データの取得が20分以内に終わりませんでした…「2」を送ってください」の
-  カード（「2 今あるデータですぐ答える」のボタンつき）を Bot として 1 通送る。
-- gourmet の返事の `live_close`（「2」で答えた・新しい質問で置き換えた lookup_id）は、その見張りを `failed` にして閉じる。
+## 「ログイン情報を更新」のボタンと gourmet からのお知らせ（`/mtalk-chat` の返事の `links`・`POST /chat-notice`）
 
-配備の順番: gourmet migration 019 → line_report（main へのマージで migration と `mtalk-external-post`）→ gourmet の `agent-api`・`ai-analyst`。新しい秘密情報はありません。
-
-## 「ログイン情報を更新」のボタンと gourmet からのお知らせ（`/chat-reply` の `links`・`POST /chat-notice`）
-
-gourmet の取得がログイン情報の問題（gourmet の `failure_kind = needs_relogin`）で失敗したとき、「最新を調べる」の回答に店舗×サイトごとの
+gourmet の取得がログイン情報の問題（gourmet の `failure_kind = needs_relogin`）で止まっているサイトのデータを使って答えたとき、回答に店舗×サイトごとの
 「ログイン情報を更新」のボタンを添えます。パスワードはトークに書かせず、トークを通しません（ボタンは gourmet のアプリの登録画面を開くだけ）。
 
-- `/chat-reply` は任意で `links: [{ kind: "relogin", source, store_name, url }]` を受け取る。答え（parts）を送ったあと、カード
-  （kind `ai_chat_login_links`、dedupe は `live:<lookup_id>`）を 1 回だけ投稿する。ボタンの文（`ログイン情報を更新（一休（BISTRO CAVACAVA））`）と
+- gourmet の `/mtalk-chat` の返事は任意で `links: [{ kind: "relogin", source, store_name, url }]` を持つ。答え（parts）を送ったあと、カード
+  （kind `ai_chat_login_links`、dedupe は `msg:<message id>`）を 1 回だけ投稿する（`aiChatLinks`）。ボタンの文（`ログイン情報を更新（一休（BISTRO CAVACAVA））`）と
   注意書き（「パスワードはこのトークに書かないでください」）はこの関数が決め、gourmet からは受け取らない。
 - URL は gourmet のアプリ（`https://marugo-s.github.io/gourmet/?view=accounts&source=<サイト>&store=<店舗コード>&retry=<依頼のUUID>`）だけを通す
   （https・ホスト・パス・問い合わせのキーが完全に一致しないもの、`source` が `links` の値と違うもの、`kind` が `relogin` 以外のものは捨てる）。最大 6 個。
   チャット画面では URL のボタンとして新しいタブで開く（既存のカードの表示のまま。画面の変更なし）。
-- カードを送れなくても答えは届いているので失敗にしない（ログだけ）。`links` の無い呼び出し（いまの gourmet）はこれまでどおり。
+- カードを送れなくても答えは届いているので失敗にしない（ログだけ）。`links` の無い返事はこれまでどおり。
 - 「私は人間です」の確認（gourmet の `needs_human_check`）にはボタンを付けない（gourmet が本文で「次の回に自動でやり直します。続くときは Grok Bot のアプリで SiteBot に伝えてください」と案内する）。
 
-`POST /chat-notice`（署名つき）`{ notice_id, mtalk_user_id, mtalk_group_id, parts[1..3], links? }`: 「最新を調べる」とは別の gourmet からのお知らせ
+`POST /chat-notice`（署名つき）`{ notice_id, mtalk_user_id, mtalk_group_id, parts[1..3], links? }`: gourmet からのお知らせ
 （例: ログイン情報を更新したあとの「【再ログイン後の取得結果】」）。送り先はその利用者と「AI分析」Bot の 1 対 1 だけ（違えば 404）。
 `chat_alert_dispatches`（kind `ai_chat_notice`、`notice:<notice_id>`）を先に確保してから送るので、同じ `notice_id` の再送は送らず成功扱い。
-1 通目を送る前に失敗したら確保を取り消す（gourmet が 3 回までやり直す）。`links` があれば同じ規則でカードを付ける。見張り（20 分・2 分）とは関係しない。
+1 通目を送る前に失敗したら確保を取り消す（gourmet が 3 回までやり直す）。`links` があれば同じ規則でカードを付ける。2 分の見張りとは関係しない。
 
 配備の順番: gourmet migration 020 → line_report（main へのマージで `mtalk-external-post`）→ gourmet の `agent-api`・`review-api`・Pages。新しい秘密情報・migration はありません。
 
 ### 内部の言葉を M-talk へ出さない（念のため）
 
 gourmet は取得の失敗を「一休（BISTRO CAVACAVA）：ログイン情報の確認が必要です」のような決まった文で書き、Grok Bot の理由の文は送らない。
-そのうえで念のため、`/chat-reply`・`/chat-notice` の parts と「AI分析」の返答（`aiChatReplyParts`）は、内部の言葉
+そのうえで念のため、`/chat-notice` の parts と「AI分析」の返答（`aiChatReplyParts`）は、内部の言葉
 （computerUse・サブエージェント・executor・Shell・claim・Playwright・INGEST_TOKEN など。`INTERNAL_TERMS`、gourmet の `failure-text.js` と同じ一覧）を含む行を落としてから投稿する。
 すべての行が落ちたときは「（回答を表示できませんでした。もう一度質問してください）」を 1 通だけ送る。
+
+配備の順番（選択の廃止）: gourmet（migration 022・`ai-analyst`・`agent-api`）→ line_report（main へのマージで migration `20261001190000` と `mtalk-external-post`）。新しい秘密情報はありません。

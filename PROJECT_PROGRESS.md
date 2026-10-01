@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-10-01 - M-talk「AI分析」Botの選択カード・「最新を調べる」・20分の見張りを廃止
+
+- 利用者の要望で、AI分析Botはデータの質問にも選択を挟まずすぐ答える方式に戻した。数値の鮮度は gourmet（ai-analyst `/mtalk-chat`）がサイトごとの「データ：…取得（期間）」と、36時間超・取り込みなし・直近の取得失敗の注記として回答に付ける。照合（anti-hallucination）と「（推測）／（予想）」の表記規則は gourmet 側で維持。
+- `_shared/mtalk_external_post.ts`: 選択カード・live の検証を削除し、`validateChatPostBase`と`aiChatLinks`を追加。`mtalk-external-post/index.ts`: `/chat-reply`と見張りを削除し、回答の`links`があれば回答のあとに`postLoginLinks`で1回だけボタンを送る。失敗の文（決まった文だけ）は変更なし。
+- migration `20261001190000_chat_ai_analysis_live_watch_noop.sql`: `chat_ai_analysis_live_timeouts`を no-op に置き換え（スケジュールが残っても何も送らない）。migration 数 312→313。
+- テスト: `tests/mtalk_external_post.test.ts`を更新。`test:chat`・`npm run check`・`npm run test:ci`（50件）成功。`knowledge:check`は生成物`graphify-out/graph.json`（gitignore）が本コンテナに無いため実行不可（CI対象外）。
+
 ### 2026-09-30 - ドームシティ各ホールで掲載が消えた予定がDBに残り続ける不具合を修正
 
 - 利用者から、週次ドーム配信で同じ公演が2行に分かれて出ているという指摘があった（9/24・9/25のBELLE & SEBASTIAN、9/27のDEZERT）。片方は正しい公演名で時刻付き、もう片方は副題だけの断片や旧ツアー名で時刻なし。当初はパーサがタイトルを取り違えていると見立てたが、実データの`updated_at`を確認したところ、正しい行は当日の取り込み時刻、重複行は`2026-08-05`のまま更新が止まっていた。つまり現行パーサはこれらの断片を生成しておらず、公演名が確定して差し替わった際の**旧い行が消えずに残っていた**のが実態だった。
