@@ -151,3 +151,10 @@ gourmet の取得がログイン情報の問題（gourmet の `failure_kind = ne
 1 通目を送る前に失敗したら確保を取り消す（gourmet が 3 回までやり直す）。`links` があれば同じ規則でカードを付ける。見張り（20 分・2 分）とは関係しない。
 
 配備の順番: gourmet migration 020 → line_report（main へのマージで `mtalk-external-post`）→ gourmet の `agent-api`・`review-api`・Pages。新しい秘密情報・migration はありません。
+
+### 内部の言葉を M-talk へ出さない（念のため）
+
+gourmet は取得の失敗を「一休（BISTRO CAVACAVA）：ログイン情報の確認が必要です」のような決まった文で書き、Grok Bot の理由の文は送らない。
+そのうえで念のため、`/chat-reply`・`/chat-notice` の parts と「AI分析」の返答（`aiChatReplyParts`）は、内部の言葉
+（computerUse・サブエージェント・executor・Shell・claim・Playwright・INGEST_TOKEN など。`INTERNAL_TERMS`、gourmet の `failure-text.js` と同じ一覧）を含む行を落としてから投稿する。
+すべての行が落ちたときは「（回答を表示できませんでした。もう一度質問してください）」を 1 通だけ送る。

@@ -548,13 +548,33 @@ export function aiChatRequestBody(message: AiChatMessageRow, history: { role: st
   })
 }
 
+// 利用者に見せてはいけない内部の言葉（gourmet の取得の仕組み・道具・認証まわり）。gourmet の failure-text.js と同じ一覧。
+// gourmet 側でも落としているが、念のため M-talk へ投稿する直前にも、これを含む行を落とす（言い換えはしない）。
+export const INTERNAL_TERMS = new RegExp([
+  'computer\\s*-?\\s*use', 'sub-?agents?', 'サブエージェント', 'executor', 'エグゼキュータ', '親エージェント', 'この実行環境',
+  '\\bshell\\b', '\\bclaim(?:[-_ ]?ids?)?\\b', 'claimid', 'playwright', 'puppeteer', 'xdotool', 'devtools', '\\bcdp\\b', '\\bmcp\\b',
+  'ingest_token', 'agent-queue', 'stage_cred', '--fail\\b', '--kind\\b', 'x-ingest-token', 'service_role',
+].join('|'), 'i')
+export const SCRUBBED_FALLBACK = '（回答を表示できませんでした。もう一度質問してください）'
+
+/** 内部の言葉を含む行を落とす。 */
+export function scrubInternalLines(text: string): string {
+  return text.split('\n').filter((line) => !INTERNAL_TERMS.test(line)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** 投稿する本文の最後の確認。空になった部分は除き、もとは本文があったのにすべて空なら決まった文を1つ。 */
+function scrubParts(parts: string[]): string[] {
+  const out = parts.map(scrubInternalLines).filter(Boolean)
+  return out.length || !parts.length ? out : [SCRUBBED_FALLBACK]
+}
+
 /** gourmet の回答（parts）を M-talk の発言に収まる形へ。空なら []。 */
 export function aiChatReplyParts(data: unknown): string[] {
   const parts = (data && typeof data === 'object' && Array.isArray((data as { parts?: unknown }).parts)) ? (data as { parts: unknown[] }).parts : []
-  return parts
+  return scrubParts(parts
     .map((p) => cleanText(p, AI_CHAT_LIMITS.replyMax, { multiline: true }))
     .filter(Boolean)
-    .slice(0, AI_CHAT_LIMITS.replyParts)
+    .slice(0, AI_CHAT_LIMITS.replyParts))
 }
 
 /** 失敗時に Bot が返す短い案内。gourmet が返した利用者向けの文（回数制限など）だけ使い、それ以外は定型文。 */
@@ -722,7 +742,7 @@ export function validateChatReplyInput(raw: unknown): ChatReplyInput {
   if (!Array.isArray(r.parts)) throw new ExternalPostError('parts が不正です')
   const parts = r.parts.map((p) => cleanText(p, AI_CHAT_LIMITS.replyMax, { multiline: true })).filter(Boolean)
   if (!parts.length || r.parts.length > AI_CHAT_LIMITS.replyParts) throw new ExternalPostError(`parts は1〜${AI_CHAT_LIMITS.replyParts}通です`)
-  return { lookupId: lookupId.toLowerCase(), mtalkUserId: mtalkUserId.toLowerCase(), groupId, parts, links: loginLinksFrom(r.links) }
+  return { lookupId: lookupId.toLowerCase(), mtalkUserId: mtalkUserId.toLowerCase(), groupId, parts: scrubParts(parts), links: loginLinksFrom(r.links) }
 }
 
 export type ChatNoticeInput = { noticeId: string; mtalkUserId: string; groupId: number; parts: string[]; links: LoginLink[] }
