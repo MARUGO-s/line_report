@@ -365,6 +365,9 @@
   </section>
 
   <section class="card" aria-labelledby="storeReviewHeading">
+    <div role="alert" style="margin-bottom:14px;padding:12px 14px;border:1px solid var(--warn);border-radius:10px;background:var(--warn-soft);color:var(--txt);font-weight:700;">
+      ⚠️ Google Places API（New）は停止中です。保存済みの口コミ・評価は表示できますが、店舗検索・口コミ更新・新着通知は停止しています。
+    </div>
     <h2 class="card-title" id="storeReviewHeading">自店舗口コミ</h2>
     <div class="competitor-panel">
       <div class="competitor-summary">
@@ -378,11 +381,11 @@
       <div class="competitor-form">
         <input id="storeReviewNameInput" class="input" type="text" placeholder="自店舗名（例: マルゴS）">
         <input id="storeReviewPlaceIdInput" class="input" type="text" placeholder="Google Place ID（自店舗）">
-        <button id="storeReviewAddBtn" class="btn primary" type="button">自店舗を登録</button>
+        <button id="storeReviewAddBtn" class="btn primary" type="button" disabled>自店舗を登録（停止中）</button>
       </div>
       <div class="controls" style="gap:8px;margin-top:0">
-        <button id="storeReviewSearchBtn" class="btn" type="button">自店舗を検索</button>
-        <button id="storeReviewRefreshBtn" class="btn" type="button">自店舗口コミを更新</button>
+        <button id="storeReviewSearchBtn" class="btn" type="button" disabled>自店舗を検索（停止中）</button>
+        <button id="storeReviewRefreshBtn" class="btn" type="button" disabled>自店舗口コミを更新（停止中）</button>
         <button id="storeReviewDeleteBtn" class="btn" type="button">登録解除</button>
         <span id="storeReviewStatus" class="meta" style="margin-top:0">競合口コミとは別枠で管理します。</span>
       </div>
@@ -393,7 +396,7 @@
         </div>
         <div id="storeReviewCandidates" class="nearby-candidates"><span class="meta">検索中…</span></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button id="storeReviewCandidateRegisterBtn" class="btn primary" type="button">選択した候補を自店舗に登録</button>
+          <button id="storeReviewCandidateRegisterBtn" class="btn primary" type="button" disabled>選択した候補を自店舗に登録（停止中）</button>
           <span id="storeReviewSearchStatus" class="meta" style="margin-top:0"></span>
         </div>
       </div>
@@ -414,11 +417,11 @@
       <div class="competitor-form">
         <input id="competitorNameInput" class="input" type="text" placeholder="競合店名（例: 近隣イタリアン）">
         <input id="competitorPlaceIdInput" class="input" type="text" placeholder="Google Place ID（口コミ取得に必要）">
-        <button id="competitorAddBtn" class="btn primary" type="button">競合を追加</button>
+        <button id="competitorAddBtn" class="btn primary" type="button" disabled>競合を追加（停止中）</button>
       </div>
       <div class="controls" style="gap:8px;margin-top:0">
-        <button id="competitorNearbyBtn" class="btn" type="button">周辺を自動検索</button>
-        <select id="nearbyRadiusSelect" class="input" style="width:auto;padding:5px 8px;font-size:0.85rem">
+        <button id="competitorNearbyBtn" class="btn" type="button" disabled>周辺を自動検索（停止中）</button>
+        <select id="nearbyRadiusSelect" class="input" style="width:auto;padding:5px 8px;font-size:0.85rem" disabled>
           <option value="100">半径100m</option>
           <option value="200">半径200m</option>
           <option value="300" selected>半径300m</option>
@@ -426,8 +429,8 @@
           <option value="1000">半径1km</option>
           <option value="2000">半径2km</option>
         </select>
-        <button id="competitorRefreshBtn" class="btn" type="button">口コミ情報を更新</button>
-        <span id="competitorStatus" class="meta" style="margin-top:0">Google Places APIキー未設定の場合、更新だけ失敗します。</span>
+        <button id="competitorRefreshBtn" class="btn" type="button" disabled>口コミ情報を更新（停止中）</button>
+        <span id="competitorStatus" class="meta" style="margin-top:0">Google Places API（New）は停止中です。保存済みデータのみ表示します。</span>
       </div>
       <div class="competitor-tabs">
         <button id="competitorTabRegisteredBtn" class="competitor-tab active" type="button" data-competitor-tab="registered">登録済み競合<span id="competitorTabRegisteredCount"></span></button>
@@ -443,7 +446,7 @@
           </div>
           <div id="nearbyCandidates" class="nearby-candidates"><span class="meta">「周辺を自動検索」を押すと候補が表示されます。</span></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button id="nearbyRegisterBtn" class="btn primary" type="button">選択した店舗を登録</button>
+            <button id="nearbyRegisterBtn" class="btn primary" type="button" disabled>選択した店舗を登録（停止中）</button>
             <span id="nearbyStatus" class="meta" style="margin-top:0"></span>
           </div>
         </div>
@@ -743,7 +746,7 @@ function renderStoreReviewContext(ctx) {
         ${excerpt}
       </div>
       <div class="competitor-actions">
-        <button class="btn" type="button" data-store-review-refresh="1">更新</button>
+        <button class="btn" type="button" data-store-review-refresh="1" disabled>更新（停止中）</button>
         <button class="btn" type="button" data-store-review-delete="1">登録解除</button>
       </div>
     </div>
@@ -974,7 +977,7 @@ function renderCompetitorContext(ctx) {
           ${excerpt}
         </div>
         <div class="competitor-actions">
-          <button class="btn" type="button" data-competitor-refresh="${escapeHtml(c.id)}">更新</button>
+          <button class="btn" type="button" data-competitor-refresh="${escapeHtml(c.id)}" disabled>更新（停止中）</button>
           <button class="btn" type="button" data-competitor-delete="${escapeHtml(c.id)}">削除</button>
         </div>
       </div>

@@ -5,6 +5,13 @@
 > **バックエンド Supabase**: `https://hocbnifuactbvmyjraxy.supabase.co`（プロジェクト名: hocbn）  
 > **最終更新**: 2026-09-10（数値予測・評価・関連文書。その他の設定値は各節の確認時点）
 
+> [!WARNING]
+> ## Google Places API（New）停止中 — 2026-10-02
+>
+> LINE Report の Google Places API は完全停止しています。自店舗・競合の検索、口コミ更新、新着口コミ通知は実行されません。Supabase に保存済みの店舗情報・口コミスナップショット・店舗理解資料は削除せず、既存データの表示と分析だけを継続します。
+>
+> `store_review_places`、`competitor_places` の登録行を削除すると、関連する履歴スナップショットも削除されるため、停止中は削除しないでください。
+
 ---
 
 ## 目次

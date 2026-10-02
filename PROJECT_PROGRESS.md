@@ -1,5 +1,10 @@
 # LINE Report Project Progress
 
+### 2026-10-02 - Google Places API（New）を完全停止（重要）
+
+- Google Places API のランニングコスト抑制のため、自店舗・競合店の検索、Place Details による口コミ更新、`review-alert-cron` の外部取得・新着通知を停止した。
+- `supabase/functions/_shared/competitor_review_context.ts` に停止ガードを置き、`review-alert-cron` も停止状態では外部 API を呼ばずに終了する。`public/reviews.html` は停止中であることを表示し、検索・更新ボタンを無効化する。
+- `store_review_places`、`competitor_places`、各口コミスナップショット、店舗理解資料は保持する。登録行を削除すると履歴が `on delete cascade` で消えるため、停止中は削除しない。
 ### 2026-10-01 - M-talk「AI分析」Botの選択カード・「最新を調べる」・20分の見張りを廃止
 
 - 利用者の要望で、AI分析Botはデータの質問にも選択を挟まずすぐ答える方式に戻した。数値の鮮度は gourmet（ai-analyst `/mtalk-chat`）がサイトごとの「データ：…取得（期間）」と、36時間超・取り込みなし・直近の取得失敗の注記として回答に付ける。照合（anti-hallucination）と「（推測）／（予想）」の表記規則は gourmet 側で維持。
