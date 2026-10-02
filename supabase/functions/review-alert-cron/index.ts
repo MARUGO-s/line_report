@@ -1,6 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
-import { refreshStoreReview, refreshCompetitorReviews } from "../_shared/competitor_review_context.ts"
+import {
+  GOOGLE_PLACES_API_SUSPENDED,
+  refreshStoreReview,
+  refreshCompetitorReviews,
+} from "../_shared/competitor_review_context.ts"
 import { pushLineMessagesToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
 import { isInternalCronAuthorized } from "../_shared/internal_cron_auth.ts"
 
@@ -68,6 +72,13 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, serviceRoleKey) as unknown as DbClient
   if (!(await isInternalCronAuthorized(req, supabase))) {
     return json({ ok: false, error: "Unauthorized" }, 401)
+  }
+  if (GOOGLE_PLACES_API_SUSPENDED) {
+    return json({
+      ok: true,
+      disabled: true,
+      message: "Google Places API is suspended; no external Places requests were made.",
+    }, 200)
   }
   const url = new URL(req.url)
   const dryRun = ["1", "true", "yes", "on"].includes((url.searchParams.get("dry_run") ?? "").toLowerCase())

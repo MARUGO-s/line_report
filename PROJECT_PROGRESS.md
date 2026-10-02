@@ -1,5 +1,11 @@
 # LINE Report Project Progress
 
+### 2026-10-02 - Google Places API（New）を完全停止（重要）
+
+- Google Places API のランニングコスト抑制のため、自店舗・競合店の検索、Place Details による口コミ更新、`review-alert-cron` の外部取得・新着通知を停止した。
+- `supabase/functions/_shared/competitor_review_context.ts` に停止ガードを置き、`review-alert-cron` も停止状態では外部 API を呼ばずに終了する。`public/reviews.html` は停止中であることを表示し、検索・更新ボタンを無効化する。
+- `store_review_places`、`competitor_places`、各口コミスナップショット、店舗理解資料は保持する。登録行を削除すると履歴が `on delete cascade` で消えるため、停止中は削除しない。
+
 ### 2026-09-21 - 無関係な重ね聞きへ前回のKPI/採算試算が引き継がれてしまう不具合を修正（重要）
 
 - 利用者から、クロワッサン導入のKPI試算をした後、全く関係ない新しい質問（「単価は上位なのに総売上が下位のまま。客数不足を解消する具体的な施策は？」）をした際、質問の趣旨と無関係にクロワッサンのKPI試算がまた出てきてしまう、しかも的を得ていない回答だという報告があった。実際のPDFを確認すると、本題の回答が丸ごと空（「回答を生成できませんでした」）で、代わりに前回と同じ新商品KPI試算の表だけが付録として出ていた。

@@ -9,6 +9,10 @@ import {
 import { loadStoreRegistry } from './store_receipt_query.ts'
 import { resolveGroqTextModel } from './groq_model.ts'
 
+// 2026-10-02: Google Places API の利用を停止。保存済みスナップショットの参照は継続し、
+// 外部APIを呼ぶ検索・更新処理だけを明示的に止める。
+export const GOOGLE_PLACES_API_SUSPENDED = true
+
 type CompetitorPlaceRow = {
   id: number
   store_partition_key: string
@@ -381,6 +385,12 @@ async function fetchGooglePlaceDetailsOnce(placeId: string): Promise<NormalizedG
 }
 
 function getGooglePlacesApiKey(): string {
+  if (GOOGLE_PLACES_API_SUSPENDED) {
+    throw {
+      status: 503,
+      message: 'Google Places API is currently suspended. Saved review snapshots remain available.',
+    } satisfies AppError
+  }
   const apiKey = (
     Deno.env.get('GOOGLE_PLACES_API_KEY')
     ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
