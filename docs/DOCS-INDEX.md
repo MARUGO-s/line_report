@@ -46,6 +46,7 @@
 | `public/mtalk-help.html` | 店舗スタッフ | **使い方だけ**の共有ページ。テーブル名・管理API・内部構造は載せない。本番 `/mtalk-help.html` |
 | [CHAT-TALK-GUIDE.md](./CHAT-TALK-GUIDE.md) | 運用・開発 | **トーク（chat.html）** — 利用条件、発言種別（text/card/image）、予約通知の複製、画像の非公開バケット、検索、既読・リアクション・返信・メンション |
 | [CHAT-ADMIN-PERMISSIONS.md](./CHAT-ADMIN-PERMISSIONS.md) | 運用・開発 | **M-talk専用管理** — ユーザー利用停止・論理削除、1対1／ルーム別の閲覧・送信・招待・管理権限、管理API、監査 |
+| [MTALK-EXTERNAL-POST.md](./MTALK-EXTERNAL-POST.md) | 開発・運用 | **M-talk外部投稿API** — gourmet の AI 分析レポートを「AI分析」Bot のカード＋PDFで利用者へ送る／「AI分析」Botへの質問に gourmet の AI分析で答える。署名認証・ルート・配備 |
 | [LINE-USER-APPROVAL-SECURITY.md](./LINE-USER-APPROVAL-SECURITY.md) | 運用・説明 | 利用許可・ルーム承認・管理 Bot・管理画面連携 |
 | [ROOM-SELF-CONFIG-GUIDE.md](./ROOM-SELF-CONFIG-GUIDE.md) | 運用・開発 | **ルーム・セルフ設定**（LINEワンパス＋ルーム個別パスワード）— フロー・データモデル・API・設定項目・運用・トラブルシュート |
 | [LINE-GROUP-BOT-IMPORTANT.md](./LINE-GROUP-BOT-IMPORTANT.md) | **必読** | グループは Bot **1体のみ**（LINE 仕様）／退出の誤解 |

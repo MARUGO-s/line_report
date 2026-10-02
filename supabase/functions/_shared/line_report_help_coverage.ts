@@ -58,6 +58,7 @@ export const EDGE_FUNCTION_HELP_CODES: Record<string, string[]> = {
   'chat-knowledge': ['OPS-01', 'KNW-02', 'JAI-02', 'DEV-02'],
   'chat-push': ['OPS-02', 'DEV-02', 'SEC-01'],
   'chat-search': ['OPS-02', 'DEV-02'],
+  'mtalk-external-post': ['OPS-01', 'OPS-02', 'DEV-02', 'SEC-01'],
   'foodcourt-forecast-cron': ['FCT-03', 'FCT-05', 'DEV-02'],
   'gmail-alert-cron': ['RSV-01', 'DEV-02'],
   'line-admin-webhook': ['ADM-01', 'DEV-02', 'SEC-01'],

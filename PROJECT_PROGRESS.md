@@ -5,6 +5,20 @@
 - Google Places API のランニングコスト抑制のため、自店舗・競合店の検索、Place Details による口コミ更新、`review-alert-cron` の外部取得・新着通知を停止した。
 - `supabase/functions/_shared/competitor_review_context.ts` に停止ガードを置き、`review-alert-cron` も停止状態では外部 API を呼ばずに終了する。`public/reviews.html` は停止中であることを表示し、検索・更新ボタンを無効化する。
 - `store_review_places`、`competitor_places`、各口コミスナップショット、店舗理解資料は保持する。登録行を削除すると履歴が `on delete cascade` で消えるため、停止中は削除しない。
+### 2026-10-01 - M-talk「AI分析」Botの選択カード・「最新を調べる」・20分の見張りを廃止
+
+- 利用者の要望で、AI分析Botはデータの質問にも選択を挟まずすぐ答える方式に戻した。数値の鮮度は gourmet（ai-analyst `/mtalk-chat`）がサイトごとの「データ：…取得（期間）」と、36時間超・取り込みなし・直近の取得失敗の注記として回答に付ける。照合（anti-hallucination）と「（推測）／（予想）」の表記規則は gourmet 側で維持。
+- `_shared/mtalk_external_post.ts`: 選択カード・live の検証を削除し、`validateChatPostBase`と`aiChatLinks`を追加。`mtalk-external-post/index.ts`: `/chat-reply`と見張りを削除し、回答の`links`があれば回答のあとに`postLoginLinks`で1回だけボタンを送る。失敗の文（決まった文だけ）は変更なし。
+- migration `20261001190000_chat_ai_analysis_live_watch_noop.sql`: `chat_ai_analysis_live_timeouts`を no-op に置き換え（スケジュールが残っても何も送らない）。migration 数 312→313。
+- テスト: `tests/mtalk_external_post.test.ts`を更新。`test:chat`・`npm run check`・`npm run test:ci`（50件）成功。`knowledge:check`は生成物`graphify-out/graph.json`（gitignore）が本コンテナに無いため実行不可（CI対象外）。
+
+### 2026-09-30 - ドームシティ各ホールで掲載が消えた予定がDBに残り続ける不具合を修正
+
+- 利用者から、週次ドーム配信で同じ公演が2行に分かれて出ているという指摘があった（9/24・9/25のBELLE & SEBASTIAN、9/27のDEZERT）。片方は正しい公演名で時刻付き、もう片方は副題だけの断片や旧ツアー名で時刻なし。当初はパーサがタイトルを取り違えていると見立てたが、実データの`updated_at`を確認したところ、正しい行は当日の取り込み時刻、重複行は`2026-08-05`のまま更新が止まっていた。つまり現行パーサはこれらの断片を生成しておらず、公演名が確定して差し替わった際の**旧い行が消えずに残っていた**のが実態だった。
+- 原因: 公式カレンダーは「現時点の全予定」を載せたスナップショットだが、`tokyo-dome-events-cron`の取り込みは`upsert`（主キー`event_date+venue+title`）のみで、行を足す・更新することしかできない。タイトルが変わると新しいキーの行が増えるだけで、旧タイトルの行はDBに残る。東京ドーム本体には掲載から消えた行を削除する突き合わせ処理（`dome_stale_deleted`）が既にあったが、カナデビア・後楽園・IMMには適用されていなかった。
+- 修正: 判定ロジックを`_shared/tokyo_dome_schedule.ts`の`planSnapshotReconcile()`に切り出し、各ホールとIMMの取り込み後にも突き合わせを実行するようにした。安全策を4つ入れている: (1)取得に失敗した会場は何もしない、(2)抽出件数が3件未満の回（サイト改修・一時的な空返し）は何もしない、(3)過去日は客数・売上の相関分析の資料なので対象外、(4)スナップショットの最終日より先の日付も、まだカレンダーの掲載範囲に入っていないだけなので対象外。レスポンスに`venue_stale_deleted`・`venue_reconcile_skipped`・`venue_reconcile_error`を追加し、実行結果を追えるようにした。
+- 回帰テスト3件追加（実際の重複3件の再現、過去日と掲載範囲外を消さないこと、取得失敗・件数過少で退避すること）。`tests/foodcourt_tokyo_dome_schedule.test.ts`9件成功。なお`tests/foodcourt_forecast_db.test.mjs`は`@electric-sql/pglite`未導入のため本コンテナでは実行不可（本修正の前後で同じ失敗、CIでは導入済み）。Deno・graphify・Obsidian知識ベースは本コンテナに無く、`deno check`と`knowledge:search`は実行できていない（CIの`deno check`で担保）。
+- 取り込みcronは毎日04:10 JSTに走るため反映は次回実行から。9/24〜9/27の重複3行は既に過去日になっており、今回の修正対象（今日以降）には入らないため自動では消えない。
 
 ### 2026-09-21 - 無関係な重ね聞きへ前回のKPI/採算試算が引き継がれてしまう不具合を修正（重要）
 

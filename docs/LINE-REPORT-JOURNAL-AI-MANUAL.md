@@ -773,12 +773,12 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 `npm run help:check` は、新しい入口が未分類のまま追加された場合に失敗します。
 
 - 公開コード入口: 43件
-- Edge Functions: 20件
-- 共有TypeScriptモジュール: 113件
+- Edge Functions: 21件
+- 共有TypeScriptモジュール: 114件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
-- SQL migrations: 308件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 114件
+- SQL migrations: 313件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 116件
 
 ### 公開画面・ブラウザコード
 
@@ -842,6 +842,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `gmail-alert-cron` | RSV-01 / DEV-02 |
 | `line-admin-webhook` | ADM-01 / DEV-02 / SEC-01 |
 | `line-webhook` | SAL-01 / SAL-02 / RSV-01 / OPS-03 / KNW-02 / DEV-02 / SEC-01 |
+| `mtalk-external-post` | OPS-01 / OPS-02 / DEV-02 / SEC-01 |
 | `pv-japan-alert-cron` | FCT-06 / DEV-02 |
 | `receipt-midreport-cron` | SAL-05 / DEV-02 |
 | `receipt-sheets-sync-cron` | SAL-05 / SAL-06 / DEV-02 |
@@ -921,6 +922,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/marugo_group_stores.ts` | SYS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_casual_chat.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_daily_sales_import.ts` | SAL-05 / SAL-07 / OPS-01 / DEV-02 |
+| `supabase/functions/_shared/mtalk_external_post.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_help_manual.ts` | OPS-01 / OPS-02 / JAI-02 / DEV-04 |
 | `supabase/functions/_shared/mtalk_menu_knowledge.ts` | KNW-01 / KNW-02 / OPS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_room_id.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
