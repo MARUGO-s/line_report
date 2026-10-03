@@ -166,6 +166,7 @@ test('schema, both settings surfaces and API persist the dedicated permission wi
   assert.match(admin, /reservation_image_registration_enabled: reservationImageRegistrationEnabled/)
   assert.match(admin, /reservationImageRegistrationEnabledRaw != null[\s\S]*?: undefined/)
   assert.match(page, /roomConfigReservationImageWrap\.hidden = !activeRoomIndividualSave/)
+  assert.match(page, /#roomConfigReservationImageWrap\[hidden\] \{\s*display: none;/)
   assert.match(page, /reservation_image_registration_enabled: activeRoomIndividualSave/)
   assert.match(page, /reservation_image_registration_enabled: parseDatasetBoolean\(tr\.dataset\.roomReservationImageRegistration, true\)/)
   assert.match(page, /reservation_image_registration_enabled: roomConfig\.reservation_image_registration_enabled !== false/)
@@ -173,4 +174,25 @@ test('schema, both settings surfaces and API persist the dedicated permission wi
   assert.match(page, /typeof opts\.overrideConfig\.reservation_image_registration_enabled === 'boolean'/)
   assert.match(selfPage, /key:'reservation_image_registration_enabled'/)
   assert.match(webhook, /handleReservationImportPostback\(\s*supabase, postbackData, eventRoomIdForPostback/)
+
+  // 実際の管理画面の行→保存値の経路で、個別OFFが一括保存によりONへ戻らないことを確認。
+  const context = vm.createContext({
+    parseDatasetBoolean: (value, fallback) => value == null ? fallback : value === 'true',
+    parseDatasetScheduleInt: () => null,
+    computeRoomEnabledFromFeatureConfig: () => true,
+  })
+  for (const [name, end] of [
+    ['getRoomConfigStateFromRow', 'function applyRoomConfigStateToRow'],
+    ['applyRoomConfigStateToRow', 'function getRoomConfigEnabledCount'],
+  ]) {
+    const start = page.indexOf(`function ${name}(`)
+    vm.runInContext(page.slice(start, page.indexOf(end, start)), context)
+  }
+  const row = { dataset: {}, querySelector: () => null }
+  context.applyRoomConfigStateToRow(row, { reservation_image_registration_enabled: false })
+  assert.equal(context.getRoomConfigStateFromRow(row).reservation_image_registration_enabled, false)
+  context.applyRoomConfigStateToRow(row, { reservation_image_registration_enabled: undefined })
+  assert.equal(context.getRoomConfigStateFromRow(row).reservation_image_registration_enabled, false)
+  context.applyRoomConfigStateToRow(row, { reservation_image_registration_enabled: true })
+  assert.equal(context.getRoomConfigStateFromRow(row).reservation_image_registration_enabled, true)
 })
