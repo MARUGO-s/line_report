@@ -1,5 +1,11 @@
 # LINE Report AI Handoff
 
+## 2026-10-04 - LINE予約画像登録ゲート
+
+- `room_summary_settings.reservation_image_registration_enabled`（既定true）。Webhookのルーム個別とセルフ設定で変更、店舗/全体一括では既存値維持。ユーザーは機能追加を依頼しており、マルゴ四谷の実設定をOFFにはしていない。
+- `_shared/reservation_image_registration.ts` はキャッシュせず最新設定を確認し、エラー時に登録拒否。画像確認カード作成前と予約postbackで使用。postbackの元ルーム・店舗を照合し、過去カードの登録/更新も停止。
+- 予約関連テスト `npm run test:reservation` に実ハンドラのモック実行7件追加。実LINE送信・顧客データは使わない。
+
 ## 現行（2026-09-21）フードコートQ&A・分析
 
 本番反映済み。最新SHA `ee775547`。日次/期間キャッシュは `foodcourt-analysis-ai-v32-generic-kpi-labels`。保存済み回答・旧PDFは自動では変わらない。画面更新後に再質問する。

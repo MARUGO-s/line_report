@@ -5681,6 +5681,10 @@
         </div>
       </div>
       <div id="roomConfigPaneCalendar" class="room-config-pane" hidden>
+        <div id="roomConfigReservationImageWrap" class="receipt-schedule-panel" hidden>
+          <label class="room-scope-option"><input id="roomConfigReservationImageRegistrationEnabled" type="checkbox">予約画像からの登録を許可</label>
+          <div class="muted" style="font-size:0.82rem;margin-top:6px;">このルームのみの設定です。OFFにすると確認カードを送らず、以前のカードからの登録・更新も停止します。レシート解析・会話からの予定登録・Gmail予約通知には影響しません。</div>
+        </div>
         <div id="roomConfigCalendarNoRoomHint" class="room-config-calendar-mode-hint" hidden>
           連携ルームがありません。「レシート関連」タブで受信済みルームを連携してから、カレンダー・予約の設定を行ってください。
         </div>
@@ -6215,6 +6219,8 @@
       roomConfigBudgetEntryEnabled: document.getElementById('roomConfigBudgetEntryEnabled'),
       roomConfigPettyReceiptAnalysisEnabled: document.getElementById('roomConfigPettyReceiptAnalysisEnabled'),
       roomConfigReceiptSalesRegistrationEnabled: document.getElementById('roomConfigReceiptSalesRegistrationEnabled'),
+      roomConfigReservationImageRegistrationEnabled: document.getElementById('roomConfigReservationImageRegistrationEnabled'),
+      roomConfigReservationImageWrap: document.getElementById('roomConfigReservationImageWrap'),
       roomConfigSelfEnabled: document.getElementById('roomConfigSelfEnabled'),
       roomConfigSelfPassword: document.getElementById('roomConfigSelfPassword'),
       roomConfigSelfPwStatus: document.getElementById('roomConfigSelfPwStatus'),
@@ -8900,6 +8906,9 @@
           ? String(dom.roomConfigSelfPassword.value) : undefined,
         petty_receipt_analysis_enabled: dom.roomConfigPettyReceiptAnalysisEnabled ? !!dom.roomConfigPettyReceiptAnalysisEnabled.checked : undefined,
         receipt_sales_registration_enabled: dom.roomConfigReceiptSalesRegistrationEnabled ? !!dom.roomConfigReceiptSalesRegistrationEnabled.checked : undefined,
+        // 店舗・全体一括保存ではこの個別の登録許可を上書きしない。
+        reservation_image_registration_enabled: activeRoomIndividualSave
+          ? !!dom.roomConfigReservationImageRegistrationEnabled.checked : undefined,
         receipt_correction_reply_enabled: !!(dom.roomConfigReceiptCorrectionReplyEnabled && dom.roomConfigReceiptCorrectionReplyEnabled.checked),
         non_receipt_image_reply_enabled: !!(dom.roomConfigNonReceiptImageReplyEnabled && dom.roomConfigNonReceiptImageReplyEnabled.checked),
         media_save_enabled: !!(dom.roomConfigMediaSaveEnabled && dom.roomConfigMediaSaveEnabled.checked),
@@ -11635,6 +11644,7 @@
         receipt_reply_executive_detail_enabled: parseDatasetBoolean(tr.dataset.roomReceiptReplyExecutiveDetail, true),
         receipt_correction_reply_enabled: parseDatasetBoolean(tr.dataset.roomReceiptCorrectionReply, false),
         non_receipt_image_reply_enabled: parseDatasetBoolean(tr.dataset.roomNonReceiptImageReply, true),
+        reservation_image_registration_enabled: parseDatasetBoolean(tr.dataset.roomReservationImageRegistration, true),
         media_save_enabled: parseDatasetBoolean(tr.dataset.roomMediaSave, true),
         review_alert_enabled: parseDatasetBoolean(tr.dataset.roomReviewAlertEnabled, false),
         calendar_ai_auto_create_enabled: gCalRow,
@@ -11687,6 +11697,9 @@
       tr.dataset.roomReceiptReplyExecutiveDetail = String(config.receipt_reply_executive_detail_enabled !== false);
       tr.dataset.roomReceiptCorrectionReply = String(!!config.receipt_correction_reply_enabled);
       tr.dataset.roomNonReceiptImageReply = String(config.non_receipt_image_reply_enabled !== false);
+      if (typeof config.reservation_image_registration_enabled === 'boolean') {
+        tr.dataset.roomReservationImageRegistration = String(config.reservation_image_registration_enabled);
+      }
       tr.dataset.roomMediaSave = String(config.media_save_enabled !== false);
       tr.dataset.roomReviewAlertEnabled = String(!!config.review_alert_enabled);
       tr.dataset.roomCalendarAutoCreate = String(!!config.calendar_ai_auto_create_enabled);
@@ -12758,6 +12771,7 @@
           receipt_reply_executive_detail_enabled: (setting && setting.receipt_reply_executive_detail_enabled) !== false,
           receipt_correction_reply_enabled: !!(setting && setting.receipt_correction_reply_enabled),
           non_receipt_image_reply_enabled: (setting && setting.non_receipt_image_reply_enabled) !== false,
+          reservation_image_registration_enabled: (setting && setting.reservation_image_registration_enabled) !== false,
           media_save_enabled: (setting && setting.media_save_enabled) !== false,
           review_alert_enabled: !!(setting && setting.review_alert_enabled),
           calendar_ai_auto_create_enabled: gCalMerged,
@@ -12802,6 +12816,7 @@
         tr.dataset.roomReceiptReplyExecutiveDetail = String(roomFeatureConfig.receipt_reply_executive_detail_enabled);
         tr.dataset.roomReceiptCorrectionReply = String(roomFeatureConfig.receipt_correction_reply_enabled);
         tr.dataset.roomNonReceiptImageReply = String(roomFeatureConfig.non_receipt_image_reply_enabled);
+        tr.dataset.roomReservationImageRegistration = String(roomFeatureConfig.reservation_image_registration_enabled);
         tr.dataset.roomMediaSave = String(roomFeatureConfig.media_save_enabled);
         tr.dataset.roomReviewAlertEnabled = String(roomFeatureConfig.review_alert_enabled);
         tr.dataset.roomCalendarAutoCreate = String(gCalMerged);
@@ -12849,6 +12864,8 @@
     // 権限・機能トグル（レシート関連＋その他権限）をモーダルへ反映。店舗一括/ルーム個別の
     // どちらの config でも使える。対象ルーム切替（個別モード）でも再利用する。
     function applyRoomConfigPermissionToggles(config) {
+      dom.roomConfigReservationImageWrap.hidden = !activeRoomIndividualSave;
+      dom.roomConfigReservationImageRegistrationEnabled.checked = config.reservation_image_registration_enabled !== false;
       dom.roomConfigBotReplyEnabled.checked = !!config.bot_reply_enabled;
       if (dom.roomConfigBotReplyHardMute) {
         dom.roomConfigBotReplyHardMute.checked = !!config.bot_reply_hard_mute_enabled;
@@ -13183,6 +13200,7 @@
       receipt_reply_executive_detail_enabled: '幹部向け詳細返信',
       receipt_correction_reply_enabled: 'レシート訂正の返信',
       non_receipt_image_reply_enabled: 'レシート以外画像の返信',
+      reservation_image_registration_enabled: '予約画像からの登録',
       media_save_enabled: 'メディア保存',
       review_alert_enabled: '口コミ新着通知',
       receipt_midreport_enabled: '中間レポート',
@@ -13774,6 +13792,7 @@
         receipt_reply_executive_detail_enabled: roomConfig.receipt_reply_executive_detail_enabled !== false,
         receipt_correction_reply_enabled: !!roomConfig.receipt_correction_reply_enabled,
         non_receipt_image_reply_enabled: roomConfig.non_receipt_image_reply_enabled !== false,
+        reservation_image_registration_enabled: roomConfig.reservation_image_registration_enabled !== false,
         media_save_enabled: roomConfig.media_save_enabled !== false,
         bot_reply_enabled: roomConfig.bot_reply_enabled,
         calendar_ai_auto_create_enabled: roomConfig.calendar_ai_auto_create_enabled,
@@ -13863,6 +13882,9 @@
         }
         payload.petty_receipt_analysis_enabled = opts.overrideConfig.petty_receipt_analysis_enabled !== false;
         payload.receipt_sales_registration_enabled = opts.overrideConfig.receipt_sales_registration_enabled !== false;
+        if (typeof opts.overrideConfig.reservation_image_registration_enabled === 'boolean') {
+          payload.reservation_image_registration_enabled = opts.overrideConfig.reservation_image_registration_enabled;
+        }
         payload.receipt_correction_reply_enabled = !!opts.overrideConfig.receipt_correction_reply_enabled;
         payload.non_receipt_image_reply_enabled = opts.overrideConfig.non_receipt_image_reply_enabled !== false;
         payload.media_save_enabled = opts.overrideConfig.media_save_enabled !== false;
@@ -14864,6 +14886,7 @@
     [
       dom.roomConfigBotReplyEnabled,
       dom.roomConfigBotReplyHardMute,
+      dom.roomConfigReservationImageRegistrationEnabled,
       dom.roomConfigMessageSearchEnabled,
       dom.roomConfigMessageSearchLibraryEnabled,
       dom.roomConfigSendSummary,

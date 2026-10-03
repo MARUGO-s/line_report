@@ -1,5 +1,13 @@
 # LINE Report Project Progress
 
+### 2026-10-04 - LINE予約画像からの登録許可をルーム個別に追加
+
+- Webhook設定のルーム「個別設定」→「カレンダー/予約」、セルフ設定の「予約・カレンダー」に「予約画像からの登録を許可」を追加。
+- migration `20261004000000_room_reservation_image_registration_gate.sql` は既定trueで既存動作を維持。今回、特定ルームの値は変更しない。
+- OFFなら下書き・確認カードを停止し、過去カードの新規登録・更新も最新設定で拒否。DB障害時も登録しない。元ルーム・店舗の照合と更新対象店舗の制約を追加。
+- レシート・会話予定・Gmail・Web予約の登録には影響しない。店舗一括・全体一括保存は個別の許可を維持する。
+- 予約の回帰テスト21件成功（新規7件を含む）。配備はPR経由・mainマージ後のDB→Edge→Pagesの順で実施。
+
 ### 2026-10-02 - Google Places API（New）を完全停止（重要）
 
 - Google Places API のランニングコスト抑制のため、自店舗・競合店の検索、Place Details による口コミ更新、`review-alert-cron` の外部取得・新着通知を停止した。
