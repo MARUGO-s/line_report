@@ -187,6 +187,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 食べログ・一休等の予約メールはGmailから自動取得され、店舗LINEへの通知とGoogleカレンダー・予約表への登録を行います。
 - メールが来ない電話・店頭・他サイト予約は、予約確認画面のスクショを店舗LINEへ送り、確認カードの「この内容で登録」で保存します。
+- 予約画像からの登録を止めるには、Webhook設定→対象店舗→ルームの個別設定→カレンダー/予約で「予約画像からの登録を許可」をOFFにします。セルフ設定の予約・カレンダーからも変更できます。OFFは確認カードと以前のカードの登録・更新を停止し、レシート解析・会話予定・Gmail予約通知には影響しません。既定はONです。
 - スクショでは来店日時、氏名、電話、人数、コース、卓、アレルギー、記念日、メモ等を読みます。氏名と電話の両方がある場合に予約回数へ算入します。
 - 予約変更は元予約を更新し、キャンセルは予約回数を減らしてキャンセル回数を増やします。予約回数は来店実績ではなく予約の正味数です。
 - M-talkの「予約・予定」や予約表から閲覧・追加・変更・日付変更・キャンセルができます。毎朝の本日の予約配信はルーム設定に従います。
@@ -774,11 +775,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 43件
 - Edge Functions: 21件
-- 共有TypeScriptモジュール: 114件
+- 共有TypeScriptモジュール: 115件
 - 補助・運用・レガシーコード: 40件
 - admin-api静的ルート: 145件
-- SQL migrations: 313件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 116件
+- SQL migrations: 314件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 117件
 
 ### 公開画面・ブラウザコード
 
@@ -957,6 +958,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/reservation_ai_cache.ts` | RSV-01 / JAI-04 / DEV-02 |
 | `supabase/functions/_shared/reservation_calendar_link.ts` | RSV-01 / JAI-04 / DEV-02 |
 | `supabase/functions/_shared/reservation_calendar_link_request.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/reservation_image_registration.ts` | RSV-01 / JAI-04 / DEV-02 |
 | `supabase/functions/_shared/reservation_mail_rules.ts` | RSV-01 / JAI-04 / DEV-02 |
 | `supabase/functions/_shared/room_config_link.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/room_hard_delete.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |

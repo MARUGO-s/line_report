@@ -304,6 +304,7 @@
       {key:'petty_receipt_analysis_enabled', t:'小口レシートの解析', d:'小口現金のレシートを自動解析します'},
     ]},
     { id:'calendar', title:'予約・カレンダー', icon:'calendar', caption:'予約通知・カレンダー連携', items:[
+      {key:'reservation_image_registration_enabled', t:'予約画像からの登録を許可', d:'OFFにすると予約画像の確認カードを送らず、以前のカードからの登録・更新も停止します。レシート解析・会話からの予定登録・Gmail予約通知には影響しません'},
       {key:'gmail_reservation_alert_enabled', t:'Gmail予約通知', d:'Gmailで受信した予約をLINEに通知します', extra:'gmailAlertInterval'},
       {key:'today_reservation_alert_enabled', t:'本日の予約状況配信', d:'毎日決まった時刻に、当日の予約一覧を1通で配信します（サイトのWebhook設定と同じ）', extra:'todayReservationAlert'},
       {key:'calendar_tomorrow_reminder_enabled', t:'予定配信リマインダー', d:'毎日決まった時刻に、予定を自動配信します（最大5件までリマインド時刻を設定可能）', extra:'tomorrowReminder'},

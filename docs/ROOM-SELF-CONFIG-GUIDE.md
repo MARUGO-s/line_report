@@ -131,6 +131,7 @@ roomスコープ session（metadata: {scope:'room_config', room_id}）
 | | 予算登録を許可 | `budget_entry_enabled` |
 | | 小口レシートの解析 | `petty_receipt_analysis_enabled` |
 | 予約・カレンダー | Gmail予約通知 | `gmail_reservation_alert_enabled` |
+| | 予約画像からの登録を許可（既定ON。OFFで確認カードと過去カードの登録・更新を停止） | `reservation_image_registration_enabled` |
 | | 本日の予約状況を配信 | `today_reservation_alert_enabled`（時刻: `today_reservation_alert_hour` / `today_reservation_alert_minute`） |
 | | 明日の予定を配信 | `calendar_tomorrow_reminder_enabled`（時刻: `calendar_tomorrow_reminder_hour` / `calendar_tomorrow_reminder_minute`、未設定は 19:00） |
 | | 予定の自動登録（M-talkの予定カレンダー） | `calendar_ai_auto_create_enabled` |

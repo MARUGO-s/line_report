@@ -739,6 +739,7 @@ const ROOM_CONFIG_SAFE_BOOL_FIELDS = [
   "media_save_enabled", "budget_entry_enabled", "petty_receipt_analysis_enabled",
   "receipt_midreport_enabled", "receipt_monthend_report_enabled",
   "gmail_reservation_alert_enabled", "today_reservation_alert_enabled",
+  "reservation_image_registration_enabled",
   "calendar_tomorrow_reminder_enabled", "calendar_ai_auto_create_enabled",
   "calendar_silent_auto_register_enabled", "calendar_low_confidence_confirm_reply_enabled",
   "calendar_registration_reply_enabled", "dome_weekly_enabled",
@@ -4672,6 +4673,7 @@ Deno.serve(async (req, info) => {
           budget_entry_enabled: payload.budget_entry_enabled,
           petty_receipt_analysis_enabled: payload.petty_receipt_analysis_enabled,
           receipt_sales_registration_enabled: payload.receipt_sales_registration_enabled,
+          reservation_image_registration_enabled: payload.reservation_image_registration_enabled,
           gmail_reservation_alert_enabled: payload.gmail_reservation_alert_enabled,
           today_reservation_alert_enabled: payload.today_reservation_alert_enabled,
           today_reservation_alert_hour: payload.today_reservation_alert_hour,
@@ -21073,6 +21075,7 @@ function buildRoomSettingsPayload(body: unknown): {
   budget_entry_enabled?: boolean
   petty_receipt_analysis_enabled?: boolean
   receipt_sales_registration_enabled?: boolean
+  reservation_image_registration_enabled?: boolean
   receipt_schedule_override: boolean
   receipt_midreport_day: number | null
   receipt_midreport_hour: number | null
@@ -21260,6 +21263,14 @@ function buildRoomSettingsPayload(body: unknown): {
   }
   const receiptSalesRegistrationEnabled = receiptSalesRegistrationEnabledRaw != null ? receiptSalesRegistrationEnabledRaw === true : undefined
 
+  // 未指定の保存経路では既存のOFF/ONを維持する（新規行の既定はDB側のtrue）。
+  const reservationImageRegistrationEnabledRaw = body.reservation_image_registration_enabled
+  if (reservationImageRegistrationEnabledRaw != null && typeof reservationImageRegistrationEnabledRaw !== "boolean") {
+    throw { status: 400, message: "reservation_image_registration_enabled must be boolean when provided." } satisfies AppError
+  }
+  const reservationImageRegistrationEnabled = reservationImageRegistrationEnabledRaw != null
+    ? reservationImageRegistrationEnabledRaw === true : undefined
+
   const receiptScheduleOverrideRaw = body.receipt_schedule_override
   if (receiptScheduleOverrideRaw != null && typeof receiptScheduleOverrideRaw !== "boolean") {
     throw { status: 400, message: "receipt_schedule_override must be boolean when provided." } satisfies AppError
@@ -21387,6 +21398,7 @@ function buildRoomSettingsPayload(body: unknown): {
     budget_entry_enabled: budgetEntryEnabled,
     petty_receipt_analysis_enabled: pettyReceiptAnalysisEnabled,
     receipt_sales_registration_enabled: receiptSalesRegistrationEnabled,
+    reservation_image_registration_enabled: reservationImageRegistrationEnabled,
     receipt_schedule_override: receiptScheduleOverride,
     receipt_midreport_day: receiptMidreportDay,
     receipt_midreport_hour: receiptMidreportHour,

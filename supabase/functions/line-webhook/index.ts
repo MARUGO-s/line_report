@@ -20,6 +20,7 @@ import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
 import { handleRoomConfigTextMessage } from '../_shared/room_config_link.ts'
 import { handleReservationCalendarLinkTextMessage } from '../_shared/reservation_calendar_link_request.ts'
+import { loadReservationImagePermission, reservationImportMatchesSource } from '../_shared/reservation_image_registration.ts'
 import { removeRoomMediaByMessageId, saveRoomMediaToLibrary } from '../_shared/line_media_store.ts'
 import { hasKnowledgeMemoTag, stripKnowledgeMemoTag } from '../_shared/knowledge_memo_tag.ts'
 import { classifyKnowledgeFile, extensionForKind } from '../_shared/knowledge_file_extract.ts'
@@ -564,6 +565,10 @@ async function handleReservationImageDetected(
   _summary: string,
 ): Promise<{ saved: boolean; replied: boolean; reason?: string }> {
   const storeKey = String(registry.store_partition_key ?? '').trim()
+  const permission = await loadReservationImagePermission(supabase, roomId)
+  if (!storeKey || permission !== 'allowed') {
+    return { saved: false, replied: false, reason: `reservation_image_${permission === 'allowed' ? 'unavailable' : permission}` }
+  }
   const visitAtIso = combineReservationVisitAtIso(reservation.date, reservation.time)
 
   // 同店舗・同日・同氏名・同電話番号の予約が既に登録済みなら、確認カードで「更新」を選べるようにする
@@ -583,6 +588,8 @@ async function handleReservationImageDetected(
       .from('pending_reservation_imports')
       .select('id')
       .eq('line_message_id', lineMessageId)
+      .eq('room_id', roomId)
+      .eq('store_partition_key', storeKey)
       .order('id', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -629,6 +636,10 @@ async function handleReservationImageDetected(
 
   if (!replyToken || !pendingId) {
     return { saved: false, replied: false, reason: 'reservation_detected_no_reply' }
+  }
+  // 解析・保存中にOFFにされた場合にも、新しい確認カードを送らない。
+  if (await loadReservationImagePermission(supabase, roomId) !== 'allowed') {
+    return { saved: false, replied: false, reason: 'reservation_image_not_allowed' }
   }
   await replyLineFlex(
     replyToken,
@@ -782,6 +793,8 @@ function buildReservationUpdatedFlex(
 async function handleReservationImportPostback(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   postbackData: string,
+  roomId: string,
+  storeKey: string,
 ): Promise<Record<string, unknown> | null> {
   const isRegister = postbackData.startsWith('resv_imp=')
   const isUpdate = postbackData.startsWith('resv_update=')
@@ -791,7 +804,7 @@ async function handleReservationImportPostback(
 
   const { data: pending, error } = await supabase
     .from('pending_reservation_imports')
-    .select('id, status, payload, store_partition_key, existing_event_id')
+    .select('id, status, payload, room_id, store_partition_key, existing_event_id')
     .eq('id', pendingId)
     .maybeSingle()
   if (error || !pending) return buildSimpleNoticeFlex('対象の予約が見つかりませんでした。')
@@ -799,8 +812,13 @@ async function handleReservationImportPostback(
     id: number
     status: string
     payload: Record<string, unknown>
+    room_id: string
     store_partition_key: string | null
     existing_event_id: number | null
+  }
+
+  if (!reservationImportMatchesSource(p, roomId, storeKey)) {
+    return buildSimpleNoticeFlex('このルームでは対象の予約を操作できません。')
   }
 
   if (p.status === 'registered') return buildSimpleNoticeFlex('この予約はすでに登録済みです。')
@@ -809,6 +827,15 @@ async function handleReservationImportPostback(
     await supabase.from('pending_reservation_imports')
       .update({ status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', pendingId)
     return buildSimpleNoticeFlex('予約の登録を取りやめました。')
+  }
+
+  if (p.status !== 'pending') return buildSimpleNoticeFlex('この予約の確認は終了しています。')
+  // 過去に送信された「登録」「更新」カードも、現在のOFF設定では書き込ませない。
+  const permission = await loadReservationImagePermission(supabase, roomId)
+  if (permission !== 'allowed') {
+    return buildSimpleNoticeFlex(permission === 'disabled'
+      ? 'このルームでは予約画像からの登録は許可されていません。'
+      : '設定を確認できないため登録できませんでした。時間をおいて再度お試しください。')
   }
 
   const payload = p.payload ?? {}
@@ -833,12 +860,15 @@ async function handleReservationImportPostback(
       manual_edited_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
-    const { error: updErr } = await supabase
+    const { data: updatedEvent, error: updErr } = await supabase
       .from('manual_reservation_visit_events')
       .update(updateRow)
       .eq('id', existingEventId)
-    if (updErr) {
-      console.error('manual reservation update (from import) failed:', updErr.message)
+      .eq('manual_store_key', storeKey)
+      .select('id')
+      .maybeSingle()
+    if (updErr || !updatedEvent) {
+      console.error('manual reservation update (from import) failed:', updErr?.message ?? 'event not found in source store')
       return buildSimpleNoticeFlex('更新に失敗しました。時間をおいて再度お試しください。')
     }
     try {
@@ -869,7 +899,7 @@ async function handleReservationImportPostback(
     visit_at: visitAt,
     reservation_type: (payload.reservation_type as string | null) ?? '予約',
     reservation_detail: (payload.reservation_detail as string | null) ?? null,
-    manual_store_key: (payload.manual_store_key as string | null) ?? p.store_partition_key ?? null,
+    manual_store_key: storeKey,
   }
   const { data: created, error: insErr } = await supabase
     .from('manual_reservation_visit_events').insert(insertRow).select('id').single()
@@ -2630,7 +2660,10 @@ Deno.serve(async (req) => {
         && postbackReplyToken
       ) {
         try {
-          const reservationReply = await handleReservationImportPostback(supabase, postbackData)
+          const reservationReply = await handleReservationImportPostback(
+            supabase, postbackData, eventRoomIdForPostback ?? '',
+            String(registry?.store_partition_key ?? '').trim(),
+          )
           if (reservationReply) {
             await replyLineFlex(
               postbackReplyToken,
