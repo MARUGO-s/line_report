@@ -697,3 +697,148 @@ export function validateChatNoticeInput(raw: unknown): ChatNoticeInput {
   const base = validateChatPostBase(r)
   return { noticeId: noticeId.toLowerCase(), mtalkUserId: base.mtalkUserId, groupId: base.groupId, parts: base.parts, links: base.links }
 }
+
+// ---------- 店舗Botの投稿（gourmet の週報など → POST /store-post） ----------
+// 店舗Bot（bot_id）として、Bot が参加しているグループのルーム（1対1・ゴミ箱・管理者通知を除く。room_ids で絞れる）へ
+// 要約カード1通＋任意のPDF（最大3つ、静かに続ける）を投稿する。口コミ通知（/alert）とは別の入口・別の kind。
+// カードはここで組み立てる（gourmet から来るのは見出し・項目・要点・リンクだけ）。リンクは /alert と同じ許可したホストだけ。
+// お客様の個人情報（メールアドレス・電話番号）らしき文字列がカードにあれば受け付けない（念のため。gourmet 側でも確認する）。
+// 同じルームに同じ dedupe_key は1回だけ（カード: chat_alert_dispatches kind = gourmet_store_post、
+// PDF: kind = gourmet_store_post_file、dedupe_key = <dedupe_key>:f<番号>）。
+export const STORE_POST_PATH = '/store-post'
+export const STORE_POST_CARD_KIND = 'gourmet_store_post'
+export const STORE_POST_FILE_KIND = 'gourmet_store_post_file'
+/** 投稿の種類 → カードの見出し（eyebrow）とプレビューの接頭辞。種類を増やすときはここに足す。 */
+export const STORE_POST_TYPES: Record<string, { eyebrow: string; prefix: string }> = {
+  weekly_report: { eyebrow: '週報', prefix: '[週報]' },
+}
+export const STORE_POST_LIMITS = {
+  storeNameMax: 100,
+  titleMax: 120,
+  subtitleMax: 120,
+  sectionsMax: 4,
+  headingMax: 40,
+  fieldsMax: 8,
+  fieldLabelMax: 24,
+  fieldValueMax: 120,
+  itemsMax: 3,
+  itemMax: 200,
+  noteMax: 300,
+  linksMax: 2,
+  linkLabelMax: 20,
+  filesMax: 3,
+  /** PDF（デコード後）の合計。本文（base64）は EXTERNAL_POST_LIMITS.bodyMaxBytes まで。 */
+  filesTotalBytes: 8 * 1024 * 1024,
+  roomsMax: 20,
+} as const
+
+const PII_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
+// 日本の電話番号（0から始まる10〜11桁。区切りはハイフン・空白・全角ハイフン類）と +81
+const PII_PHONE = /(?:^|[^\d])(?:0\d{1,4}[-‐‑–—−ー－\s]?\d{1,4}[-‐‑–—−ー－\s]?\d{3,4}|\+81[-\s]?\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4})(?:[^\d]|$)/
+/** メールアドレス・電話番号らしき文字列があれば true（カードに載せない）。 */
+export function looksLikePersonalInfo(text: string): boolean {
+  const s = String(text ?? '').normalize('NFKC')
+  if (PII_EMAIL.test(s)) return true
+  const m = PII_PHONE.exec(s)
+  if (!m) return false
+  const digits = m[0].replace(/\D/g, '')
+  return digits.length >= 10 && digits.length <= 12
+}
+
+export type StorePostSection = { heading: string; fields: { label: string; value: string }[]; items: string[] }
+export type StorePostFile = { pdf: Uint8Array<ArrayBuffer>; fileName: string }
+export type StorePostInput = {
+  botId: string
+  roomIds: number[] | null
+  dedupeKey: string
+  type: string
+  storeName: string
+  title: string
+  subtitle: string
+  sections: StorePostSection[]
+  note: string
+  links: { label: string; url: string }[]
+  files: StorePostFile[]
+  dryRun: boolean
+}
+
+/** POST /store-post の本文を検証する。/alert の形式（score_changes・reviews）は受け付けない。 */
+export function validateStorePostInput(raw: unknown): StorePostInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ExternalPostError('送信内容が不正です')
+  const v = raw as Record<string, unknown>
+  const L = STORE_POST_LIMITS
+  if (!isUuid(v.bot_id)) throw new ExternalPostError('店舗Botが不正です')
+  if (v.recipient_user_id != null || v.reviews != null || v.score_changes != null) throw new ExternalPostError('送信内容が不正です（口コミ通知は /alert）')
+  let roomIds: number[] | null = null
+  if (v.room_ids != null) {
+    if (!Array.isArray(v.room_ids) || !v.room_ids.length || v.room_ids.length > L.roomsMax || v.room_ids.some((id) => !Number.isSafeInteger(id) || Number(id) <= 0)) {
+      throw new ExternalPostError(`room_ids は1〜${L.roomsMax}件のルームIDで指定してください`)
+    }
+    roomIds = [...new Set(v.room_ids as number[])]
+  }
+  const dedupeKey = String(v.dedupe_key ?? '')
+  if (!DEDUPE.test(dedupeKey) || dedupeKey.length > 112) throw new ExternalPostError('dedupe_key が不正です')
+  const type = String(v.type ?? '')
+  if (!Object.hasOwn(STORE_POST_TYPES, type)) throw new ExternalPostError('type が不正です')
+  const storeName = cleanText(v.store_name, L.storeNameMax)
+  if (!storeName) throw new ExternalPostError('店舗名が必要です')
+  const title = cleanText(v.title, L.titleMax)
+  if (!title) throw new ExternalPostError('タイトルが必要です')
+  if (v.sections != null && (!Array.isArray(v.sections) || v.sections.length > L.sectionsMax)) throw new ExternalPostError(`sections は${L.sectionsMax}件までです`)
+  const obj = (x: unknown) => (x && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {})
+  const sections = ((v.sections as unknown[] | undefined) ?? []).map((s) => {
+    const r = obj(s)
+    const fields = (Array.isArray(r.fields) ? r.fields : []).slice(0, L.fieldsMax)
+      .map((f) => ({ label: cleanText(obj(f).label, L.fieldLabelMax), value: cleanText(obj(f).value, L.fieldValueMax) }))
+      .filter((f) => f.label && f.value)
+    const items = (Array.isArray(r.items) ? r.items : []).slice(0, L.itemsMax).map((x) => cleanText(x, L.itemMax)).filter(Boolean)
+    return { heading: cleanText(r.heading, L.headingMax), fields, items }
+  }).filter((s) => s.fields.length || s.items.length)
+  if (!sections.length) throw new ExternalPostError('カードに載せる内容がありません')
+  const links = (Array.isArray(v.links) ? v.links : []).slice(0, L.linksMax)
+    .map((l) => ({ label: cleanText(obj(l).label, L.linkLabelMax), url: alertUrl(obj(l).url) }))
+    .filter((l): l is { label: string; url: string } => !!l.label && !!l.url)
+  if (v.files != null && (!Array.isArray(v.files) || v.files.length > L.filesMax)) throw new ExternalPostError(`files は${L.filesMax}件までです`)
+  const files = ((v.files as unknown[] | undefined) ?? []).map((f) => ({ pdf: decodePdfBase64(obj(f).pdf_base64), fileName: sanitizePdfFileName(obj(f).filename) }))
+  if (files.reduce((a, f) => a + f.pdf.byteLength, 0) > L.filesTotalBytes) throw new ExternalPostError('PDFが大きすぎます', 413)
+  const input: StorePostInput = {
+    botId: String(v.bot_id).toLowerCase(), roomIds, dedupeKey, type, storeName, title,
+    subtitle: cleanText(v.subtitle, L.subtitleMax), sections, note: cleanText(v.note, L.noteMax, { multiline: true }), links, files,
+    dryRun: v.dry_run === true,
+  }
+  const texts = [input.storeName, input.title, input.subtitle, input.note, ...sections.flatMap((s) => [s.heading, ...s.fields.flatMap((f) => [f.label, f.value]), ...s.items])]
+  if (texts.some(looksLikePersonalInfo)) throw new ExternalPostError('カードに個人情報らしき文字列（メールアドレス・電話番号）が含まれています', 422)
+  return input
+}
+
+/** PDF ごとの dedupe_key（カードの dedupe_key + :f<番号>）。 */
+export const storePostFileDedupeKey = (dedupeKey: string, index: number) => `${dedupeKey}:f${index + 1}`
+
+/** 店舗Botの投稿のカード（見出し → 項目 → 要点、セクションごとに区切り線）とプレビュー用の文。 */
+export function buildStorePostCard(input: Pick<StorePostInput, 'type' | 'storeName' | 'title' | 'subtitle' | 'sections' | 'note' | 'links' | 'files'>): { text: string; cards: AlertCard[] } {
+  const meta = STORE_POST_TYPES[input.type] ?? { eyebrow: 'お知らせ', prefix: '[お知らせ]' }
+  const sections: CardSection[] = []
+  input.sections.forEach((s, i) => {
+    if (i > 0) sections.push({ type: 'separator' })
+    if (s.heading) sections.push({ type: 'heading', text: s.heading })
+    if (s.fields.length) sections.push({ type: 'fields', rows: s.fields.map((f) => ({ label: f.label, value: f.value })) })
+    if (s.items.length) sections.push({ type: 'fields', rows: [{ label: 'ポイント', value: '', paragraphs: s.items.map((x) => `・${x}`) }] })
+  })
+  const fileNote = input.files.length ? `詳しくはこのあとのPDF（${input.files.map((f) => f.fileName).join('、')}）をご覧ください。` : ''
+  const note = [input.note, fileNote].filter(Boolean).join('\n')
+  if (note) sections.push({ type: 'separator' }, { type: 'note', size: 'xs', text: note })
+  const lines = [`${meta.prefix} ${input.title}`]
+  if (input.subtitle) lines.push(input.subtitle)
+  for (const s of input.sections) {
+    const head = s.fields.slice(0, 2).map((f) => `${f.label} ${f.value}`).join(' / ')
+    if (head) lines.push(`${s.heading ? `${s.heading}: ` : ''}${head}`)
+  }
+  return {
+    text: cleanText(lines.join('\n'), 500, { multiline: true }),
+    cards: [{
+      header: { eyebrow: input.title.includes(input.storeName) ? meta.eyebrow : `${meta.eyebrow} · ${input.storeName}`, title: input.title, subtitle: input.subtitle || null },
+      sections,
+      actions: input.links.map((l, i) => ({ label: l.label, url: l.url, style: i === 0 ? 'primary' as const : 'secondary' as const })),
+    }],
+  }
+}

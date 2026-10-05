@@ -9,6 +9,9 @@
  *                     gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）を店舗Botとしてルームへ。カードはこの関数が組み立て、
  *                     リンクは許可したホストだけ。同じルームに同じ dedupe_key は1回だけ（chat_alert_dispatches、kind = gourmet_review_alert）。
  *                     旧形式 { recipient_user_id, ... }（「AI分析」Botとの1対1）も互換のため受け付ける。
+ *   POST /store-post  { bot_id, room_ids?, dedupe_key, type: "weekly_report", store_name, title, subtitle?, sections[], note?, links?, files?[], dry_run? }
+ *                     店舗Botとして要約カード1通＋PDF（最大3つ、静かに続ける）をルームへ（gourmet の週報）。/alert とは別の入口・別の kind
+ *                     （カード gourmet_store_post、PDF gourmet_store_post_file。同じルームに同じ dedupe_key は1回だけ）。dry_run は投稿せず確認だけ。
  *   POST /chat-dispatch { message_id }  ← DBトリガー（pg_net）専用。「AI分析」Botとの1対1への質問に答える。
  *                     認証は chat-search と同じ chat_push_internal_config.dispatch_secret（Bearer、定数時間比較）。
  *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
@@ -67,6 +70,12 @@ import {
   buildLoginLinksCard,
   type LoginLink,
   validateChatNoticeInput,
+  buildStorePostCard,
+  STORE_POST_CARD_KIND,
+  STORE_POST_FILE_KIND,
+  STORE_POST_PATH,
+  storePostFileDedupeKey,
+  validateStorePostInput,
 } from "../_shared/mtalk_external_post.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 
@@ -127,17 +136,29 @@ async function dispatchMessageId(supabase: DbClient, kind: string, groupId: numb
   return data as { message_id: number | null; created_at: string } | null
 }
 
-async function postPdfOnce(
-  supabase: DbClient,
-  options: { groupId: number; dedupeKey: string; pdf: Uint8Array<ArrayBuffer>; fileName: string },
-): Promise<{ messageId: number; deduplicated: boolean }> {
+type PdfPostOptions = {
+  groupId: number
+  dedupeKey: string
+  pdf: Uint8Array<ArrayBuffer>
+  fileName: string
+  /** chat_alert_dispatches.kind（既定: 「AI分析」のPDF） */
+  kind?: string
+  /** 投稿者（既定: 「AI分析」Bot） */
+  asUser?: { id: string; username: string }
+  /** 保存先のフォルダ（groups/<group_id>/<folder>/<uuid>.pdf） */
+  folder?: string
+}
+
+async function postPdfOnce(supabase: DbClient, options: PdfPostOptions): Promise<{ messageId: number; deduplicated: boolean }> {
   const { groupId, dedupeKey } = options
-  const claim = () => supabase.from("chat_alert_dispatches").insert({ kind: AI_REPORT_FILE_KIND, chat_group_id: groupId, dedupe_key: dedupeKey })
+  const kind = options.kind ?? AI_REPORT_FILE_KIND
+  const author = options.asUser ?? { id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME }
+  const claim = () => supabase.from("chat_alert_dispatches").insert({ kind, chat_group_id: groupId, dedupe_key: dedupeKey })
   const release = () => supabase.from("chat_alert_dispatches").delete()
-    .eq("kind", AI_REPORT_FILE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", dedupeKey).is("message_id", null)
+    .eq("kind", kind).eq("chat_group_id", groupId).eq("dedupe_key", dedupeKey).is("message_id", null)
   let { error: claimError } = await claim()
   if (claimError && String(claimError.code ?? "") === "23505") {
-    const existing = await dispatchMessageId(supabase, AI_REPORT_FILE_KIND, groupId, dedupeKey)
+    const existing = await dispatchMessageId(supabase, kind, groupId, dedupeKey)
     if (existing?.message_id) return { messageId: Number(existing.message_id), deduplicated: true }
     // 前回の試行が途中で止まった予約だけ取り消してやり直す（進行中の予約は触らない）。
     if (existing && Date.now() - Date.parse(existing.created_at) > STALE_FILE_CLAIM_MS) {
@@ -149,7 +170,7 @@ async function postPdfOnce(
   }
   if (claimError) throw new Error("file dispatch claim failed")
 
-  const path = `groups/${groupId}/ai-reports/${crypto.randomUUID()}.pdf`
+  const path = `groups/${groupId}/${options.folder ?? "ai-reports"}/${crypto.randomUUID()}.pdf`
   const bucket = supabase.storage.from("chat-images")
   const { error: uploadError } = await bucket.upload(path, new Blob([options.pdf], { type: "application/pdf" }), {
     contentType: "application/pdf",
@@ -164,8 +185,8 @@ async function postPdfOnce(
     .from("chat_messages")
     .insert({
       group_id: groupId,
-      user_id: AI_ANALYSIS_BOT_ID,
-      username: AI_ANALYSIS_BOT_USERNAME,
+      user_id: author.id,
+      username: author.username,
       content: `[${options.fileName}]`,
       kind: "file",
       payload: { v: 1, kind: "file", file: { path, name: options.fileName, mime: "application/pdf", size: options.pdf.byteLength } },
@@ -181,7 +202,7 @@ async function postPdfOnce(
     throw new Error("file message insert failed")
   }
   await supabase.from("chat_alert_dispatches").update({ message_id: messageId })
-    .eq("kind", AI_REPORT_FILE_KIND).eq("chat_group_id", groupId).eq("dedupe_key", dedupeKey)
+    .eq("kind", kind).eq("chat_group_id", groupId).eq("dedupe_key", dedupeKey)
   return { messageId, deduplicated: false }
 }
 
@@ -264,6 +285,26 @@ async function listStoreBots(supabase: DbClient) {
   return storeBotList(bots ?? [], memberships ?? [], (groups ?? []) as BotRoomRow[], counts)
 }
 
+/** 店舗Bot（削除されていない・store_key あり）と、投稿してよいルーム（参加しているグループ。1対1・ゴミ箱・管理者通知を除く）。 */
+async function storeBotRooms(supabase: DbClient, botId: string, roomIds: number[] | null) {
+  const { data: bot, error: botError } = await supabase.from("chat_users").select("id, username, store_key")
+    .eq("id", botId).eq("is_bot", true).not("store_key", "is", null).is("bot_deleted_at", null).maybeSingle()
+  if (botError) throw new Error("store bot lookup failed")
+  if (!bot) throw new ExternalPostError("店舗Botが見つからないか、削除されています", 404)
+  const asUser = await loadMtalkStoreBot(supabase, String(bot.store_key))
+  if (!asUser) throw new ExternalPostError("店舗Botが見つからないか、削除されています", 404)
+  const { data: memberships, error: mError } = await supabase.from("chat_group_members").select("group_id").eq("user_id", botId).limit(1000)
+  if (mError) throw new Error("store bot rooms failed")
+  const groupIds = (memberships ?? []).map((m: { group_id: number }) => Number(m.group_id))
+  const { data: groups, error: gError } = groupIds.length
+    ? await supabase.from("chat_groups").select(ROOM_COLUMNS).in("id", groupIds)
+    : { data: [], error: null }
+  if (gError) throw new Error("store bot rooms failed")
+  const rooms = alertRooms((groups ?? []) as BotRoomRow[], roomIds)
+  if (!rooms.length) throw new ExternalPostError(roomIds ? "選んだルームにこの店舗Botが参加していません" : "この店舗Botが参加しているグループのルームがありません", 404)
+  return { asUser, rooms }
+}
+
 // gourmet の口コミ通知（カードのみ・PDFなし）
 async function alert(supabase: DbClient, bodyText: string) {
   let raw: unknown
@@ -289,21 +330,7 @@ async function alert(supabase: DbClient, bodyText: string) {
 
   // 店舗Botとして、Bot が参加しているグループのルームへ
   const { botId, roomIds } = input.target
-  const { data: bot, error: botError } = await supabase.from("chat_users").select("id, username, store_key")
-    .eq("id", botId).eq("is_bot", true).not("store_key", "is", null).is("bot_deleted_at", null).maybeSingle()
-  if (botError) throw new Error("store bot lookup failed")
-  if (!bot) throw new ExternalPostError("店舗Botが見つからないか、削除されています", 404)
-  const asUser = await loadMtalkStoreBot(supabase, String(bot.store_key))
-  if (!asUser) throw new ExternalPostError("店舗Botが見つからないか、削除されています", 404)
-  const { data: memberships, error: mError } = await supabase.from("chat_group_members").select("group_id").eq("user_id", botId).limit(1000)
-  if (mError) throw new Error("store bot rooms failed")
-  const groupIds = (memberships ?? []).map((m: { group_id: number }) => Number(m.group_id))
-  const { data: groups, error: gError } = groupIds.length
-    ? await supabase.from("chat_groups").select(ROOM_COLUMNS).in("id", groupIds)
-    : { data: [], error: null }
-  if (gError) throw new Error("store bot rooms failed")
-  const rooms = alertRooms((groups ?? []) as BotRoomRow[], roomIds)
-  if (!rooms.length) throw new ExternalPostError(roomIds ? "選んだルームにこの店舗Botが参加していません" : "この店舗Botが参加しているグループのルームがありません", 404)
+  const { asUser, rooms } = await storeBotRooms(supabase, botId, roomIds)
 
   const results: { group_id: number; name: string; message_id: number | null; deduplicated: boolean }[] = []
   let failed = 0
@@ -316,6 +343,59 @@ async function alert(supabase: DbClient, bodyText: string) {
   // 1つでも失敗したら 502（gourmet は同じ dedupe_key でやり直す。投稿済みのルームは chat_alert_dispatches が飛ばす）
   if (failed) throw new Error("card post failed")
   return { ok: true, bot_id: botId, bot_name: asUser.username, rooms: results, deduplicated: results.every((r) => r.deduplicated) }
+}
+
+// ---------- 店舗Botの投稿（gourmet の週報: カード＋PDF） ----------
+async function storePost(supabase: DbClient, bodyText: string) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(bodyText)
+  } catch {
+    throw new ExternalPostError("送信内容が不正です")
+  }
+  const input = validateStorePostInput(raw)
+  const { text, cards } = buildStorePostCard(input)
+  const { asUser, rooms } = await storeBotRooms(supabase, input.botId, input.roomIds)
+  const files = input.files.map((f) => ({ filename: f.fileName, bytes: f.pdf.byteLength }))
+  if (input.dryRun) {
+    // 投稿しない（Bot・ルーム・カードの確認だけ）。送信済みかどうかも返す
+    const preview = []
+    for (const room of rooms) {
+      const sent = await dispatchMessageId(supabase, STORE_POST_CARD_KIND, room.id, input.dedupeKey)
+      preview.push({ group_id: room.id, name: room.name, is_store_room: room.isStoreRoom, already_sent: Boolean(sent?.message_id) })
+    }
+    return { ok: true, dry_run: true, bot_id: input.botId, bot_name: asUser.username, rooms: preview, text, cards, files }
+  }
+
+  const results: { group_id: number; name: string; card_message_id: number | null; file_message_ids: number[]; deduplicated: boolean }[] = []
+  let failed = 0
+  for (const room of rooms) {
+    try {
+      const posted = await postChatCardIndependent(supabase, { groupId: room.id, text, cards, kind: STORE_POST_CARD_KIND, dedupeKey: input.dedupeKey, asUser })
+      if (!posted.ok) { failed++; continue }
+      const cardMessageId = posted.skipped
+        ? (await dispatchMessageId(supabase, STORE_POST_CARD_KIND, room.id, input.dedupeKey))?.message_id ?? null
+        : posted.messageId ?? null
+      let allFilesDeduplicated = true
+      const fileIds: number[] = []
+      for (const [i, f] of input.files.entries()) {
+        const file = await postPdfOnce(supabase, {
+          groupId: room.id, dedupeKey: storePostFileDedupeKey(input.dedupeKey, i), pdf: f.pdf, fileName: f.fileName,
+          kind: STORE_POST_FILE_KIND, asUser, folder: "store-posts",
+        })
+        fileIds.push(file.messageId)
+        if (!file.deduplicated) allFilesDeduplicated = false
+      }
+      results.push({ group_id: room.id, name: room.name, card_message_id: cardMessageId, file_message_ids: fileIds, deduplicated: Boolean(posted.skipped) && allFilesDeduplicated })
+    } catch (error) {
+      if (error instanceof ExternalPostError && error.status === 409) throw error
+      console.error("[mtalk-external-post] store post room failed:", error instanceof Error ? error.message.slice(0, 80) : "unknown")
+      failed++
+    }
+  }
+  // 1つでも失敗したら 502（gourmet は同じ dedupe_key でやり直す。投稿済みのカード・PDFはルームごとに飛ばされる）
+  if (failed) throw new Error("store post failed")
+  return { ok: true, bot_id: input.botId, bot_name: asUser.username, rooms: results, deduplicated: results.every((r) => r.deduplicated) }
 }
 
 // ---------- 「AI分析」Bot への質問 → gourmet の AI分析 → Bot の返信 ----------
@@ -534,6 +614,7 @@ Deno.serve(async (req) => {
     if (path === "/store-bots" && req.method === "GET") return respond({ bots: await listStoreBots(supabase) })
     if (path === "/send" && req.method === "POST") return respond(await send(supabase, bodyText))
     if (path === "/alert" && req.method === "POST") return respond(await alert(supabase, bodyText))
+    if (path === STORE_POST_PATH && req.method === "POST") return respond(await storePost(supabase, bodyText))
     if (path === AI_CHAT_NOTICE_PATH && req.method === "POST") return respond(await chatNotice(supabase, bodyText))
     return respond({ error: "not found" }, 404)
   } catch (error) {
