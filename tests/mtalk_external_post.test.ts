@@ -38,6 +38,14 @@ import {
   loginLinksFrom,
   validateChatNoticeInput,
   INTERNAL_TERMS,
+  buildStorePostCard,
+  looksLikePersonalInfo,
+  STORE_POST_CARD_KIND,
+  STORE_POST_FILE_KIND,
+  STORE_POST_LIMITS,
+  STORE_POST_PATH,
+  storePostFileDedupeKey,
+  validateStorePostInput,
   SCRUBBED_FALLBACK,
   scrubInternalLines,
 } from "../supabase/functions/_shared/mtalk_external_post.ts"
@@ -193,7 +201,7 @@ test("edge function is JWT-less but gated by the external token, without CORS", 
   assert.ok(serve.indexOf('path === "/chat-dispatch"') < serve.indexOf("verifyExternalRequest("), "chat-dispatch is routed before the external HMAC check")
   assert.doesNotMatch(src, /Access-Control-Allow-Origin/)
   assert.match(src, /is_silent: true/)
-  assert.match(src, /groups\/\$\{groupId\}\/ai-reports\//)
+  assert.match(src, /groups\/\$\{groupId\}\/\$\{options\.folder \?\? "ai-reports"\}\//, "/send の PDF は従来どおり ai-reports へ")
 })
 
 // ---------- 「AI分析」Bot への質問 ----------
@@ -602,4 +610,127 @@ test("AI分析: gourmet の取得の内部の言葉（computerUse・サブエー
   assert.deepEqual(notice.parts, ["【再ログイン後の取得結果】"])
   assert.deepEqual(aiChatReplyParts({ parts: ["予約は12件です", "executor failed"] }), ["予約は12件です"])
   assert.deepEqual(aiChatReplyParts({ parts: [] }), [])
+})
+
+
+// ---------- 店舗Botの投稿（POST /store-post、gourmet の週報） ----------
+const STORE_BOT = "6b0b1f0e-3c1a-4d55-9a4e-2f7d8c9e0a11"
+const tinyPdf = () => btoa("%PDF-1.7\n" + "x".repeat(80) + "\n%%EOF")
+const storePostBody = (over: Record<string, unknown> = {}) => ({
+  bot_id: STORE_BOT,
+  dedupe_key: "gourmet-weekly:00000000-0000-4000-8000-000000000001:2026-10-05",
+  type: "weekly_report",
+  store_name: "BISTRO CAVA CAVA",
+  title: "BISTRO CAVA CAVA 週報（食べログ・一休）",
+  subtitle: "2026/10/05 作成 · 直近7日 9/28〜10/4",
+  sections: [
+    { heading: "食べログ", fields: [{ label: "直近7日のPV", value: "1,234 PV（前週比 +5.2%）" }, { label: "評価", value: "3.28（口コミ 50件）" }], items: ["ネット予約は前月比 +12.0%"] },
+    { heading: "一休", fields: [{ label: "直近7日のPV", value: "456 PV" }, { label: "予約", value: "7件（受付日ベース）" }] },
+  ],
+  note: "数値は各サイトの管理画面・公開ページの取得値です。",
+  links: [{ label: "アプリで見る", url: "https://marugo-s.github.io/gourmet/" }, { label: "外部", url: "https://evil.example/" }],
+  files: [{ pdf_base64: tinyPdf(), filename: "BISTRO CAVA CAVA weekly 2026-10-05.pdf" }],
+  ...over,
+})
+
+test("store post: separate path and kinds from the review alert", () => {
+  assert.equal(STORE_POST_PATH, "/store-post")
+  assert.equal(STORE_POST_CARD_KIND, "gourmet_store_post")
+  assert.equal(STORE_POST_FILE_KIND, "gourmet_store_post_file")
+  assert.notEqual(STORE_POST_CARD_KIND, REVIEW_ALERT_KIND)
+  assert.equal(storePostFileDedupeKey("gourmet-weekly:abc:2026-10-05", 0), "gourmet-weekly:abc:2026-10-05:f1")
+})
+
+test("store post input: bot, dedupe key, type, title and at least one section are required", () => {
+  const input = validateStorePostInput(storePostBody())
+  assert.equal(input.botId, STORE_BOT)
+  assert.equal(input.roomIds, null)
+  assert.equal(input.type, "weekly_report")
+  assert.equal(input.sections.length, 2)
+  assert.equal(input.files.length, 1)
+  assert.equal(input.files[0].fileName, "BISTRO CAVA CAVA weekly 2026-10-05.pdf")
+  assert.deepEqual(input.links, [{ label: "アプリで見る", url: "https://marugo-s.github.io/gourmet/" }], "許可していないリンクは落とす")
+  assert.equal(input.dryRun, false)
+  assert.equal(validateStorePostInput(storePostBody({ dry_run: true })).dryRun, true)
+  assert.equal(validateStorePostInput(storePostBody({ dry_run: "true" })).dryRun, false, "true だけ")
+  assert.deepEqual(validateStorePostInput(storePostBody({ room_ids: [30, 5, 30] })).roomIds, [30, 5])
+  assert.equal(validateStorePostInput(storePostBody({ files: undefined })).files.length, 0, "PDFは任意")
+  assert.throws(() => validateStorePostInput(storePostBody({ bot_id: "x" })), /店舗Bot/)
+  assert.throws(() => validateStorePostInput(storePostBody({ recipient_user_id: ALERT_RECIPIENT })), /\/alert/)
+  assert.throws(() => validateStorePostInput(storePostBody({ reviews: [] })), /\/alert/, "口コミ通知の形式は受け付けない")
+  assert.throws(() => validateStorePostInput(storePostBody({ dedupe_key: "short" })), /dedupe_key/)
+  assert.throws(() => validateStorePostInput(storePostBody({ dedupe_key: "k".repeat(113) })), /dedupe_key/, "PDFの :fN を付けても120文字以内")
+  assert.throws(() => validateStorePostInput(storePostBody({ type: "ad" })), /type/)
+  assert.throws(() => validateStorePostInput(storePostBody({ type: "constructor" })), /type/)
+  assert.throws(() => validateStorePostInput(storePostBody({ store_name: " " })), /店舗名/)
+  assert.throws(() => validateStorePostInput(storePostBody({ title: "" })), /タイトル/)
+  assert.throws(() => validateStorePostInput(storePostBody({ sections: [] })), /内容/)
+  assert.throws(() => validateStorePostInput(storePostBody({ sections: [{ heading: "空", fields: [] }] })), /内容/)
+  assert.throws(() => validateStorePostInput(storePostBody({ sections: Array.from({ length: STORE_POST_LIMITS.sectionsMax + 1 }, () => storePostBody().sections[0]) })), /sections/)
+  assert.throws(() => validateStorePostInput(storePostBody({ room_ids: [] })), /room_ids/)
+  assert.throws(() => validateStorePostInput(storePostBody({ room_ids: [0] })), /room_ids/)
+  assert.throws(() => validateStorePostInput(storePostBody({ files: Array.from({ length: STORE_POST_LIMITS.filesMax + 1 }, () => ({ pdf_base64: tinyPdf() })) })), /files/)
+  assert.throws(() => validateStorePostInput(storePostBody({ files: [{ pdf_base64: btoa("<html>" + "x".repeat(100)) }] })), /PDF/, "HTMLは添付できない")
+  assert.throws(() => validateStorePostInput([]), /送信内容/)
+})
+
+test("store post input: rejects guest personal info (email / phone) in the card", () => {
+  assert.equal(looksLikePersonalInfo("guest@example.com"), true)
+  assert.equal(looksLikePersonalInfo("連絡先 090-1234-5678"), true)
+  assert.equal(looksLikePersonalInfo("０３−１２３４−５６７８"), true, "全角も")
+  assert.equal(looksLikePersonalInfo("+81 90 1234 5678"), true)
+  assert.equal(looksLikePersonalInfo("1,234 PV（前週比 +5.2%）"), false)
+  assert.equal(looksLikePersonalInfo("2026/10/05 作成 · 直近7日 9/28〜10/4"), false)
+  assert.equal(looksLikePersonalInfo("予約金額 1234567円"), false)
+  for (const bad of [
+    { note: "山田様 090-1234-5678" },
+    { sections: [{ heading: "食べログ", fields: [{ label: "予約", value: "guest@example.com" }] }] },
+    { sections: [{ heading: "一休", items: ["03-1234-5678 から予約"] }] },
+  ]) {
+    assert.throws(() => validateStorePostInput(storePostBody(bad)), (e: Error & { status?: number }) => /個人情報/.test(e.message) && e.status === 422)
+  }
+})
+
+test("store post card: heading → fields → points per site, note mentions the PDF, links as buttons", () => {
+  const input = validateStorePostInput(storePostBody())
+  const { text, cards } = buildStorePostCard(input)
+  assert.equal(cards.length, 1)
+  assert.deepEqual(cards[0].header, { eyebrow: "週報", title: "BISTRO CAVA CAVA 週報（食べログ・一休）", subtitle: "2026/10/05 作成 · 直近7日 9/28〜10/4" })
+  assert.deepEqual(cards[0].sections.slice(0, 4), [
+    { type: "heading", text: "食べログ" },
+    { type: "fields", rows: [{ label: "直近7日のPV", value: "1,234 PV（前週比 +5.2%）" }, { label: "評価", value: "3.28（口コミ 50件）" }] },
+    { type: "fields", rows: [{ label: "ポイント", value: "", paragraphs: ["・ネット予約は前月比 +12.0%"] }] },
+    { type: "separator" },
+  ])
+  const note = cards[0].sections.at(-1) as { type: string; text: string }
+  assert.equal(note.type, "note")
+  assert.match(note.text, /^数値は各サイトの管理画面・公開ページの取得値です。\n詳しくはこのあとのPDF（BISTRO CAVA CAVA weekly 2026-10-05\.pdf）をご覧ください。$/)
+  assert.deepEqual(cards[0].actions, [{ label: "アプリで見る", url: "https://marugo-s.github.io/gourmet/", style: "primary" }])
+  assert.equal(text, "[週報] BISTRO CAVA CAVA 週報（食べログ・一休）\n2026/10/05 作成 · 直近7日 9/28〜10/4\n食べログ: 直近7日のPV 1,234 PV（前週比 +5.2%） / 評価 3.28（口コミ 50件）\n一休: 直近7日のPV 456 PV / 予約 7件（受付日ベース）")
+  const other = buildStorePostCard(validateStorePostInput(storePostBody({ title: "今週のまとめ", files: [] })))
+  assert.equal(other.cards[0].header.eyebrow, "週報 · BISTRO CAVA CAVA", "タイトルに店舗名が無ければ見出しに付ける")
+  assert.equal((other.cards[0].sections.at(-1) as { text: string }).text, "数値は各サイトの管理画面・公開ページの取得値です。", "PDFなしなら案内しない")
+})
+
+test("store post route: signed like the others, posts as the store bot, PDFs silent, dedupe per room, dry run posts nothing", async () => {
+  const src = await Deno.readTextFile(new URL("../supabase/functions/mtalk-external-post/index.ts", import.meta.url))
+  assert.match(src, /path === STORE_POST_PATH && req\.method === "POST"\) return respond\(await storePost\(supabase, bodyText\)\)/)
+  // 署名の確認より後（/chat-dispatch 以外はすべて verifyExternalRequest を通る）
+  assert.ok(src.indexOf("verifyExternalRequest({") < src.indexOf("path === STORE_POST_PATH"))
+  const fn = src.slice(src.indexOf("async function storePost("), src.indexOf("// ---------- 「AI分析」Bot への質問"))
+  assert.match(fn, /storeBotRooms\(supabase, input\.botId, input\.roomIds\)/)
+  assert.match(fn, /kind: STORE_POST_CARD_KIND, dedupeKey: input\.dedupeKey, asUser/)
+  assert.match(fn, /kind: STORE_POST_FILE_KIND, asUser, folder: "store-posts"/)
+  assert.match(fn, /storePostFileDedupeKey\(input\.dedupeKey, i\)/)
+  assert.doesNotMatch(fn, /AI_ANALYSIS_BOT_ID|REVIEW_ALERT_KIND/)
+  const dry = fn.slice(fn.indexOf("if (input.dryRun)"), fn.indexOf("const results"))
+  assert.doesNotMatch(dry, /postChatCard|postPdfOnce|insert\(/, "dry_run は投稿・予約をしない")
+  assert.match(fn, /if \(failed\) throw new Error\("store post failed"\)/)
+  const pdf = src.slice(src.indexOf("async function postPdfOnce("), src.indexOf("async function send("))
+  assert.match(pdf, /is_silent: true/)
+  assert.match(pdf, /user_id: author\.id/)
+  assert.match(pdf, /groups\/\$\{groupId\}\/\$\{options\.folder \?\? "ai-reports"\}\//)
+  // /send（「AI分析」のPDF）は従来どおり
+  assert.match(pdf, /options\.kind \?\? AI_REPORT_FILE_KIND/)
+  assert.match(pdf, /options\.asUser \?\? \{ id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME \}/)
 })

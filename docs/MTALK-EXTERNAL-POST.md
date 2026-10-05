@@ -16,7 +16,7 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 | `X-Mtalk-Timestamp` | UNIX 秒。前後 300 秒以内 |
 | `X-Mtalk-Signature` | `v1=` + HMAC-SHA256(key=token, `v1:<ts>:<METHOD>:<path>:<body>`) の hex |
 
-`path` は `/recipients`・`/store-bots`・`/send`・`/alert`。署名のテストベクターは `tests/mtalk_external_post.test.ts` と gourmet の `server/tests/mtalk-share.test.js` で同じ値を使います。
+`path` は `/recipients`・`/store-bots`・`/send`・`/alert`・`/store-post`・`/chat-notice`。署名のテストベクターは `tests/mtalk_external_post.test.ts` と gourmet の `server/tests/mtalk-share.test.js` で同じ値を使います。
 
 ## ルート
 
@@ -59,6 +59,47 @@ gourmet（MARUGO-s/gourmet）の「AI分析」画面から、保存済みレポ�
 カードはこの関数が組み立てます（総合点の変化 → 口コミごと（10件まで）→「ほか N件」とアプリへのリンク）。リンクは `https` の `tabelog.com`・`owner.tabelog.com`・`restaurant.ikyu.com`・`marugo-s.github.io` だけで、それ以外はリンクなしで送ります。
 応答: `{ ok, bot_id, bot_name, rooms: [{ group_id, name, message_id, deduplicated }], deduplicated }`。同じルームに同じ `dedupe_key` は `chat_alert_dispatches`（`kind = gourmet_review_alert`）で1回だけ。1つでもルームへの投稿に失敗すると 502（gourmet は同じ `dedupe_key` でやり直し、投稿済みのルームは飛ばされる）。Bot が見つからない・投稿できるルームが無いは 404（gourmet はやり直しません）。
 旧形式 `{ recipient_user_id, ... }`（「AI分析」Botとの1対1、応答 `{ ok, group_id, message_id, deduplicated }`）も互換のため受け付けます。新しい migration・秘密情報はありません。
+
+## 店舗Botの投稿（`POST /store-post`、gourmet の週報）
+
+gourmet の週報（食べログ・一休）を、**店舗Bot として** Bot が参加しているグループのルーム（例: BISTRO CAVA CAVA の店舗ルーム）へ届ける入口です。
+要約カード 1 通（kind `gourmet_store_post`）と、任意の PDF（最大 3 つ、`file` メッセージ・`is_silent: true`、kind `gourmet_store_post_file`）を続けて投稿します。
+口コミ通知（`/alert`）とは別の入口・別の kind・別の形式です（`/alert` の `score_changes`・`reviews`・`recipient_user_id` を付けると 400）。「AI分析」Bot の 1 対 1 には送りません。
+
+gourmet の `agent-api POST /weekly/deliver`（Grok Bot の月曜の作業から `INGEST_TOKEN` で呼ぶ）が、店舗Bot・ルームを `GET /store-bots` と gourmet の口コミ通知の設定（自動＝店舗名で判定／指定／送らない）で決めてから、署名つきで呼びます。
+`GOURMET_MTALK_TOKEN` は両方の Edge Function の秘密情報だけにあり、Grok Bot は持ちません。
+
+```json
+{
+  "bot_id": "<店舗Bot の chat_users.id>",
+  "room_ids": [30],
+  "dedupe_key": "gourmet-weekly:<gourmet の店舗 UUID>:2026-10-05",
+  "type": "weekly_report",
+  "store_name": "BISTRO CAVA CAVA",
+  "title": "BISTRO CAVA CAVA 週報（食べログ・一休）",
+  "subtitle": "2026/10/05 作成 · 直近7日 9/28〜10/4",
+  "sections": [
+    { "heading": "食べログ", "fields": [{ "label": "直近7日のPV", "value": "1,234 PV（前週比 +5.2%）" }, { "label": "評価", "value": "3.28（口コミ 50件）" }], "items": ["ネット予約は前月比 +12.0%"] },
+    { "heading": "一休", "fields": [{ "label": "直近7日のPV", "value": "456 PV" }, { "label": "予約", "value": "7件（受付日ベース）" }] }
+  ],
+  "note": "数値は各サイトの管理画面・公開ページの取得値です。",
+  "links": [{ "label": "アプリで見る", "url": "https://marugo-s.github.io/gourmet/" }],
+  "files": [{ "pdf_base64": "JVBERi0…", "filename": "BISTRO CAVA CAVA weekly 2026-10-05.pdf" }],
+  "dry_run": false
+}
+```
+
+- `type` は `weekly_report` だけ（カードの見出しは「週報」。タイトルに店舗名が無ければ「週報 · 店舗名」）。種類を増やすときは `STORE_POST_TYPES` に足す。
+- 上限: `sections` 4・各 `fields` 8（ラベル 24 文字・値 120 文字）・`items` 3（200 文字）・`note` 300 文字・`links` 2・`files` 3（PDF の合計 8MB、本文は 12MB まで）・`room_ids` 20。
+- PDF だけを添付できます（先頭が `%PDF-` でないものは 400。HTML は添付できません。見せたいときは許可したホストのリンクで）。ファイル名は `/send` と同じ規則（英数字と `._() -`）。保存先は `chat-images/groups/<group_id>/store-posts/<uuid>.pdf`。
+- リンクは `/alert` と同じ許可したホスト（https の `tabelog.com`・`owner.tabelog.com`・`restaurant.ikyu.com`・`marugo-s.github.io`）だけ。それ以外は黙って落とす。
+- お客様の個人情報らしき文字列（メールアドレス・日本の電話番号）がカードのどこかにあれば 422 で受け付けません（gourmet 側でも同じ確認をします）。カードは件数・評価・PV などの集計だけにしてください。
+- `room_ids` を省くと Bot が参加している全グループ（1対1・ゴミ箱・管理者通知を除く）。指定しても参加していないルームには送りません（全部外れたら 404）。投稿者名は「<店舗名> bot」（`loadMtalkStoreBot`）。
+- 冪等性: 同じルームに同じ `dedupe_key` のカードは 1 回だけ、PDF は `<dedupe_key>:f<番号>` ごとに 1 回だけ（`chat_alert_dispatches`）。gourmet は店舗×週（作成日の週の月曜、日本時間）で同じキーを使うので、月曜の作業をやり直しても二重に届きません。
+- 応答: `{ ok, bot_id, bot_name, rooms: [{ group_id, name, card_message_id, file_message_ids, deduplicated }], deduplicated }`。1 つでもルームへの投稿に失敗すると 502（同じ `dedupe_key` でやり直すと投稿済みのカード・PDF は飛ばされる）。Bot・ルームが見つからないは 404、同じ PDF を処理中は 409。
+- `dry_run: true`: 何も投稿・予約せず、Bot・送り先ルーム（`already_sent` 付き）・組み立てたカード（`text`・`cards`）・PDF の名前と大きさだけを返す。最初の配信の前の確認に使う。
+
+新しい migration・秘密情報はありません（`chat_alert_dispatches` に新しい kind の行が増えるだけ）。配備は `main` へのマージで Actions が `mtalk-external-post` を配備します。gourmet の `agent-api` は、この配備の後に配備してください（先に gourmet だけ配備すると `/store-post` が 404 "not found" になり、gourmet は 502 として失敗を返します）。
 
 ## DB（migration `20261001000000_chat_ai_analysis_bot.sql`）
 
