@@ -4,142 +4,132 @@
 - cluster-only mode — file stats not available
 
 ## Summary
-- 5955 nodes · 13092 edges · 563 communities (364 shown, 199 thin omitted)
+- 5955 nodes · 13067 edges · 559 communities (358 shown, 201 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 128 edges (avg confidence: 0.71)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `28daddff`
+- Built from commit: `4080066e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - admin-api/index.ts
 - db.js
-- server.js
-- receipt_report_flex.ts
 - toSafeString
+- server.js
+- line_search_bot.ts
+- receipt_sheets_pilot_sync.ts
+- gmail-alert-cron/index.ts
+- journal_product_index.ts
 - foodcourt_compare.ts
+- line-webhook/index.ts
+- line_user_approval.ts
 - attachments.js
 - composer.js
+- chat_store_file_bridge.ts
 - index.js
-- line_user_approval.ts
-- line-webhook/index.ts
-- receipt_sheets_pilot_sync.ts
-- journal_product_index.ts
+- normalizeInlineText
 - foodcourt_kpi.ts
-- receipt-sheets-sync-cron/index.ts
+- receipt_parse.ts
 - kpi_scenario.ts
-- competitor_review_context.ts
-- gmail-alert-cron/index.ts
 - ai-analyze/index.ts
 - receipt_correction.ts
 - fetchReservationAiFactsLive
-- toNonNegativeInteger
 - pos_journal.ts
+- receipt_reply_context.ts
 - pos_journal_ai.ts
 - 20260824010000_chat_admin_permissions.sql
+- admin_dashboard_link_auth.ts
 - admin_receipt_sales.ts
+- item
 - foodcourt-forecast-cron/index.ts
 - foodCourtAiChat
 - answerFoodCourtQuestion
-- foodcourt_loop_utils.ts
-- line_search_bot.ts
-- chat_store_file_bridge.ts
-- mtalk_casual_chat.ts
-- supabase/functions/_shared/receipt_store_name_resolve.ts
 - receipt_vision.ts
-- processPullRowsToDb
+- foodcourt_loop_utils.ts
 - petty_cash_flow.ts
+- dedupeTextArray
+- Element
 - readChatPageSource
 - core.js
-- messages.js
+- chat-knowledge/index.ts
+- sales_reconciliation.ts
 - journal_store_context.ts
-- reservation-today-cron/index.ts
+- competitor_review_context.ts
+- receipt_sheets_tab_resolve.ts
+- receipt_store_mismatch.ts
 - receipt-midreport-cron/functions/_shared/receipt_report_aggregate.ts
 - rooms.js
+- fetchState
 - calendar-tomorrow-cron/index.ts
-- chat-push/index.ts
-- extractReservationMailDetails
-- uploadDocumentFile
+- receipt-midreport-cron/functions/_shared/sales_budget_allocation.ts
 - line_client.ts
-- chat-knowledge/index.ts
+- reservation-today-cron/index.ts
 - foodcourt_forecast_engine.ts
 - journal_ai_orchestrate.ts
-- chat-page-source.mjs
-- admin_dashboard_link_auth.ts
-- mtalk_external_post.ts
 - receipt_duplicate.ts
+- chat-page-source.mjs
+- messages.js
+- mtalk_external_post.ts
 - tokyo-dome-events-cron/index.ts
-- isRecord
-- sales_reconciliation.ts
-- check-line-report-help-coverage.ts
-- mtalk-external-post/index.ts
-- google_sheets_client.ts
-- store_receipt.ts
 - buildWineAnalysisFallback
-- fetchReservationAiFacts
+- receipt-sheets-sync-cron/index.ts
+- mtalk_casual_chat.ts
+- chat-push/index.ts
+- mtalk-external-post/index.ts
+- check-line-report-help-coverage.ts
+- receipt_report_flex.ts
 - pos_journal_lha.ts
 - public/auth-session.js
 - jnm/auth-session.js
-- truncateText
-- uploadPosJournalFiles
+- fetchReservationAiFacts
 - buildJournalSavedReportsFromPosDays
-- supabase/functions/_shared/sales_budget_allocation.ts
 - notifications.js
 - mtalk-loan-report/index.ts
 - line_report_help_manual.ts
-- tokyo-dome-weekly-cron/index.ts
+- weather_daily.ts
 - journal_chat_query_planner.test.mjs
 - scripts
 - generate-knowledge-system.mjs
-- chat_admin_delegation.ts
-- receipt_flex_reply.ts
-- weather_daily.ts
-- parse-pos-journal.py
-- dedupeTextArray
 - mtalk_daily_sales_import.ts
-- receipt_parse.ts
-- renderMessageList
+- chat_bridge.ts
+- parse-pos-journal.py
 - permissions.js
 - wait-for-edge-deploy.mjs
-- chat_flex_card.ts
-- mtalk_search.ts
 - backfill-pos-journal-v22.mjs
-- line_media_store.ts
 - upload-pos-journal-archive.mjs
-- daily_sales_import.ts
-- resolveChannelAccessToken
 - mtalk_external_post.test.ts
-- receipt_reply_context.ts
-- item
 - public/pages-config.js
-- buildSimulatedPriceReply
+- fetchMediaState
+- supabase/functions/_shared/receipt_store_name_resolve.ts
 - check-knowledge-system.mjs
+- supabase/functions/_shared/sales_budget_allocation.ts
 - renderTalkRow
-- buildGmailReservationFlexBubble
+- searchWebCandidates
+- room_hard_delete.ts
 - internal_cron_auth.ts
+- journal_sales_sync.ts
+- web_push.ts
 - chat_web_push.test.ts
 - foodcourt-qa-planner.js
 - jnm/pages-config.js
-- room_hard_delete.ts
-- fetchGmailMessageAlert
-- canonicalStorePartitionKeyForDb
-- web_push.ts
+- tokyo-dome-weekly-cron/index.ts
 - chat_ai_typing_indicator.test.mjs
 - profile.js
+- receipt-midreport-cron/index.ts
+- toSafeString
 - foodcourt_qa_methods.ts
 - journal_ai_privacy.ts
-- journal_sales_sync.ts
 - 20260904010000_chat_user_stores.sql
 - 20260910070000_chat_full_admin_all_stores.sql
-- refreshMessageNode
+- renderMessageList
 - renderGroups
 - purge-sales-except-allowed-stores.mjs
+- createPettyCashEntry
 - budget_entry_flow.ts
 - 20260818184854_chat_auth_hardening.sql
 - realtime.js
-- normalizeInlineText
 - review-alert-cron/index.ts
 - resolveGroqTextModel
 - mtalk_schedule_register.ts
@@ -150,25 +140,30 @@
 - search-knowledge-vault.mjs
 - verify-journal-ai-data-flow.mjs
 - processCsvIngestionRows
+- createBackup
 - admin_access_log.ts
 - auto_link_room.ts
 - paged_row_scan.ts
-- receipt_prompt.ts
-- receipt_store_mismatch.ts
 - 20260903010000_chat_signup_approval.sql
 - isStoreBot
+- addMessageToUI
 - schema.sql
+- daily_sales_import.ts
+- line_media_store.ts
 - line_room_message_search.ts
+- mtalk_web_search.ts
 - cloudflare-worker/package.json
 - ocr
+- journal-ai-privacy.js
 - resolvePosJournalAiSummary
-- mtalk_menu_knowledge.ts
+- supabase/functions/_shared/manual_month_sales.ts
+- openMessageMenu
 - paintAvatar
 - openReservationSchedule
 - site-cache.js
 - receipt-midreport-cron/functions/_shared/manual_month_sales.ts
 - foodcourt_attendance.ts
-- line_room_search_archive.ts
+- tokyo_dome_weekly_window.ts
 - 20260804035330_reservation_ai_daily_cache.sql
 - 20260820240000_chat_room_trash.sql
 - chat_file_links.test.mjs
@@ -176,9 +171,7 @@
 - dependencies
 - renderRegisteredUsers
 - dummy-sales-seed.sh
-- createPettyCashEntry
-- reservation_mail_rules.ts
-- mtalk_room_settings.ts
+- supabase/functions/_shared/japanese_holidays.ts
 - 20260818220643_chat_web_push_notifications.sql
 - 20260910010000_chat_delegated_admin.sql
 - foodcourt_pdf_export.test.mjs
@@ -187,24 +180,24 @@
 - bootstrap.js
 - avatarHtml
 - closeChat
-- job_titles.ts
 - cleanText
 - room-messages-retention-cron/index.ts
 - foodcourt_distillation.ts
 - foodcourt_journal_coverage.ts
 - knowledge_file_extract.ts
+- supabase/functions/_shared/receipt_report_aggregate.ts
 - 20260819230000_chat_store_rooms.sql
 - 20260820150000_chat_store_bots.sql
 - 20260825010000_chat_admin_templates_access_revert.sql
 - 20260901020000_chat_admin_room_trash_and_bot_archive.sql
 - 20260910040000_security_authorization_hardening.sql
 - 20260910140000_foodcourt_forecast_issuance.sql
+- forwardToUser
 - chat-sw.js
 - clear-store-budget-data.mjs
 - verify-journal-sales-sync-toggle.sh
-- signExternalRequest
-- chat_bridge.ts
-- usage_metrics.ts
+- buildGmailReservationFlexBubble
+- job_titles.ts
 - 20260523140000_store_partition_webhook_tables.sql
 - 20260526220000_reservation_customer_visit_history.sql
 - 20260622200000_forecast_foundation.sql
@@ -218,14 +211,15 @@
 - check-graphify-sql-coverage.mjs
 - cleanup-bistrocavacava-dummy-data.mjs
 - supabase-db-push-reconcile.sh
-- addMessageToUI
+- mtalk_daily_sales_import.test.ts
 - admin_api_pos_journal_pagination.test.mjs
 - appsscript.json
 - access-log.js
 - menu-logout.js
 - check-supabase-ownership.mjs
 - import-profile-icons.mjs
-- openMessageMenu
+- removeRoomDocuments
+- reservation_mail_rules.ts
 - 20260527220000_line_room_search_excluded_messages.sql
 - 20260706130000_review_alert_cron.sql
 - 20260715120023_foodcourt_ai_learning_feedback.sql
@@ -244,6 +238,8 @@
 - journal_ai_usage_tokens.test.ts
 - setup-gas-sync-config.sh
 - update-knowledge-vault.sh
+- buildDeclarativeChatPushPayload
+- mtalk_room_settings.ts
 - 20260523150000_sales_budget_tables.sql
 - 20260527213000_line_room_receipt_search_fields_and_rpc.sql
 - 20260604130000_reservation_manual_edit.sql
@@ -437,7 +433,7 @@
 - foodcourt_qa_input.test.mjs
 - journal_store_select.test.mjs
 - pos_journal_ai_history.test.mjs
-- enrichWebCandidatesForMissingFields
+- validateStorePostInput
 
 ## God Nodes (most connected - your core abstractions)
 1. `toSafeString()` - 122 edges
@@ -454,167 +450,163 @@
 ## Surprising Connections (you probably didn't know these)
 - `buildForecastFactorsContext()` --indirect_call--> `gap()`  [INFERRED]
   supabase/functions/_shared/foodcourt_compare.ts → scripts/verify-journal-ai-data-flow.mjs
+- `collect()` --indirect_call--> `item()`  [INFERRED]
+  public/jnm/journal-ai-privacy.js → tests/foodcourt_journal_link.test.ts
+- `sanitizeValue()` --indirect_call--> `item()`  [INFERRED]
+  public/jnm/journal-ai-privacy.js → tests/foodcourt_journal_link.test.ts
 - `renderSvg()` --indirect_call--> `node()`  [INFERRED]
   scripts/generate-knowledge-system.mjs → public/sales-source-notice.js
 - `extractOcrTextCandidates()` --indirect_call--> `item()`  [INFERRED]
-  src/server.js → tests/foodcourt_journal_link.test.ts
-- `searchWebCandidates()` --indirect_call--> `item()`  [INFERRED]
-  src/server.js → tests/foodcourt_journal_link.test.ts
-- `buildDrinkingWindowFromHints()` --indirect_call--> `item()`  [INFERRED]
   src/server.js → tests/foodcourt_journal_link.test.ts
 
 ## Import Cycles
 - 3-file cycle: `supabase/functions/_shared/receipt_parse.ts -> supabase/functions/_shared/store_receipt_phones.ts -> supabase/functions/_shared/store_receipt.ts -> supabase/functions/_shared/receipt_parse.ts`
 
-## Communities (563 total, 199 thin omitted)
+## Communities (559 total, 201 thin omitted)
 
 ### Community 0 - "admin-api/index.ts"
 Cohesion: 0.02
-Nodes (133): addDaysIso(), AdminAuthenticationResult, AI_USAGE_CLAUDE_STORE_KEYS, AiUsageProviderBucket, AiUsageStoreRow, AppError, AuthenticatedAdmin, backfillLineUserPermissionsFromMessages() (+125 more)
+Nodes (143): addDaysIso(), AdminAuthenticationResult, AI_USAGE_CLAUDE_STORE_KEYS, AiUsageProviderBucket, AiUsageStoreRow, appendChunkWithinLimit(), appendWordXmlNodeText(), AppError (+135 more)
 
 ### Community 1 - "db.js"
 Cohesion: 0.02
-Nodes (101): addIngestionError(), buildProductWritePayload(), completeIngestionFile(), countIngestionErrorsByFileStmt, countIngestionProductSnapshotsByFileStmt, countPriceHistoryByIngestionFileStmt, createIngestionFile(), createProduct() (+93 more)
+Nodes (106): addIngestionError(), attachAliases(), buildProductWritePayload(), completeIngestionFile(), countIngestionErrorsByFileStmt, countIngestionProductSnapshotsByFileStmt, countPriceHistoryByIngestionFileStmt, createIngestionFile() (+98 more)
 
-### Community 2 - "server.js"
-Cohesion: 0.03
-Nodes (83): adjustProductStockQty(), adjustProductStockQtyTx, backupDatabaseTo(), findCatalogProductsByQuery(), getAdminTokenOverride(), saveOcrResult(), app, asBackupTimestamp() (+75 more)
+### Community 2 - "toSafeString"
+Cohesion: 0.04
+Nodes (107): analyzeStoreKnowledgeImage(), buildKnowledgeBodyFallback(), buildSavedReportHtmlStoragePath(), buildStoreKnowledgeSearchText(), callKnowledgeGemini(), createSavedReportHtmlSignedUrl(), createSignedMediaUrl(), createStoreKnowledgeDownloadUrl() (+99 more)
 
-### Community 3 - "receipt_report_flex.ts"
+### Community 3 - "server.js"
+Cohesion: 0.04
+Nodes (84): adjustProductStockQty(), adjustProductStockQtyTx, findCurrentPricesByQuery(), getActiveReplyTemplateByKey(), getAdminTokenOverride(), renderTemplate(), saveOcrResult(), app (+76 more)
+
+### Community 4 - "line_search_bot.ts"
+Cohesion: 0.06
+Nodes (82): ChatAction, CORS_HEADERS, helpCard(), SearchKind, emitFlexNote(), flexColor(), FlexField, flexNoteSize() (+74 more)
+
+### Community 5 - "receipt_sheets_pilot_sync.ts"
+Cohesion: 0.06
+Nodes (90): fetchJapaneseHolidaySet(), applySheetMissingMonthDeletions(), BudgetComparable, budgetComparableEqual(), budgetComparableFromRow(), budgetComparableFromSheetRow(), BudgetRow, budgetRowStoreKeyIndex() (+82 more)
+
+### Community 6 - "gmail-alert-cron/index.ts"
 Cohesion: 0.05
-Nodes (81): getJapaneseHolidayDateSet(), JAPANESE_HOLIDAY_ISO_DATES, buildReceiptBudgetComparisonRows(), computeReceiptDailyDiffTotalLikeAnalyticsFooter(), fetchSalesBudgetRow(), formatYenAmount(), formatYenSignedDiff(), loadStoreDayGrossSumForDate() (+73 more)
+Nodes (76): buildDisplayWidthIndent(), buildGmailReservationAlertLinePayload(), buildGmailReservationAlertMessage(), buildGmailReservationChatCards(), buildRelaxedGmailAlertQuery(), buildReservationCalendarUrlsForAlerts(), buildReservationHistoryParagraphs(), cleanupTestReservationSeed() (+68 more)
 
-### Community 4 - "toSafeString"
+### Community 7 - "journal_product_index.ts"
 Cohesion: 0.05
-Nodes (73): analyzeStoreKnowledgeImage(), buildKnowledgeBodyFallback(), buildSavedReportHtmlStoragePath(), buildStoreKnowledgeSearchText(), callKnowledgeGemini(), chunkArray(), createSavedReportHtmlSignedUrl(), createSignedMediaUrl() (+65 more)
+Nodes (68): addReceiptToCohort(), buildJournalProductIndexMonthSnapshot(), buildPosJournalRepairPayload(), buildPosJournalStoragePath(), combineJournalProductDetailCoverage(), comparePosJournalCohortsGeneral(), comparePosJournalProductCohorts(), deletePosJournalFile() (+60 more)
 
-### Community 5 - "foodcourt_compare.ts"
+### Community 8 - "foodcourt_compare.ts"
+Cohesion: 0.04
+Nodes (68): fetchReceiptDailyAggForRange(), foodCourtRoleProvider(), buildDailyLogsContext(), buildFoodCourtAckFlex(), buildFoodCourtCompareFlex(), buildFoodCourtDashboardLink(), buildFoodCourtDateConfirmFlex(), buildFoodCourtPageUrl() (+60 more)
+
+### Community 9 - "line-webhook/index.ts"
 Cohesion: 0.05
-Nodes (67): fetchReceiptDailyAggForRange(), foodCourtRoleProvider(), buildDailyLogsContext(), buildFoodCourtAckFlex(), buildFoodCourtCompareFlex(), buildFoodCourtDashboardLink(), buildFoodCourtDateConfirmFlex(), buildFoodCourtPageUrl() (+59 more)
+Nodes (57): buildDailySalesConfirmFlex(), buildDailySalesImportedFlex(), buildDailySalesSummaryRows(), buildDailySalesTemplateDownloadFlex(), buildReservationConfirmFlex(), buildReservationImportDetailJson(), buildReservationRegisteredFlex(), buildReservationUpdatedFlex() (+49 more)
 
-### Community 6 - "attachments.js"
+### Community 10 - "line_user_approval.ts"
+Cohesion: 0.08
+Nodes (58): replyLineFlex(), resolveChannelAccessToken(), fetchLineDisplayNameByUserId(), buildFlexInfoCard(), buildLineFlexBlueHeader(), flexButton(), FlexButtonAction, FlexButtonSpec (+50 more)
+
+### Community 11 - "attachments.js"
 Cohesion: 0.05
 Nodes (55): archiveChatImageInMediaLibrary(), cardsFromMessage(), CHAT_FILE_MIMES, CHAT_PREVIEW_DOC, CHAT_PREVIEW_PDF, CHAT_PREVIEW_SHEET, CHAT_PREVIEW_TEXT, chatFilesFromList() (+47 more)
 
-### Community 7 - "composer.js"
+### Community 12 - "composer.js"
 Cohesion: 0.07
 Nodes (62): addMessageToAlbum(), albumDate(), albumSignedUrls(), applySavedCredentials(), askDeleteAlbum(), backToAlbumLibrary(), cancelAlbumDelete(), cancelScheduledMessage() (+54 more)
 
-### Community 8 - "index.js"
+### Community 13 - "chat_store_file_bridge.ts"
+Cohesion: 0.06
+Nodes (52): createPettyCashEntryFromReceiptImage(), recordPettyCashWebAiUsage(), processReceiptImageEvent(), ChatStoreBot, DbClient, menuKnowledgeFromLineImageAnalysis(), mtalkMediaMessageId(), preferMenuKnowledgeResult() (+44 more)
+
+### Community 14 - "index.js"
 Cohesion: 0.09
 Nodes (60): asJson(), buildRedirectUrl(), buildResumeImmediateAckText(), buildResumeLineAcceptedText(), callLineBotInfo(), callLineMessageQuota(), callLineWebhookEndpointInfo(), callLineWebhookTest() (+52 more)
 
-### Community 9 - "line_user_approval.ts"
-Cohesion: 0.08
-Nodes (57): pushLineMessages(), replyLineFlex(), buildFlexInfoCard(), buildLineFlexBlueHeader(), flexButton(), FlexButtonAction, FlexButtonSpec, lineSafeFlexText() (+49 more)
-
-### Community 10 - "line-webhook/index.ts"
-Cohesion: 0.06
-Nodes (50): buildDailySalesConfirmFlex(), buildDailySalesImportedFlex(), buildDailySalesSummaryRows(), buildDailySalesTemplateDownloadFlex(), buildReservationConfirmFlex(), buildReservationImportDetailJson(), buildReservationRegisteredFlex(), buildReservationUpdatedFlex() (+42 more)
-
-### Community 11 - "receipt_sheets_pilot_sync.ts"
-Cohesion: 0.06
-Nodes (55): fetchJapaneseHolidaySet(), date(), BudgetComparable, BudgetRow, buildClosedDatesExportFromDb(), buildDailySalesExportRows(), buildDailySeriesForStoreMonth(), buildJstDateKeysForMonth() (+47 more)
-
-### Community 12 - "journal_product_index.ts"
+### Community 15 - "normalizeInlineText"
 Cohesion: 0.07
-Nodes (53): addReceiptToCohort(), buildJournalProductIndexMonthSnapshot(), combineJournalProductDetailCoverage(), comparePosJournalCohortsGeneral(), comparePosJournalProductCohorts(), emptyCohortBucket(), fetchChatPdfHistoryItem(), fetchChatPdfHistoryList() (+45 more)
+Nodes (60): appendReservationHonorific(), buildGmailReservationFlexAltText(), buildReservationCalendarDetailPayload(), buildReservationDetailLabel(), buildReservationTemplateData(), buildSeatNameFromMail(), buildVisitDateTimeFromMail(), captureFirstMatch() (+52 more)
 
-### Community 13 - "foodcourt_kpi.ts"
+### Community 16 - "foodcourt_kpi.ts"
 Cohesion: 0.07
 Nodes (46): allocateFoodCourtHourlyTargets(), assessFoodCourtNewItemPlausibility(), buildFoodCourtJournalDemandOutlook(), buildFoodCourtJournalDetail(), FoodCourtJournalDetail, FoodCourtNewItemPlausibilityCheck, formatFoodCourtNewItemPlausibilityBlock(), Product (+38 more)
 
-### Community 14 - "receipt-sheets-sync-cron/index.ts"
-Cohesion: 0.09
-Nodes (48): bearerToken(), constantTimeEqual(), CORS_HEADERS, isAuthorized(), isServiceRoleAuthorized(), clearBistrocavacavaSheetDataRowsAndPushFromDb(), canonicalKeepStoreKey(), clearSpreadsheetTabsExceptStores() (+40 more)
+### Community 17 - "receipt_parse.ts"
+Cohesion: 0.10
+Nodes (50): upsertManualDaySalesEntries(), normalizeReceiptCorrectionInputValue(), startCorrectionSession(), buildReceiptSummaryText(), clamp01(), computeReceiptHeuristicConfidence(), decodeEscapedUnicodeSequences(), extractPartyGuestCountsFromText() (+42 more)
 
-### Community 15 - "kpi_scenario.ts"
+### Community 18 - "kpi_scenario.ts"
 Cohesion: 0.06
 Nodes (50): loadWeatherForReports(), buildClarificationMessages(), describeMissingKpiAssumptions(), allocateUnits(), ASSUMPTION_RULES, BASIS_RANK, buildDataGaps(), buildKpiScenarioPack() (+42 more)
 
-### Community 16 - "competitor_review_context.ts"
-Cohesion: 0.11
-Nodes (52): isRecord(), toSafeString(), applyProfileDictionaryClassification(), buildReviewExcerpt(), buildStoreReviewProfilePayload(), classifyNearbyWithAI(), compactGoogleRaw(), CompetitorPlaceRow (+44 more)
-
-### Community 17 - "gmail-alert-cron/index.ts"
-Cohesion: 0.06
-Nodes (59): buildDisplayWidthIndent(), buildGmailReservationAlertLinePayload(), buildGmailReservationAlertMessage(), buildGmailReservationChatCards(), buildRelaxedGmailAlertQuery(), buildReservationCalendarUrlsForAlerts(), buildReservationHistoryParagraphs(), cleanupTestReservationSeed() (+51 more)
-
-### Community 18 - "ai-analyze/index.ts"
+### Community 19 - "ai-analyze/index.ts"
 Cohesion: 0.08
 Nodes (43): AI_RATE_LIMITS, AiAction, boundedIsoDate(), boundedNonNegativeInteger(), boundJournalFoodcourtIntegrationReports(), BRIEF_CACHE_TTL_MS, buildJournalAiServerPolicy(), buildKpiScenarioContext() (+35 more)
 
-### Community 19 - "receipt_correction.ts"
+### Community 20 - "receipt_correction.ts"
 Cohesion: 0.10
-Nodes (48): applyCorrectionFieldValue(), buildCorrectionFlexHeader(), buildFieldSelectionPrompt(), buildReceiptCorrectionCancelOnlyFooter(), buildReceiptCorrectionConfirmCancelFooter(), buildUpdatedReceiptFlexReply(), buildValueInputPrompt(), clearPendingCorrection() (+40 more)
+Nodes (47): applyCorrectionFieldValue(), buildCorrectionFlexHeader(), buildFieldSelectionPrompt(), buildReceiptCorrectionCancelOnlyFooter(), buildReceiptCorrectionConfirmCancelFooter(), buildUpdatedReceiptFlexReply(), buildValueInputPrompt(), clearPendingCorrection() (+39 more)
 
-### Community 20 - "fetchReservationAiFactsLive"
-Cohesion: 0.08
-Nodes (48): assertReservationEventMatchesStoreScope(), buildCalendarVisitMonthLabel(), buildCalendarVisitTimeLabel(), buildChatScheduleReservationDetail(), buildJstMonthRange(), buildReservationCalendarItem(), buildReservationCountDedupeKey(), buildReservationEffectiveSummaryLookup() (+40 more)
-
-### Community 21 - "toNonNegativeInteger"
-Cohesion: 0.06
-Nodes (48): buildDocumentSnippet(), clampInt(), createSignedMediaDownloadUrl(), fetchChatMediaView(), fetchDocumentPermissionSummaries(), fetchDocumentState(), fetchGlobalSettings(), fetchLineDocumentUsageStats() (+40 more)
+### Community 21 - "fetchReservationAiFactsLive"
+Cohesion: 0.07
+Nodes (54): assertReservationEventMatchesStoreScope(), buildCalendarVisitMonthLabel(), buildCalendarVisitTimeLabel(), buildChatScheduleReservationDetail(), buildJstMonthRange(), buildReservationCalendarItem(), buildReservationCountDedupeKey(), buildReservationEffectiveSummaryLookup() (+46 more)
 
 ### Community 22 - "pos_journal.ts"
 Cohesion: 0.07
 Nodes (47): amount(), applyPosJournalCategoryOverrides(), buildPosJournalSummary(), classifyPosJournalDrinkSubclassByName(), classifyPosJournalReportItem(), CodeSpec, codeSpecMatches(), firstInt() (+39 more)
 
-### Community 23 - "pos_journal_ai.ts"
+### Community 23 - "receipt_reply_context.ts"
+Cohesion: 0.10
+Nodes (44): buildReceiptChatCard(), buildReceiptFlexMessage(), field(), formatCountOrDash(), formatDecimalOrDash(), formatReceiptDateJa(), formatYenOrDash(), kvRow() (+36 more)
+
+### Community 24 - "pos_journal_ai.ts"
 Cohesion: 0.10
 Nodes (41): analyzePosJournalWithAi(), askPosJournalAi(), recordPosJournalAiUsage(), buildStoreLocationPromptBlock(), aggregateGroups(), aggregatePeriod(), answerPosJournalAiQuestion(), boundedInteger() (+33 more)
 
-### Community 24 - "20260824010000_chat_admin_permissions.sql"
+### Community 25 - "20260824010000_chat_admin_permissions.sql"
 Cohesion: 0.05
 Nodes (9): chat_group_members_protect_permissions, chat_groups_protect_security_columns, chat_users_create_default_access, public.chat_admin_audit_log, public.chat_create_default_user_access(), public.chat_group_members, public.chat_protect_group_security_columns(), public.chat_protect_member_permissions() (+1 more)
 
-### Community 25 - "admin_receipt_sales.ts"
-Cohesion: 0.10
-Nodes (38): fetchAnalyticsMonthly(), fetchDistinctRoomIdsFromRawTable(), fetchManualMonthsForYearState(), fetchReceiptSalesState(), fetchReceiptWebhookStatus(), fetchSalesBudgetRow(), fetchStoreClosedDatesFromTable(), mergeSalesTotalsWithManualMonth() (+30 more)
+### Community 26 - "admin_dashboard_link_auth.ts"
+Cohesion: 0.08
+Nodes (47): archiveChatMedia(), asAppError(), authenticate(), authenticateChatMember(), buildFoodCourtWeeklyReportLink(), decideChatMenuKnowledge(), exchangeChatJournalLoginLink(), exchangeChatMediaViewLink() (+39 more)
 
-### Community 26 - "foodcourt-forecast-cron/index.ts"
+### Community 27 - "admin_receipt_sales.ts"
+Cohesion: 0.10
+Nodes (38): fetchDistinctRoomIdsFromRawTable(), fetchManualMonthsForYearState(), fetchReceiptSalesState(), fetchReceiptWebhookStatus(), fetchSalesBudgetRow(), fetchStoreClosedDatesFromTable(), mergeSalesTotalsWithManualMonth(), parsePositiveWeight() (+30 more)
+
+### Community 28 - "item"
+Cohesion: 0.06
+Nodes (55): fetchHtmlMetaSummary(), applyChatAdminTemplate(), assertChatAdminAuditScope(), assertChatAdminBotScope(), assertChatAdminRoomScope(), assertChatAdminTemplateScope(), assertChatAdminUserGlobalScope(), assertChatAdminUserReadScope() (+47 more)
+
+### Community 29 - "foodcourt-forecast-cron/index.ts"
 Cohesion: 0.07
 Nodes (31): AdvancedStats, avg(), CiEntry, cohensD(), computeAdvancedStats(), DbClient, dMagnitude(), EffectSizeEntry (+23 more)
 
-### Community 27 - "foodCourtAiChat"
+### Community 30 - "foodCourtAiChat"
 Cohesion: 0.08
 Nodes (43): foodCourtExceptionReason(), FoodCourtExtractionDiagnostic, foodCourtFetch(), foodCourtGeminiGeneration(), foodCourtGeminiText(), foodCourtHttpReason(), foodCourtImageMime(), FoodCourtProvider (+35 more)
 
-### Community 28 - "answerFoodCourtQuestion"
-Cohesion: 0.17
-Nodes (46): answerFoodCourtQuestion(), appendLoopFeedback(), buildAnomalyDays(), buildBaseInsights(), buildCompetitorContext(), buildConditionPatternStats(), buildContributionDecomposition(), buildDailyLogImpactContext() (+38 more)
+### Community 31 - "answerFoodCourtQuestion"
+Cohesion: 0.18
+Nodes (44): answerFoodCourtQuestion(), appendLoopFeedback(), buildAnomalyDays(), buildBaseInsights(), buildCompetitorContext(), buildConditionPatternStats(), buildContributionDecomposition(), buildDailyLogImpactContext() (+36 more)
 
-### Community 29 - "foodcourt_loop_utils.ts"
+### Community 32 - "receipt_vision.ts"
+Cohesion: 0.12
+Nodes (43): coerceMaybeJsonObject(), normalizeInlineText(), normalizeLineImageAnalysisResult(), normalizeLineImageMenuAnalysis(), parseFirstJsonObject(), salvageLineImageAnalysisResultFromText(), buildReceiptVisionSystemPrompt(), analyzeExpenseReceiptWithAzureFoundry() (+35 more)
+
+### Community 33 - "foodcourt_loop_utils.ts"
 Cohesion: 0.08
-Nodes (40): buildLoopFeedback(), evaluateFoodCourtAnswer(), foodCourtEvalDeadlineAt(), parseLoopEvaluationJson(), recordFoodCourtFallbackEvent(), recordFoodCourtFallbackIfNeeded(), resolveFoodCourtOpenAiModel(), runFoodCourtLoopEngineering() (+32 more)
+Nodes (41): buildLoopFeedback(), evaluateFoodCourtAnswer(), foodCourtEvalDeadlineAt(), loadFoodCourtLearningMemory(), parseLoopEvaluationJson(), recordFoodCourtFallbackEvent(), recordFoodCourtFallbackIfNeeded(), resolveFoodCourtOpenAiModel() (+33 more)
 
-### Community 30 - "line_search_bot.ts"
-Cohesion: 0.09
-Nodes (43): buildGroupSalesDatePromptFlex(), buildGroupSalesSearchGuideFlex(), buildGroupSalesSearchGuideText(), buildKindPromptFlex(), buildSearchMenuFlex(), buildSearchMenuFooter(), dedupeSalesSearchRows(), executeCalendarSearch() (+35 more)
-
-### Community 31 - "chat_store_file_bridge.ts"
-Cohesion: 0.11
-Nodes (38): createPettyCashEntryFromReceiptImage(), recordPettyCashWebAiUsage(), processReceiptImageEvent(), ChatStoreBot, DbClient, menuKnowledgeFromLineImageAnalysis(), mtalkMediaMessageId(), preferMenuKnowledgeResult() (+30 more)
-
-### Community 32 - "mtalk_casual_chat.ts"
-Cohesion: 0.09
-Nodes (35): getStoreLocationProfile(), LABEL_SET, MARUGO_GROUP_STORE_OPTIONS, STORE_COORDINATES, STORE_LOCATION_PROFILES, StoreLocationProfile, buildAiCreditLine(), buildWeatherForecastReply() (+27 more)
-
-### Community 33 - "supabase/functions/_shared/receipt_store_name_resolve.ts"
-Cohesion: 0.12
-Nodes (39): normalizeReceiptFieldText(), RECEIPT_SHEETS_STORE_CATALOG, alignReceiptStoreNameToRegistry(), findRegistryEntryForParsedStoreName(), normalizeStoreCompareKey(), receiptStoreNameMatchesRegistry(), resolveParsedStoreNameForDisplay(), StoreRegistryMatchCandidate (+31 more)
-
-### Community 34 - "receipt_vision.ts"
-Cohesion: 0.13
-Nodes (41): coerceMaybeJsonObject(), normalizeInlineText(), normalizeLineImageAnalysisResult(), normalizeLineImageMenuAnalysis(), parseFirstJsonObject(), salvageLineImageAnalysisResultFromText(), buildReceiptVisionSystemPrompt(), analyzeExpenseReceiptWithAzureFoundry() (+33 more)
-
-### Community 35 - "processPullRowsToDb"
-Cohesion: 0.12
-Nodes (42): budgetComparableEqual(), budgetComparableFromRow(), budgetComparableFromSheetRow(), budgetRowStoreKeyIndex(), buildBudgetOperatingDaysSheetUpdates(), buildBudgetSheetRowUpdatesFromDb(), buildClosedDatesSheetUpdates(), buildSheetDeletionMergeContext() (+34 more)
-
-### Community 36 - "petty_cash_flow.ts"
+### Community 34 - "petty_cash_flow.ts"
 Cohesion: 0.10
-Nodes (37): buildPettyCashDashboardLink(), buildPettyCashPageUrl(), CANCEL_WORDS, classifyPettyAcct(), clearPending(), confirmFlex(), conversationKey(), defaultPettyRate() (+29 more)
+Nodes (38): buildPettyCashDashboardLink(), buildPettyCashPageUrl(), CANCEL_WORDS, classifyPettyAcct(), clearPending(), confirmFlex(), conversationKey(), defaultPettyRate() (+30 more)
+
+### Community 35 - "dedupeTextArray"
+Cohesion: 0.10
+Nodes (40): asGroqVisionContentType(), buildAwardsFromHints(), buildDrinkingWindowFromHints(), buildRatingPointsFromHints(), buildSourceUrlLines(), buildWebSummaryContext(), buildWineryHistoryFromHints(), collectAwardHintsFromText() (+32 more)
 
 ### Community 37 - "readChatPageSource"
 Cohesion: 0.06
@@ -624,754 +616,734 @@ Nodes (22): read(), root, read(), root, read(), root, read(), root (+14 more)
 Cohesion: 0.05
 Nodes (32): albumItemsById, albums, AVATAR_COLORS, botRoomIds, currentMessages, currentPrivateNotes, groupMembers, groupReadStates (+24 more)
 
-### Community 39 - "messages.js"
-Cohesion: 0.11
-Nodes (25): applyMention(), buildMessageNode(), closeForward(), collectMentions(), copyMessage(), currentMentionFragment(), fileFromMessage(), firstMessageUrl() (+17 more)
+### Community 39 - "chat-knowledge/index.ts"
+Cohesion: 0.12
+Nodes (35): CORS_HEADERS, DbClient, ensureManagerNoticeRoom(), filePayload(), handleDispatch(), handleSignupNotify(), handleSignupReviewed(), handleStoreChangeNotify() (+27 more)
 
-### Community 40 - "journal_store_context.ts"
+### Community 40 - "sales_reconciliation.ts"
+Cohesion: 0.12
+Nodes (34): fetchAnalyticsMonthly(), fetchManualDayBudgetMapForStore(), fetchManualDaySalesMapForStore(), manualDaySalesFromRow(), ManualDaySalesRecord, ManualDaySalesUpsertEntry, normalizeDateInput(), parseOptionalNonNegativeInt() (+26 more)
+
+### Community 41 - "journal_store_context.ts"
 Cohesion: 0.10
 Nodes (31): attachJournalStoreContext(), loadJournalStoreContext(), number(), oneOf(), ProfileDatabase, ProfileResult, rebaseJournalWineAnalysis(), record() (+23 more)
 
-### Community 41 - "reservation-today-cron/index.ts"
-Cohesion: 0.12
-Nodes (35): allergyLabel(), buildReservationRow(), buildTodayReservationCalendarUrl(), buildTodayReservationChatCard(), buildTodayReservationChatText(), buildTodayReservationFlex(), DbClient, formatReservationCustomerName() (+27 more)
+### Community 42 - "competitor_review_context.ts"
+Cohesion: 0.14
+Nodes (36): isRecord(), applyProfileDictionaryClassification(), buildStoreReviewProfilePayload(), classifyNearbyWithAI(), compactGoogleRaw(), CompetitorPlaceRow, CompetitorSnapshotRow, expandCandidatesWithProfileGenreSearch() (+28 more)
 
-### Community 42 - "receipt-midreport-cron/functions/_shared/receipt_report_aggregate.ts"
+### Community 43 - "receipt_sheets_tab_resolve.ts"
+Cohesion: 0.11
+Nodes (46): clearBistrocavacavaSheetDataRowsAndPushFromDb(), base64UrlEncodeBytes(), base64UrlEncodeText(), fetchGoogleServiceAccountAccessToken(), pemToArrayBuffer(), signRs256(), addSpreadsheetSheet(), appendSpreadsheetValues() (+38 more)
+
+### Community 44 - "receipt_store_mismatch.ts"
+Cohesion: 0.11
+Nodes (32): buildReceiptStoreMismatchFlexReply(), buildStoreMismatchGuidance(), buildStoreMismatchGuidanceText(), capText(), clearPendingStoreNameMismatch(), conversationKey(), formatJapaneseReceiptDateFromIso(), kvRow() (+24 more)
+
+### Community 45 - "receipt-midreport-cron/functions/_shared/receipt_report_aggregate.ts"
 Cohesion: 0.11
 Nodes (29): LABEL_SET, MARUGO_GROUP_STORE_OPTIONS, STORE_COORDINATES, buildReceiptDailyOverrideKey(), deleteReceiptDailyOverrides(), fetchReceiptDailyOverrideMap(), toNonNegativeInt(), toSafeOverrideStoreKey() (+21 more)
 
-### Community 43 - "rooms.js"
+### Community 46 - "rooms.js"
 Cohesion: 0.09
-Nodes (21): assertIconFile(), closeAccountMenu(), copyInvite(), currentRoomAllowsJournalAi(), currentRoomHasOnlyMeAndBots(), iconOptionHtml(), inviteLink(), isMultiMemberGroup() (+13 more)
+Nodes (23): assertIconFile(), closeAccountMenu(), copyInvite(), currentRoomAllowsJournalAi(), currentRoomHasOnlyMeAndBots(), iconOptionHtml(), inviteLink(), isGroupTrashed() (+15 more)
 
-### Community 44 - "calendar-tomorrow-cron/index.ts"
+### Community 47 - "fetchState"
+Cohesion: 0.21
+Nodes (11): fetchGlobalSettings(), fetchState(), isActionableDeliveryLogStatus(), isForceRunLogDetails(), stripRoomConfigSecret(), fetchReceiptStoreOptions(), count(), FetchLike (+3 more)
+
+### Community 48 - "calendar-tomorrow-cron/index.ts"
 Cohesion: 0.13
 Nodes (29): buildReminderFlex(), DbClient, loadEventsForDate(), resolveStoreLineToken(), sanitizeLineToken(), TargetRoomTask, truncate(), addJstDays() (+21 more)
 
-### Community 45 - "chat-push/index.ts"
+### Community 49 - "receipt-midreport-cron/functions/_shared/sales_budget_allocation.ts"
+Cohesion: 0.13
+Nodes (31): getJapaneseHolidayDateSet(), JAPANESE_HOLIDAY_ISO_DATES, buildReceiptBudgetComparisonRows(), computeReceiptDailyDiffTotalLikeAnalyticsFooter(), fetchSalesBudgetRow(), formatYenAmount(), formatYenSignedDiff(), loadStoreDayGrossSumForDate() (+23 more)
+
+### Community 50 - "line_client.ts"
 Cohesion: 0.10
-Nodes (29): ChatMessageRow, CORS_HEADERS, DbClient, handleDiagnostic(), handleDiagnosticStatus(), handleDispatch(), handlePreferenceSync(), handleRegister() (+21 more)
+Nodes (24): sendLinePushMessages(), isBlockedByMarugosecondLockdown(), MARUGOSECOND_LOCKDOWN_ALLOWED_ROOM_IDS, pushLineMessages(), pushLineMessagesToTarget(), pushLineText(), pushLineTextToTarget(), replyLineMessages() (+16 more)
 
-### Community 46 - "extractReservationMailDetails"
-Cohesion: 0.18
-Nodes (19): buildSeatNameFromMail(), buildVisitDateTimeFromMail(), captureFirstMatch(), extractLineAfterLabel(), extractQaAnswer(), extractReservationAllergy(), extractReservationHistory(), extractReservationMailDetails() (+11 more)
-
-### Community 47 - "uploadDocumentFile"
-Cohesion: 0.09
-Nodes (27): appendChunkWithinLimit(), appendWordXmlNodeText(), collectTextNodes(), compareWordXmlEntry(), compareXlsxWorksheetEntry(), extractDocxText(), extractPdfText(), extractWordXmlText() (+19 more)
-
-### Community 48 - "line_client.ts"
-Cohesion: 0.10
-Nodes (25): sendLinePushMessages(), buildAlertMessage(), DbClient, dowOf(), PvEvent, resolveStoreLineToken(), sanitizeLineToken(), sendLinePush() (+17 more)
-
-### Community 49 - "chat-knowledge/index.ts"
+### Community 51 - "reservation-today-cron/index.ts"
 Cohesion: 0.14
-Nodes (30): CORS_HEADERS, DbClient, ensureManagerNoticeRoom(), filePayload(), handleDispatch(), handleSignupNotify(), handleSignupReviewed(), handleStoreChangeNotify() (+22 more)
+Nodes (31): allergyLabel(), buildReservationRow(), buildTodayReservationCalendarUrl(), buildTodayReservationChatCard(), buildTodayReservationChatText(), buildTodayReservationFlex(), DbClient, formatReservationCustomerName() (+23 more)
 
-### Community 50 - "foodcourt_forecast_engine.ts"
+### Community 52 - "foodcourt_forecast_engine.ts"
 Cohesion: 0.13
 Nodes (29): Accuracy, candidatePredictions(), dateDistance(), evaluationReport(), EVENTS, Feature, LedgerRow, mean() (+21 more)
 
-### Community 51 - "journal_ai_orchestrate.ts"
+### Community 53 - "journal_ai_orchestrate.ts"
 Cohesion: 0.12
 Nodes (29): addCitationUrl(), buildGrokXSearchRequest(), callGrokTrendBrief(), callPerplexityBrief(), clampInteger(), collectAnnotationUrls(), containsXSearchUsage(), ExternalBrief (+21 more)
 
-### Community 52 - "chat-page-source.mjs"
+### Community 54 - "receipt_duplicate.ts"
+Cohesion: 0.13
+Nodes (30): buildReceiptDuplicateConfirmationFlexReply(), capText(), clearPendingReceiptDuplicate(), completePendingDuplicateAndReply(), conversationKey(), formatJapaneseReceiptDateFromIso(), loadPendingReceiptDuplicate(), markPendingReceiptDuplicateAwaitingDateChange() (+22 more)
+
+### Community 55 - "chat-page-source.mjs"
 Cohesion: 0.08
 Nodes (23): chat, migration, singleReactionMigration, chat, chat, editMigration, migration, root (+15 more)
 
-### Community 53 - "admin_dashboard_link_auth.ts"
-Cohesion: 0.13
-Nodes (28): authenticate(), authenticateRawAdminToken(), buildFoodCourtWeeklyReportLink(), exchangeChatJournalLoginLink(), exchangeChatMediaViewLink(), getStoredAdminTokenHash(), hashToken(), isInternalSupabaseServerKey() (+20 more)
+### Community 56 - "messages.js"
+Cohesion: 0.11
+Nodes (28): applyMention(), buildMessageNode(), closeReadDetails(), collectMentions(), copyMessage(), currentMentionFragment(), fileFromMessage(), firstMessageUrl() (+20 more)
 
-### Community 54 - "mtalk_external_post.ts"
-Cohesion: 0.08
-Nodes (31): aiChatLinks(), AlertCard, AlertInput, AlertReview, AlertScoreChange, AlertTarget, CardSection, ChatNoticeInput (+23 more)
+### Community 57 - "mtalk_external_post.ts"
+Cohesion: 0.09
+Nodes (28): aiChatLinks(), AlertCard, AlertInput, AlertReview, AlertScoreChange, AlertTarget, CardSection, ChatNoticeInput (+20 more)
 
-### Community 55 - "receipt_duplicate.ts"
-Cohesion: 0.14
-Nodes (29): buildReceiptDuplicateConfirmationFlexReply(), capText(), clearPendingReceiptDuplicate(), completePendingDuplicateAndReply(), conversationKey(), formatJapaneseReceiptDateFromIso(), loadPendingReceiptDuplicate(), markPendingReceiptDuplicateAwaitingDateChange() (+21 more)
-
-### Community 56 - "tokyo-dome-events-cron/index.ts"
+### Community 58 - "tokyo-dome-events-cron/index.ts"
 Cohesion: 0.12
 Nodes (27): ExtractedTokyoDomeEvent, extractEventTimes(), isWeekdayLabel(), markerCategory(), normalizeBaseballCategory(), normalizeEventTime(), normalizeTimeText(), parseTokyoDomeSchedule() (+19 more)
 
-### Community 57 - "isRecord"
-Cohesion: 0.14
-Nodes (31): archiveChatMedia(), authenticateChatMember(), decideChatMenuKnowledge(), fetchStoreOperationProfile(), handleChatRoomConfig(), handleChatRoomPurge(), handleChatScheduleEvent(), isRecord() (+23 more)
+### Community 59 - "buildWineAnalysisFallback"
+Cohesion: 0.09
+Nodes (31): asNullableWineField(), buildGrapeCompositionFromEvidence(), buildJpyPriceRangeInfo(), buildLineWineReplyFallback(), buildMarketPriceFromHints(), buildWineAnalysisFallback(), computeWineConfidence(), countTokenMatches() (+23 more)
 
-### Community 58 - "sales_reconciliation.ts"
-Cohesion: 0.13
-Nodes (27): fetchManualDayBudgetMapForStore(), fetchManualDaySalesMapForStore(), manualDaySalesFromRow(), ManualDaySalesRecord, ManualDaySalesUpsertEntry, normalizeDateInput(), parseOptionalNonNegativeInt(), upsertManualDayBudgetEntries() (+19 more)
+### Community 60 - "receipt-sheets-sync-cron/index.ts"
+Cohesion: 0.12
+Nodes (33): bearerToken(), constantTimeEqual(), CORS_HEADERS, isAuthorized(), isServiceRoleAuthorized(), canonicalKeepStoreKey(), clearSpreadsheetTabsExceptStores(), clearStoreSheetBudgetTabsAndPushFromDb() (+25 more)
 
-### Community 59 - "check-line-report-help-coverage.ts"
-Cohesion: 0.13
-Nodes (21): actualFunctions, actualPublicFiles, apiPaths, auxiliaryFiles, errors, helpCodes, root, sharedFiles (+13 more)
+### Community 61 - "mtalk_casual_chat.ts"
+Cohesion: 0.12
+Nodes (24): getStoreLocationProfile(), LABEL_SET, MARUGO_GROUP_STORE_OPTIONS, STORE_COORDINATES, STORE_LOCATION_PROFILES, StoreLocationProfile, buildAiCreditLine(), buildCasualSystemPrompt() (+16 more)
 
-### Community 60 - "mtalk-external-post/index.ts"
+### Community 62 - "chat-push/index.ts"
+Cohesion: 0.11
+Nodes (25): ChatMessageRow, CORS_HEADERS, DbClient, handleDiagnostic(), handleDiagnosticStatus(), handleDispatch(), handlePreferenceSync(), handleRegister() (+17 more)
+
+### Community 63 - "mtalk-external-post/index.ts"
 Cohesion: 0.13
 Nodes (29): alert(), botDirectRoom(), chatDispatch(), chatNotice(), DbClient, dispatchMessageId(), listRecipients(), listStoreBots() (+21 more)
 
-### Community 61 - "google_sheets_client.ts"
-Cohesion: 0.16
-Nodes (27): base64UrlEncodeBytes(), base64UrlEncodeText(), fetchGoogleServiceAccountAccessToken(), pemToArrayBuffer(), signRs256(), addSpreadsheetSheet(), appendSpreadsheetValues(), batchUpdateSpreadsheetValues() (+19 more)
+### Community 64 - "check-line-report-help-coverage.ts"
+Cohesion: 0.13
+Nodes (20): actualFunctions, actualPublicFiles, apiPaths, auxiliaryFiles, errors, helpCodes, root, sharedFiles (+12 more)
 
-### Community 62 - "store_receipt.ts"
+### Community 65 - "receipt_report_flex.ts"
 Cohesion: 0.17
-Nodes (28): indexLineRoomReceiptSearch(), upsertManualDaySalesEntries(), startCorrectionSession(), buildReceiptSummaryText(), isPlausibleReceiptCount(), looksLikeOcrLatinStoreLabel(), parseCurrencyAmount(), parseIntegerCount() (+20 more)
+Nodes (28): appendReceiptReportYoySection(), buildReceiptReportFlexMessages(), buildReceiptYoyCompactKvRows(), buildReceiptYoyKvRows(), calendarDaysInMonth(), countInclusiveCalendarDays(), flexBaselineRow(), flexBudgetRow() (+20 more)
 
-### Community 63 - "buildWineAnalysisFallback"
-Cohesion: 0.10
-Nodes (30): asNullableWineField(), asSourceDisplayName(), buildGrapeCompositionFromEvidence(), buildJpyPriceRangeInfo(), buildLineWineReplyFallback(), buildSourceSummary(), buildWineAnalysisFallback(), buildWineSources() (+22 more)
-
-### Community 64 - "fetchReservationAiFacts"
-Cohesion: 0.14
-Nodes (27): addReservationDateDays(), asAppError(), buildReservationLiveUrl(), fetchReservationAiFacts(), jstTodayDateKey(), rebuildReservationAiDailyCache(), reservationAiBaseNotes(), reservationCacheWindowStart() (+19 more)
-
-### Community 65 - "pos_journal_lha.ts"
+### Community 66 - "pos_journal_lha.ts"
 Cohesion: 0.15
 Nodes (23): detectPosJournalStoreCode(), ascii(), BitReader, crc16(), decodeBitLengthDecoder(), decodeDistanceLengths(), decodeLh5(), decodeLiteralLengths() (+15 more)
 
-### Community 66 - "public/auth-session.js"
+### Community 67 - "public/auth-session.js"
 Cohesion: 0.16
 Nodes (24): bindRememberCheckbox(), clearToken(), clearTokenStorage(), consumeUrlAuthParams(), consumeUrlLoginTicketParam(), consumeUrlTokenParam(), currentAppScope(), exchangeAdminTokenForSession() (+16 more)
 
-### Community 67 - "jnm/auth-session.js"
+### Community 68 - "jnm/auth-session.js"
 Cohesion: 0.16
 Nodes (24): bindRememberCheckbox(), clearToken(), clearTokenStorage(), consumeUrlAuthParams(), consumeUrlLoginTicketParam(), consumeUrlTokenParam(), currentAppScope(), exchangeAdminTokenForSession() (+16 more)
 
-### Community 68 - "truncateText"
-Cohesion: 0.11
-Nodes (29): asGroqVisionContentType(), buildSourceUrlLines(), extractQueryCandidatesFromOcrText(), extractSuggestionsFromGroqText(), extractTextFromGeminiResponse(), fetchJsonWithTimeout(), fetchWikipediaSummary(), flattenDuckDuckGoTopics() (+21 more)
-
-### Community 69 - "uploadPosJournalFiles"
-Cohesion: 0.11
-Nodes (28): buildPosJournalRepairPayload(), buildPosJournalStoragePath(), deletePosJournalFile(), ensureJournalProductIndexMonths(), ensurePosJournalStorageForRepair(), extractFileExt(), fetchPosJournalAiHistory(), fetchPosJournalCategoryOverrides() (+20 more)
+### Community 69 - "fetchReservationAiFacts"
+Cohesion: 0.14
+Nodes (26): addReservationDateDays(), buildReservationLiveUrl(), fetchReservationAiFacts(), jstTodayDateKey(), rebuildReservationAiDailyCache(), reservationAiBaseNotes(), reservationCacheWindowStart(), reservationDateStartIso() (+18 more)
 
 ### Community 70 - "buildJournalSavedReportsFromPosDays"
 Cohesion: 0.15
 Nodes (25): fetchPosJournalCategoryRules(), upsertPosJournalAutoReports(), aggregatePosJournalReceiptPayments(), allocateDayPaymentsToSales(), allocateDayTaxToSales(), buildJournalSavedReportHtml(), buildJournalSavedReportsFromPosDays(), buildPosJournalCategoryRules() (+17 more)
 
-### Community 71 - "supabase/functions/_shared/sales_budget_allocation.ts"
-Cohesion: 0.11
-Nodes (25): buildHardcodedHolidayMap(), fetchCaoHolidayMap(), fetchJapaneseHolidayMap(), getJapaneseHolidayDateSet(), HolidayLiveCache, JAPANESE_HOLIDAY_ISO_DATES, JapaneseHolidaySource, mergeWithFutureFallback() (+17 more)
-
-### Community 72 - "notifications.js"
+### Community 71 - "notifications.js"
 Cohesion: 0.24
 Nodes (24): chatPushManager(), chatPushRequest(), dispatchPushForMessage(), ensureChatServiceWorker(), flushPushDiagnostics(), hidePushRestoreBar(), initializeChatPwa(), isIosDevice() (+16 more)
 
-### Community 73 - "mtalk-loan-report/index.ts"
+### Community 72 - "mtalk-loan-report/index.ts"
 Cohesion: 0.13
 Nodes (19): alreadySent(), botRooms(), DbClient, fullAdmins(), report(), ChatCard, ChatCardSection, ALERT_URL_HOSTS (+11 more)
 
-### Community 74 - "line_report_help_manual.ts"
+### Community 73 - "line_report_help_manual.ts"
 Cohesion: 0.18
-Nodes (23): buildLineReportHelpIndex(), isLineReportHelpQuestion(), keywordScore(), LINE_REPORT_HELP_CATEGORIES, LINE_REPORT_HELP_SECTION_SOURCES, LineReportHelpCategory, LineReportHelpSection, LineReportHelpSelection (+15 more)
+Nodes (23): buildLineReportHelpIndex(), isLineReportHelpQuestion(), keywordScore(), LINE_REPORT_HELP_CATEGORIES, LINE_REPORT_HELP_SECTION_SOURCES, LINE_REPORT_HELP_SECTIONS, LineReportHelpCategory, LineReportHelpSection (+15 more)
 
-### Community 75 - "tokyo-dome-weekly-cron/index.ts"
-Cohesion: 0.13
-Nodes (21): formatEventTimeLabel(), addDaysUtc(), explicitWeekWindow(), nextWeekWindow(), pad2(), WeekWindow, WeekWindowDay, windowFrom() (+13 more)
+### Community 74 - "weather_daily.ts"
+Cohesion: 0.15
+Nodes (26): buildCacheKey(), enumerateDates(), fetchArchiveRange(), fetchForecastPastDaysWindow(), fetchForecastRange(), fetchOpenMeteoDaily(), fetchOpenMeteoExternal(), fetchOpenMeteoJson() (+18 more)
 
-### Community 76 - "journal_chat_query_planner.test.mjs"
+### Community 75 - "journal_chat_query_planner.test.mjs"
 Cohesion: 0.07
 Nodes (19): aiTruncationTailMatch, aiUsagePath, appThemePath, context, forecastHistorySource, historyPath, htmlPath, hydrateKnowledgeSource (+11 more)
 
-### Community 77 - "scripts"
+### Community 76 - "scripts"
 Cohesion: 0.08
 Nodes (26): scripts, check, dev, graphify:system-map, help:check, help:update, journal:backfill:v22, journal:integration:check (+18 more)
 
-### Community 78 - "generate-knowledge-system.mjs"
+### Community 77 - "generate-knowledge-system.mjs"
 Cohesion: 0.09
 Nodes (23): architectureHash, colors, docsDir, edgeColors, escapeHtml(), escapeXml(), generatedAt, graph (+15 more)
 
-### Community 79 - "chat_admin_delegation.ts"
-Cohesion: 0.10
-Nodes (29): assertChatAdminAuditScope(), assertChatAdminBotScope(), assertChatAdminRoomScope(), assertChatAdminUserGlobalScope(), assertChatAdminUserReadScope(), CHAT_ADMIN_REVERTIBLE_ACTIONS, chatAdminCanRevertAction(), chatAdminDelegationRpcAllowed() (+21 more)
-
-### Community 80 - "receipt_flex_reply.ts"
+### Community 78 - "mtalk_daily_sales_import.ts"
 Cohesion: 0.21
-Nodes (23): buildReceiptChatCard(), buildReceiptFlexMessage(), field(), formatCountOrDash(), formatDecimalOrDash(), formatReceiptDateJa(), formatYenOrDash(), kvRow() (+15 more)
+Nodes (24): importDailyReceiptsCommit(), buildSimpleNoticeFlex(), handleDailySalesImportPostback(), processDailySalesFileEvent(), postChatCard(), postStoreRoomLineStyleReply(), countExistingReceiptsForDates(), importDailyReceiptsOverwrite() (+16 more)
 
-### Community 81 - "weather_daily.ts"
-Cohesion: 0.16
-Nodes (25): buildCacheKey(), enumerateDates(), fetchArchiveRange(), fetchForecastPastDaysWindow(), fetchForecastRange(), fetchOpenMeteoDaily(), fetchOpenMeteoExternal(), fetchOpenMeteoJson() (+17 more)
+### Community 79 - "chat_bridge.ts"
+Cohesion: 0.10
+Nodes (20): buildAlertMessage(), DbClient, dowOf(), PvEvent, resolveStoreLineToken(), sanitizeLineToken(), sendLinePush(), SPORT_ICON (+12 more)
 
-### Community 82 - "parse-pos-journal.py"
+### Community 80 - "parse-pos-journal.py"
 Cohesion: 0.18
 Nodes (23): amount(), decode_lzh(), first_int(), main(), normalize_payment_label(), normalize_wide(), parse_adjustment(), parse_file() (+15 more)
 
-### Community 83 - "dedupeTextArray"
-Cohesion: 0.16
-Nodes (24): buildAwardsFromHints(), buildDrinkingWindowFromHints(), buildMarketPriceFromHints(), buildRatingPointsFromHints(), buildWebSummaryContext(), buildWineryHistoryFromHints(), collectAwardHintsFromText(), collectDrinkingWindowHintsFromText() (+16 more)
-
-### Community 84 - "mtalk_daily_sales_import.ts"
-Cohesion: 0.19
-Nodes (19): postChatCard(), postStoreRoomLineStyleReply(), applyImport(), BotUser, dailySalesTemplateUrl(), DbClient, handleMtalkDailySalesCommand(), insertPendingImport() (+11 more)
-
-### Community 85 - "receipt_parse.ts"
-Cohesion: 0.17
-Nodes (21): buildReceiptTextReply(), clamp01(), decodeEscapedUnicodeSequences(), extractPartyGuestCountsFromText(), extractReceiptPrintedHour(), formatJapaneseReceiptDateFromIso(), getJstBusinessDateForReceiptBudget(), isSingleDayPeriodSettlementReport() (+13 more)
-
-### Community 86 - "renderMessageList"
-Cohesion: 0.20
-Nodes (14): buildDayDivider(), buildNoteNode(), buildTimeline(), dayKey(), fillLatestGap(), formatDayLabel(), loadOlderMessages(), loadPrivateNotes() (+6 more)
-
-### Community 87 - "permissions.js"
+### Community 81 - "permissions.js"
 Cohesion: 0.17
 Nodes (20): adminNoticeKindFromMessage(), canCurrentUserInvite(), canCurrentUserManage(), canCurrentUserSend(), canSeeAdminNoticeMessage(), chatAccessAllows(), chatAccessIsBlocked(), chatAccessSignupState() (+12 more)
 
-### Community 88 - "wait-for-edge-deploy.mjs"
+### Community 82 - "wait-for-edge-deploy.mjs"
 Cohesion: 0.17
 Nodes (20): assertMatchingRun(), classifyWorkflowRun(), detectCommand(), EDGE_DEPLOY_PATH_PATTERNS, findMatchingRun(), githubJson(), main(), parseCommandLine() (+12 more)
 
-### Community 89 - "chat_flex_card.ts"
-Cohesion: 0.14
-Nodes (14): ChatAction, CORS_HEADERS, helpCard(), SearchKind, emitFlexNote(), flexColor(), FlexField, flexNoteSize() (+6 more)
-
-### Community 90 - "mtalk_search.ts"
-Cohesion: 0.25
-Nodes (22): buildSearchEntryReply(), clearSearchPending(), detectKindTrigger(), executeSalesSearch(), handleLineSearchTextMessage(), isCancelText(), isLineSearchIntentText(), isMenuTrigger() (+14 more)
-
-### Community 91 - "backfill-pos-journal-v22.mjs"
+### Community 83 - "backfill-pos-journal-v22.mjs"
 Cohesion: 0.15
 Nodes (21): allowedArgs, apply, applyResults, callAdmin(), dryRunResults, fetchRest(), force, loadReparseBatch() (+13 more)
 
-### Community 92 - "line_media_store.ts"
-Cohesion: 0.18
-Nodes (20): fetchLineMessageBinary(), ensureLineRoomDisplayNameFromWebhook(), ensureLineUserDisplayNameFromWebhook(), fetchLineConversationNameByRoomId(), fetchLineConversationNameByUrl(), fetchLineDisplayNameByUrl(), fetchLineDisplayNameByUserId(), isAutoDisplayNamesEnabled() (+12 more)
-
-### Community 93 - "upload-pos-journal-archive.mjs"
+### Community 84 - "upload-pos-journal-archive.mjs"
 Cohesion: 0.10
 Nodes (17): allowedCodes, apply, args, candidates, directories, existingDates, form, loadServiceRoleKey() (+9 more)
 
-### Community 94 - "daily_sales_import.ts"
-Cohesion: 0.20
-Nodes (20): importDailyReceiptsCommit(), parseManualDaySalesImport(), buildSimpleNoticeFlex(), handleDailySalesImportPostback(), processDailySalesFileEvent(), clearDailyReceiptsForMonth(), countExistingReceiptsForDates(), DailySalesImportEntry (+12 more)
+### Community 85 - "mtalk_external_post.test.ts"
+Cohesion: 0.11
+Nodes (21): askGourmet(), AI_CHAT_LIMITS, AI_CHAT_STATUS, EXTERNAL_POST_LIMITS, gourmetAiAnalystUrl(), REVIEW_ALERT_LIMITS, signExternalRequest(), signingMessage() (+13 more)
 
-### Community 95 - "resolveChannelAccessToken"
-Cohesion: 0.16
-Nodes (14): replyLineMessages(), resolveChannelAccessToken(), sanitizeLineToken(), sendReply(), buildReservationCalendarPageUrl(), normalizeMonth(), buildReservationCalendarLinkFlex(), handleReservationCalendarLinkTextMessage() (+6 more)
-
-### Community 96 - "mtalk_external_post.test.ts"
-Cohesion: 0.13
-Nodes (19): AI_CHAT_LIMITS, AI_CHAT_STATUS, decodePdfBase64(), EXTERNAL_POST_LIMITS, isUuid(), REVIEW_ALERT_LIMITS, sanitizePdfFileName(), STORE_POST_LIMITS (+11 more)
-
-### Community 97 - "receipt_reply_context.ts"
-Cohesion: 0.18
-Nodes (20): buildFoodcourtReportUri(), buildComparableEndDateForMonth(), buildReceiptAnalyticsDashboardUrlForLine(), computeBudgetDiffs(), computeComparableMonthProgressRatio(), DayAgg, dayOfMonthFromIso(), daysInMonth() (+12 more)
-
-### Community 98 - "item"
-Cohesion: 0.19
-Nodes (19): addName(), aliasFor(), collect(), collectText(), isRecord(), normalizeName(), replaceNameOccurrences(), sanitizePayload() (+11 more)
-
-### Community 99 - "public/pages-config.js"
+### Community 86 - "public/pages-config.js"
 Cohesion: 0.19
 Nodes (19): adminApiPath(), adminApiUrl(), bindDeadSalesSheetClicks(), dailySalesTemplateUrl(), getPreferredStoreDisplayLabel(), gmailSharedAdminApiUrl(), isUsableSalesSheetUrl(), lineWebhookLegacyUrl() (+11 more)
 
-### Community 100 - "buildSimulatedPriceReply"
-Cohesion: 0.13
-Nodes (19): attachAliases(), findCatalogProductsByPriceRange(), findCatalogProductsByVintage(), findCurrentPricesByQuery(), getActiveReplyTemplateByKey(), getPriceDistance(), renderTemplate(), buildCatalogCandidatesMessage() (+11 more)
+### Community 87 - "fetchMediaState"
+Cohesion: 0.11
+Nodes (23): buildGlobalSettingsPayload(), buildRoomConfigSafePayload(), buildRoomSettingsPayload(), fetchChatMediaView(), fetchLineMediaUsageStats(), fetchMediaCountByStore(), fetchMediaState(), fetchMediaUploadMaxMb() (+15 more)
 
-### Community 101 - "check-knowledge-system.mjs"
+### Community 88 - "supabase/functions/_shared/receipt_store_name_resolve.ts"
+Cohesion: 0.23
+Nodes (19): RECEIPT_SHEETS_STORE_CATALOG, catalogPartitionKeyForDisplayName(), collectLabelMatchTokens(), collectNameMatchTokens(), extractLatinLettersLower(), findBestStoreNameInText(), levenshtein(), normalizeStoreToken() (+11 more)
+
+### Community 89 - "check-knowledge-system.mjs"
 Cohesion: 0.11
 Nodes (14): collectFiles(), errors, exists(), gitStatus, knowledgeManifestPath, manifestPath, nextVaultScanCache, projectDir (+6 more)
 
-### Community 102 - "renderTalkRow"
+### Community 90 - "supabase/functions/_shared/sales_budget_allocation.ts"
+Cohesion: 0.17
+Nodes (17): getJapaneseHolidayDateSet(), addCalendarDaysIso(), allocateDailyBudgetsForMonth(), classifySalesBudgetDay(), coerceStoreClosedDatesItems(), DayKind, DOW_TO_KIND, getDailyBudgetForDateFromAllocation() (+9 more)
+
+### Community 91 - "renderTalkRow"
 Cohesion: 0.18
 Nodes (18): bindTalkSwipe(), canPurgeTalk(), canTrashTalk(), closeOpenSwipe(), isPcPointer(), muteMarkHtml(), openTalkContextMenu(), patchMineGroup() (+10 more)
 
-### Community 103 - "buildGmailReservationFlexBubble"
-Cohesion: 0.29
-Nodes (8): buildGmailReservationFlexAltText(), buildGmailReservationFlexBubble(), buildGmailReservationFlexMessage(), buildGmailReservationFlexMessages(), buildGmailReservationFlexParagraphRow(), buildGmailReservationFlexRow(), isReservationHistoryFlexField(), isReservationHistorySectionHeading()
+### Community 92 - "searchWebCandidates"
+Cohesion: 0.16
+Nodes (18): asSourceDisplayName(), buildSourceSummary(), buildWineSources(), detectSearchMode(), enrichWebCandidatesForMissingFields(), extractHostname(), fetchJsonWithTimeout(), flattenDuckDuckGoTopics() (+10 more)
 
-### Community 104 - "internal_cron_auth.ts"
+### Community 93 - "room_hard_delete.ts"
+Cohesion: 0.22
+Nodes (17): purgeChatAdminRoom(), mtalkSyntheticRoomId(), assertIsolatedRoomId(), DbClient, deleteExact(), dropRoomMessageTable(), isMissingRelation(), purgeLineAdminRoom() (+9 more)
+
+### Community 94 - "internal_cron_auth.ts"
 Cohesion: 0.18
 Nodes (8): CORS_HEADERS, constantTimeEqualSecret(), CronAuthRpcClient, extractBearerToken(), InternalCronAuthOptions, isInternalCronAuthorized(), DbClient, OpenMeteoResp
 
-### Community 106 - "foodcourt-qa-planner.js"
+### Community 95 - "journal_sales_sync.ts"
+Cohesion: 0.19
+Nodes (14): DailyTotals, EMPTY_RESULT, extractDailyTotalsFromReport(), isJournalSalesSyncEnabled(), isRecord(), JournalSalesSyncResult, normalizeDate(), rebuildMonthsFromDays() (+6 more)
+
+### Community 96 - "web_push.ts"
+Cohesion: 0.23
+Nodes (17): asArrayBuffer(), base64UrlDecode(), base64UrlEncode(), buildWebPushRequest(), concatBytes(), createVapidAuthorization(), encoder, encryptWebPushPayload() (+9 more)
+
+### Community 98 - "foodcourt-qa-planner.js"
 Cohesion: 0.26
 Nodes (15): applySelectedMethods(), assumptionsClarify(), hasPriceAndCost(), isRestartQuestion(), methodByChip(), methodsClarify(), methodsForceKpi(), needsInputTrialChoice() (+7 more)
 
-### Community 107 - "jnm/pages-config.js"
+### Community 99 - "jnm/pages-config.js"
 Cohesion: 0.24
 Nodes (16): adminApiPath(), adminApiUrl(), getPreferredStoreDisplayLabel(), gmailSharedAdminApiUrl(), lineWebhookLegacyUrl(), lineWebhookPath(), lineWebhookUrl(), listStores() (+8 more)
 
-### Community 108 - "room_hard_delete.ts"
-Cohesion: 0.22
-Nodes (16): purgeChatAdminRoom(), assertIsolatedRoomId(), DbClient, deleteExact(), dropRoomMessageTable(), isMissingRelation(), purgeLineAdminRoom(), purgeMtalkGroup() (+8 more)
+### Community 100 - "tokyo-dome-weekly-cron/index.ts"
+Cohesion: 0.16
+Nodes (13): formatEventTimeLabel(), buildWeeklyFlex(), buildWeeklyFlexBody(), DbClient, dowOf(), EVT_ICON, jsonByteLength(), resolveStoreLineToken() (+5 more)
 
-### Community 109 - "fetchGmailMessageAlert"
-Cohesion: 0.14
-Nodes (17): collectGmailBodyParts(), countReservationCoreFields(), decodeBase64UrlUtf8(), extractGmailBodyText(), extractGmailHeader(), extractReservationMailDetailsWithGroq(), fetchGmailMessageAlert(), hasAnyReservationMailDetails() (+9 more)
-
-### Community 110 - "canonicalStorePartitionKeyForDb"
-Cohesion: 0.23
-Nodes (16): fetchManualMonthSalesMapForStore(), manualMonthSalesFromRow(), ManualMonthSalesRecord, ManualMonthSalesUpsertEntry, normalizeSheetIntegerInput(), normalizeUpdatedAtInput(), parseManualMonthOperatingDays(), parseManualMonthPartyGuestFromUnknown() (+8 more)
-
-### Community 111 - "web_push.ts"
-Cohesion: 0.24
-Nodes (16): asArrayBuffer(), base64UrlDecode(), base64UrlEncode(), buildWebPushRequest(), concatBytes(), createVapidAuthorization(), encoder, encryptWebPushPayload() (+8 more)
-
-### Community 112 - "chat_ai_typing_indicator.test.mjs"
+### Community 101 - "chat_ai_typing_indicator.test.mjs"
 Cohesion: 0.15
 Nodes (10): chatCss, chatHtml, chatSource, constant(), domContext(), extractFunction(), FakeNode, messagesJs (+2 more)
 
-### Community 113 - "profile.js"
+### Community 102 - "profile.js"
 Cohesion: 0.23
 Nodes (13): afterSignIn(), createProfile(), formatStoreLabels(), listKnownStores(), loadPendingStoreRequest(), loadUserStores(), myStoreKeys(), renderStorePicker() (+5 more)
 
-### Community 114 - "foodcourt_qa_methods.ts"
+### Community 103 - "receipt-midreport-cron/index.ts"
+Cohesion: 0.27
+Nodes (15): buildJstDateStartUtcIso(), buildReceiptReportTestSchedule(), buildScheduleSliceForKind(), constantTimeEqual(), dispatchReceiptReport(), getJstMonthLastDay(), handleReceiptReportTestSend(), json() (+7 more)
+
+### Community 104 - "toSafeString"
+Cohesion: 0.28
+Nodes (16): toSafeString(), buildReviewExcerpt(), deactivateCompetitorPlace(), deactivateStoreReviewPlace(), ensureStoreReviewProfile(), fetchCompetitorReviewContext(), fetchStoreReviewContext(), inferNegativeTerms() (+8 more)
+
+### Community 105 - "foodcourt_qa_methods.ts"
 Cohesion: 0.21
 Nodes (10): FOODCOURT_MANAGEMENT_PACKS, foodCourtManagementPack(), FOODCOURT_ANALYSIS_METHODS, FoodCourtAnalysisMethodId, foodCourtAnalysisMethodPrompt(), METHOD_IDS, parseFoodCourtAnalysisMethods(), warehouseDir (+2 more)
 
-### Community 115 - "journal_ai_privacy.ts"
+### Community 106 - "journal_ai_privacy.ts"
 Cohesion: 0.25
 Nodes (13): addName(), collectNames(), collectNamesFromText(), isRecord(), JournalAiPrivacyInput, JournalAiPrivacyResult, journalReservationAlias(), JsonRecord (+5 more)
 
-### Community 116 - "journal_sales_sync.ts"
-Cohesion: 0.23
-Nodes (12): DailyTotals, EMPTY_RESULT, extractDailyTotalsFromReport(), isJournalSalesSyncEnabled(), isRecord(), JournalSalesSyncResult, normalizeDate(), rebuildMonthsFromDays() (+4 more)
-
-### Community 117 - "20260904010000_chat_user_stores.sql"
+### Community 107 - "20260904010000_chat_user_stores.sql"
 Cohesion: 0.18
 Nodes (9): public.chat_normalize_store_keys(), public.chat_request_store_change(), public.chat_review_store_change(), public.chat_shares_affiliation(), public.chat_store_catalog, public.chat_store_change_requests, public.chat_store_display_names(), public.chat_user_store_keys() (+1 more)
 
-### Community 118 - "20260910070000_chat_full_admin_all_stores.sql"
+### Community 108 - "20260910070000_chat_full_admin_all_stores.sql"
 Cohesion: 0.19
 Nodes (12): chat_group_members_enforce_full_admin, chat_groups_add_full_admins, chat_store_catalog_add_full_admins, chat_user_access_protect_full_admin, public.chat_add_full_admins_to_shared_room(), public.chat_add_store_to_full_admins(), public.chat_admin_set_full_admin(), public.chat_create_group() (+4 more)
 
-### Community 119 - "refreshMessageNode"
-Cohesion: 0.25
-Nodes (8): closeReadDetails(), openReadDetails(), readCountFor(), readersFor(), readMarkHtml(), refreshMessageNode(), refreshReadMarks(), toggleReaction()
+### Community 109 - "renderMessageList"
+Cohesion: 0.20
+Nodes (14): buildDayDivider(), buildNoteNode(), buildTimeline(), dayKey(), fillLatestGap(), formatDayLabel(), loadOlderMessages(), loadPrivateNotes() (+6 more)
 
-### Community 120 - "renderGroups"
+### Community 110 - "renderGroups"
 Cohesion: 0.20
 Nodes (15): buildSearchSnippet(), escapeLikePattern(), handleTalkSearchInput(), lastTalkAt(), loadRegisteredUsers(), loadUnread(), markGroupRead(), openMessageAt() (+7 more)
 
-### Community 121 - "purge-sales-except-allowed-stores.mjs"
+### Community 111 - "purge-sales-except-allowed-stores.mjs"
 Cohesion: 0.30
 Nodes (14): bulkDeleteNonKeepSalesRows(), canonicalKey(), clearStoreSales(), clearStoreSheetTabs(), countTable(), del(), deleteDummySeedData(), dryRun (+6 more)
 
-### Community 122 - "budget_entry_flow.ts"
-Cohesion: 0.27
-Nodes (14): BUDGET_NOTICE_LINES, budgetConfirmFlex(), budgetDoneFlex(), budgetFlex(), CANCEL_WORDS, clearPending(), commitBudgetAndReply(), conversationKey() (+6 more)
-
-### Community 123 - "20260818184854_chat_auth_hardening.sql"
-Cohesion: 0.24
-Nodes (12): chat_groups_set_owner, chat_messages_set_author, public.chat_allowed_emails, public.chat_group_members, public.chat_groups, public.chat_is_member(), public.chat_is_registered(), public.chat_messages (+4 more)
-
-### Community 124 - "realtime.js"
-Cohesion: 0.29
-Nodes (13): dropRealtimeChannel(), handleCurrentChatAccessChange(), handleDeletedMessage(), handleDeletedNote(), handleIncomingMessage(), handleIncomingNote(), handleMemberRemoved(), handleMembershipChanged() (+5 more)
-
-### Community 125 - "normalizeInlineText"
-Cohesion: 0.09
-Nodes (41): appendReservationHonorific(), buildReservationCalendarDetailPayload(), buildReservationDetailLabel(), buildReservationTemplateData(), extractStoreNameFromBody(), fallbackField(), formatReservationDateTimeLabel(), formatReservationHistoryDisplay() (+33 more)
-
-### Community 126 - "review-alert-cron/index.ts"
-Cohesion: 0.20
-Nodes (11): buildAlertFlexMessage(), checkCompetitorReviewAndAlert(), checkStoreReviewAndAlert(), CompetitorPlaceRow, DbClient, flexSafeText(), logReviewAlertCheck(), PlaceCheckResult (+3 more)
-
-### Community 127 - "resolveGroqTextModel"
-Cohesion: 0.18
-Nodes (6): resolveGroqTextModel(), RETIRED_GROQ_TEXT_MODELS, executable, png, source, table
-
-### Community 128 - "mtalk_schedule_register.ts"
-Cohesion: 0.26
-Nodes (13): addDays(), extractTitle(), formatScheduleReply(), jstDateTimeToIso(), jstParts(), normalizeHm(), parseDate(), ParsedRoomSchedule (+5 more)
-
-### Community 129 - "20260527120000_line_room_messages_per_room.sql"
-Cohesion: 0.19
-Nodes (6): public.get_room_overview(), public.%I, public.line_room_calendar_events, public.line_room_message_tables, public.line_room_messages_search, public.search_line_room_messages()
-
-### Community 130 - "20260527200000_room_search_archive_media_calendar_sales.sql"
-Cohesion: 0.19
-Nodes (7): public.insert_line_room_media_search(), public.line_room_calendar_search, public.line_room_document_search, public.line_room_media_search, public.line_room_receipt_search, public.search_line_room_calendar_events(), public.search_line_room_document_search()
-
-### Community 131 - "selectGroup"
-Cohesion: 0.18
-Nodes (13): applyRoomViewCache(), consumeInvite(), extractInviteToken(), hideMemberStrip(), joinGroup(), latestMessageFingerprint(), mergeLatestPage(), openRequestedGroup() (+5 more)
-
-### Community 132 - "migrate-bistrocavacava-jhpm-to-hocbn.mjs"
-Cohesion: 0.31
-Nodes (12): closedDaysFromBudget(), deleteAllHocbn(), fetchAll(), hocbnKey, insertBatch(), jhpmKey, main(), mapBudgetRow() (+4 more)
-
-### Community 133 - "search-knowledge-vault.mjs"
-Cohesion: 0.18
-Nodes (10): args, includeGenerated, limit, limitArg, matchingExcerpt(), normalize(), query, results (+2 more)
-
-### Community 134 - "verify-journal-ai-data-flow.mjs"
-Cohesion: 0.15
-Nodes (9): checks, coreFailures, foodcourtBriefEnd, foodcourtBriefStart, foodcourtDeepEnd, foodcourtDeepStart, gap(), root (+1 more)
-
-### Community 135 - "processCsvIngestionRows"
-Cohesion: 0.18
-Nodes (13): addPriceHistory(), addPriceTx, upsertCatalogProduct(), upsertCatalogProductTx, asDate(), asPositiveInt(), hasValue(), looksLikeNumericCell() (+5 more)
-
-### Community 136 - "admin_access_log.ts"
-Cohesion: 0.26
-Nodes (10): recordCurrentAdminAccess(), actorFromAuth(), AdminAccessClassification, AdminAccessInsert, classifyAdminAccess(), insertAdminAccessEvent(), pageFromApiPath(), pruneAdminAccessEvents() (+2 more)
-
-### Community 137 - "auto_link_room.ts"
-Cohesion: 0.32
-Nodes (12): AutoLinkBatchSummary, autoLinkDetectedRoomsForStore(), AutoLinkRoomResult, buildAutoLinkRoomDefaults(), clearRoomDismissed(), ensureRoomAutoLinkedToStore(), isAutoLinkEnabled(), isReceiptRoomAutoLinkEnabled() (+4 more)
-
-### Community 138 - "paged_row_scan.ts"
-Cohesion: 0.22
-Nodes (10): AscendingIdPageFetcher, AscendingIdPageVisitor, AscendingIdScanOptions, AscendingIdScanResult, positiveInteger(), rowId(), RowWithId, scanRowsByAscendingId() (+2 more)
-
-### Community 139 - "receipt_prompt.ts"
-Cohesion: 0.17
-Nodes (8): buildMarugoGroupBuiltinPrompt(), buildMarugoSBuiltinPrompt(), EXPENSE_RECEIPT_PROMPT_ADDITION, EXPENSE_RECEIPT_PROMPT_CORE, EXPENSE_VENDOR_PROMPT_BLOCKS, ExpenseVendorPromptBlock, RECEIPT_VISION_SYSTEM_PROMPT_BASE, STORE_BUILTIN_RECEIPT_PROMPT_BUILDERS
-
-### Community 140 - "receipt_store_mismatch.ts"
-Cohesion: 0.31
-Nodes (12): buildReceiptStoreMismatchFlexReply(), buildStoreMismatchGuidanceText(), capText(), clearPendingStoreNameMismatch(), conversationKey(), formatJapaneseReceiptDateFromIso(), kvRow(), loadLegacyPendingStoreNameMismatch() (+4 more)
-
-### Community 141 - "20260903010000_chat_signup_approval.sql"
-Cohesion: 0.22
-Nodes (8): chat_user_access_sync_signup_status, chat_users_create_default_access, public.chat_create_default_user_access(), public.chat_create_group(), public.chat_new_member_permissions(), public.chat_review_signup(), public.chat_user_access, public.chat_user_access_sync_signup_status()
-
-### Community 142 - "isStoreBot"
-Cohesion: 0.20
-Nodes (12): findStoreBotUser(), isStoreBot(), isStoreBotDirect(), isStoreBotId(), personAvatarKey(), personIconUrl(), personName(), speakerName() (+4 more)
-
-### Community 143 - "schema.sql"
-Cohesion: 0.32
-Nodes (11): audit_events, current_prices, ingestion_errors, ingestion_files, line_events, line_reply_templates, ocr_results, price_history (+3 more)
-
-### Community 144 - "line_room_message_search.ts"
-Cohesion: 0.32
-Nodes (11): AppError, buildSnippet(), CalendarSearchRow, clampLimit(), clampOffset(), fetchLineRoomCalendarSearchState(), fetchLineRoomMessageSearchState(), isRoomMessageSearchEnabled() (+3 more)
-
-### Community 145 - "cloudflare-worker/package.json"
-Cohesion: 0.18
-Nodes (10): devDependencies, wrangler, name, private, scripts, deploy, dev, type (+2 more)
-
-### Community 146 - "ocr"
-Cohesion: 0.33
-Nodes (10): get, health(), infer_suffix(), ocr(), parse_confidence(), require_auth(), run_ndlocr(), Path (+2 more)
-
-### Community 147 - "resolvePosJournalAiSummary"
-Cohesion: 0.29
-Nodes (9): fillPosJournalDaysWeather(), posJournalMonthBounds(), resolvePosJournalAiSummary(), applyCachedWeatherToPosJournalDays(), mergePosJournalDaysPreferPrimary(), parsePosJournalTempC(), posJournalDayNeedsWeather(), posJournalWeatherLabelFromCache() (+1 more)
-
-### Community 148 - "mtalk_menu_knowledge.ts"
-Cohesion: 0.31
-Nodes (9): offerMenuKnowledgeRegistration(), boundedStrings(), buildMtalkMenuKnowledgeCard(), MtalkMenuKnowledgeAnalysis, MtalkMenuKnowledgeItem, MtalkMenuKnowledgeStatus, normalizeMtalkMenuKnowledgeAnalysis(), parseMtalkMenuKnowledgeCommand() (+1 more)
-
-### Community 149 - "paintAvatar"
-Cohesion: 0.29
-Nodes (10): applyGroupIconUrl(), choosePresetIcon(), closeUserIconPicker(), createGroup(), paintAvatar(), pickUploadedIcon(), renderUserAvatars(), saveGroupIcon() (+2 more)
-
-### Community 150 - "openReservationSchedule"
-Cohesion: 0.23
-Nodes (12): buildMtalkScheduleUrl(), closeTalkContextMenu(), findMineGroup(), findMtalkCalendarStoreGroup(), isGroupTrashed(), mtalkScheduleMonth(), openRequestedReservationCalendar(), openReservationSchedule() (+4 more)
-
-### Community 151 - "site-cache.js"
-Cohesion: 0.36
-Nodes (8): activeStorage(), buildEntryKey(), hashString(), normalizeEntryKey(), pruneStore(), readStore(), storageKey(), writeStore()
-
-### Community 152 - "receipt-midreport-cron/functions/_shared/manual_month_sales.ts"
-Cohesion: 0.44
-Nodes (9): fetchManualMonthSales(), fetchManualMonthSalesMapForStore(), manualMonthSalesFromRow(), normalizeSheetIntegerInput(), parseManualMonthOperatingDays(), parseManualMonthPartyGuestFromUnknown(), parseOptionalNonNegativeInt(), parsePastSalesSheetRow() (+1 more)
-
-### Community 153 - "foodcourt_attendance.ts"
-Cohesion: 0.33
-Nodes (8): actualEventAttendance(), capacityBaseAttendance(), FOODCOURT_VENUE_CAPACITY, FoodCourtAttendanceEvent, maxActualEventAttendance(), ResolvedFoodCourtAttendance, resolveEventAttendance(), page
-
-### Community 154 - "line_room_search_archive.ts"
-Cohesion: 0.36
-Nodes (7): extractLineMessageTextContent(), isLineRoomMessageRecordingEnabled(), LINE_ROOM_MESSAGE_RECORDING, LineMessageEvent, persistLineRoomMessageFromWebhook(), MEDIA_TYPES, persistLineRoomSearchArchivesFromWebhook()
-
-### Community 155 - "20260804035330_reservation_ai_daily_cache.sql"
-Cohesion: 0.29
-Nodes (8): ikyu_reservation_ai_cache_dirty_trg, manual_reservation_ai_cache_dirty_trg, public.mark_reservation_ai_cache_dirty_date(), public.reservation_ai_cache_dirty_dates, public.reservation_ai_store_cache, public.set_reservation_ai_store_cache_updated_at(), reservation_ai_store_cache_updated_at_trg, tabelog_reservation_ai_cache_dirty_trg
-
-### Community 156 - "20260820240000_chat_room_trash.sql"
-Cohesion: 0.31
-Nodes (7): chat_groups_protect_trash_columns, chat_members_reject_trashed, chat_messages_reject_trashed, chat_scheduled_reject_trashed, public.chat_groups, public.chat_protect_trash_columns(), public.chat_reject_trashed_group_write()
-
-### Community 157 - "chat_file_links.test.mjs"
-Cohesion: 0.20
-Nodes (4): calendarStoreRoom, chat, migration, root
-
-### Community 159 - "dependencies"
-Cohesion: 0.22
-Nodes (9): better-sqlite3, dotenv, express, dependencies, better-sqlite3, dotenv, express, xlsx (+1 more)
-
-### Community 160 - "renderRegisteredUsers"
-Cohesion: 0.36
-Nodes (9): closeUserInviteTarget(), directoryUsers(), inviteSelectedToGroup(), inviteSelectedToNewGroup(), isDirectoryUser(), openUserInviteTarget(), registerDirectFriend(), renderRegisteredUsers() (+1 more)
-
-### Community 161 - "dummy-sales-seed.sh"
-Cohesion: 0.53
-Nodes (8): apply_all_functions(), apply_budget_functions(), apply_sales_functions(), delete_budgets(), delete_sales(), seed_budgets(), seed_sales(), dummy-sales-seed.sh script
-
-### Community 162 - "createPettyCashEntry"
+### Community 112 - "createPettyCashEntry"
 Cohesion: 0.33
 Nodes (9): createPettyCashEntry(), isPettyDiscountName(), normalizePettyItems(), normalizePettyTaxMode(), PETTY_ACCT_KEYS, pettyCategoryLabel(), pettyItemText(), pettyTotalsFromItems() (+1 more)
 
-### Community 163 - "reservation_mail_rules.ts"
-Cohesion: 0.70
-Nodes (3): isLikelyReservationNotificationMail(), normalizeInlineText(), resolveReservationYear()
+### Community 113 - "budget_entry_flow.ts"
+Cohesion: 0.27
+Nodes (14): BUDGET_NOTICE_LINES, budgetConfirmFlex(), budgetDoneFlex(), budgetFlex(), CANCEL_WORDS, clearPending(), commitBudgetAndReply(), conversationKey() (+6 more)
 
-### Community 164 - "mtalk_room_settings.ts"
+### Community 114 - "20260818184854_chat_auth_hardening.sql"
+Cohesion: 0.24
+Nodes (12): chat_groups_set_owner, chat_messages_set_author, public.chat_allowed_emails, public.chat_group_members, public.chat_groups, public.chat_is_member(), public.chat_is_registered(), public.chat_messages (+4 more)
+
+### Community 115 - "realtime.js"
+Cohesion: 0.29
+Nodes (13): dropRealtimeChannel(), handleCurrentChatAccessChange(), handleDeletedMessage(), handleDeletedNote(), handleIncomingMessage(), handleIncomingNote(), handleMemberRemoved(), handleMembershipChanged() (+5 more)
+
+### Community 116 - "review-alert-cron/index.ts"
+Cohesion: 0.20
+Nodes (11): buildAlertFlexMessage(), checkCompetitorReviewAndAlert(), checkStoreReviewAndAlert(), CompetitorPlaceRow, DbClient, flexSafeText(), logReviewAlertCheck(), PlaceCheckResult (+3 more)
+
+### Community 117 - "resolveGroqTextModel"
+Cohesion: 0.18
+Nodes (6): resolveGroqTextModel(), RETIRED_GROQ_TEXT_MODELS, executable, png, source, table
+
+### Community 118 - "mtalk_schedule_register.ts"
+Cohesion: 0.26
+Nodes (13): addDays(), extractTitle(), formatScheduleReply(), jstDateTimeToIso(), jstParts(), normalizeHm(), parseDate(), ParsedRoomSchedule (+5 more)
+
+### Community 119 - "20260527120000_line_room_messages_per_room.sql"
+Cohesion: 0.19
+Nodes (6): public.get_room_overview(), public.%I, public.line_room_calendar_events, public.line_room_message_tables, public.line_room_messages_search, public.search_line_room_messages()
+
+### Community 120 - "20260527200000_room_search_archive_media_calendar_sales.sql"
+Cohesion: 0.19
+Nodes (7): public.insert_line_room_media_search(), public.line_room_calendar_search, public.line_room_document_search, public.line_room_media_search, public.line_room_receipt_search, public.search_line_room_calendar_events(), public.search_line_room_document_search()
+
+### Community 121 - "selectGroup"
+Cohesion: 0.18
+Nodes (13): applyRoomViewCache(), consumeInvite(), extractInviteToken(), hideMemberStrip(), joinGroup(), latestMessageFingerprint(), mergeLatestPage(), openRequestedGroup() (+5 more)
+
+### Community 122 - "migrate-bistrocavacava-jhpm-to-hocbn.mjs"
 Cohesion: 0.31
-Nodes (7): mtalkSyntheticRoomId(), DbClient, ensureMtalkRoomSettings(), loadMtalkRoomFlags(), MtalkRoomFlags, MtalkStoreBot, mtalkUserCanAccessStore()
+Nodes (12): closedDaysFromBudget(), deleteAllHocbn(), fetchAll(), hocbnKey, insertBatch(), jhpmKey, main(), mapBudgetRow() (+4 more)
 
-### Community 165 - "20260818220643_chat_web_push_notifications.sql"
-Cohesion: 0.28
-Nodes (6): chat_messages_enqueue_push, public.chat_enqueue_push_dispatch(), public.chat_push_dispatches, public.chat_push_internal_config, public.chat_push_subscriptions, public.chat_push_user_preferences
+### Community 123 - "search-knowledge-vault.mjs"
+Cohesion: 0.18
+Nodes (10): args, includeGenerated, limit, limitArg, matchingExcerpt(), normalize(), query, results (+2 more)
 
-### Community 166 - "20260910010000_chat_delegated_admin.sql"
-Cohesion: 0.39
-Nodes (7): public.chat_admin_delegated_execute(), public.chat_admin_delegation_allows_audit(), public.chat_admin_delegation_allows_bot(), public.chat_admin_delegation_allows_room(), public.chat_admin_delegation_allows_user_global(), public.chat_admin_delegation_allows_user_read(), public.chat_admin_delegations
+### Community 124 - "verify-journal-ai-data-flow.mjs"
+Cohesion: 0.15
+Nodes (9): checks, coreFailures, foodcourtBriefEnd, foodcourtBriefStart, foodcourtDeepEnd, foodcourtDeepStart, gap(), root (+1 more)
 
-### Community 168 - "package.json"
-Cohesion: 0.25
-Nodes (7): @electric-sql/pglite, devDependencies, @electric-sql/pglite, name, private, type, version
+### Community 125 - "processCsvIngestionRows"
+Cohesion: 0.18
+Nodes (13): addPriceHistory(), addPriceTx, upsertCatalogProduct(), upsertCatalogProductTx, asDate(), asPositiveInt(), hasValue(), looksLikeNumericCell() (+5 more)
 
-### Community 169 - "auth.js"
-Cohesion: 0.39
-Nodes (5): clearCredentials(), login(), saveCredentials(), showLogin(), signup()
+### Community 126 - "createBackup"
+Cohesion: 0.18
+Nodes (13): backupDatabaseTo(), asBackupTimestamp(), buildCustomHeaderMap(), createBackup(), detectCsvDelimiter(), ensureBackupDirectory(), listBackupFiles(), normalizeCsvHeaders() (+5 more)
 
-### Community 171 - "avatarHtml"
-Cohesion: 0.43
-Nodes (8): avatarHtml(), avatarStyle(), inviteUser(), kickMember(), loadInviteLists(), renderInviteLists(), renderInvitePeople(), renderMemberStrip()
+### Community 127 - "admin_access_log.ts"
+Cohesion: 0.26
+Nodes (10): recordCurrentAdminAccess(), actorFromAuth(), AdminAccessClassification, AdminAccessInsert, classifyAdminAccess(), insertAdminAccessEvent(), pageFromApiPath(), pruneAdminAccessEvents() (+2 more)
 
-### Community 172 - "closeChat"
-Cohesion: 0.39
-Nodes (8): closeChat(), closeInvite(), leaveCurrentRoom(), leaveTalk(), matchesQuery(), purgeTalk(), roomTitle(), trashTalk()
-
-### Community 173 - "job_titles.ts"
-Cohesion: 0.29
-Nodes (7): buildLineUserPermissionPayload(), isJobTitleLabel(), JOB_TITLE_OPTIONS, jobTitleSortRank(), LABEL_SET, RANK_BY_LABEL, isMarugoGroupStoreLabel()
-
-### Community 174 - "cleanText"
-Cohesion: 0.36
-Nodes (8): answerInBackground(), finishDispatch(), recordReply(), aiChatErrorMessage(), aiChatReplyParts(), aiChatRequestBody(), buildAiChatHistory(), cleanText()
-
-### Community 175 - "room-messages-retention-cron/index.ts"
-Cohesion: 0.39
-Nodes (5): bearerToken(), constantTimeEqual(), CORS_HEADERS, isAuthorized(), isServiceRoleAuthorized()
-
-### Community 176 - "foodcourt_distillation.ts"
-Cohesion: 0.29
-Nodes (6): buildFoodCourtDistillationRecords(), FoodCourtDistillationRecord, UnknownRow, acceptedRows, iterations, runs
-
-### Community 177 - "foodcourt_journal_coverage.ts"
-Cohesion: 0.43
-Nodes (6): addDaysIso(), buildFoodcourtJournalCoverage(), FoodcourtJournalCoverage, FoodcourtJournalRange, inclusiveDayCount(), mergeRanges()
-
-### Community 178 - "knowledge_file_extract.ts"
-Cohesion: 0.54
-Nodes (7): clip(), extractDocxText(), extractKnowledgeText(), extractPdfText(), extractPlainText(), extractSpreadsheetText(), KnowledgeFileKind
-
-### Community 179 - "20260819230000_chat_store_rooms.sql"
-Cohesion: 0.39
-Nodes (6): chat_groups_prevent_store_room_delete, chat_users_join_store_rooms, public.chat_groups, public.chat_join_store_rooms(), public.chat_leave_group(), public.chat_prevent_store_room_delete()
-
-### Community 180 - "20260820150000_chat_store_bots.sql"
+### Community 128 - "auto_link_room.ts"
 Cohesion: 0.32
-Nodes (4): chat_users_protect_bot_fields, public.chat_enqueue_knowledge_dispatch(), public.chat_users, public.chat_users_protect_bot_fields()
+Nodes (12): AutoLinkBatchSummary, autoLinkDetectedRoomsForStore(), AutoLinkRoomResult, buildAutoLinkRoomDefaults(), clearRoomDismissed(), ensureRoomAutoLinkedToStore(), isAutoLinkEnabled(), isReceiptRoomAutoLinkEnabled() (+4 more)
 
-### Community 181 - "20260825010000_chat_admin_templates_access_revert.sql"
-Cohesion: 0.32
-Nodes (4): public.chat_admin_apply_room_template(), public.chat_admin_audit_log, public.chat_admin_revert_audit(), public.chat_permission_templates
+### Community 129 - "paged_row_scan.ts"
+Cohesion: 0.22
+Nodes (10): AscendingIdPageFetcher, AscendingIdPageVisitor, AscendingIdScanOptions, AscendingIdScanResult, positiveInteger(), rowId(), RowWithId, scanRowsByAscendingId() (+2 more)
 
-### Community 182 - "20260901020000_chat_admin_room_trash_and_bot_archive.sql"
-Cohesion: 0.39
-Nodes (5): chat_messages_reject_deleted_bot, public.chat_admin_remove_bot(), public.chat_admin_restore_bot(), public.chat_reject_deleted_bot_message(), public.chat_users
+### Community 130 - "20260903010000_chat_signup_approval.sql"
+Cohesion: 0.22
+Nodes (8): chat_user_access_sync_signup_status, chat_users_create_default_access, public.chat_create_default_user_access(), public.chat_create_group(), public.chat_new_member_permissions(), public.chat_review_signup(), public.chat_user_access, public.chat_user_access_sync_signup_status()
 
-### Community 183 - "20260910040000_security_authorization_hardening.sql"
-Cohesion: 0.32
-Nodes (3): public.chat_admin_update_user_access_secure(), public.chat_is_signup_manager(), public.chat_user_access
+### Community 131 - "isStoreBot"
+Cohesion: 0.20
+Nodes (12): findStoreBotUser(), isStoreBot(), isStoreBotDirect(), isStoreBotId(), personAvatarKey(), personIconUrl(), personName(), speakerName() (+4 more)
 
-### Community 184 - "20260910140000_foodcourt_forecast_issuance.sql"
-Cohesion: 0.36
-Nodes (6): foodcourt_issuance_immutable, foodcourt_snapshot_immutable, public.foodcourt_forecast_history, public.foodcourt_forecast_issuances, public.foodcourt_forecast_snapshots, public.reject_foodcourt_forecast_mutation()
-
-### Community 185 - "chat-sw.js"
-Cohesion: 0.33
-Nodes (4): CHAT_ASSET_URLS, CHAT_SHELL, updateAppBadge(), updateAppBadgeAndRefreshVisibleClients()
-
-### Community 186 - "clear-store-budget-data.mjs"
-Cohesion: 0.29
-Nodes (3): keepReceipts, key, STORE
-
-### Community 187 - "verify-journal-sales-sync-toggle.sh"
-Cohesion: 0.52
-Nodes (5): api_post(), bad(), cleanup(), ok(), verify-journal-sales-sync-toggle.sh script
-
-### Community 188 - "signExternalRequest"
-Cohesion: 0.29
-Nodes (7): askGourmet(), gourmetAiAnalystUrl(), signExternalRequest(), signingMessage(), toHex(), verifyExternalRequest(), signed()
-
-### Community 189 - "chat_bridge.ts"
-Cohesion: 0.29
-Nodes (6): ChatCardAction, ChatCardFieldRow, ChatCardListItem, ChatCardPayload, DbClient, dispatchChatPush()
-
-### Community 190 - "usage_metrics.ts"
-Cohesion: 0.48
-Nodes (5): count(), FetchLike, fetchLineQuotaChannels(), fetchMonthlyUsage(), UsageChannel
-
-### Community 193 - "20260622200000_forecast_foundation.sql"
-Cohesion: 0.43
-Nodes (6): public.foodcourt_daily_facts, public.foodcourt_daily_features, public.forecast_predictions, public.sync_foodcourt_daily_facts(), public.tokyo_dome_events, trg_sync_foodcourt_daily_facts
-
-### Community 194 - "20260715124824_foodcourt_ai_rag_documents.sql"
-Cohesion: 0.38
-Nodes (5): foodcourt_ai_rag_from_feedback, foodcourt_ai_rag_from_run, public.foodcourt_ai_rag_documents, public.trg_sync_foodcourt_ai_rag_from_feedback(), public.trg_sync_foodcourt_ai_rag_from_run()
-
-### Community 195 - "20260805031441_journal_product_monthly_index.sql"
-Cohesion: 0.38
-Nodes (6): journal_product_monthly_index_updated_at_trg, pos_journal_files_product_index_dirty_trg, public.journal_product_index_dirty_months, public.journal_product_monthly_index, public.mark_journal_product_index_dirty_month(), public.set_journal_product_monthly_index_updated_at()
-
-### Community 196 - "20260818183443_chat_realtime.sql"
-Cohesion: 0.76
-Nodes (6): public.chat_group_members, public.chat_groups, public.chat_messages, public.chat_read_states, public.chat_unread_counts(), public.chat_users
-
-### Community 199 - "20260908010000_chat_admin_notice_room.sql"
-Cohesion: 0.38
-Nodes (4): chat_groups_protect_admin_notice_room, public.chat_ensure_manager_notice_room(), public.chat_groups, public.chat_protect_admin_notice_room()
-
-### Community 200 - "offload-saved-report-html.mjs"
-Cohesion: 0.29
-Nodes (5): ADMIN_API_BASE, ADMIN_TOKEN, LIMIT, LOOPS, STORE_KEY
-
-### Community 201 - "public/app-theme.js"
-Cohesion: 0.73
-Nodes (5): apply(), current(), normalize(), set(), wire()
-
-### Community 202 - "jnm/app-theme.js"
-Cohesion: 0.73
-Nodes (5): apply(), current(), normalize(), set(), wire()
-
-### Community 203 - "check-graphify-sql-coverage.mjs"
-Cohesion: 0.33
-Nodes (4): graph, migrations, missing, sources
-
-### Community 204 - "cleanup-bistrocavacava-dummy-data.mjs"
-Cohesion: 0.53
-Nodes (5): countManual(), doPush, hocbnKey, main(), rest()
-
-### Community 205 - "supabase-db-push-reconcile.sh"
-Cohesion: 0.47
-Nodes (4): extract_orphan_versions(), repair_versions(), SEEN, supabase-db-push-reconcile.sh script
-
-### Community 206 - "addMessageToUI"
+### Community 132 - "addMessageToUI"
 Cohesion: 0.26
 Nodes (12): addMessageToUI(), aiTypingCandidate(), buildAiTypingNode(), handleMessagesScroll(), isAiAnalysisRoom(), jumpToLatest(), resolveUnloadedLatestGap(), scrollMessagesToBottom() (+4 more)
 
-### Community 207 - "admin_api_pos_journal_pagination.test.mjs"
+### Community 133 - "schema.sql"
+Cohesion: 0.32
+Nodes (11): audit_events, current_prices, ingestion_errors, ingestion_files, line_events, line_reply_templates, ocr_results, price_history (+3 more)
+
+### Community 134 - "daily_sales_import.ts"
+Cohesion: 0.26
+Nodes (11): parseManualDaySalesImport(), clearDailyReceiptsForMonth(), DailySalesImportEntry, DailySalesParseResult, enumerateImportMonthDates(), importLooksLikeCsv(), ManualMonthImportEntry, parseImportCsvCells() (+3 more)
+
+### Community 135 - "line_media_store.ts"
+Cohesion: 0.18
+Nodes (19): fetchLineMessageBinary(), ensureLineRoomDisplayNameFromWebhook(), ensureLineUserDisplayNameFromWebhook(), fetchLineConversationNameByRoomId(), fetchLineConversationNameByUrl(), fetchLineDisplayNameByUrl(), isAutoDisplayNamesEnabled(), runWebhookDisplayNameSync() (+11 more)
+
+### Community 136 - "line_room_message_search.ts"
+Cohesion: 0.32
+Nodes (11): AppError, buildSnippet(), CalendarSearchRow, clampLimit(), clampOffset(), fetchLineRoomCalendarSearchState(), fetchLineRoomMessageSearchState(), isRoomMessageSearchEnabled() (+3 more)
+
+### Community 137 - "mtalk_web_search.ts"
+Cohesion: 0.24
+Nodes (11): EXTERNAL_TOPIC_RE, fetchMtalkWebSearch(), MODEL_SET, MTALK_WEB_SEARCH_MODELS, MtalkWebSearchModel, MtalkWebSearchResult, MtalkWebSearchUsage, normalizeMtalkWebSearchModel() (+3 more)
+
+### Community 138 - "cloudflare-worker/package.json"
+Cohesion: 0.18
+Nodes (10): devDependencies, wrangler, name, private, scripts, deploy, dev, type (+2 more)
+
+### Community 139 - "ocr"
 Cohesion: 0.33
-Nodes (4): cohortSearch, productSearch, scanner, storeLinkPolicy
+Nodes (10): get, health(), infer_suffix(), ocr(), parse_confidence(), require_auth(), run_ndlocr(), Path (+2 more)
 
-### Community 208 - "appsscript.json"
-Cohesion: 0.40
-Nodes (4): dependencies, exceptionLogging, runtimeVersion, timeZone
+### Community 140 - "journal-ai-privacy.js"
+Cohesion: 0.42
+Nodes (10): addName(), aliasFor(), collect(), collectText(), isRecord(), normalizeName(), replaceNameOccurrences(), sanitizePayload() (+2 more)
 
-### Community 209 - "access-log.js"
-Cohesion: 0.80
-Nodes (4): getToken(), pageKey(), postPageView(), start()
+### Community 141 - "resolvePosJournalAiSummary"
+Cohesion: 0.29
+Nodes (9): fillPosJournalDaysWeather(), posJournalMonthBounds(), resolvePosJournalAiSummary(), applyCachedWeatherToPosJournalDays(), mergePosJournalDaysPreferPrimary(), parsePosJournalTempC(), posJournalDayNeedsWeather(), posJournalWeatherLabelFromCache() (+1 more)
 
-### Community 210 - "menu-logout.js"
-Cohesion: 0.70
-Nodes (4): doLogout(), inject(), injectStyle(), resolveLogoutUrl()
+### Community 142 - "supabase/functions/_shared/manual_month_sales.ts"
+Cohesion: 0.36
+Nodes (10): manualMonthSalesFromRow(), ManualMonthSalesRecord, ManualMonthSalesUpsertEntry, normalizeSheetIntegerInput(), normalizeUpdatedAtInput(), parseManualMonthOperatingDays(), parseManualMonthPartyGuestFromUnknown(), parseOptionalNonNegativeInt() (+2 more)
 
-### Community 211 - "check-supabase-ownership.mjs"
-Cohesion: 0.40
-Nodes (4): localFunctions, manifest, ownedFunctions, root
-
-### Community 212 - "import-profile-icons.mjs"
-Cohesion: 0.40
-Nodes (4): catalog, files, outputDir, sourceDir
-
-### Community 213 - "openMessageMenu"
+### Community 143 - "openMessageMenu"
 Cohesion: 0.24
 Nodes (10): cancelMessageEdit(), clearReplyTarget(), closeMessageMenu(), deleteMessage(), editableMessageText(), hideAiTyping(), messageIsEditable(), openMessageMenu() (+2 more)
 
-### Community 215 - "20260706130000_review_alert_cron.sql"
+### Community 144 - "paintAvatar"
+Cohesion: 0.29
+Nodes (10): applyGroupIconUrl(), choosePresetIcon(), closeUserIconPicker(), createGroup(), paintAvatar(), pickUploadedIcon(), renderUserAvatars(), saveGroupIcon() (+2 more)
+
+### Community 145 - "openReservationSchedule"
+Cohesion: 0.29
+Nodes (10): buildMtalkScheduleUrl(), closeTalkContextMenu(), findMineGroup(), findMtalkCalendarStoreGroup(), mtalkScheduleMonth(), openRequestedReservationCalendar(), openReservationSchedule(), openRoomSettings() (+2 more)
+
+### Community 146 - "site-cache.js"
+Cohesion: 0.36
+Nodes (8): activeStorage(), buildEntryKey(), hashString(), normalizeEntryKey(), pruneStore(), readStore(), storageKey(), writeStore()
+
+### Community 147 - "receipt-midreport-cron/functions/_shared/manual_month_sales.ts"
+Cohesion: 0.44
+Nodes (9): fetchManualMonthSales(), fetchManualMonthSalesMapForStore(), manualMonthSalesFromRow(), normalizeSheetIntegerInput(), parseManualMonthOperatingDays(), parseManualMonthPartyGuestFromUnknown(), parseOptionalNonNegativeInt(), parsePastSalesSheetRow() (+1 more)
+
+### Community 148 - "foodcourt_attendance.ts"
+Cohesion: 0.33
+Nodes (8): actualEventAttendance(), capacityBaseAttendance(), FOODCOURT_VENUE_CAPACITY, FoodCourtAttendanceEvent, maxActualEventAttendance(), ResolvedFoodCourtAttendance, resolveEventAttendance(), page
+
+### Community 149 - "tokyo_dome_weekly_window.ts"
+Cohesion: 0.40
+Nodes (8): addDaysUtc(), explicitWeekWindow(), nextWeekWindow(), pad2(), WeekWindow, WeekWindowDay, windowFrom(), ymd()
+
+### Community 150 - "20260804035330_reservation_ai_daily_cache.sql"
+Cohesion: 0.29
+Nodes (8): ikyu_reservation_ai_cache_dirty_trg, manual_reservation_ai_cache_dirty_trg, public.mark_reservation_ai_cache_dirty_date(), public.reservation_ai_cache_dirty_dates, public.reservation_ai_store_cache, public.set_reservation_ai_store_cache_updated_at(), reservation_ai_store_cache_updated_at_trg, tabelog_reservation_ai_cache_dirty_trg
+
+### Community 151 - "20260820240000_chat_room_trash.sql"
+Cohesion: 0.31
+Nodes (7): chat_groups_protect_trash_columns, chat_members_reject_trashed, chat_messages_reject_trashed, chat_scheduled_reject_trashed, public.chat_groups, public.chat_protect_trash_columns(), public.chat_reject_trashed_group_write()
+
+### Community 152 - "chat_file_links.test.mjs"
+Cohesion: 0.20
+Nodes (4): calendarStoreRoom, chat, migration, root
+
+### Community 154 - "dependencies"
+Cohesion: 0.22
+Nodes (9): better-sqlite3, dotenv, express, dependencies, better-sqlite3, dotenv, express, xlsx (+1 more)
+
+### Community 155 - "renderRegisteredUsers"
+Cohesion: 0.36
+Nodes (9): closeUserInviteTarget(), directoryUsers(), inviteSelectedToGroup(), inviteSelectedToNewGroup(), isDirectoryUser(), openUserInviteTarget(), registerDirectFriend(), renderRegisteredUsers() (+1 more)
+
+### Community 156 - "dummy-sales-seed.sh"
+Cohesion: 0.53
+Nodes (8): apply_all_functions(), apply_budget_functions(), apply_sales_functions(), delete_budgets(), delete_sales(), seed_budgets(), seed_sales(), dummy-sales-seed.sh script
+
+### Community 157 - "supabase/functions/_shared/japanese_holidays.ts"
+Cohesion: 0.33
+Nodes (8): buildHardcodedHolidayMap(), fetchCaoHolidayMap(), fetchJapaneseHolidayMap(), HolidayLiveCache, JAPANESE_HOLIDAY_ISO_DATES, JapaneseHolidaySource, mergeWithFutureFallback(), parseCaoHolidayCsv()
+
+### Community 158 - "20260818220643_chat_web_push_notifications.sql"
+Cohesion: 0.28
+Nodes (6): chat_messages_enqueue_push, public.chat_enqueue_push_dispatch(), public.chat_push_dispatches, public.chat_push_internal_config, public.chat_push_subscriptions, public.chat_push_user_preferences
+
+### Community 159 - "20260910010000_chat_delegated_admin.sql"
+Cohesion: 0.39
+Nodes (7): public.chat_admin_delegated_execute(), public.chat_admin_delegation_allows_audit(), public.chat_admin_delegation_allows_bot(), public.chat_admin_delegation_allows_room(), public.chat_admin_delegation_allows_user_global(), public.chat_admin_delegation_allows_user_read(), public.chat_admin_delegations
+
+### Community 161 - "package.json"
+Cohesion: 0.25
+Nodes (7): @electric-sql/pglite, devDependencies, @electric-sql/pglite, name, private, type, version
+
+### Community 162 - "auth.js"
+Cohesion: 0.39
+Nodes (5): clearCredentials(), login(), saveCredentials(), showLogin(), signup()
+
+### Community 164 - "avatarHtml"
+Cohesion: 0.43
+Nodes (8): avatarHtml(), avatarStyle(), inviteUser(), kickMember(), loadInviteLists(), renderInviteLists(), renderInvitePeople(), renderMemberStrip()
+
+### Community 165 - "closeChat"
+Cohesion: 0.39
+Nodes (8): closeChat(), closeInvite(), leaveCurrentRoom(), leaveTalk(), matchesQuery(), purgeTalk(), roomTitle(), trashTalk()
+
+### Community 166 - "cleanText"
+Cohesion: 0.36
+Nodes (8): answerInBackground(), finishDispatch(), recordReply(), aiChatErrorMessage(), aiChatReplyParts(), aiChatRequestBody(), buildAiChatHistory(), cleanText()
+
+### Community 167 - "room-messages-retention-cron/index.ts"
+Cohesion: 0.39
+Nodes (5): bearerToken(), constantTimeEqual(), CORS_HEADERS, isAuthorized(), isServiceRoleAuthorized()
+
+### Community 168 - "foodcourt_distillation.ts"
+Cohesion: 0.29
+Nodes (6): buildFoodCourtDistillationRecords(), FoodCourtDistillationRecord, UnknownRow, acceptedRows, iterations, runs
+
+### Community 169 - "foodcourt_journal_coverage.ts"
+Cohesion: 0.43
+Nodes (6): addDaysIso(), buildFoodcourtJournalCoverage(), FoodcourtJournalCoverage, FoodcourtJournalRange, inclusiveDayCount(), mergeRanges()
+
+### Community 170 - "knowledge_file_extract.ts"
+Cohesion: 0.54
+Nodes (7): clip(), extractDocxText(), extractKnowledgeText(), extractPdfText(), extractPlainText(), extractSpreadsheetText(), KnowledgeFileKind
+
+### Community 171 - "supabase/functions/_shared/receipt_report_aggregate.ts"
+Cohesion: 0.43
+Nodes (7): buildReceiptReportAggregateFromRows(), loadReceiptReportAggregateForRoom(), normalizeConfiguredStorePartitionKey(), receiptDateIsoFromValue(), ReceiptReportAggregate, resolveStorePartitionKeyForRoom(), toReceiptStorePartitionKey()
+
+### Community 172 - "20260819230000_chat_store_rooms.sql"
+Cohesion: 0.39
+Nodes (6): chat_groups_prevent_store_room_delete, chat_users_join_store_rooms, public.chat_groups, public.chat_join_store_rooms(), public.chat_leave_group(), public.chat_prevent_store_room_delete()
+
+### Community 173 - "20260820150000_chat_store_bots.sql"
+Cohesion: 0.32
+Nodes (4): chat_users_protect_bot_fields, public.chat_enqueue_knowledge_dispatch(), public.chat_users, public.chat_users_protect_bot_fields()
+
+### Community 174 - "20260825010000_chat_admin_templates_access_revert.sql"
+Cohesion: 0.32
+Nodes (4): public.chat_admin_apply_room_template(), public.chat_admin_audit_log, public.chat_admin_revert_audit(), public.chat_permission_templates
+
+### Community 175 - "20260901020000_chat_admin_room_trash_and_bot_archive.sql"
+Cohesion: 0.39
+Nodes (5): chat_messages_reject_deleted_bot, public.chat_admin_remove_bot(), public.chat_admin_restore_bot(), public.chat_reject_deleted_bot_message(), public.chat_users
+
+### Community 176 - "20260910040000_security_authorization_hardening.sql"
+Cohesion: 0.32
+Nodes (3): public.chat_admin_update_user_access_secure(), public.chat_is_signup_manager(), public.chat_user_access
+
+### Community 177 - "20260910140000_foodcourt_forecast_issuance.sql"
+Cohesion: 0.36
+Nodes (6): foodcourt_issuance_immutable, foodcourt_snapshot_immutable, public.foodcourt_forecast_history, public.foodcourt_forecast_issuances, public.foodcourt_forecast_snapshots, public.reject_foodcourt_forecast_mutation()
+
+### Community 178 - "forwardToUser"
+Cohesion: 0.40
+Nodes (5): closeForward(), forwardToUser(), insertForwardedMessage(), openForward(), renderForwardUsers()
+
+### Community 179 - "chat-sw.js"
+Cohesion: 0.33
+Nodes (4): CHAT_ASSET_URLS, CHAT_SHELL, updateAppBadge(), updateAppBadgeAndRefreshVisibleClients()
+
+### Community 180 - "clear-store-budget-data.mjs"
+Cohesion: 0.29
+Nodes (3): keepReceipts, key, STORE
+
+### Community 181 - "verify-journal-sales-sync-toggle.sh"
+Cohesion: 0.52
+Nodes (5): api_post(), bad(), cleanup(), ok(), verify-journal-sales-sync-toggle.sh script
+
+### Community 182 - "buildGmailReservationFlexBubble"
+Cohesion: 0.33
+Nodes (7): buildGmailReservationFlexBubble(), buildGmailReservationFlexMessage(), buildGmailReservationFlexMessages(), buildGmailReservationFlexParagraphRow(), buildGmailReservationFlexRow(), isReservationHistoryFlexField(), isReservationHistorySectionHeading()
+
+### Community 183 - "job_titles.ts"
+Cohesion: 0.29
+Nodes (7): buildLineUserPermissionPayload(), isJobTitleLabel(), JOB_TITLE_OPTIONS, jobTitleSortRank(), LABEL_SET, RANK_BY_LABEL, isMarugoGroupStoreLabel()
+
+### Community 186 - "20260622200000_forecast_foundation.sql"
+Cohesion: 0.43
+Nodes (6): public.foodcourt_daily_facts, public.foodcourt_daily_features, public.forecast_predictions, public.sync_foodcourt_daily_facts(), public.tokyo_dome_events, trg_sync_foodcourt_daily_facts
+
+### Community 187 - "20260715124824_foodcourt_ai_rag_documents.sql"
+Cohesion: 0.38
+Nodes (5): foodcourt_ai_rag_from_feedback, foodcourt_ai_rag_from_run, public.foodcourt_ai_rag_documents, public.trg_sync_foodcourt_ai_rag_from_feedback(), public.trg_sync_foodcourt_ai_rag_from_run()
+
+### Community 188 - "20260805031441_journal_product_monthly_index.sql"
+Cohesion: 0.38
+Nodes (6): journal_product_monthly_index_updated_at_trg, pos_journal_files_product_index_dirty_trg, public.journal_product_index_dirty_months, public.journal_product_monthly_index, public.mark_journal_product_index_dirty_month(), public.set_journal_product_monthly_index_updated_at()
+
+### Community 189 - "20260818183443_chat_realtime.sql"
+Cohesion: 0.76
+Nodes (6): public.chat_group_members, public.chat_groups, public.chat_messages, public.chat_read_states, public.chat_unread_counts(), public.chat_users
+
+### Community 192 - "20260908010000_chat_admin_notice_room.sql"
+Cohesion: 0.38
+Nodes (4): chat_groups_protect_admin_notice_room, public.chat_ensure_manager_notice_room(), public.chat_groups, public.chat_protect_admin_notice_room()
+
+### Community 193 - "offload-saved-report-html.mjs"
+Cohesion: 0.29
+Nodes (5): ADMIN_API_BASE, ADMIN_TOKEN, LIMIT, LOOPS, STORE_KEY
+
+### Community 194 - "public/app-theme.js"
+Cohesion: 0.73
+Nodes (5): apply(), current(), normalize(), set(), wire()
+
+### Community 195 - "jnm/app-theme.js"
+Cohesion: 0.73
+Nodes (5): apply(), current(), normalize(), set(), wire()
+
+### Community 196 - "check-graphify-sql-coverage.mjs"
+Cohesion: 0.33
+Nodes (4): graph, migrations, missing, sources
+
+### Community 197 - "cleanup-bistrocavacava-dummy-data.mjs"
+Cohesion: 0.53
+Nodes (5): countManual(), doPush, hocbnKey, main(), rest()
+
+### Community 198 - "supabase-db-push-reconcile.sh"
+Cohesion: 0.47
+Nodes (4): extract_orphan_versions(), repair_versions(), SEEN, supabase-db-push-reconcile.sh script
+
+### Community 200 - "admin_api_pos_journal_pagination.test.mjs"
+Cohesion: 0.33
+Nodes (4): cohortSearch, productSearch, scanner, storeLinkPolicy
+
+### Community 201 - "appsscript.json"
+Cohesion: 0.40
+Nodes (4): dependencies, exceptionLogging, runtimeVersion, timeZone
+
+### Community 202 - "access-log.js"
+Cohesion: 0.80
+Nodes (4): getToken(), pageKey(), postPageView(), start()
+
+### Community 203 - "menu-logout.js"
+Cohesion: 0.70
+Nodes (4): doLogout(), inject(), injectStyle(), resolveLogoutUrl()
+
+### Community 204 - "check-supabase-ownership.mjs"
+Cohesion: 0.40
+Nodes (4): localFunctions, manifest, ownedFunctions, root
+
+### Community 205 - "import-profile-icons.mjs"
+Cohesion: 0.40
+Nodes (4): catalog, files, outputDir, sourceDir
+
+### Community 206 - "removeRoomDocuments"
+Cohesion: 0.50
+Nodes (5): chunkArray(), removeRoomDocuments(), removeRoomMediaObjects(), cacheRuntime(), chunk()
+
+### Community 207 - "reservation_mail_rules.ts"
+Cohesion: 0.70
+Nodes (3): isLikelyReservationNotificationMail(), normalizeInlineText(), resolveReservationYear()
+
+### Community 209 - "20260706130000_review_alert_cron.sql"
 Cohesion: 0.40
 Nodes (3): public.competitor_places, public.room_summary_settings, public.store_review_places
 
-### Community 216 - "20260715120023_foodcourt_ai_learning_feedback.sql"
+### Community 210 - "20260715120023_foodcourt_ai_learning_feedback.sql"
 Cohesion: 0.50
 Nodes (4): public.foodcourt_ai_feedback, public.foodcourt_ai_loop_runs, public.foodcourt_forecast_factors, public.foodcourt_forecast_history
 
-### Community 217 - "20260803152607_journal_history_soft_delete.sql"
+### Community 211 - "20260803152607_journal_history_soft_delete.sql"
 Cohesion: 0.40
 Nodes (4): public.ai_analysis_history, public.ai_chat_pdf_history, public.sales_forecasts, public.saved_reports
 
-### Community 220 - "20260818220000_chat_direct_rooms.sql"
+### Community 214 - "20260818220000_chat_direct_rooms.sql"
 Cohesion: 0.60
 Nodes (3): chat_group_members_direct_limit, public.chat_groups, public.chat_prevent_direct_extra_member()
 
-### Community 224 - "20260827010000_chat_keep_and_albums.sql"
+### Community 218 - "20260827010000_chat_keep_and_albums.sql"
 Cohesion: 0.50
 Nodes (3): public.chat_album_items, public.chat_albums, public.chat_keep_items
 
-### Community 225 - "20260902010000_chat_message_edits.sql"
+### Community 219 - "20260902010000_chat_message_edits.sql"
 Cohesion: 0.50
 Nodes (4): chat_messages_guard_edit, chat_messages_reject_trashed, public.chat_guard_message_edit(), public.chat_messages
 
-### Community 228 - "admin_api_pos_journal_repair.test.mjs"
+### Community 222 - "admin_api_pos_journal_repair.test.mjs"
 Cohesion: 0.40
 Nodes (3): placeholder, repairHelpers, upload
 
-### Community 229 - "chat_profile_icon_catalog.test.mjs"
+### Community 223 - "chat_profile_icon_catalog.test.mjs"
 Cohesion: 0.40
 Nodes (4): catalog, chat, files, serviceWorker
 
-### Community 230 - "foodcourt_x_search_wiring.test.ts"
+### Community 224 - "foodcourt_x_search_wiring.test.ts"
 Cohesion: 0.40
 Nodes (4): journalPath, journalSource, source, sourcePath
 
-### Community 231 - "journal_ai_usage_tokens.test.ts"
+### Community 225 - "journal_ai_usage_tokens.test.ts"
 Cohesion: 0.40
 Nodes (3): moduleText, OPENAI_USAGE, SOURCE
 
-### Community 233 - "update-knowledge-vault.sh"
+### Community 227 - "update-knowledge-vault.sh"
 Cohesion: 0.50
 Nodes (3): KNOWLEDGE_VAULT_APP_DIR, KNOWLEDGE_VAULT_GRAPHIFY_DIR, update-knowledge-vault.sh script
 
-### Community 234 - "20260523150000_sales_budget_tables.sql"
+### Community 228 - "buildDeclarativeChatPushPayload"
+Cohesion: 0.67
+Nodes (3): absoluteChatUrl(), buildDeclarativeChatPushPayload(), ChatPushPayloadInput
+
+### Community 229 - "mtalk_room_settings.ts"
+Cohesion: 0.50
+Nodes (3): DbClient, MtalkRoomFlags, MtalkStoreBot
+
+### Community 230 - "20260523150000_sales_budget_tables.sql"
 Cohesion: 0.50
 Nodes (3): public.line_sales_manual_month_gross, public.line_sales_month_budgets, public.line_sales_month_store_closed_days
 
-### Community 236 - "20260604130000_reservation_manual_edit.sql"
+### Community 232 - "20260604130000_reservation_manual_edit.sql"
 Cohesion: 0.50
 Nodes (3): public.ikyu_reservation_visit_events, public.manual_reservation_visit_events, public.tabelog_reservation_visit_events
 
-### Community 238 - "20260612100000_enable_rls_security_tables.sql"
+### Community 234 - "20260612100000_enable_rls_security_tables.sql"
 Cohesion: 0.50
 Nodes (3): public.receipt_sheets_past_sales_export_snapshot, public.security_rate_limits, public.store_webhook_tables
 
-### Community 241 - "20260717040645_fix_reservation_mail_import_accuracy.sql"
+### Community 237 - "20260717040645_fix_reservation_mail_import_accuracy.sql"
 Cohesion: 0.83
 Nodes (3): ikyu_hide_cancelled_reservation_event, public.hide_cancelled_partner_reservation_events(), tabelog_hide_cancelled_reservation_event
 
-### Community 242 - "20260813110747_foodcourt_prompt_candidate_evaluation.sql"
+### Community 238 - "20260813110747_foodcourt_prompt_candidate_evaluation.sql"
 Cohesion: 0.67
 Nodes (3): public.foodcourt_prompt_candidates, public.foodcourt_prompt_evaluation_cases, public.foodcourt_prompt_evaluation_sets
 
-### Community 248 - "20260901010000_mtalk_journal_qa_history.sql"
+### Community 244 - "20260901010000_mtalk_journal_qa_history.sql"
 Cohesion: 0.83
 Nodes (3): mtalk_journal_qa_history_prune_trg, public.mtalk_journal_qa_history, public.mtalk_journal_qa_history_prune()
 
-### Community 255 - "mtalk_journal_paste_format.test.mjs"
+### Community 251 - "mtalk_journal_paste_format.test.mjs"
 Cohesion: 0.67
 Nodes (3): loadFormatter(), loadFormatterFn(), repoRoot
 
-### Community 562 - "enrichWebCandidatesForMissingFields"
-Cohesion: 0.33
-Nodes (6): detectSearchMode(), enrichWebCandidatesForMissingFields(), hasPriorityDomainCandidates(), isPriorityDomainUrl(), isUnknownSummaryField(), mergeWebCandidatesByUrl()
+### Community 558 - "validateStorePostInput"
+Cohesion: 0.32
+Nodes (8): count(), decodePdfBase64(), isUuid(), pick(), sanitizePdfFileName(), validateAlertInput(), validateSendInput(), validateStorePostInput()
 
 ## Knowledge Gaps
 - **1104 isolated node(s):** `name`, `version`, `private`, `type`, `dev` (+1099 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **199 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **201 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Work-memory lessons
 
@@ -1385,17 +1357,17 @@ Nodes (6): detectSearchMode(), enrichWebCandidatesForMissingFields(), hasPriorit
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `item()` connect `item` to `admin-api/index.ts`, `server.js`, `toSafeString`, `journal_product_index.ts`, `foodcourt_kpi.ts`, `ai-analyze/index.ts`, `receipt_correction.ts`, `mtalk_menu_knowledge.ts`, `toNonNegativeInteger`, `pos_journal.ts`, `pos_journal_ai.ts`, `supabase/functions/_shared/receipt_store_name_resolve.ts`, `receipt_vision.ts`, `journal_store_context.ts`, `uploadDocumentFile`, `enrichWebCandidatesForMissingFields`, `journal_ai_orchestrate.ts`, `isRecord`, `buildWineAnalysisFallback`, `fetchReservationAiFacts`, `truncateText`, `buildJournalSavedReportsFromPosDays`, `chat_admin_delegation.ts`, `dedupeTextArray`, `mtalk_search.ts`, `journal_ai_privacy.ts`?**
+- **Why does `item()` connect `item` to `admin-api/index.ts`, `toSafeString`, `server.js`, `line_search_bot.ts`, `journal_product_index.ts`, `journal-ai-privacy.js`, `chat_store_file_bridge.ts`, `foodcourt_kpi.ts`, `ai-analyze/index.ts`, `receipt_correction.ts`, `pos_journal.ts`, `pos_journal_ai.ts`, `receipt_vision.ts`, `dedupeTextArray`, `journal_store_context.ts`, `receipt_store_mismatch.ts`, `journal_ai_orchestrate.ts`, `buildWineAnalysisFallback`, `fetchReservationAiFacts`, `buildJournalSavedReportsFromPosDays`, `fetchMediaState`, `searchWebCandidates`, `journal_ai_privacy.ts`?**
   _High betweenness centrality (0.047) - this node is a cross-community bridge._
-- **Why does `isMtalkSyntheticRoomId()` connect `reservation-today-cron/index.ts` to `admin-api/index.ts`, `receipt_report_flex.ts`, `mtalk_room_settings.ts`, `chat_web_push.test.ts`, `tokyo-dome-weekly-cron/index.ts`, `calendar-tomorrow-cron/index.ts`, `room_hard_delete.ts`, `line_client.ts`, `gmail-alert-cron/index.ts`, `toNonNegativeInteger`?**
-  _High betweenness centrality (0.014) - this node is a cross-community bridge._
-- **Why does `xlsx` connect `dependencies` to `knowledge_file_extract.ts`, `server.js`, `daily_sales_import.ts`?**
-  _High betweenness centrality (0.011) - this node is a cross-community bridge._
+- **Why does `isMtalkSyntheticRoomId()` connect `chat_bridge.ts` to `admin-api/index.ts`, `chat_web_push.test.ts`, `tokyo-dome-weekly-cron/index.ts`, `gmail-alert-cron/index.ts`, `receipt-midreport-cron/index.ts`, `fetchState`, `calendar-tomorrow-cron/index.ts`, `line_client.ts`, `reservation-today-cron/index.ts`, `room_hard_delete.ts`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
+- **Why does `xlsx` connect `dependencies` to `knowledge_file_extract.ts`, `daily_sales_import.ts`, `createBackup`?**
+  _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **Are the 48 inferred relationships involving `item()` (e.g. with `collect()` and `sanitizeValue()`) actually correct?**
   _`item()` has 48 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `name`, `version`, `private` to the rest of the system?**
   _1104 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `admin-api/index.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.018330091276372886 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.018271211215201647 - nodes in this community are weakly interconnected._
 - **Should `db.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.023443223443223443 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.022852376980817348 - nodes in this community are weakly interconnected._

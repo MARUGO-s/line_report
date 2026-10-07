@@ -1497,7 +1497,7 @@ export async function executeSalesSearch(
   const first = rows[0] as Record<string, unknown>
   const storeName = resolveCanonicalStoreDisplayName(
     registry.display_name,
-    first.store_name,
+    first.store_name == null ? null : String(first.store_name),
     registry.store_partition_key,
   )
   const receiptDateText = first.receipt_date_text ? String(first.receipt_date_text) : null
@@ -1522,7 +1522,7 @@ export async function executeSalesSearch(
 
     const localStoreName = resolveCanonicalStoreDisplayName(
       registry.display_name,
-      r.store_name ?? storeName,
+      r.store_name == null ? storeName : String(r.store_name),
       registry.store_partition_key,
     )
     const localDateText = r.receipt_date_text ? String(r.receipt_date_text) : receiptDateText
