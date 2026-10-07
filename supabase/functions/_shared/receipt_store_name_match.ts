@@ -10,7 +10,6 @@ import {
   resolveReceiptPhonePartitionKey,
   type StoreReceiptPhoneIndex,
 } from './store_receipt_phones.ts'
-import type { StoreRegistryRow } from './store_receipt.ts'
 
 function normalizeStoreCompareKey(raw: string): string {
   return normalizeInlineText(String(raw ?? '').normalize('NFKC'))
@@ -134,7 +133,7 @@ export function findRegistryEntryForParsedStoreName<T extends StoreRegistryMatch
   excludePartitionKey?: string,
   receiptStorePhone?: string | null,
 ): T | null {
-  const phoneIndex = buildStoreReceiptPhoneIndex(registry as StoreRegistryRow[])
+  const phoneIndex = buildStoreReceiptPhoneIndex(registry)
   const phonePk = resolveReceiptPhonePartitionKey(receiptStorePhone, phoneIndex)
   if (phonePk && phonePk !== excludePartitionKey) {
     for (const entry of registry) {

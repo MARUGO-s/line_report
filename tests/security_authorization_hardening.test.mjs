@@ -95,9 +95,18 @@ test("login links are endpoint-bound and every store link has an explicit purpos
   const issuers = [
     ["supabase/functions/_shared/foodcourt_compare.ts", "FOODCOURT_DASHBOARD_SCOPE"],
     ["supabase/functions/_shared/petty_cash_flow.ts", "PETTY_CASH_SCOPE"],
-    ["supabase/functions/_shared/budget_entry_flow.ts", "RECEIPT_ANALYTICS_SCOPE"],
   ]
   for (const [file, scope] of issuers) assert.match(await read(file), new RegExp(`scope: ${scope}`))
+  const [budgetFlow, salesSearch, lineActions] = await Promise.all([
+    read("supabase/functions/_shared/budget_entry_flow.ts"),
+    read("supabase/functions/_shared/line_search_bot.ts"),
+    read("supabase/functions/_shared/receipt_line_actions.ts"),
+  ])
+  assert.match(lineActions, /buildReceiptAnalyticsDashboardUrlForLine[\s\S]*issueAdminDashboardLoginLinkToken[\s\S]*RECEIPT_ANALYTICS_SCOPE/)
+  assert.match(budgetFlow, /buildReceiptAnalyticsDashboardUrlForLine[\s\S]*line_budget_entry/)
+  assert.doesNotMatch(budgetFlow, /buildReceiptAnalyticsDashboardUri\(/)
+  assert.match(salesSearch, /buildReceiptAnalyticsDashboardUrlForLine[\s\S]*line_sales_search/)
+  assert.doesNotMatch(salesSearch, /buildReceiptAnalyticsDashboardUri\(/)
   // Reservation notifications now require the recipient's M-talk Auth + store membership.
   for (const file of [
     "supabase/functions/_shared/reservation_calendar_link_request.ts",

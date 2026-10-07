@@ -19,14 +19,16 @@ import { fetchJapaneseHolidaySet } from './japanese_holidays.ts'
 import {
   FOODCOURT_DAILY_LOG_SCOPE,
   issueAdminDashboardLoginLinkToken,
-  RECEIPT_ANALYTICS_SCOPE,
 } from './admin_dashboard_link_auth.ts'
 import {
   fetchManualMonthSales,
   type ManualMonthSalesRecord,
 } from './manual_month_sales.ts'
 import { fetchManualDayBudgetMapForStore } from './manual_day_sales.ts'
-import { buildReceiptAnalyticsDashboardUri, buildFoodcourtReportUri } from './receipt_line_actions.ts'
+import {
+  buildReceiptAnalyticsDashboardUrlForLine as buildReceiptAnalyticsDashboardUrlForLineShared,
+  buildFoodcourtReportUri,
+} from './receipt_line_actions.ts'
 
 export type ReceiptReplyContext = {
   storeDisplayName: string
@@ -253,20 +255,7 @@ export async function buildReceiptAnalyticsDashboardUrlForLine(
   storePartitionKey: string,
   targetMonth: string,
 ): Promise<string> {
-  try {
-    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-      source: 'line_receipt_report',
-      store_partition_key: storePartitionKey,
-      target_month: targetMonth,
-      scope: RECEIPT_ANALYTICS_SCOPE,
-    })
-    return buildReceiptAnalyticsDashboardUri(storePartitionKey, targetMonth, {
-      loginToken: issued.token,
-    })
-  } catch (error) {
-    console.error('buildReceiptAnalyticsDashboardUrlForLine failed:', error)
-    return buildReceiptAnalyticsDashboardUri(storePartitionKey, targetMonth)
-  }
+  return await buildReceiptAnalyticsDashboardUrlForLineShared(supabase, storePartitionKey, targetMonth)
 }
 
 export async function loadMonthAggUpToDate(

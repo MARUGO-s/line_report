@@ -1,4 +1,6 @@
 import { normalizeInlineText } from './receipt_parse.ts'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
+import { issueAdminDashboardLoginLinkToken, RECEIPT_ANALYTICS_SCOPE } from './admin_dashboard_link_auth.ts'
 
 const LINE_MESSAGING_URI_MAX_LEN = 1000
 const LINE_MESSAGE_ACTION_TEXT_MAX_LEN = 300
@@ -8,7 +10,7 @@ const FOODCOURT_REPORT_BASE = 'https://marugo-s.github.io/line_report/foodcourt-
  * 売上ページ(analytics.html)のデプロイ版数。URL に ?v= で付与してブラウザ／LINEアプリ内
  * ブラウザのキャッシュを無効化する。analytics.html の UI を更新したらこの値を更新する。
  */
-const ANALYTICS_APP_VERSION = '20260530'
+const ANALYTICS_APP_VERSION = '20261007'
 
 function normalizeForRuleParsing(raw: string): string {
   return normalizeInlineText(String(raw ?? '').normalize('NFKC'))
@@ -77,6 +79,38 @@ export function buildReceiptAnalyticsDashboardUri(
     if (withoutToken.length <= LINE_MESSAGING_URI_MAX_LEN) return withoutToken
   }
   return `${ANALYTICS_BASE}?store_key=${encodeURIComponent(storePartitionKey)}&v=${ANALYTICS_APP_VERSION}`.slice(0, LINE_MESSAGING_URI_MAX_LEN)
+}
+
+/**
+ * LINEの売上分析画面へ遷移する専用リンク。
+ * M-talkのリンクやルーム設定リンクと混ぜず、必ず receipt_analytics 用の
+ * ワンタイムログインチケットを発行する。発行できない場合は、パスワード画面へ
+ * 誤誘導するURLを返さず、呼び出し側がボタンを表示しないよう空文字を返す。
+ */
+export async function buildReceiptAnalyticsDashboardUrlForLine(
+  supabase: SupabaseClient,
+  storePartitionKey: string,
+  targetMonth: string,
+  source = 'line_receipt_report',
+): Promise<string> {
+  try {
+    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
+      source,
+      store_partition_key: storePartitionKey,
+      target_month: targetMonth,
+      scope: RECEIPT_ANALYTICS_SCOPE,
+    })
+    const dashboardUrl = buildReceiptAnalyticsDashboardUri(storePartitionKey, targetMonth, {
+      loginToken: issued.token,
+    })
+    if (!new URL(dashboardUrl).searchParams.get('lt')) {
+      throw new Error('LINE analytics URL was generated without a one-time login token')
+    }
+    return dashboardUrl
+  } catch (error) {
+    console.error('buildReceiptAnalyticsDashboardUrlForLine failed:', error)
+    return ''
+  }
 }
 
 export function buildFoodcourtReportUri(

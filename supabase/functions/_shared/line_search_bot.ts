@@ -15,7 +15,7 @@ import {
 } from './receipt_parse.ts'
 import { buildLineFlexBlueHeader } from './line_flex_messages.ts'
 import {
-  buildReceiptAnalyticsDashboardUri,
+  buildReceiptAnalyticsDashboardUrlForLine,
   buildReceiptAnalysisDeletionCommandTextForLineMessageId,
   buildReceiptAnalysisDeletionCommandTextForReceiptRowId,
   buildReceiptCorrectionCommandTextForLineMessageId,
@@ -1285,7 +1285,12 @@ export async function executeSalesSearch(
     const storeName = String(registry.store_partition_key ?? '').trim() || '店舗'
     const monthJa = `${salesInput.year}年${salesInput.month}月`
     const monthTarget = `${salesInput.yyyymm.slice(0, 4)}-${salesInput.yyyymm.slice(4, 6)}`
-    const trendUrl = buildReceiptAnalyticsDashboardUri(registry.store_partition_key, monthTarget)
+    const trendUrl = await buildReceiptAnalyticsDashboardUrlForLine(
+      supabase,
+      registry.store_partition_key,
+      monthTarget,
+      'line_sales_search',
+    )
 
     return {
       type: 'flex',
@@ -1492,14 +1497,19 @@ export async function executeSalesSearch(
   const first = rows[0] as Record<string, unknown>
   const storeName = resolveCanonicalStoreDisplayName(
     registry.display_name,
-    first.store_name,
+    first.store_name == null ? null : String(first.store_name),
     registry.store_partition_key,
   )
   const receiptDateText = first.receipt_date_text ? String(first.receipt_date_text) : null
   const dateTextJa = formatReceiptDateJa(receiptDateText, iso)
 
   const monthTarget = iso.slice(0, 7)
-  const trendUrl = buildReceiptAnalyticsDashboardUri(registry.store_partition_key, monthTarget)
+  const trendUrl = await buildReceiptAnalyticsDashboardUrlForLine(
+    supabase,
+    registry.store_partition_key,
+    monthTarget,
+    'line_sales_search',
+  )
 
   const bodyContents: Array<Record<string, unknown>> = []
   const footerButtons: Array<Record<string, unknown>> = []
@@ -1512,7 +1522,7 @@ export async function executeSalesSearch(
 
     const localStoreName = resolveCanonicalStoreDisplayName(
       registry.display_name,
-      r.store_name ?? storeName,
+      r.store_name == null ? storeName : String(r.store_name),
       registry.store_partition_key,
     )
     const localDateText = r.receipt_date_text ? String(r.receipt_date_text) : receiptDateText
@@ -1563,16 +1573,18 @@ export async function executeSalesSearch(
     }
   }
 
-  footerButtons.push({
-    type: 'button',
-    style: 'secondary',
-    height: 'sm',
-    action: {
-      type: 'uri',
-      label: '売上推移を見る',
-      uri: trendUrl,
-    },
-  })
+  if (trendUrl) {
+    footerButtons.push({
+      type: 'button',
+      style: 'secondary',
+      height: 'sm',
+      action: {
+        type: 'uri',
+        label: '売上推移を見る',
+        uri: trendUrl,
+      },
+    })
+  }
   footerButtons.push({
     type: 'button',
     style: 'secondary',

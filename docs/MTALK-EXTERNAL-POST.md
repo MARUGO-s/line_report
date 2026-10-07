@@ -185,3 +185,33 @@ gourmet は取得の失敗を「一休（BISTRO CAVACAVA）：ログイン情報
 すべての行が落ちたときは「（回答を表示できませんでした。もう一度質問してください）」を 1 通だけ送る。
 
 配備の順番（選択の廃止）: gourmet（migration 022・`ai-analyst`・`agent-api`）→ line_report（main へのマージで migration `20261001190000` と `mtalk-external-post`）。新しい秘密情報はありません。
+
+## 貸借管理の月次報告（`mtalk-loan-report`、2026-10-07）
+
+貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に、前々月・前月の2か月分（月が変わってから前月分を入力する人もいるため、前月分は次の報告でもう一度見る）の「重複チェック」（重複・入力ミスの疑い）を集計して送る入口です。前回の報告より後に入力された疑いには「【新】」が付きます。
+`mtalk-external-post` とは別の Edge Function・別の秘密情報（`LOAN_MTALK_TOKEN`）にしています（gourmet の `GOURMET_MTALK_TOKEN` では通りません）。認証の形（`Authorization: Bearer`・`X-Mtalk-Timestamp`・`X-Mtalk-Signature`、署名文字列 `v1:<ts>:POST:/report:<body>`）は上と同じです。
+
+- 送信元: 専用Bot「貸借管理 報告」（`00000000-0000-4000-8000-00000000b074`、店舗に属さない。migration `20261007120000_chat_loan_report_bot.sql`）
+- 送り先: 現在の全権管理者（`chat_is_full_admin`）それぞれとの1対1（`chat_ensure_bot_direct` で作成・再利用、非表示・ゴミ箱は戻す。全権管理者でなくなった人には送らない）と、Botが参加しているグループのルーム（1対1・ゴミ箱・管理者通知を除く）
+- Bot との1対1・ルームへの招待は全権管理者だけ（`chat_shares_affiliation` の例外）。店舗ルームには入れない（Bot の店舗とルームの店舗が一致しないため）。M-talk の Bot タブにも全権管理者にだけ表示する
+- `POST /report`（本文 64KB まで）
+
+```json
+{
+  "dedupe_key": "loan-duplicate:2026-08_2026-09",
+  "title": "重複チェック（2026年8月〜9月分）",
+  "subtitle": "2026/08/01〜2026/09/30 · 10/1 06:10 作成",
+  "sections": [
+    { "heading": "重複の疑いが強い", "fields": [{ "label": "件数", "value": "3件（2グループ）" }, { "label": "重複分", "value": "¥15,354" }], "items": ["2026-09-03 焼肉マルゴ→MARUGO MARUNOUCHI シャンティ ¥3,948 ×6"] }
+  ],
+  "note": "重複と確認できた行は、貸借管理の「逆取引修正」で取り消してください。",
+  "links": [{ "label": "重複チェックを開く", "url": "https://marugo-s.github.io/management/pages/marugo.html" }],
+  "dry_run": false
+}
+```
+
+- 上限: `sections` 4・各 `fields` 8（ラベル 24 文字・値 120 文字）・`items` 5（200 文字）・`note` 300 文字・`links` 2。リンクは `/alert` と同じ許可したホストだけ。入力者名は送らない前提で、メールアドレス・電話番号らしき文字列があれば 422。
+- 冪等性: 同じルームに同じ `dedupe_key` は1回だけ（`chat_alert_dispatches`、kind `loan_duplicate_report`）。1つでも失敗すると 502（同じキーでやり直すと送信済みは飛ばす）。送り先が無いと 404。
+- `dry_run: true`: 投稿せず（1対1も作らず）、送り先の全権管理者名・ルーム（`already_sent` 付き）と組み立てたカードを返す。
+- 応答: `{ ok, bot_name, targets: [{ group_id, name, kind: "direct" | "room", deduplicated }], deduplicated }`
+- 配備: migration（main への push で `db push`）→ `supabase secrets set LOAN_MTALK_TOKEN=... --project-ref hocbnifuactbvmyjraxy`（32文字以上）→ Actions が `mtalk-loan-report` を配備 → 貸借管理の GAS のスクリプトプロパティに同じトークンを設定。

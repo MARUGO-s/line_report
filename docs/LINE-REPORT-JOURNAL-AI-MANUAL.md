@@ -120,6 +120,7 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 - LINEで「予算登録」→対象月6桁→予算額の順に送ると、月間総予算を登録します。ルーム側で予算登録許可が必要です。
 - 既存予算や売上がある月は上書き確認が出ます。30分操作がない場合は最初からやり直します。
 - 曜日重み、祝日・祝日前日、店舗休日、特定日の日別予算は売上分析画面の「予算・日別配分を設定」で調整します。
+- 予算登録完了カードやLINEの売上照会から開く売上分析リンクは、LINE売上分析専用のワンタイムログインです。M-talkのパスワードやルーム設定リンクとは別用途です。
 - 何も操作中でなければ、8桁はその日の売上、6桁はその月の売上照会です。予算登録とは別機能です。
 - 日別配分は中間報告・月末レポート・売上進捗・着地予測の基準になります。
 
@@ -774,12 +775,12 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 `npm run help:check` は、新しい入口が未分類のまま追加された場合に失敗します。
 
 - 公開コード入口: 43件
-- Edge Functions: 21件
-- 共有TypeScriptモジュール: 115件
+- Edge Functions: 22件
+- 共有TypeScriptモジュール: 116件
 - 補助・運用・レガシーコード: 40件
-- admin-api静的ルート: 145件
-- SQL migrations: 314件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 117件
+- admin-api静的ルート: 146件
+- SQL migrations: 317件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- テストファイル: 119件
 
 ### 公開画面・ブラウザコード
 
@@ -844,6 +845,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `line-admin-webhook` | ADM-01 / DEV-02 / SEC-01 |
 | `line-webhook` | SAL-01 / SAL-02 / RSV-01 / OPS-03 / KNW-02 / DEV-02 / SEC-01 |
 | `mtalk-external-post` | OPS-01 / OPS-02 / DEV-02 / SEC-01 |
+| `mtalk-loan-report` | OPS-01 / OPS-02 / DEV-02 / SEC-01 |
 | `pv-japan-alert-cron` | FCT-06 / DEV-02 |
 | `receipt-midreport-cron` | SAL-05 / DEV-02 |
 | `receipt-sheets-sync-cron` | SAL-05 / SAL-06 / DEV-02 |
@@ -925,6 +927,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/mtalk_daily_sales_import.ts` | SAL-05 / SAL-07 / OPS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_external_post.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_help_manual.ts` | OPS-01 / OPS-02 / JAI-02 / DEV-04 |
+| `supabase/functions/_shared/mtalk_loan_report.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_menu_knowledge.ts` | KNW-01 / KNW-02 / OPS-01 / DEV-02 |
 | `supabase/functions/_shared/mtalk_room_id.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_room_settings.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
@@ -1054,6 +1057,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/chat-schedule` | RSV-01 / OPS-01 / DEV-02 |
 | `/chat-schedule/event` | RSV-01 / OPS-01 / DEV-02 |
 | `/chat-schedule/reservation` | RSV-01 / OPS-01 / DEV-02 |
+| `/chat-schedule/reservation-history` | RSV-01 / OPS-01 / DEV-02 |
 | `/documents` | OPS-02 / OPS-04 / DEV-02 |
 | `/documents/` | OPS-02 / OPS-04 / DEV-02 |
 | `/foodcourt/ai-distillation-dataset` | FCT-02 / FCT-05 / DEV-02 |

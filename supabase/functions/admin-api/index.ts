@@ -1561,11 +1561,15 @@ Deno.serve(async (req, info) => {
   if (
     path === "/chat-schedule" ||
     path === "/chat-schedule/reservation" ||
+    path === "/chat-schedule/reservation-history" ||
     path === "/chat-schedule/event"
   ) {
     try {
       if (path === "/chat-schedule" && req.method === "GET") {
         return await handleChatSchedule(req, url, supabase)
+      }
+      if (path === "/chat-schedule/reservation-history" && req.method === "GET") {
+        return await handleChatScheduleReservationHistory(req, url, supabase)
       }
       if (path === "/chat-schedule/reservation") {
         return await handleChatScheduleReservation(req, workReq, url, supabase)
@@ -6693,6 +6697,7 @@ function slimChatScheduleReservation(item: Record<string, unknown>): Record<stri
     source: item.source ?? null,
     id: item.id ?? null,
     visit_at: item.visit_at ?? null,
+    created_at: item.created_at ?? null,
     customer_name: item.customer_name_label || item.customer_name || "",
     customer_phone: item.customer_phone || "",
     visit_time_label: item.visit_time_label || "",
@@ -6871,6 +6876,109 @@ async function handleChatSchedule(
     reservation_note: reservationNote,
     reservations,
     events,
+  }, 200)
+}
+
+async function handleChatScheduleReservationHistory(
+  req: Request,
+  url: URL,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Response> {
+  const ctx = await requireChatScheduleMember(req, url, supabase, null, "view")
+  const storeKey = requireChatScheduleStoreKey(ctx)
+  const source = toSafeString(url.searchParams.get("source"))
+  const normalizedSource = source === "tabelog" || source === "ikyu" || source === "manual"
+    ? source
+    : null
+  const id = Number(url.searchParams.get("id") ?? "")
+  const table = normalizedSource ? reservationEventTableForSource(normalizedSource) : null
+  if (!normalizedSource || !table || !Number.isInteger(id) || id <= 0) {
+    throw { status: 400, message: "予約を特定できません。" } satisfies AppError
+  }
+
+  const selectColumns = normalizedSource === "manual"
+    ? MANUAL_RESERVATION_SELECT_COLUMNS
+    : RESERVATION_EVENT_SELECT_COLUMNS
+  const { data: target, error: targetError } = await supabase
+    .from(table)
+    .select(selectColumns)
+    .eq("id", id)
+    .maybeSingle()
+  if (targetError) {
+    throw { status: 500, message: `Failed to load reservation history target: ${targetError.message}` } satisfies AppError
+  }
+  if (!isRecord(target)) {
+    throw { status: 404, message: "対象の予約が見つかりません。" } satisfies AppError
+  }
+
+  const targetItem = buildReservationCalendarItem(normalizedSource, target, null)
+  if (!targetItem || !reservationCalendarItemMatchesStoreScope(targetItem, storeKey)) {
+    throw { status: 404, message: "対象の予約が見つかりません。" } satisfies AppError
+  }
+  const customerName = toSafeString(target.customer_name)
+  const customerPhone = toSafeString(target.customer_phone)
+  if (!customerName) {
+    return json({ customer_name: "", items: [], total: 0 }, 200)
+  }
+
+  const historyItems: Array<Record<string, unknown>> = []
+  const sources: Array<"tabelog" | "ikyu" | "manual"> = ["tabelog", "ikyu", "manual"]
+  for (const historySource of sources) {
+    const historyTable = reservationEventTableForSource(historySource)
+    if (!historyTable) continue
+    const historySelect = historySource === "manual"
+      ? MANUAL_RESERVATION_SELECT_COLUMNS
+      : RESERVATION_EVENT_SELECT_COLUMNS
+    let query = supabase
+      .from(historyTable)
+      .select(historySelect)
+      .eq("customer_name", customerName)
+      .order("visit_at", { ascending: false })
+      .limit(200)
+    if (customerPhone) query = query.eq("customer_phone", customerPhone)
+    const { data, error } = await query
+    if (error) {
+      throw { status: 500, message: `Failed to fetch ${historySource} reservation history: ${error.message}` } satisfies AppError
+    }
+    for (const row of data ?? []) {
+      if (!isRecord(row) || row.manual_hidden === true) continue
+      const item = buildReservationCalendarItem(historySource, row, null)
+      if (!item || !reservationCalendarItemMatchesStoreScope(item, storeKey)) continue
+      const slim = slimChatScheduleReservation(item)
+      historyItems.push({
+        ...slim,
+        cancelled: isReservationCancellationRow(row),
+        status_label: isReservationCancellationRow(row) ? "キャンセル" : "予約",
+      })
+    }
+  }
+
+  historyItems.sort((a, b) => String(b.visit_at ?? "").localeCompare(String(a.visit_at ?? "")))
+  const targetSource = normalizedSource
+  const targetId = id
+  const previousItems = historyItems.filter((item) =>
+    !(String(item.source ?? "") === targetSource && Number(item.id ?? 0) === targetId)
+  )
+  const reservationCount = previousItems.filter((item) => item.cancelled !== true).length
+  const cancelledCount = previousItems.filter((item) => item.cancelled === true).length
+  const targetVisitAt = Date.parse(toSafeString(targetItem.visit_at))
+  const lastVisitAt = previousItems
+    .filter((item) => {
+      const visitAt = Date.parse(toSafeString(item.visit_at))
+      return item.cancelled !== true && Number.isFinite(visitAt) &&
+        (!Number.isFinite(targetVisitAt) || visitAt < targetVisitAt)
+    })
+    .map((item) => toSafeString(item.visit_at))
+    .sort((a, b) => b.localeCompare(a))[0] ?? null
+  return json({
+    customer_name: customerName,
+    total: historyItems.length,
+    summary: {
+      reservation_count: reservationCount,
+      cancelled_count: cancelledCount,
+      last_visit_at: lastVisitAt,
+    },
+    items: historyItems.slice(0, 200),
   }, 200)
 }
 

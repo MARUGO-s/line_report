@@ -96,7 +96,7 @@ test("chat.html hides admin notices and bot invite for viewers", async () => {
   assert.match(chat, /function currentUserIsSignupManager/)
   assert.match(chat, /signup_approval/)
   assert.match(chat, /store_change_reviewed/)
-  assert.match(chat, /isStoreBot\(user\) && sharesAffiliationWith\(user\)/)
+  assert.match(chat, /\(isStoreBot\(user\) \|\| isLoanReportBot\(user\)\) && sharesAffiliationWith\(user\)/)
   assert.match(chat, /canInviteSomewhere/)
   assert.match(chat, /if \(shouldHideAdminNotice\(msg\)\) return/)
 })

@@ -1,5 +1,7 @@
 # セキュリティ概要（line_report）
 
+2026-10-07 貸借管理報告Bot追補: 貸借管理アプリの月次「重複チェック」報告用に、店舗に属さないBot「貸借管理 報告」（…b074）と受け口`mtalk-loan-report`を追加。報告に全店舗の取引情報が載るため、`chat_shares_affiliation`にこのBotの例外を足し、1対1・招待は現在の全権管理者（`chat_is_full_admin`）だけに限定（店舗ルームへは入れない）。関数は`search_path = pg_catalog, public`、anon/authenticatedからは実行不可を維持。受け口は`verify_jwt = false`で、専用の`LOAN_MTALK_TOKEN`（32文字以上、定数時間比較）＋HMAC署名（±5分）を必須にし、gourmetの`GOURMET_MTALK_TOKEN`では通らない。送り先は現在の全権管理者との1対1とBotが参加しているルームだけ。[仕様](./MTALK-EXTERNAL-POST.md)。
+
 2026-09-11 共有店舗情報追補: 利用者が送信先OpenAI／Anthropic（Claude）と対象を明示承認。通常JournalとM-talk Journal AIの`ai-analyze`で認可後にだけ同一店舗の営業情報・共有メモ・期間内施策カレンダー・ワイン換算設定を取得し、既存privacy処理後に統合AIへ渡す。個人メモ・他店・予約者原本・資料全体は追加せず、検索プロバイダーへの引数や設定API allowlist/RLSも拡張しない。読取8秒上限、DB障害は503、未登録は未知として扱う。[仕様と限界](./THREE-APP-DATA-INTEGRATION-AUDIT.md)。
 
 2026-09-11 LINE予約リンク追補: 利用者承認により、Gmail予約・本日の予約・「予約確認」はM-talk本人ログイン＋店舗閲覧権限へ統一。URLのstore_keyは遷移先の候補であり資格ではない。本人の閲覧可能な店舗固定ルームを一意に解決し、既存chat-schedule APIが現在の所属・利用状態・ルーム/Bot・can_view/can_manageを再検査する。旧LINE予約ページはlt等を交換せず破棄してM-talkへ転送。他用途の管理リンクと認可は維持する。[仕様](./RESERVATION-GMAIL-GUIDE.md)。

@@ -5,8 +5,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { StoreRegistryRow } from './store_receipt.ts'
 import { replyLineMessages, resolveChannelAccessToken } from './line_client.ts'
-import { issueAdminDashboardLoginLinkToken, RECEIPT_ANALYTICS_SCOPE } from './admin_dashboard_link_auth.ts'
-import { buildReceiptAnalyticsDashboardUri } from './receipt_line_actions.ts'
+import { buildReceiptAnalyticsDashboardUrlForLine } from './receipt_line_actions.ts'
 
 const PENDING_TABLE = 'store_budget_entry_pending'
 const BUDGET_TABLE = 'line_sales_month_budgets'
@@ -189,22 +188,18 @@ async function commitBudgetAndReply(
       `(${error.message.slice(0, 80)})`,
     ], '#D14343'))
   }
-  let dashboardUri = ''
-  try {
-    const issued = await issueAdminDashboardLoginLinkToken(supabase, {
-      source: 'line_budget_entry',
-      store_partition_key: budgetStoreKey,
-      target_month: targetMonth,
-      scope: RECEIPT_ANALYTICS_SCOPE,
-    })
-    dashboardUri = buildReceiptAnalyticsDashboardUri(urlStoreKey, targetMonth, { loginToken: issued.token })
-  } catch (_e) {
-    try {
-      dashboardUri = buildReceiptAnalyticsDashboardUri(urlStoreKey, targetMonth)
-    } catch (_e2) {
-      dashboardUri = ''
-    }
-  }
+  const dashboardUri = await buildReceiptAnalyticsDashboardUrlForLine(
+    supabase,
+    urlStoreKey,
+    targetMonth,
+    'line_budget_entry',
+  )
+  const dashboardNoticeLines = dashboardUri
+    ? BUDGET_NOTICE_LINES
+    : [
+      ...BUDGET_NOTICE_LINES,
+      '売上分析ページのワンタイムリンクを発行できませんでした。リンクを再発行するには、もう一度この操作を行ってください。',
+    ]
   const [yy, mo] = targetMonth.split('-')
   return reply(budgetDoneFlex(
     existed ? '✅ 予算を更新しました' : '✅ 予算を登録しました',
@@ -213,7 +208,7 @@ async function commitBudgetAndReply(
       `対象月：${Number(yy)}年${Number(mo)}月`,
       `月間総予算：${formatYen(amount)}`,
     ],
-    BUDGET_NOTICE_LINES,
+    dashboardNoticeLines,
     dashboardUri,
   ))
 }
