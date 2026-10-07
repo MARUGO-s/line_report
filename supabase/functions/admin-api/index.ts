@@ -6697,6 +6697,7 @@ function slimChatScheduleReservation(item: Record<string, unknown>): Record<stri
     source: item.source ?? null,
     id: item.id ?? null,
     visit_at: item.visit_at ?? null,
+    created_at: item.created_at ?? null,
     customer_name: item.customer_name_label || item.customer_name || "",
     customer_phone: item.customer_phone || "",
     visit_time_label: item.visit_time_label || "",
@@ -6953,9 +6954,30 @@ async function handleChatScheduleReservationHistory(
   }
 
   historyItems.sort((a, b) => String(b.visit_at ?? "").localeCompare(String(a.visit_at ?? "")))
+  const targetSource = normalizedSource
+  const targetId = id
+  const previousItems = historyItems.filter((item) =>
+    !(String(item.source ?? "") === targetSource && Number(item.id ?? 0) === targetId)
+  )
+  const reservationCount = previousItems.filter((item) => item.cancelled !== true).length
+  const cancelledCount = previousItems.filter((item) => item.cancelled === true).length
+  const targetVisitAt = Date.parse(toSafeString(targetItem.visit_at))
+  const lastVisitAt = previousItems
+    .filter((item) => {
+      const visitAt = Date.parse(toSafeString(item.visit_at))
+      return item.cancelled !== true && Number.isFinite(visitAt) &&
+        (!Number.isFinite(targetVisitAt) || visitAt < targetVisitAt)
+    })
+    .map((item) => toSafeString(item.visit_at))
+    .sort((a, b) => b.localeCompare(a))[0] ?? null
   return json({
     customer_name: customerName,
     total: historyItems.length,
+    summary: {
+      reservation_count: reservationCount,
+      cancelled_count: cancelledCount,
+      last_visit_at: lastVisitAt,
+    },
     items: historyItems.slice(0, 200),
   }, 200)
 }

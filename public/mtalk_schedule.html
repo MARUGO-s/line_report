@@ -214,6 +214,10 @@
     }
     .reservation-history h4 { font-size: 14px; margin-bottom: 8px; color: var(--text); }
     .reservation-history-note { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .history-summary { margin: 8px 0 12px; color: var(--text); font-size: 14px; line-height: 1.8; }
+    .history-section-title { margin: 12px 0 6px; color: var(--muted); font-weight: 800; font-size: 14px; }
+    .history-summary-row { display: flex; gap: 8px; }
+    .history-summary-label { min-width: 7em; font-weight: 800; }
     .history-item {
       padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.5;
     }
@@ -313,6 +317,15 @@
     function timeLabel(iso) {
       if (!iso) return '';
       return new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+    }
+    function historyDateTimeLabel(iso) {
+      if (!iso || Number.isNaN(new Date(iso).getTime())) return '';
+      const date = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+      }).formatToParts(new Date(iso));
+      const get = (type) => date.find((part) => part.type === type)?.value || '';
+      const weekday = get('weekday').replace('曜日', '');
+      return get('year') + '/' + get('month') + '/' + get('day') + '(' + weekday + ')' + (timeLabel(iso) ? ' ' + timeLabel(iso) : '');
     }
     function escapeHtml(text) {
       return String(text ?? '').replace(/[&<>"']/g, (ch) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[ch]));
@@ -711,21 +724,27 @@
       const panel = $('reservationHistory');
       if (!panel) return;
       if (state.loading) {
-        panel.innerHTML = '<section class="reservation-history"><h4>過去の予約履歴</h4><p class="reservation-history-note">読み込み中…</p></section>';
+        panel.innerHTML = '<section class="reservation-history"><h4>予約回数・履歴</h4><p class="reservation-history-note">読み込み中…</p></section>';
         return;
       }
       if (state.error) {
-        panel.innerHTML = '<section class="reservation-history"><h4>過去の予約履歴</h4><p class="reservation-history-note">' + escapeHtml(state.error) + '</p></section>';
+        panel.innerHTML = '<section class="reservation-history"><h4>予約回数・履歴</h4><p class="reservation-history-note">' + escapeHtml(state.error) + '</p></section>';
         return;
       }
       const rows = Array.isArray(state.items) ? state.items : [];
+      const summary = state.summary && typeof state.summary === 'object' ? state.summary : {};
+      const summaryHtml = '<div class="history-summary">' +
+        '<div class="history-summary-row"><span class="history-summary-label">予約回数</span><span>' + escapeHtml(String(Number(summary.reservation_count) || 0)) + '回</span></div>' +
+        '<div class="history-summary-row"><span class="history-summary-label">キャンセル回数</span><span>' + escapeHtml(String(Number(summary.cancelled_count) || 0)) + '回</span></div>' +
+        '</div>';
       if (!rows.length) {
-        panel.innerHTML = '<section class="reservation-history"><h4>過去の予約履歴</h4><p class="reservation-history-note">過去の予約はありません。</p></section>';
+        panel.innerHTML = '<section class="reservation-history"><h4>予約回数・履歴</h4>' + summaryHtml + '<div class="history-section-title">過去の予約</div><p class="reservation-history-note">過去の予約はありません。</p></section>';
         return;
       }
       const items = rows.map((row) => {
-        const date = dayLabel(row.visit_at) + (row.visit_time_label ? ' ' + row.visit_time_label : '');
+        const date = historyDateTimeLabel(row.visit_at) || (dayLabel(row.visit_at) + (row.visit_time_label ? ' ' + row.visit_time_label : ''));
         const meta = [row.party_size_label, row.route_label].filter(Boolean).join(' / ');
+        const bookedAt = historyDateTimeLabel(row.created_at);
         const detail = [
           row.plan_label,
           row.allergy_label ? 'アレルギー: ' + row.allergy_label : '',
@@ -736,10 +755,11 @@
         return '<div class="history-item">' +
           '<div class="history-date">' + escapeHtml(date) + ' <span class="history-status' + (row.cancelled ? ' cancelled' : '') + '">' + escapeHtml(row.status_label || '予約') + '</span></div>' +
           (meta ? '<div class="history-meta">' + escapeHtml(meta) + '</div>' : '') +
+          (bookedAt ? '<div class="history-meta">予約受付: ' + escapeHtml(bookedAt) + '</div>' : '') +
           (detail ? '<div class="history-detail">' + escapeHtml(detail) + '</div>' : '') +
           '</div>';
       }).join('');
-      panel.innerHTML = '<section class="reservation-history"><h4>過去の予約履歴（' + rows.length + '件）</h4>' + items + '</section>';
+      panel.innerHTML = '<section class="reservation-history"><h4>予約回数・履歴</h4>' + summaryHtml + '<div class="history-section-title">過去の予約</div>' + items + '</section>';
     }
     async function loadReservationHistory(raw) {
       try {
@@ -752,7 +772,7 @@
           const time = Date.parse(String(item.visit_at || ''));
           return Number.isFinite(time) && time < Date.now();
         });
-        renderReservationHistory({ items: past });
+        renderReservationHistory({ items: past, summary: result.summary });
       } catch (error) {
         if (editing?.raw !== raw || editing?.mode !== 'view') return;
         renderReservationHistory({ error: error.message || '過去の予約履歴を読み込めませんでした。' });
