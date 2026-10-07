@@ -90,6 +90,7 @@ function myStoreKeys() {
 
 function sharesAffiliationWith(user) {
   if (!user || !currentUser || user.id === currentUser.id) return false;
+  if (isLoanReportBot(user)) return currentChatAccess?.is_full_admin === true;
   const mine = myStoreKeys();
   if (!mine.length) return false;
   if (isStoreBot(user)) return mine.includes(user.store_key);

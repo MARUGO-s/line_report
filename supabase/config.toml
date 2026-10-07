@@ -118,3 +118,10 @@ verify_jwt = false
 # /chat-dispatch だけは DB トリガー（pg_net）からの内部呼び出しで、chat-search と同じ dispatch_secret を定数時間比較する。
 [functions.mtalk-external-post]
 verify_jwt = false
+
+# mtalk-loan-report は貸借管理アプリ（MARUGO-s/management の GAS）からの月次「重複チェック」報告の受け口。
+# 呼び出し元は Supabase の利用者JWTを持たないため verify_jwt = false。関数入口で LOAN_MTALK_TOKEN（Bearer、
+# 定数時間比較）と X-Mtalk-Timestamp / X-Mtalk-Signature（HMAC-SHA256、±5分）を必須にし、欠けたら 401。
+# 送信元は店舗に属さない「貸借管理 報告」Bot（…b074）。送り先は現在の全権管理者との1対1と、Botが参加しているルームだけ。
+[functions.mtalk-loan-report]
+verify_jwt = false

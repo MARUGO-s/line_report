@@ -144,6 +144,12 @@ function isReservationBot(user) {
 function isStoreBot(user) {
   return !!(user && user.is_bot && user.store_key);
 }
+// 「貸借管理 報告」Bot（貸借管理アプリの月次「重複チェック」報告）。全店舗の取引情報を扱うため、
+// Botタブでの表示・1対1・招待は全権管理者だけ（サーバー側は chat_shares_affiliation で同じ判定）。
+const LOAN_REPORT_BOT_USER_ID = '00000000-0000-4000-8000-00000000b074';
+function isLoanReportBot(user) {
+  return !!(user && user.is_bot && String(user.id) === LOAN_REPORT_BOT_USER_ID);
+}
 function storeBotLogoForKey(storeKey) {
   const rawKey = String(storeKey || '').trim();
   if (STORE_BOT_LOGOS[rawKey]) return STORE_BOT_LOGOS[rawKey];

@@ -1,5 +1,13 @@
 # LINE Report Project Progress
 
+### 2026-10-07 - M-talk「貸借管理 報告」Botと受け口 mtalk-loan-report を追加
+
+- 貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に前月分の「重複チェック」報告を送り、専用Bot「貸借管理 報告」（…b074、店舗に属さない）として届ける。
+- migration `20261007120000_chat_loan_report_bot.sql`: Bot 作成と `chat_shares_affiliation` の例外（このBotとの1対1・招待は現在の全権管理者だけ）。店舗ルームには入れない。
+- Edge `mtalk-loan-report`（`verify_jwt = false`、`LOAN_MTALK_TOKEN`＋HMAC、`POST /report`、`dry_run`）と `_shared/mtalk_loan_report.ts`。送り先は全権管理者との1対1（`chat_ensure_bot_direct`）とBotが参加しているルーム。
+- M-talk画面: Botタブに全権管理者にだけ表示し、招待先から店舗ルーム・管理者通知を外す。PWA v67（core/profile/rooms の版を更新）。
+- テスト: `tests/mtalk_loan_report.test.ts`（6件）を追加し、`test:chat`・`test:structure`・`npm run check`・`test:ci` 成功。配備は migration → secret `LOAN_MTALK_TOKEN` → Edge → Pages。
+
 ### 2026-10-04 - LINE予約画像からの登録許可をルーム個別に追加
 
 - Webhook設定のルーム「個別設定」→「カレンダー/予約」、セルフ設定の「予約・カレンダー」に「予約画像からの登録を許可」を追加。

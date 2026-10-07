@@ -247,7 +247,7 @@ function toggleUserSelect(userId) {
 }
 
 function isDirectoryUser(user) {
-  if (talkTab === 'bots') return isStoreBot(user) && sharesAffiliationWith(user);
+  if (talkTab === 'bots') return (isStoreBot(user) || isLoanReportBot(user)) && sharesAffiliationWith(user);
   return !isBotUser(user);
 }
 
@@ -280,7 +280,7 @@ function renderRegisteredUsers() {
         <div class="talk-avatar" style="background:${iconUrl ? '#2c2c2e' : avatarStyle(personAvatarKey(user))}">${avatarHtml(personAvatarKey(user), iconUrl, isStoreBot(user))}</div>
         <div class="talk-body">
           <div class="group-item-name"><span>${escapeHtml(personName(user))}</span>${botMarkHtml()}</div>
-          <div class="group-item-info">${canInviteSomewhere ? '1対1、またはルームへ招待' : '所属店舗の店舗Bot'}</div>
+          <div class="group-item-info">${isLoanReportBot(user) ? '貸借管理の月次報告（全権管理者のみ）' : (canInviteSomewhere ? '1対1、またはルームへ招待' : '所属店舗の店舗Bot')}</div>
         </div>
       `;
       const talkBtn = document.createElement('button');
@@ -344,13 +344,18 @@ function openUserInviteTarget() {
     return;
   }
   const invitingBots = [...selectedUserIds].some((id) => (
-    (registeredUsers || []).some((u) => u.id === id && isStoreBot(u))
+    (registeredUsers || []).some((u) => u.id === id && (isStoreBot(u) || isLoanReportBot(u)))
+  ));
+  // 「貸借管理 報告」Botは店舗に属さないので、店舗ルーム・管理者通知には入れない（サーバー側も拒否する）
+  const invitingLoanReportBot = [...selectedUserIds].some((id) => (
+    (registeredUsers || []).some((u) => u.id === id && isLoanReportBot(u))
   ));
   const newGroupBtn = $('inviteNewGroupBtn');
   if (newGroupBtn) newGroupBtn.classList.toggle('hidden', invitingBots);
   const list = $('userInviteGroupList');
   list.innerHTML = '';
-  const rooms = myGroups.filter((group) => !group.is_direct && canCurrentUserInvite(group));
+  const rooms = myGroups.filter((group) => !group.is_direct && canCurrentUserInvite(group)
+    && !(invitingLoanReportBot && (group.is_store_room || group.store_key || group.is_admin_notice_room)));
   if (!rooms.length) {
     list.innerHTML = invitingBots
       ? '<div class="empty-note">招待できるルームがありません</div>'
