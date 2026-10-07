@@ -778,7 +778,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 - Edge Functions: 22件
 - 共有TypeScriptモジュール: 116件
 - 補助・運用・レガシーコード: 40件
-- admin-api静的ルート: 145件
+- admin-api静的ルート: 146件
 - SQL migrations: 317件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 119件
 
@@ -1057,6 +1057,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `/chat-schedule` | RSV-01 / OPS-01 / DEV-02 |
 | `/chat-schedule/event` | RSV-01 / OPS-01 / DEV-02 |
 | `/chat-schedule/reservation` | RSV-01 / OPS-01 / DEV-02 |
+| `/chat-schedule/reservation-history` | RSV-01 / OPS-01 / DEV-02 |
 | `/documents` | OPS-02 / OPS-04 / DEV-02 |
 | `/documents/` | OPS-02 / OPS-04 / DEV-02 |
 | `/foodcourt/ai-distillation-dataset` | FCT-02 / FCT-05 / DEV-02 |
