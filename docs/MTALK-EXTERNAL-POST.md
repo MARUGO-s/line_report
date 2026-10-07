@@ -188,7 +188,7 @@ gourmet は取得の失敗を「一休（BISTRO CAVACAVA）：ログイン情報
 
 ## 貸借管理の月次報告（`mtalk-loan-report`、2026-10-07）
 
-貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に、前月分の「重複チェック」（重複・入力ミスの疑い）を集計して送る入口です。
+貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に、前々月・前月の2か月分（月が変わってから前月分を入力する人もいるため、前月分は次の報告でもう一度見る）の「重複チェック」（重複・入力ミスの疑い）を集計して送る入口です。前回の報告より後に入力された疑いには「【新】」が付きます。
 `mtalk-external-post` とは別の Edge Function・別の秘密情報（`LOAN_MTALK_TOKEN`）にしています（gourmet の `GOURMET_MTALK_TOKEN` では通りません）。認証の形（`Authorization: Bearer`・`X-Mtalk-Timestamp`・`X-Mtalk-Signature`、署名文字列 `v1:<ts>:POST:/report:<body>`）は上と同じです。
 
 - 送信元: 専用Bot「貸借管理 報告」（`00000000-0000-4000-8000-00000000b074`、店舗に属さない。migration `20261007120000_chat_loan_report_bot.sql`）
@@ -198,9 +198,9 @@ gourmet は取得の失敗を「一休（BISTRO CAVACAVA）：ログイン情報
 
 ```json
 {
-  "dedupe_key": "loan-duplicate:2026-09",
-  "title": "重複チェック（2026年9月分）",
-  "subtitle": "2026/09/01〜2026/09/30 · 10/01 06:00 作成",
+  "dedupe_key": "loan-duplicate:2026-08_2026-09",
+  "title": "重複チェック（2026年8月〜9月分）",
+  "subtitle": "2026/08/01〜2026/09/30 · 10/1 06:10 作成",
   "sections": [
     { "heading": "重複の疑いが強い", "fields": [{ "label": "件数", "value": "3件（2グループ）" }, { "label": "重複分", "value": "¥15,354" }], "items": ["2026-09-03 焼肉マルゴ→MARUGO MARUNOUCHI シャンティ ¥3,948 ×6"] }
   ],

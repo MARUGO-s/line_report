@@ -9,7 +9,7 @@
 
 ### 2026-10-07 - M-talk「貸借管理 報告」Botと受け口 mtalk-loan-report を追加
 
-- 貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に前月分の「重複チェック」報告を送り、専用Bot「貸借管理 報告」（…b074、店舗に属さない）として届ける。
+- 貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に前々月・前月の2か月分の「重複チェック」報告を送り（遅れて入力される前月分を次の報告でも拾う）、専用Bot「貸借管理 報告」（…b074、店舗に属さない）として届ける。
 - migration `20261007120000_chat_loan_report_bot.sql`: Bot 作成と `chat_shares_affiliation` の例外（このBotとの1対1・招待は現在の全権管理者だけ）。店舗ルームには入れない。
 - Edge `mtalk-loan-report`（`verify_jwt = false`、`LOAN_MTALK_TOKEN`＋HMAC、`POST /report`、`dry_run`）と `_shared/mtalk_loan_report.ts`。送り先は全権管理者との1対1（`chat_ensure_bot_direct`）とBotが参加しているルーム。
 - M-talk画面: Botタブに全権管理者にだけ表示し、招待先から店舗ルーム・管理者通知を外す。PWA v67（core/profile/rooms の版を更新）。

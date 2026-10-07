@@ -17,9 +17,9 @@ const read = (relative: string) => readFile(new URL(relative, root), "utf8")
 const MIGRATION = "supabase/migrations/20261007120000_chat_loan_report_bot.sql"
 
 const report = (extra: Record<string, unknown> = {}) => ({
-  dedupe_key: "loan-duplicate:2026-09",
-  title: "重複チェック（2026年9月分）",
-  subtitle: "2026/09/01〜2026/09/30 · 10/01 06:00 作成",
+  dedupe_key: "loan-duplicate:2026-08_2026-09",
+  title: "重複チェック（2026年8月〜9月分）",
+  subtitle: "2026/08/01〜2026/09/30 · 10/1 06:10 作成",
   sections: [
     {
       heading: "重複の疑いが強い",
@@ -34,11 +34,11 @@ const report = (extra: Record<string, unknown> = {}) => ({
 
 test("報告の本文を検証し、カードを組み立てる", () => {
   const input = validateLoanReportInput(report())
-  assert.equal(input.dedupeKey, "loan-duplicate:2026-09")
+  assert.equal(input.dedupeKey, "loan-duplicate:2026-08_2026-09")
   assert.equal(input.dryRun, false)
   assert.equal(input.links.length, 1)
   const { text, cards } = buildLoanReportCard(input)
-  assert.match(text, /^\[貸借管理\] 重複チェック（2026年9月分）/)
+  assert.match(text, /^\[貸借管理\] 重複チェック（2026年8月〜9月分）/)
   assert.equal(cards[0].header?.eyebrow, "貸借管理")
   assert.equal(cards[0].actions?.[0].url, "https://marugo-s.github.io/management/pages/marugo.html")
   assert.ok(cards[0].sections.some((s) => s.type === "fields" && s.rows.some((r) => r.label === "重複分")))
