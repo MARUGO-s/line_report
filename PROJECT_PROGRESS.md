@@ -1,5 +1,12 @@
 # LINE Report Project Progress
 
+### 2026-10-07 - LINE予算登録・売上照会リンクのOTP経路をM-talkから分離
+
+- 症状: LINEの「予算登録」完了カードから売上分析を開くと、ワンタイムリンクなのに管理トークン（パスワード）入力画面が表示されることがあった。
+- 原因: LINE売上分析URLの発行が複数箇所に分散し、予算登録側はOTP発行失敗時に通常URLへフォールバックしていた。売上照会側にもOTPなしのURL生成が残っていた。
+- 修正: `receipt_line_actions.ts` にLINE専用の `receipt_analytics` OTP発行関数を集約し、予算登録・LINE売上照会・レシート売上報告から共通利用。発行失敗時はパスワード画面へ誘導するURLを返さず、ボタンを表示しない。M-talkのルーム設定・チャット認証リンクとは経路を分離した。
+- Pagesキャッシュ対策として分析URLと `auth-session.js` の版数を `20261007` に更新。回帰テスト `tests/receipt_line_actions.test.ts` を追加。
+
 ### 2026-10-07 - M-talk「貸借管理 報告」Botと受け口 mtalk-loan-report を追加
 
 - 貸借管理アプリ（MARUGO-s/management）の GAS が毎月1日 6時台に前月分の「重複チェック」報告を送り、専用Bot「貸借管理 報告」（…b074、店舗に属さない）として届ける。

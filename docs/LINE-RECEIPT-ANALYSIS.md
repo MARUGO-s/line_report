@@ -218,7 +218,7 @@ Webhook の登録店舗名と、レシート解析の店名が一致しない場
 |--------|------|
 | この結果を修正 | 修正セッション開始（対象 LINE メッセージ ID 付き） |
 | この解析結果を削除 | 当該解析結果を DB から削除 |
-| 売上推移を見る | `analytics.html` へリンク（`store_key`・`month`・`from=line`・任意で `t=`） |
+| 売上推移を見る | `analytics.html` へリンク（`store_key`・`month`・`from=line`・`lt`。`lt`は`receipt_analytics`用途のワンタイムログインチケット） |
 
 ---
 
