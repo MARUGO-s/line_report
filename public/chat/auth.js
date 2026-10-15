@@ -100,11 +100,20 @@ async function signup() {
 }
 
 async function login() {
+  const button = $('loginBtn');
+  if (button.disabled) return;
   const email = $('emailInput').value.trim();
   const password = $('passwordInput').value;
   if (!email || !password) return showLoginError('メールアドレスとパスワードを入力してください');
 
-  $('loginBtn').disabled = true;
+  const progress = $('loginProgress');
+  button.disabled = true;
+  button.textContent = '認証中…';
+  progress.textContent = '認証しています。しばらくお待ちください。';
+  progress.classList.remove('hidden');
+  const slowTimer = setTimeout(() => {
+    progress.textContent = '認証に時間がかかっています。再度押さずにお待ちください。画面が変わらない場合は再読み込みしてやり直してください。';
+  }, 15000);
   try {
     const { error } = await sb.auth.signInWithPassword({ email, password });
     if (error) {
@@ -130,6 +139,9 @@ async function login() {
     console.error('Login error:', error);
     showLoginError(`ログインに失敗しました: ${error.message || error}`);
   } finally {
-    $('loginBtn').disabled = false;
+    clearTimeout(slowTimer);
+    progress.classList.add('hidden');
+    button.textContent = 'ログイン';
+    button.disabled = false;
   }
 }

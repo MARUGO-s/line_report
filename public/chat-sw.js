@@ -1,11 +1,11 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v67';
+const CHAT_CACHE = 'line-report-chat-v68';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261001-ai-typing-1',
   './chat/core.js?v=20261007-loan-report-1',
-  './chat/auth.js',
+  './chat/auth.js?v=20261015-login-stability-1',
   './chat/permissions.js',
   './chat/profile.js?v=20261007-loan-report-1',
   './chat/realtime.js?v=20260911-line-calendar-1',
@@ -13,7 +13,7 @@ const CHAT_SHELL = [
   './chat/rooms.js?v=20261007-loan-report-1',
   './chat/messages.js?v=20261001-ai-typing-1',
   './chat/attachments.js?v=20260911-calendar-links-1',
-  './chat/composer.js',
+  './chat/composer.js?v=20261015-login-stability-1',
   './chat/bootstrap.js?v=20260911-line-calendar-1',
   './chat.webmanifest',
   './pages-config.js',
@@ -123,16 +123,8 @@ self.addEventListener('activate', (event) => {
             && key !== CHAT_PUSH_DIAGNOSTIC_QUEUE
           ))
           .map((key) => caches.delete(key)),
-      ))
-      .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
-      .then((clients) => Promise.all(clients.map((client) => {
-        const url = new URL(client.url);
-        if (!url.pathname.endsWith('/chat.html') || !('navigate' in client)) return undefined;
-        // iOSのホーム画面アプリが旧HTMLを保持していても、新SW有効化時に
-        // network-firstのchat.htmlへ一度だけ遷移して最新UIへ切り替える。
-        return client.navigate(client.url).catch(() => undefined);
-      }))),
+      )),
+    // clients.claim / client.navigate は実行しない。更新で編集中の画面を再読み込みしない。
   );
 });
 
