@@ -1039,19 +1039,8 @@ if ('serviceWorker' in navigator) {
       flushPushDiagnostics();
     }
   });
-  // 新しいService Workerが有効化されたら、古い画面を1回だけ自動再読込する。
-  // iOSのホーム画面アプリは開いたままだと旧UIが残り、通知テストボタン等の
-  // 新機能が出ないため。無限リロードを防ぐため sessionStorage で1回に限定する。
-  let swReloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (swReloaded) return;
-    swReloaded = true;
-    try {
-      if (sessionStorage.getItem('mtalk-sw-reloaded') === '1') return;
-      sessionStorage.setItem('mtalk-sw-reloaded', '1');
-    } catch (_) { /* storage不可でも続行 */ }
-    location.reload();
-  });
+  // 更新後の画面は次回の通常ナビゲーションで表示する。
+  // controllerchange での自動再読込は入力中のログインや下書きを破棄する。
   // 復帰時に新しいService Workerの取得を促す。
   const checkForServiceWorkerUpdate = () => {
     navigator.serviceWorker.getRegistration().then((registration) => {
