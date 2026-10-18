@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v70';
+const CHAT_CACHE = 'line-report-chat-v71';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261001-ai-typing-1',
@@ -202,11 +202,15 @@ self.addEventListener('push', (event) => {
     declarative?.navigate || metadata?.url || data.url || CHAT_ENTRY_URL,
   );
   const testId = String(metadata?.test_id || '');
+  const incomingMessageId = Number(metadata?.message_id || data.message_id);
   const options = {
     body: String(declarative?.body || data.body || '新しいメッセージがあります'),
     icon: './icons/chat-android-192x192-v3.png',
     badge: './icons/chat-favicon-48x48-v3.png',
-    tag: declarative?.tag || data.tag || 'line-report-chat',
+    // 同じルームタグだと新しい通知が前の通知を置き換え、アイコン件数は1のままになる。
+    tag: Number.isSafeInteger(incomingMessageId) && incomingMessageId > 0
+      ? `chat-message-${incomingMessageId}`
+      : (declarative?.tag || data.tag || 'line-report-chat'),
     renotify: true,
     data: {
       url: targetUrl,

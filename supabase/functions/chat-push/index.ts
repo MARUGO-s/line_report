@@ -772,7 +772,7 @@ async function handleDispatch(
             ? `${mentionPrefix}${preview}`
             : `${mentionPrefix}${message.username}: ${preview}`,
           navigatePath: notificationUrl(message.group_id),
-          tag: `chat-group-${message.group_id}`,
+          tag: `chat-message-${message.id}`,
           groupId: message.group_id,
           messageId: message.id,
           badgeCount: unreadTotals.get(row.user_id) ?? null,
