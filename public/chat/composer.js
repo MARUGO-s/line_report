@@ -1032,8 +1032,16 @@ document.addEventListener('visibilitychange', () => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (event) => {
     if (event.data?.type === 'REFRESH_APP_BADGE' && currentUser && !document.hidden) {
-      if (currentGroupId) markGroupRead(currentGroupId);
-      else loadUnread();
+      const groupId = Number(event.data.group_id);
+      const pushed = Number(event.data.count);
+      const sameRoom = currentGroupId && Number(currentGroupId) === groupId;
+      if (sameRoom) {
+        markGroupRead(currentGroupId);
+      } else {
+        loadUnread().finally(() => {
+          if (Number.isSafeInteger(pushed) && pushed > unreadTotal()) syncAppBadge(pushed);
+        });
+      }
     }
     if (event.data?.type === 'FLUSH_PUSH_DIAGNOSTICS' && currentUser) {
       flushPushDiagnostics();

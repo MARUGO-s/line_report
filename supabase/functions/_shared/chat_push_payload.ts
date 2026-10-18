@@ -28,7 +28,7 @@ export function buildDeclarativeChatPushPayload(input: ChatPushPayloadInput): Re
   const title = String(input.title ?? "").trim() || "M-talk"
   const body = String(input.body ?? "").trim() || "新しいメッセージがあります"
   const navigate = absoluteChatUrl(input.navigatePath)
-  const badgeCount = Number(input.badgeCount)
+  const badgeCount = input.badgeCount == null ? Number.NaN : Number(input.badgeCount)
   const notification: Record<string, unknown> = {
     title,
     body,
