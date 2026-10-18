@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v71';
+const CHAT_CACHE = 'line-report-chat-v72';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261001-ai-typing-1',
@@ -266,11 +266,28 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
+async function closeReadNotifications(groupId, closeAll) {
+  const notes = await self.registration.getNotifications();
+  await Promise.all(notes.map(async (note) => {
+    const tag = String(note.tag || '');
+    if (!tag.startsWith('chat-message-')) return;
+    const noteGroup = Number(note.data?.group_id);
+    if (closeAll || (Number.isSafeInteger(Number(groupId)) && noteGroup === Number(groupId))) {
+      note.close();
+    }
+  }));
+}
+
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'SET_APP_BADGE') return;
   const count = Number(event.data.count);
   if (Number.isSafeInteger(count) && count >= 0) lastPushAppBadge = count;
-  event.waitUntil(updateAppBadge(event.data.count));
+  const groupId = event.data.groupId;
+  const closeAll = event.data.closeAll === true || count === 0;
+  event.waitUntil((async () => {
+    await closeReadNotifications(groupId, closeAll);
+    await updateAppBadge(count);
+  })());
 });
 
 self.addEventListener('message', (event) => {

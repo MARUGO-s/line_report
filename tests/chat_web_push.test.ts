@@ -131,7 +131,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v71/)
+  assert.match(serviceWorker, /line-report-chat-v72/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -242,7 +242,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v71/)
+  assert.match(serviceWorker, /line-report-chat-v72/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -963,4 +963,61 @@ test("a new notification raises the icon badge even when the payload count is un
   await deliver(121)
   assert.deepEqual(badges, [1, 2])
   assert.deepEqual(notifications.map((options) => options.tag), ["chat-message-120", "chat-message-121"])
+})
+
+test("marking a room read closes its notifications and lowers the icon badge", async () => {
+  const serviceWorker = await read("public/chat-sw.js")
+  const listeners = new Map<string, Array<(event: any) => void>>()
+  const badges: number[] = []
+  const closed: string[] = []
+  const notes = [
+    { tag: "chat-message-120", data: { group_id: 31 }, close() { closed.push(this.tag) } },
+    { tag: "chat-message-121", data: { group_id: 32 }, close() { closed.push(this.tag) } },
+  ]
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    console,
+    Number,
+    caches: {
+      async open() { return { async add() {}, async addAll() {}, async put() {}, async match() { return undefined } } },
+      async keys() { return [] },
+      async delete() { return true },
+      async match() { return undefined },
+    },
+    self: {
+      location: { href: "https://marugo-s.github.io/line_report/chat-sw.js", origin: "https://marugo-s.github.io" },
+      navigator: {
+        async setAppBadge(count: number) { badges.push(count) },
+        async clearAppBadge() { badges.push(0) },
+      },
+      registration: {
+        async showNotification() {},
+        async getNotifications() { return notes.filter((note) => !closed.includes(note.tag)) },
+      },
+      clients: { async matchAll() { return [] }, async claim() {} },
+      async skipWaiting() {},
+      addEventListener(type: string, listener: (event: any) => void) {
+        const list = listeners.get(type) || []
+        list.push(listener)
+        listeners.set(type, list)
+      },
+    },
+  })
+  vm.runInContext(serviceWorker, context, { filename: "chat-sw.js" })
+  let pending: Promise<unknown> | null = null
+  for (const listener of listeners.get("message") || []) {
+    listener({
+      data: { type: "SET_APP_BADGE", count: 1, groupId: 31, closeAll: false },
+      waitUntil(value: Promise<unknown>) { pending = value },
+    })
+  }
+  assert.ok(pending)
+  await pending
+  assert.deepEqual(closed, ["chat-message-120"])
+  assert.deepEqual(badges, [1])
 })

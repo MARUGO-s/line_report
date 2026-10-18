@@ -1027,7 +1027,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && currentUser) {
     if (currentGroupId) markGroupRead(currentGroupId);
     else loadUnread();
-    closeDeliveredChatNotifications();
+    closeDeliveredChatNotifications(null, true);
   }
 });
 if ('serviceWorker' in navigator) {
