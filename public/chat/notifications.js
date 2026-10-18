@@ -226,32 +226,40 @@ function unreadTotal() {
   }, 0);
 }
 
-async function closeDeliveredChatNotifications() {
+async function closeDeliveredChatNotifications(groupId, closeAll) {
   try {
     const registration = serviceWorkerRegistration || await navigator.serviceWorker.getRegistration();
     if (!registration || !registration.getNotifications) return;
     const notes = await registration.getNotifications();
     for (const note of notes) {
-      if (String(note.tag || '').startsWith('chat-message-')) note.close();
+      if (!String(note.tag || '').startsWith('chat-message-')) continue;
+      const noteGroup = Number(note.data && note.data.group_id);
+      if (closeAll || (groupId != null && noteGroup === Number(groupId))) note.close();
     }
   } catch (_) {}
 }
 
-async function syncAppBadge(total = pushNotificationsEnabled ? unreadTotal() : 0) {
+async function syncAppBadge(total = pushNotificationsEnabled ? unreadTotal() : 0, groupId = null) {
   const count = Number(total);
   const badgeCount = Number.isSafeInteger(count) && count > 0 ? count : 0;
+  const closeAll = badgeCount === 0;
+  await closeDeliveredChatNotifications(groupId, closeAll);
   try {
     if (badgeCount > 0 && 'setAppBadge' in navigator) {
       await navigator.setAppBadge(badgeCount);
-      return;
-    }
-    if (badgeCount === 0 && 'clearAppBadge' in navigator) {
+    } else if (badgeCount === 0 && 'clearAppBadge' in navigator) {
       await navigator.clearAppBadge();
-      return;
     }
     const registration = serviceWorkerRegistration || await ensureChatServiceWorker();
     const worker = registration?.active || registration?.waiting || registration?.installing;
-    if (worker) worker.postMessage({ type: 'SET_APP_BADGE', count: badgeCount });
+    if (worker) {
+      worker.postMessage({
+        type: 'SET_APP_BADGE',
+        count: badgeCount,
+        groupId: groupId == null ? null : Number(groupId),
+        closeAll,
+      });
+    }
   } catch (error) {
     // Badging API非対応でもトーク・Web Push本体は継続する。
     console.error('App badge sync error:', error);

@@ -166,7 +166,8 @@ async function markGroupRead(groupId) {
   delete unread[groupId];
   renderGroups();
   updateTitle();
-  await syncAppBadge();
+  await syncAppBadge(undefined, groupId);
+  let saved = false;
   try {
     const { error } = await sb.from('chat_read_states').upsert({
       group_id: groupId,
@@ -174,10 +175,17 @@ async function markGroupRead(groupId) {
       last_read_at: new Date().toISOString()
     }, { onConflict: 'group_id,user_id' });
     if (error) throw error;
+    saved = true;
   } catch (error) {
     console.error('Mark read error:', error);
   } finally {
     await loadUnread();
+    if (saved) {
+      delete unread[groupId];
+      renderGroups();
+      updateTitle();
+      await syncAppBadge(undefined, groupId);
+    }
   }
 }
 
