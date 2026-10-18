@@ -131,7 +131,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v68/)
+  assert.match(serviceWorker, /line-report-chat-v69/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -156,6 +156,8 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /Push sign out local cleanup error/)
   assert.match(html, /function unreadTotal\(\)/)
   assert.match(html, /async function syncAppBadge/)
+  assert.match(html, /const requestSequence = \+\+unreadRequestSequence/)
+  assert.match(html, /requestSequence !== unreadRequestSequence \|\| currentUser\?\.id !== requestedUserId/)
   assert.doesNotMatch(html, /if \(currentGroupId\) delete counts\[currentGroupId\]/)
   assert.match(html, /const \{ error \} = await sb\.from\('chat_read_states'\)\.upsert/)
   assert.match(html, /if \(error\) throw error;[\s\S]*?finally \{[\s\S]*?await loadUnread\(\)/)
@@ -240,7 +242,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v68/)
+  assert.match(serviceWorker, /line-report-chat-v69/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {

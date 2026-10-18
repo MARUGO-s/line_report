@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v68';
+const CHAT_CACHE = 'line-report-chat-v69';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261001-ai-typing-1',

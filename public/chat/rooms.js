@@ -139,9 +139,14 @@ async function loadLastMessages() {
 
 async function loadUnread() {
   if (!currentUser) return;
+  const requestSequence = ++unreadRequestSequence;
+  const requestedUserId = currentUser.id;
   try {
     const { data, error } = await sb.rpc('chat_unread_counts');
     if (error) throw error;
+    // RPCs can finish out of order (for example, after a read receipt and a
+    // push-triggered refresh). Only the newest response may replace the badge.
+    if (requestSequence !== unreadRequestSequence || currentUser?.id !== requestedUserId) return;
 
     const counts = {};
     (data || []).forEach((row) => { counts[row.group_id] = Number(row.unread_count) || 0; });

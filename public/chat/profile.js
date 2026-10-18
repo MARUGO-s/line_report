@@ -30,6 +30,7 @@ async function afterSignIn() {
   }
 
   currentUser = data;
+  unreadRequestSequence++;
   try {
     await loadCurrentChatAccess();
   } catch (accessError) {
@@ -176,6 +177,7 @@ async function createProfile() {
     }
 
     currentUser = Array.isArray(data) ? data[0] : data;
+    unreadRequestSequence++;
     pendingUserIconFile = null;
     pendingPresetUserIconUrl = '';
 

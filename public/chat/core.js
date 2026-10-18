@@ -32,6 +32,7 @@ let scheduleTarget = 'text';
 let myGroups = [];
 let otherGroups = [];
 let unread = {};
+let unreadRequestSequence = 0;
 let lastMessages = {};
 let talkTab = 'all';
 const TALK_PIN_LIMIT = 5;
