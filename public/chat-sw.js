@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v69';
+const CHAT_CACHE = 'line-report-chat-v70';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261001-ai-typing-1',
@@ -71,6 +71,21 @@ async function queuePushDiagnostic(testId, stage, detail) {
   }
 }
 
+const seenPushMessageIds = new Set();
+let lastPushAppBadge = 0;
+
+function nextPushAppBadge(previous, payloadCount, messageId) {
+  const id = Number(messageId);
+  const hasId = Number.isSafeInteger(id) && id > 0;
+  if (hasId && seenPushMessageIds.has(id)) return previous;
+  if (hasId) seenPushMessageIds.add(id);
+  const incoming = Number(payloadCount);
+  // 未読集計が同じ数字のまま、または欠けると、通知が来てもアイコン数が増えない。
+  // 新しいmessage idは、集計がそれより高くない限り最低1件足す。既読の消去はページからの明示更新だけ。
+  if (!Number.isSafeInteger(incoming) || incoming <= 0) return previous + 1;
+  return Math.max(incoming, previous + 1);
+}
+
 async function updateAppBadge(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return;
   const count = Number(value);
@@ -87,14 +102,14 @@ async function updateAppBadge(value) {
   }
 }
 
-async function updateAppBadgeAndRefreshVisibleClients(value) {
+async function updateAppBadgeAndRefreshVisibleClients(value, groupId) {
   try {
     await updateAppBadge(value);
     const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windowClients) {
       const url = new URL(client.url);
       if (client.visibilityState !== 'visible' || !url.pathname.endsWith('/chat.html')) continue;
-      client.postMessage({ type: 'REFRESH_APP_BADGE' });
+      client.postMessage({ type: 'REFRESH_APP_BADGE', count: value, group_id: groupId || null });
     }
   } catch (error) {
     // クライアント同期失敗も通知表示を妨げない。
@@ -202,6 +217,9 @@ self.addEventListener('push', (event) => {
   const declarativeBadge = Number(declarative?.app_badge ?? data.app_badge);
   const legacyBadge = Number(data.badge_count);
   const badgeCount = Number.isSafeInteger(declarativeBadge) ? declarativeBadge : legacyBadge;
+  const messageId = metadata?.message_id || data.message_id;
+  const raisedBadge = nextPushAppBadge(lastPushAppBadge, badgeCount, messageId);
+  lastPushAppBadge = raisedBadge;
   event.waitUntil((async () => {
     // userVisibleOnlyを守るため、診断I/Oより先に通知表示を開始する。
     const showPromise = self.registration.showNotification(title, options);
@@ -223,7 +241,7 @@ self.addEventListener('push', (event) => {
       ]);
       throw error;
     } finally {
-      await updateAppBadgeAndRefreshVisibleClients(badgeCount);
+      await updateAppBadgeAndRefreshVisibleClients(raisedBadge, metadata?.group_id || data.group_id);
     }
   })());
 });
@@ -246,6 +264,8 @@ self.addEventListener('notificationclick', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'SET_APP_BADGE') return;
+  const count = Number(event.data.count);
+  if (Number.isSafeInteger(count) && count >= 0) lastPushAppBadge = count;
   event.waitUntil(updateAppBadge(event.data.count));
 });
 

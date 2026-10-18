@@ -131,7 +131,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v69/)
+  assert.match(serviceWorker, /line-report-chat-v70/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -242,7 +242,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v69/)
+  assert.match(serviceWorker, /line-report-chat-v70/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -766,6 +766,14 @@ test("chat push payload uses the declarative Web Push format with safe navigatio
   assert.equal(unsafe.notification.body, "新しいメッセージがあります")
   assert.equal(unsafe.notification.navigate, "https://marugo-s.github.io/line_report/chat.html")
   assert.equal("app_badge" in unsafe.notification, false)
+
+  const missing = buildDeclarativeChatPushPayload({
+    title: "M-talk",
+    body: "新しいメッセージがあります",
+    navigatePath: "/line_report/chat.html",
+    badgeCount: null,
+  }) as { notification: Record<string, unknown> }
+  assert.equal("app_badge" in missing.notification, false)
 })
 
 test("chat service worker displays a declarative push and persists delivery diagnostics", async () => {
@@ -889,4 +897,65 @@ test("Web Push request uses VAPID and aes128gcm encryption", async () => {
   assert.equal(request.headers.TTL, "86400")
   assert.ok(request.body.length > 100)
   assert.equal(request.body[20], 65, "encrypted record must carry a P-256 public key")
+})
+
+test("a new notification raises the icon badge even when the payload count is unchanged", async () => {
+  const serviceWorker = await read("public/chat-sw.js")
+  const listeners = new Map<string, (event: any) => void>()
+  const badges: number[] = []
+  const context = vm.createContext({
+    URL,
+    Request,
+    Response,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    console,
+    caches: {
+      async open() {
+        return { async add() {}, async addAll() {}, async put() {}, async match() { return undefined } }
+      },
+      async keys() { return [] },
+      async delete() { return true },
+      async match() { return undefined },
+    },
+    self: {
+      location: { href: "https://marugo-s.github.io/line_report/chat-sw.js", origin: "https://marugo-s.github.io" },
+      navigator: {
+        async setAppBadge(count: number) { badges.push(count) },
+        async clearAppBadge() { badges.push(0) },
+      },
+      registration: { async showNotification() {} },
+      clients: { async matchAll() { return [] }, async claim() {} },
+      async skipWaiting() {},
+      addEventListener(type: string, listener: (event: any) => void) {
+        listeners.set(type, listener)
+      },
+    },
+  })
+  vm.runInContext(serviceWorker, context, { filename: "chat-sw.js" })
+
+  const deliver = async (messageId: number) => {
+    let pending: Promise<unknown> | null = null
+    listeners.get("push")?.({
+      data: {
+        json: () => buildDeclarativeChatPushPayload({
+          title: "M-talk",
+          body: "新しいメッセージがあります",
+          navigatePath: "/line_report/chat.html?group=31",
+          tag: "chat-group-31",
+          groupId: 31,
+          messageId,
+          badgeCount: 1,
+        }),
+      },
+      waitUntil(value: Promise<unknown>) { pending = value },
+    })
+    assert.ok(pending)
+    await pending
+  }
+
+  await deliver(120)
+  await deliver(121)
+  assert.deepEqual(badges, [1, 2])
 })
