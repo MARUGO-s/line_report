@@ -131,7 +131,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(serviceWorker, /data\?\.web_push === 8030/)
   assert.match(serviceWorker, /declarative\?\.navigate/)
   assert.match(serviceWorker, /declarative\?\.app_badge \?\? data\.app_badge/)
-  assert.match(serviceWorker, /line-report-chat-v70/)
+  assert.match(serviceWorker, /line-report-chat-v71/)
   assert.match(serviceWorker, /chat-logo-v3\.svg/)
   assert.match(serviceWorker, /chat-apple-touch-icon-v3\.png/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
@@ -242,7 +242,7 @@ test("chat PWA registers a service worker and lets the signed-in user enable not
   assert.match(html, /mtalk-signed-images-v1/)
   assert.match(html, /selectGroupSeq/)
   assert.match(html, /decoding="async"/)
-  assert.match(serviceWorker, /line-report-chat-v70/)
+  assert.match(serviceWorker, /line-report-chat-v71/)
 })
 
 test("chat messages can be scheduled for later delivery", async () => {
@@ -718,6 +718,7 @@ test("chat push endpoint requires Supabase Auth and excludes the sender", async 
   assert.match(edge, /chat_push_unread_totals/)
   assert.match(edge, /badgeCount: unreadTotals\.get\(row\.user_id\) \?\? null/)
   assert.match(edge, /muted_at/)
+  assert.match(edge, /chat-message-\$\{message\.id\}/)
   assert.match(serviceWorker, /chat-android-192x192-v3\.png/)
   assert.match(serviceWorker, /chat-favicon-48x48-v3\.png/)
   assert.match(edge, /バッジ件数の取得失敗でWeb Push本体を止めない/)
@@ -903,6 +904,7 @@ test("a new notification raises the icon badge even when the payload count is un
   const serviceWorker = await read("public/chat-sw.js")
   const listeners = new Map<string, (event: any) => void>()
   const badges: number[] = []
+  const notifications: Array<Record<string, unknown>> = []
   const context = vm.createContext({
     URL,
     Request,
@@ -925,7 +927,9 @@ test("a new notification raises the icon badge even when the payload count is un
         async setAppBadge(count: number) { badges.push(count) },
         async clearAppBadge() { badges.push(0) },
       },
-      registration: { async showNotification() {} },
+      registration: {
+        async showNotification(_title, options) { notifications.push(options) },
+      },
       clients: { async matchAll() { return [] }, async claim() {} },
       async skipWaiting() {},
       addEventListener(type: string, listener: (event: any) => void) {
@@ -958,4 +962,5 @@ test("a new notification raises the icon badge even when the payload count is un
   await deliver(120)
   await deliver(121)
   assert.deepEqual(badges, [1, 2])
+  assert.deepEqual(notifications.map((options) => options.tag), ["chat-message-120", "chat-message-121"])
 })

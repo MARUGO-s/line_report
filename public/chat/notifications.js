@@ -226,6 +226,17 @@ function unreadTotal() {
   }, 0);
 }
 
+async function closeDeliveredChatNotifications() {
+  try {
+    const registration = serviceWorkerRegistration || await navigator.serviceWorker.getRegistration();
+    if (!registration || !registration.getNotifications) return;
+    const notes = await registration.getNotifications();
+    for (const note of notes) {
+      if (String(note.tag || '').startsWith('chat-message-')) note.close();
+    }
+  } catch (_) {}
+}
+
 async function syncAppBadge(total = pushNotificationsEnabled ? unreadTotal() : 0) {
   const count = Number(total);
   const badgeCount = Number.isSafeInteger(count) && count > 0 ? count : 0;
