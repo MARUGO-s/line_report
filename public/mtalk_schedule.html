@@ -395,6 +395,24 @@
         ? CONFIG.adminApiUrl(path)
         : (SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/admin-api' + path);
     }
+    const PERMISSION_DENIED_MESSAGE = 'この店舗の閲覧権限がありません。管理者に権限の付与を依頼してください。';
+    // HTTPエラーを画面に出す文言へ変換する。403は権限不足として明示する（通信エラー扱いにしない）。
+    function apiErrorFromResponse(response, result) {
+      const serverMessage = typeof result?.error === 'string' ? result.error.trim() : '';
+      let message;
+      if (response.status === 403) {
+        message = serverMessage && /権限/.test(serverMessage)
+          ? serverMessage + '管理者に権限の付与を依頼してください。'
+          : PERMISSION_DENIED_MESSAGE;
+      } else if (response.status === 401) {
+        message = serverMessage || 'ログインの有効期限が切れました。もう一度ログインしてください。';
+      } else {
+        message = serverMessage || ('HTTP ' + response.status);
+      }
+      const error = new Error(message);
+      error.status = response.status;
+      return error;
+    }
     async function apiSend(path, method, body) {
       const response = await fetch(scheduleApiUrl(path), {
         method,
@@ -402,7 +420,7 @@
         body: body ? JSON.stringify(body) : undefined,
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
+      if (!response.ok) throw apiErrorFromResponse(response, result);
       return result;
     }
     async function apiGet(path) {
@@ -469,7 +487,7 @@
           headers: { Authorization: 'Bearer ' + token, apikey: SUPABASE_ANON_KEY }
         });
         const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
+        if (!response.ok) throw apiErrorFromResponse(response, result);
         payload = result;
         const storeName = STORE_NAMES[result.store_key] || result.store_key || '';
         $('roomSub').textContent = [result.room_name, storeName].filter(Boolean).join(' / ');
