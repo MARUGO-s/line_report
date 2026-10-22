@@ -4,8 +4,17 @@ const RESERVATION_TRANSACTION_SUBJECT_RE =
 const NON_RESERVATION_SUBJECT_RE =
   /(?:(?:クチコミ|口コミ|レビュー)[^\n]{0,24}(?:返信|回答|投稿|お知らせ)|(?:返信|回答)[^\n]{0,24}(?:クチコミ|口コミ|レビュー)|タイムセール|キャンペーン|メルマガ|販促|広告|アンケート)/i;
 
-const RESERVATION_DIGEST_RE =
-  /(本日のご来店一覧|ネット予約一覧|時点の予約一覧|ご来店予定の|食べログネット予約一覧|まとめ情報|Vポイント利用予約まとめ|本日のVポイント利用|お値引きをお願い)/i;
+// Digest mails (daily visit lists, V-point summaries) are identified by their
+// subject. Individual Tabelog notifications with V-point use carry a body
+// banner such as 「利用Vポイントに応じたお値引きをお願いいたします」, so body
+// wording like お値引きをお願い must NOT be treated as a digest signal.
+const RESERVATION_DIGEST_SUBJECT_RE =
+  /(まとめ情報|本日のご来店一覧|ネット予約一覧|時点の予約一覧)/i;
+
+// Fallback body cues for digests whose subject is unusual. Only applied when the
+// subject is not an individual reservation transaction.
+const RESERVATION_DIGEST_BODY_RE =
+  /(本日のご来店一覧|時点の予約一覧|ご来店予定の|食べログネット予約一覧|Vポイント利用予約まとめ|本日のVポイント利用のあるご予約)/i;
 
 function normalizeInlineText(raw: string): string {
   return String(raw ?? "").replace(/\s+/g, " ").trim();
@@ -33,7 +42,12 @@ export function isLikelyReservationNotificationMail(
 
   // Daily lists and point-use digests describe multiple reservations and must
   // never become a single calendar event.
-  if (RESERVATION_DIGEST_RE.test(compact)) return false;
+  if (RESERVATION_DIGEST_SUBJECT_RE.test(normalizedSubject)) return false;
+  // Individual new/changed/cancelled notifications are never digests, even if
+  // their body mentions point discounts (e.g. 【新規予約 Vポイント利用アリ】).
+  if (!hasTransactionSubject && RESERVATION_DIGEST_BODY_RE.test(compact)) {
+    return false;
+  }
 
   const hasReservationCue =
     /(予約|来店|人数|コース|予約番号|ご予約|reservation|booking)/i.test(
