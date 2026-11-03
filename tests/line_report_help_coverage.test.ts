@@ -5,7 +5,6 @@ import {
   helpCodesForApiPath,
   helpCodesForSharedModule,
   PUBLIC_CODE_HELP_CODES,
-  PUBLIC_HELP_EXEMPT_FILES,
 } from "../supabase/functions/_shared/line_report_help_coverage.ts"
 import { LINE_REPORT_HELP_SECTIONS } from "../supabase/functions/_shared/line_report_help_manual.ts"
 
@@ -40,14 +39,7 @@ Deno.test("公開コード・Edge・共有モジュール・管理APIルート�
       }
     }
   }
-  assertSetEquals(
-    actualPublic,
-    [...Object.keys(PUBLIC_CODE_HELP_CODES), ...Object.keys(PUBLIC_HELP_EXEMPT_FILES)],
-    "公開コード・明示的除外の網羅",
-  )
-  for (const [file, reason] of Object.entries(PUBLIC_HELP_EXEMPT_FILES)) {
-    if (!reason.trim()) throw new Error(`public ${file}: 除外理由が未設定です`)
-  }
+  assertSetEquals(actualPublic, Object.keys(PUBLIC_CODE_HELP_CODES), "公開コードの網羅")
   for (const [file, codes] of Object.entries(PUBLIC_CODE_HELP_CODES)) {
     assertValidCodes(`public ${file}`, codes, validCodes)
   }
