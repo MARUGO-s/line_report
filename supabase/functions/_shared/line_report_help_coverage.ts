@@ -52,6 +52,11 @@ export const PUBLIC_CODE_HELP_CODES: Record<string, string[]> = {
   'public/system-map/graph.html': ['ADM-02', 'DEV-04'],
 }
 
+// 法務・ポリシー等の静的文書はアプリ操作ヘルプの対象外。
+export const PUBLIC_HELP_EXEMPT_FILES: Record<string, string> = {
+  'public/mtalk-privacy.html': 'M-talkのプライバシーポリシー（操作ヘルプではない）',
+}
+
 export const EDGE_FUNCTION_HELP_CODES: Record<string, string[]> = {
   'admin-api': ['SYS-02', 'SAL-04', 'SAL-06', 'RSV-01', 'OPS-03', 'OPS-04', 'JRN-02', 'JRN-05', 'KNW-01', 'JAI-02', 'FCT-01', 'FCT-05', 'REV-01', 'ADM-01', 'ADM-03', 'DEV-02', 'SEC-01', 'SEC-03'],
   'ai-analyze': ['JAI-01', 'JAI-02', 'DEV-02', 'SEC-01'],

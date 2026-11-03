@@ -5,6 +5,7 @@ import {
   helpCodesForApiPath,
   helpCodesForSharedModule,
   PUBLIC_CODE_HELP_CODES,
+  PUBLIC_HELP_EXEMPT_FILES,
 } from "../supabase/functions/_shared/line_report_help_coverage.ts"
 import { LINE_REPORT_HELP_SECTIONS } from "../supabase/functions/_shared/line_report_help_manual.ts"
 
@@ -32,7 +33,8 @@ function checkCodes(label: string, codes: string[]): void {
   }
 }
 
-// publicの利用者向けコードを全件監査。vendorは外部固定ライブラリなので対象外。
+// publicの利用者向けコードを全件監査。法務文書など操作ヘルプ対象外は明示して除く。
+// vendorは外部固定ライブラリなので対象外。
 const actualPublicFiles: string[] = []
 for await (const entry of Deno.readDir(new URL("../public/", import.meta.url))) {
   if (entry.isFile && /\.(html|js|webmanifest)$/.test(entry.name)) {
@@ -48,8 +50,12 @@ for await (const entry of Deno.readDir(new URL("../public/", import.meta.url))) 
 }
 actualPublicFiles.sort()
 for (const file of actualPublicFiles) {
+  if (file in PUBLIC_HELP_EXEMPT_FILES) continue
   const codes = PUBLIC_CODE_HELP_CODES[file] ?? []
   checkCodes(`public ${file}`, codes)
+}
+for (const file of Object.keys(PUBLIC_HELP_EXEMPT_FILES)) {
+  if (!actualPublicFiles.includes(file)) errors.push(`public help exemption missing file: ${file}`)
 }
 for (const [file, codes] of Object.entries(PUBLIC_CODE_HELP_CODES)) {
   checkCodes(`public map ${file}`, codes)
