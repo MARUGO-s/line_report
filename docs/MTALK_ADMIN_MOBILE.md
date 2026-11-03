@@ -8,6 +8,7 @@
 - 添付画像はSafariで開かれた `public/chat-admin.html`。Flutterの `chat_admin_page.dart` ではない。
 - Web正本: `line_report-main` / `MARUGO-s/line_report`。
 - ベース: `182c5892e029aa06317073c8cd19483c52198ca3`。
+- 公開統合時に既存mainの `77367bb6a6973df4e06b4af035527b050c040700` へrebase。別作業のプライバシーテンプレート本文は変更しない。
 - 隔離作業ブランチ: `feat/mtalk-admin-mobile-20261104`。
 - 保存先worktree: `/Users/yoshito/.hermes/worktrees/mtalk-admin-mobile`。
 - 既存の作業コピーにある別機能の変更は取り込まず、origin/mainから作成したworktreeで実装。
@@ -34,7 +35,8 @@
 - API・管理者認可・委任範囲・busy/inert・確認ダイアログ・送信payloadは既存処理を利用する。表示用data属性を認可として扱わない。
 - 401と409は、従来処理がダイアログを閉じて再認証／再読込する。この既存仕様も変更していない。400・403・500での入力保持を含め、旧UIと新UIの挙動を比較した。
 - Flutter、端末インストール、TestFlight、Android、本番DB、Edge Functionの配備は変更しない。ユーザーは見本確認後にWeb公開を承認。
-- 初期の独立したJSを、レビュー済み本体バイトを変えず既存help分類済みHTMLへ収めた。shared分類ファイルの変更でもDB・全Edge配備が自動起動する既存workflowを考慮し、最終差分にはsupabase／workflowの変更を含めない。生成マニュアルは正規generatorでテストファイル数を更新。
+- 初期の独立したJSを、レビュー済み本体バイトを変えず既存help分類済みHTMLへ収めた。公開直前に別作業でmainへ入ったプライバシーテンプレートのhelp分類漏れが既存Pages配信を失敗させていたため、分類1行だけ補完し、生成マニュアルを正規generatorで更新。ポリシー本文、DB、API実装、workflowは変更しない。
+- shared分類ファイルの1行でもDB・全Edge配備が自動起動するため、squash commitの`[skip ci]`は自動push workflowを抑止する目的に限る。代わりに既存 `deploy-pages.yml` をmainへ明示dispatchし、`skip_tests=false`で静的検証と全CI相当を通してからPagesだけ配備する。検証自体はスキップせず、対象SHAの結果とEdge配備が起動していないことを読む。
 
 ## 検証
 

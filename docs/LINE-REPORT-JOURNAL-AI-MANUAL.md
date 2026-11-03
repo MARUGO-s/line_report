@@ -774,7 +774,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 この節はリポジトリの実コード入口を区分コードへ対応付けた監査表です。
 `npm run help:check` は、新しい入口が未分類のまま追加された場合に失敗します。
 
-- 公開コード入口: 43件
+- 公開コード入口: 44件
 - Edge Functions: 22件
 - 共有TypeScriptモジュール: 116件
 - 補助・運用・レガシーコード: 40件
@@ -818,6 +818,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `public/mtalk_journal_ai.html` | JAI-02 / DEV-01 |
 | `public/mtalk_schedule.html` | RSV-01 / DEV-01 |
 | `public/mtalk-help.html` | OPS-01 / OPS-02 / JAI-02 / DEV-01 |
+| `public/mtalk-privacy.html` | OPS-01 / SEC-01 / DEV-01 |
 | `public/pages-config.js` | SYS-01 / SYS-02 / DEV-01 |
 | `public/petty_cash.html` | OPS-03 / DEV-01 |
 | `public/pos-journal.html` | JRN-02 / JRN-05 / JAI-04 / DEV-01 |
