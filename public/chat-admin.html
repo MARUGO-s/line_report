@@ -182,6 +182,7 @@
       .delegate-row { grid-template-columns:1fr; }
     }
   </style>
+  <link rel="stylesheet" href="chat-admin-mobile.css">
 </head>
 <body>
   <div class="app">
@@ -1061,6 +1062,163 @@
       showLogin();
       $('resumeAdminBtn').classList.remove('hidden');
     })();
+  </script>
+  <script data-admin-mobile-adapter>
+/* Presentation adapter: retain original controls, state, auth and write handlers. */
+(() => {
+  'use strict';
+  const root = document.documentElement;
+  const media = matchMedia('(max-width:980px)');
+  const side = document.querySelector('.side');
+  const nav = document.querySelector('.nav');
+  const dashboard = document.getElementById('dashboardView');
+  const title = document.querySelector('.top h1');
+  if (!side || !nav || !dashboard || !title) return;
+  const originalTitle = title.textContent;
+  const labels = {overview:'概要',users:'ユーザー管理',rooms:'ルーム管理',audit:'監査ログ',delegations:'委任管理者'};
+  const permissionLabels = {can_view:'閲覧',can_send:'送信',can_invite:'招待',can_manage:'管理'};
+  const paths = {
+    overview:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+    users:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 21v-2a6 6 0 0 0-4-5"/>',
+    rooms:'<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/>',
+    audit:'<path d="M8 3h8v4H8zM8 5H5v16h14V5h-3M8 12h8M8 16h6"/>',
+    delegations:'<path d="m12 3 8 4v5c0 5-8 9-8 9s-8-4-8-9V7l8-4Z"/><path d="m8 12 3 3 5-6"/>',
+  };
+  const links = Array.from(nav.querySelectorAll(':scope > a'));
+  const foot = side.querySelector('.side-foot');
+  const more = document.createElement('details');
+  more.className = 'admin-more';
+  const summary = document.createElement('summary');
+  summary.textContent = 'その他';
+  summary.setAttribute('aria-label','管理画面のその他の操作');
+  const moreBody = document.createElement('div');
+  moreBody.className = 'admin-more-body';
+  more.append(summary,moreBody);
+  side.append(more);
+  let section = 'overview', scheduled = false;
+
+  function selectSection(value, scroll) {
+    const target = document.getElementById(value);
+    section = labels[value] && target && !target.classList.contains('hidden') ? value : 'overview';
+    root.dataset.adminSection = section;
+    if (scroll) { more.open = false; window.scrollTo({top:0,behavior:'instant'}); }
+    refresh();
+  }
+  function decorateTables() {
+    dashboard.parentElement.querySelectorAll('table').forEach(table => {
+      const headings = Array.from(table.querySelectorAll('thead th'),th=>th.textContent.trim());
+      table.querySelectorAll('tbody tr').forEach(row => {
+        Array.from(row.children).forEach((cell,index) => {
+          const label = headings[index] || '操作';
+          if (cell.dataset.mobileLabel !== label) cell.dataset.mobileLabel = label;
+        });
+      });
+    });
+    document.querySelectorAll('dialog table').forEach(table => {
+      const headings = Array.from(table.querySelectorAll('thead th'),th=>th.textContent.trim());
+      table.querySelectorAll('tbody tr').forEach(row => Array.from(row.children).forEach((cell,index) => {
+        const label = headings[index] || '操作';
+        if (cell.dataset.mobileLabel !== label) cell.dataset.mobileLabel = label;
+      }));
+    });
+  }
+  function decorateMembers() {
+    document.querySelectorAll('[data-member-permission]').forEach(input => {
+      const label = permissionLabels[input.dataset.memberPermission];
+      if (!label || input.parentElement.querySelector('.mobile-permission-label')) return;
+      const span = document.createElement('span');
+      span.className = 'mobile-permission-label'; span.textContent = label;
+      input.parentElement.append(span);
+      input.setAttribute('aria-label',label);
+    });
+    document.querySelectorAll('[data-member-select],[data-room-select]').forEach(input => {
+      if (!input.hasAttribute('aria-label')) input.setAttribute('aria-label','一括適用の対象に選択');
+    });
+    const detail = document.getElementById('roomDetail');
+    if (detail.querySelector('h3') && !detail.querySelector('.mobile-room-back')) {
+      const back = document.createElement('button');
+      back.type = 'button'; back.className = 'btn mobile-room-back';
+      back.textContent = '← ルーム一覧へ戻る';
+      back.addEventListener('click',() => {
+        root.dataset.adminRoomDetail = 'false';
+        document.querySelector('.room-item.active')?.focus({preventScroll:true});
+        window.scrollTo({top:0,behavior:'instant'});
+      });
+      detail.prepend(back);
+    }
+    if (!detail.querySelector('h3')) root.dataset.adminRoomDetail = 'false';
+  }
+  function authorityDetails() {
+    const host = document.querySelector('#authorityNotice > div');
+    if (!host) return;
+    const details = host.querySelector('.mobile-authority-details');
+    if (media.matches && !details) {
+      const small = host.querySelector('small');
+      if (!small) return;
+      const wrapper = document.createElement('details'); wrapper.className = 'mobile-authority-details';
+      const caption = document.createElement('summary'); caption.textContent = '管理範囲・操作権限を確認';
+      wrapper.append(caption,small); host.append(wrapper);
+    } else if (!media.matches && details) {
+      const small = details.querySelector('small');
+      if (small) host.append(small);
+      details.remove();
+    }
+  }
+  function refresh() {
+    scheduled = false;
+    root.dataset.adminAuthenticated = String(!dashboard.classList.contains('hidden'));
+    if (media.matches) {
+      links.forEach(link => { if (link.parentElement !== moreBody) moreBody.append(link); });
+      if (foot && foot.parentElement !== moreBody) moreBody.append(foot);
+      if (!labels[section] || document.getElementById(section)?.classList.contains('hidden')) section = 'overview';
+      root.dataset.adminSection = section;
+      if (title.textContent !== labels[section]) title.textContent = labels[section];
+    } else {
+      links.forEach(link => { if (link.parentElement !== nav) nav.append(link); });
+      if (foot && foot.parentElement !== side) side.insertBefore(foot,more);
+      more.open = false;
+      if (title.textContent !== originalTitle) title.textContent = originalTitle;
+    }
+    if (dashboard.classList.contains('hidden')) more.open = false;
+    nav.querySelectorAll('[data-jump]').forEach(button => {
+      const active = media.matches ? button.dataset.jump === section : button.classList.contains('active');
+      if (media.matches && button.classList.contains('active') !== active) button.classList.toggle('active',active);
+      if (active) { if (button.getAttribute('aria-current') !== 'page') button.setAttribute('aria-current','page'); }
+      else button.removeAttribute('aria-current');
+    });
+    decorateTables(); decorateMembers(); authorityDetails();
+  }
+  function schedule() { if (!scheduled) { scheduled = true; requestAnimationFrame(refresh); } }
+  nav.querySelectorAll('[data-jump]').forEach(button => {
+    const label = document.createElement('span'); label.className = 'admin-nav-label';
+    while (button.firstChild) label.append(button.firstChild);
+    const icon = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    icon.setAttribute('class','admin-nav-icon'); icon.setAttribute('viewBox','0 0 24 24');
+    icon.setAttribute('fill','none'); icon.setAttribute('stroke','currentColor'); icon.setAttribute('stroke-width','1.7');
+    icon.setAttribute('stroke-linecap','round'); icon.setAttribute('stroke-linejoin','round'); icon.setAttribute('aria-hidden','true');
+    // SVG markup is from the fixed paths map above, never user or API content.
+    icon.innerHTML = paths[button.dataset.jump] || '';
+    button.append(icon,label);
+  });
+  nav.addEventListener('click',event => {
+    const button = event.target.closest('[data-jump]');
+    if (!media.matches || !button || button.classList.contains('hidden')) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    selectSection(button.dataset.jump,true);
+  },true);
+  document.getElementById('roomRows').addEventListener('click',event => {
+    if (media.matches && event.target.closest('[data-room-id]')) {
+      root.dataset.adminRoomDetail = 'true';
+      window.scrollTo({top:0,behavior:'instant'});
+    }
+  });
+  document.addEventListener('click',event => { if (more.open && !more.contains(event.target)) more.open = false; });
+  document.addEventListener('keydown',event => { if (event.key === 'Escape') more.open = false; });
+  media.addEventListener('change',schedule);
+  new MutationObserver(schedule).observe(document.querySelector('.app'),{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden']});
+  document.querySelectorAll('dialog').forEach(dialog => new MutationObserver(schedule).observe(dialog,{subtree:true,childList:true}));
+  refresh();
+})();
   </script>
 </body>
 </html>

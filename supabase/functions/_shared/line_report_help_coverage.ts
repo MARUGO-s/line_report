@@ -13,6 +13,7 @@ export const PUBLIC_CODE_HELP_CODES: Record<string, string[]> = {
   'public/app-theme.js': ['DEV-01'],
   'public/auth-session.js': ['SYS-02', 'SEC-01', 'DEV-01'],
   'public/chat-admin.html': ['ADM-01', 'ADM-03', 'OPS-01', 'DEV-01'],
+  'public/mtalk-privacy.html': ['OPS-01', 'SEC-01', 'DEV-01'],
   'public/chat-sw.js': ['OPS-02', 'DEV-01'],
   'public/chat.html': ['SYS-01', 'OPS-01', 'OPS-02', 'RSV-01', 'JAI-02', 'DEV-01'],
   'public/chat.webmanifest': ['SYS-01', 'DEV-01'],
