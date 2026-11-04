@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:chat-admin-mobile:browser": "node tests/chat_admin_mobile.browser.mjs",
+    "test:chat-admin-login:browser": "node tests/chat_admin_login_viewport.browser.mjs",
     "test:usage": "node --test tests/usage_metrics.test.mjs",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",

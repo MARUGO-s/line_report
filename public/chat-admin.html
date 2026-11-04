@@ -182,7 +182,7 @@
       .delegate-row { grid-template-columns:1fr; }
     }
   </style>
-  <link rel="stylesheet" href="chat-admin-mobile.css">
+  <link rel="stylesheet" href="chat-admin-mobile.css?v=20261104-login-font">
 </head>
 <body>
   <div class="app">
@@ -1097,6 +1097,24 @@
   side.append(more);
   let section = 'overview', scheduled = false;
 
+  function syncControlFont() {
+    if (!media.matches) {
+      root.style.removeProperty('--admin-control-font-size');
+      return;
+    }
+    // Per-site page zoom can make a 16 CSS px field smaller than 16 screen px.
+    // Prevent focus magnification before login, rather than disabling pinch zoom.
+    let screenWidth = window.screen?.width || root.clientWidth;
+    if (Math.abs(window.orientation) === 90 && window.screen.width < window.screen.height) {
+      screenWidth = window.screen.height;
+    }
+    const ratio = screenWidth > 0 ? Math.max(1, root.clientWidth / screenWidth) : 1;
+    const size = (Math.ceil(16 * ratio * 100) / 100) + 'px';
+    if (root.style.getPropertyValue('--admin-control-font-size') !== size) {
+      root.style.setProperty('--admin-control-font-size', size);
+    }
+  }
+
   function selectSection(value, scroll) {
     const target = document.getElementById(value);
     section = labels[value] && target && !target.classList.contains('hidden') ? value : 'overview';
@@ -1166,6 +1184,7 @@
   }
   function refresh() {
     scheduled = false;
+    syncControlFont();
     root.dataset.adminAuthenticated = String(!dashboard.classList.contains('hidden'));
     if (media.matches) {
       links.forEach(link => { if (link.parentElement !== moreBody) moreBody.append(link); });
@@ -1215,6 +1234,9 @@
   document.addEventListener('click',event => { if (more.open && !more.contains(event.target)) more.open = false; });
   document.addEventListener('keydown',event => { if (event.key === 'Escape') more.open = false; });
   media.addEventListener('change',schedule);
+  window.addEventListener('resize',schedule);
+  window.addEventListener('orientationchange',schedule);
+  window.visualViewport?.addEventListener('resize',schedule);
   new MutationObserver(schedule).observe(document.querySelector('.app'),{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden']});
   document.querySelectorAll('dialog').forEach(dialog => new MutationObserver(schedule).observe(dialog,{subtree:true,childList:true}));
   refresh();

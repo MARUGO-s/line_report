@@ -23,7 +23,7 @@ export const fixture = {
   audit_logs:[{id:100,created_at:'2026-11-03T12:00:00Z',actor:'本部管理者（見本）',action:'user_access_update',before_state:{access_enabled:true},after_state:{access_enabled:false},revertible:true}],
 };
 
-export async function mockAdminPage(page, root, {baselineHtml, delegated = false, writeStatus = 200} = {}) {
+export async function mockAdminPage(page, root, {baselineHtml, delegated = false, writeStatus = 200, startLoggedOut = false} = {}) {
   const writes = [], blocked = [], errors = [];
   const data = structuredClone(fixture);
   if (delegated) data.admin_authority = {is_full_admin:false,label:'店舗管理者（見本）',scope_mode:'stores',store_keys:['sample'],capabilities:['view','audit_read','manage_members','manage_rooms']};
@@ -42,7 +42,9 @@ export async function mockAdminPage(page, root, {baselineHtml, delegated = false
       return route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
     }
     if (pathname === '/pages-config.js') return route.fulfill({contentType:'text/javascript; charset=utf-8',body:"window.LINE_REPORT_PAGES={PROJECT_URL:location.origin,ADMIN_SURFACE:'line_report',adminApiUrl:p=>location.origin+'/__api'+p};"});
-    if (pathname === '/auth-session.js') return route.fulfill({contentType:'text/javascript; charset=utf-8',body:"window.LINE_REPORT_AUTH={getToken:()=> 'fixture-not-a-real-credential',consumeUrlAuthParams:async()=>true,logout:async()=>{},loginWithToken:async()=>{}};"});
+    if (pathname === '/auth-session.js') return route.fulfill({contentType:'text/javascript; charset=utf-8',body:startLoggedOut
+      ? "window.LINE_REPORT_AUTH=(()=>{let token='';return {getToken:()=>token,consumeUrlAuthParams:async()=>false,logout:async()=>{token='';},loginWithToken:async()=>{token='fixture-not-a-real-credential';}};})();"
+      : "window.LINE_REPORT_AUTH={getToken:()=> 'fixture-not-a-real-credential',consumeUrlAuthParams:async()=>true,logout:async()=>{},loginWithToken:async()=>{}};"});
     if (pathname === '/site-cache.js') return route.fulfill({contentType:'text/javascript',body:''});
     if (pathname === '/favicon.ico') return route.fulfill({status:204,body:''});
     const file = resolve(root,'public','.'+pathname);
@@ -54,7 +56,7 @@ export async function mockAdminPage(page, root, {baselineHtml, delegated = false
     } catch { return route.fulfill({status:404,body:'not found'}); }
   });
   await page.goto('http://127.0.0.1:4178/chat-admin.html');
-  await page.waitForSelector('#dashboardView:not(.hidden)');
+  await page.waitForSelector(startLoggedOut ? '#loginView:not(.hidden)' : '#dashboardView:not(.hidden)');
   await page.evaluate(() => {
     const notice = document.createElement('div');
     notice.id='fixtureNotice'; notice.textContent='見本データ（本番の情報ではありません）';
