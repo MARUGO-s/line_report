@@ -35,7 +35,7 @@
   .top .actions { flex:0 0 auto; }
   .btn { min-height:44px; padding:10px 13px; border-radius:12px; font-size:14px; line-height:1.4; }
   .btn:focus-visible,.nav button:focus-visible,summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
-  input,select,textarea { min-width:0; max-width:100%; min-height:46px; font-size:16px; border-radius:12px; }
+  input,select,textarea { min-width:0; max-width:100%; min-height:46px; font-size:var(--admin-control-font-size,16px); border-radius:12px; }
   input[type="checkbox"] { min-height:0; }
   label.field { font-size:13px; }
   .panel { border-radius:18px; }

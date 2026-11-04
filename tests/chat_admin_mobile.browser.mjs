@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('..',import.meta.url));
 const out = resolve(process.env.ADMIN_SCREENSHOT_DIR || new URL('../.admin-mobile-proof',import.meta.url).pathname);
 await mkdir(out,{recursive:true});
 const html = await readFile(resolve(root,'public/chat-admin.html'),'utf8');
-const baselineHtml = html.replace(/\s*<link rel="stylesheet" href="chat-admin-mobile\.css">/,'').replace(/\s*<script data-admin-mobile-adapter>[\s\S]*?<\/script>/,'');
+const baselineHtml = html.replace(/\s*<link rel="stylesheet" href="chat-admin-mobile\.css(?:\?[^"<>]*)?">/,'').replace(/\s*<script data-admin-mobile-adapter>[\s\S]*?<\/script>/,'');
 const browser = await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
 const results = [];
 async function fresh(width, options = {}) {
