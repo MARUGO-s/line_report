@@ -860,12 +860,31 @@ async function saveImageToKeep(storagePath, messageId) {
 }
 
 async function resolveAlbumMessage(messageId, storagePath) {
+  const owner = currentUser;
+  const groupId = currentGroupId;
+  if (!owner || !groupId || !storagePath || !storagePath.startsWith(`groups/${groupId}/`)) return null;
+  const currentScope = () => currentUser === owner && currentGroupId === groupId;
   let message = currentMessages.find((row) => Number(row.id) === Number(messageId));
-  if (message || !messageId) return message || null;
-  const { data, error } = await sb.from('chat_messages').select(MESSAGE_COLUMNS).eq('id', Number(messageId)).maybeSingle();
-  if (error) { console.error('Load album message error:', error); return null; }
-  const image = data && imageFromMessage(data);
-  return image && (!storagePath || image.path === storagePath) ? data : null;
+  const loadedImage = message && imageFromMessage(message);
+  if (message && Number(message.group_id) === Number(groupId) && loadedImage?.path === storagePath) return message;
+  if (messageId) {
+    const { data, error } = await sb.from('chat_messages').select(MESSAGE_COLUMNS).eq('id', Number(messageId)).eq('group_id', groupId).maybeSingle();
+    if (!currentScope()) return null;
+    if (error) { console.error('Load album message error:', error); return null; }
+    const image = data && imageFromMessage(data);
+    if (image?.path === storagePath) return data;
+  }
+  // Retained album rows are independent snapshots. Require a fresh RLS-checked
+  // row, never construct a forwarding/Keep payload from a caller-supplied path.
+  const { data: item, error } = await sb.from('chat_album_items')
+    .select('id,group_id,storage_path,caption,created_at')
+    .eq('group_id', groupId).eq('storage_path', storagePath).limit(1).maybeSingle();
+  if (!currentScope()) return null;
+  if (error) { console.error('Load retained album image error:', error); return null; }
+  if (!item || Number(item.group_id) !== Number(groupId) || item.storage_path !== storagePath) return null;
+  // A local transfer value only: no chat_messages INSERT or deleted placeholder.
+  return { id: null, group_id: groupId, kind: 'image', content: item.caption || '[画像]',
+    payload: { v: 1, kind: 'image', image: { path: item.storage_path } }, created_at: item.created_at };
 }
 
 // javascript: 等を踏まないよう、リンクは http(s) のみ通す。

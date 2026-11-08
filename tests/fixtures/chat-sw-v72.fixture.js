@@ -1,0 +1,296 @@
+'use strict';
+
+const CHAT_CACHE = 'line-report-chat-v72';
+const CHAT_SHELL = [
+  './chat.html',
+  './chat/chat.css?v=20261001-ai-typing-1',
+  './chat/core.js?v=20261007-loan-report-1',
+  './chat/auth.js?v=20261015-login-stability-1',
+  './chat/permissions.js',
+  './chat/profile.js?v=20261007-loan-report-1',
+  './chat/realtime.js?v=20260911-line-calendar-1',
+  './chat/notifications.js',
+  './chat/rooms.js?v=20261007-loan-report-1',
+  './chat/messages.js?v=20261001-ai-typing-1',
+  './chat/attachments.js?v=20260911-calendar-links-1',
+  './chat/composer.js?v=20261015-login-stability-1',
+  './chat/bootstrap.js?v=20260911-line-calendar-1',
+  './chat.webmanifest',
+  './pages-config.js',
+  './vendor/supabase/supabase-2.110.9.min.js',
+  './icons/chat-logo-v3.svg',
+  './icons/chat-android-192x192-v3.png',
+  './icons/chat-android-512x512-v3.png',
+  './icons/chat-maskable-192x192-v3.png',
+  './icons/chat-maskable-512x512-v3.png',
+  './icons/chat-apple-touch-icon-v3.png',
+  './icons/chat-favicon-v3.ico',
+  './icons/chat-favicon-32x32-v3.png',
+  './icons/chat-favicon-16x16-v3.png',
+  './icons/chat-favicon-48x48-v3.png',
+];
+const CHAT_ENTRY_URL = new URL('./chat.html', self.location.href).href;
+const CHAT_ENTRY_PATH = new URL(CHAT_ENTRY_URL).pathname;
+const CHAT_ASSET_URLS = new Set(CHAT_SHELL.map((path) => new URL(path, self.location.href).href));
+const CHAT_PUSH_DIAGNOSTIC_QUEUE = 'line-report-chat-push-diagnostics';
+const CHAT_PUSH_TEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function safeChatNavigationUrl(value) {
+  try {
+    const resolved = new URL(String(value || ''), self.location.origin);
+    if (resolved.origin !== self.location.origin || resolved.pathname !== CHAT_ENTRY_PATH) {
+      return CHAT_ENTRY_URL;
+    }
+    const safe = new URL(CHAT_ENTRY_URL);
+    const groupId = resolved.searchParams.get('group');
+    if (/^[1-9][0-9]{0,18}$/.test(groupId || '')) safe.searchParams.set('group', groupId);
+    return safe.href;
+  } catch (_) {
+    return CHAT_ENTRY_URL;
+  }
+}
+
+async function queuePushDiagnostic(testId, stage, detail) {
+  if (!CHAT_PUSH_TEST_ID_RE.test(String(testId || ''))) return;
+  try {
+    const cache = await caches.open(CHAT_PUSH_DIAGNOSTIC_QUEUE);
+    const key = new Request(new URL(
+      `./__push-diagnostic__/${encodeURIComponent(testId)}/${encodeURIComponent(stage)}`,
+      self.location.href,
+    ).href);
+    await cache.put(key, new Response(JSON.stringify({
+      test_id: testId,
+      stage,
+      detail: String(detail || '').slice(0, 500) || null,
+      created_at: new Date().toISOString(),
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clients) client.postMessage({ type: 'FLUSH_PUSH_DIAGNOSTICS' });
+  } catch (error) {
+    console.error('Push diagnostic queue error:', error);
+  }
+}
+
+const seenPushMessageIds = new Set();
+let lastPushAppBadge = 0;
+
+function nextPushAppBadge(previous, payloadCount, messageId) {
+  const id = Number(messageId);
+  const hasId = Number.isSafeInteger(id) && id > 0;
+  if (hasId && seenPushMessageIds.has(id)) return previous;
+  if (hasId) seenPushMessageIds.add(id);
+  const incoming = Number(payloadCount);
+  // 未読集計が同じ数字のまま、または欠けると、通知が来てもアイコン数が増えない。
+  // 新しいmessage idは、集計がそれより高くない限り最低1件足す。既読の消去はページからの明示更新だけ。
+  if (!Number.isSafeInteger(incoming) || incoming <= 0) return previous + 1;
+  return Math.max(incoming, previous + 1);
+}
+
+async function updateAppBadge(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return;
+  const count = Number(value);
+  if (!Number.isSafeInteger(count)) return;
+  try {
+    if (count > 0 && 'setAppBadge' in self.navigator) {
+      await self.navigator.setAppBadge(count);
+    } else if (count <= 0 && 'clearAppBadge' in self.navigator) {
+      await self.navigator.clearAppBadge();
+    }
+  } catch (error) {
+    // バッジ非対応・OS設定拒否でも通知本体は表示する。
+    console.error('App badge update error:', error);
+  }
+}
+
+async function updateAppBadgeAndRefreshVisibleClients(value, groupId) {
+  try {
+    await updateAppBadge(value);
+    const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windowClients) {
+      const url = new URL(client.url);
+      if (client.visibilityState !== 'visible' || !url.pathname.endsWith('/chat.html')) continue;
+      client.postMessage({ type: 'REFRESH_APP_BADGE', count: value, group_id: groupId || null });
+    }
+  } catch (error) {
+    // クライアント同期失敗も通知表示を妨げない。
+    console.error('App badge client refresh error:', error);
+  }
+}
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CHAT_CACHE)
+      .then((cache) => cache.addAll(CHAT_SHELL).catch(() => Promise.all(
+        CHAT_SHELL.map((path) => cache.add(path).catch(() => undefined)),
+      )))
+      .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => (
+            key.startsWith('line-report-chat-')
+            && key !== CHAT_CACHE
+            && key !== CHAT_PUSH_DIAGNOSTIC_QUEUE
+          ))
+          .map((key) => caches.delete(key)),
+      )),
+    // clients.claim / client.navigate は実行しない。更新で編集中の画面を再読み込みしない。
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  const isChatNavigation = event.request.mode === 'navigate' && url.pathname.endsWith('/chat.html');
+  // 画像そのものだけを cache-first にする。catalog.json のような一覧ファイルまで
+  // 含めると、アイコンを追加しても古い一覧が返り続けて新しい絵が出せなくなる。
+  const isRuntimeImageAsset = /\.(png|jpe?g|webp|gif|svg)$/i.test(url.pathname)
+    && (url.pathname.includes('/profile-icons/') || url.pathname.includes('/stickers/face/'));
+  if (!isChatNavigation && !CHAT_ASSET_URLS.has(url.href) && !isRuntimeImageAsset) return;
+
+  if (isChatNavigation) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CHAT_CACHE).then((cache) => cache.put(CHAT_ENTRY_URL, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(CHAT_ENTRY_URL)),
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.open(CHAT_CACHE).then((cache) => cache.match(event.request).then((cached) => (
+      cached || fetch(event.request).then((response) => {
+        if (response && response.ok) cache.put(event.request, response.clone());
+        return response;
+      })
+    ))),
+  );
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = { body: event.data ? event.data.text() : '新しいメッセージがあります' };
+  }
+
+  // 対応WebKitのDeclarative Web Push標準形式を優先する。対応ブラウザでは
+  // Service Workerが失敗してもOSがfallback通知を表示し、未対応ブラウザでは
+  // このハンドラーが従来どおりnotification辞書を表示する。
+  const declarative = data?.web_push === 8030 && data?.notification && typeof data.notification === 'object'
+    ? data.notification
+    : null;
+  const metadata = declarative?.data && typeof declarative.data === 'object'
+    ? declarative.data
+    : data;
+  const title = String(declarative?.title || data.title || 'M-talk');
+  const targetUrl = safeChatNavigationUrl(
+    declarative?.navigate || metadata?.url || data.url || CHAT_ENTRY_URL,
+  );
+  const testId = String(metadata?.test_id || '');
+  const incomingMessageId = Number(metadata?.message_id || data.message_id);
+  const options = {
+    body: String(declarative?.body || data.body || '新しいメッセージがあります'),
+    icon: './icons/chat-android-192x192-v3.png',
+    badge: './icons/chat-favicon-48x48-v3.png',
+    // 同じルームタグだと新しい通知が前の通知を置き換え、アイコン件数は1のままになる。
+    tag: Number.isSafeInteger(incomingMessageId) && incomingMessageId > 0
+      ? `chat-message-${incomingMessageId}`
+      : (declarative?.tag || data.tag || 'line-report-chat'),
+    renotify: true,
+    data: {
+      url: targetUrl,
+      group_id: metadata?.group_id || null,
+      message_id: metadata?.message_id || null,
+    },
+  };
+  const declarativeBadge = Number(declarative?.app_badge ?? data.app_badge);
+  const legacyBadge = Number(data.badge_count);
+  const badgeCount = Number.isSafeInteger(declarativeBadge) ? declarativeBadge : legacyBadge;
+  const messageId = metadata?.message_id || data.message_id;
+  const raisedBadge = nextPushAppBadge(lastPushAppBadge, badgeCount, messageId);
+  lastPushAppBadge = raisedBadge;
+  event.waitUntil((async () => {
+    // userVisibleOnlyを守るため、診断I/Oより先に通知表示を開始する。
+    const showPromise = self.registration.showNotification(title, options);
+    const receivedPromise = queuePushDiagnostic(testId, 'sw_received', 'push_event');
+    try {
+      await showPromise;
+      await Promise.all([
+        receivedPromise,
+        queuePushDiagnostic(testId, 'notification_shown', 'showNotification_resolved'),
+      ]);
+    } catch (error) {
+      await Promise.allSettled([
+        receivedPromise,
+        queuePushDiagnostic(
+          testId,
+          'notification_failed',
+          error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+        ),
+      ]);
+      throw error;
+    } finally {
+      await updateAppBadgeAndRefreshVisibleClients(raisedBadge, metadata?.group_id || data.group_id);
+    }
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = safeChatNavigationUrl(event.notification.data?.url);
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
+      for (const client of clients) {
+        const url = new URL(client.url);
+        if (!url.pathname.endsWith('/chat.html')) continue;
+        if ('navigate' in client) await client.navigate(target);
+        if ('focus' in client) return client.focus();
+      }
+      return self.clients.openWindow ? self.clients.openWindow(target) : undefined;
+    }),
+  );
+});
+
+async function closeReadNotifications(groupId, closeAll) {
+  const notes = await self.registration.getNotifications();
+  await Promise.all(notes.map(async (note) => {
+    const tag = String(note.tag || '');
+    if (!tag.startsWith('chat-message-')) return;
+    const noteGroup = Number(note.data?.group_id);
+    if (closeAll || (Number.isSafeInteger(Number(groupId)) && noteGroup === Number(groupId))) {
+      note.close();
+    }
+  }));
+}
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'SET_APP_BADGE') return;
+  const count = Number(event.data.count);
+  if (Number.isSafeInteger(count) && count >= 0) lastPushAppBadge = count;
+  const groupId = event.data.groupId;
+  const closeAll = event.data.closeAll === true || count === 0;
+  event.waitUntil((async () => {
+    await closeReadNotifications(groupId, closeAll);
+    await updateAppBadge(count);
+  })());
+});
+
+self.addEventListener('message', (event) => {
+  // ページから明示的に要求された時だけ、待機中のSWを即時有効化する。
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
