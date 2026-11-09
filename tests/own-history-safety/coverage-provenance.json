@@ -1,0 +1,83 @@
+{
+  "baseline69": "Selected safe semantics, not copy-all; FACT2 omitted; cas-recovery2 and ui-v2-contract5 replaced by stronger ui-semantic named acknowledgement/drawer cases; initial-auth1 replaced by real 12-script sync auth delta. Original total69 retained only as historical evidence, never added to CI total.",
+  "imports": "ROOT defaults to import.meta.url; CHAT_SAFETY_CANDIDATE_ROOT explicitly supports readonly old-tree differential execution, never changes dependency resolution. fixture({candidateRoot}) supports per-test root.",
+  "mappings": [
+    {
+      "source": "web-review-fix-v2/tooling/independent-safety.test.mjs",
+      "source_sha256": "791dc826aab7f9dc07ea959e3016c2667e308c46ec7e4cefd037631819a2fa60",
+      "target": "tests/own-history-safety/independent-safety.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/independent-probes.test.mjs",
+      "source_sha256": "28c188733d5df31821821823df49d53d16ff3f6b9725ddf9a0e81a64cf941d4c",
+      "target": "tests/own-history-safety/independent-probes.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only. Historical FACT2 intentionally excluded (observations, not safety assertions); immutable original evidence retained."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/independent-display.test.mjs",
+      "source_sha256": "9e043b2bd64676c6f3bebb632efd14d805105600a8dea9df2df8fd0341a0a3f2",
+      "target": "tests/own-history-safety/independent-display.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/independent-jwt.test.mjs",
+      "source_sha256": "2dbb301c3e890bc5154f531d65f88c29e0a634dfa30f5396dae5f47d695ef0ba",
+      "target": "tests/own-history-safety/independent-jwt.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/extended-regressions.test.mjs",
+      "source_sha256": "74b4d1ffbdd17cd8de2e5e3e261bb545e38f8410ab3cea1c4db72a1ffc3fd342",
+      "target": "tests/own-history-safety/extended-regressions.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only. Five overlapping CAS safety variants are covered by ui-semantic UNKNOWN cases and initial-proof storage cases instead of duplicated."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/access-errors.test.mjs",
+      "source_sha256": "29c17a35923ff2930f845b66a60530bf05ee8bc05b2cf69ff5b05574856596e3",
+      "target": "tests/own-history-safety/access-errors.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/access-token-binding.test.mjs",
+      "source_sha256": "ca26bbc844a70f4df031b920a4b8f0c7101a3d14673709374de1386350766d58",
+      "target": "tests/own-history-safety/access-token-binding.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/harness-guard.test.mjs",
+      "source_sha256": "eb8e391f3d46dffddb76fd8c3cff936d9b5aa90a8a1ce1ca73bee8ace7588545",
+      "target": "tests/own-history-safety/harness-guard.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "web-review-fix-v2/tooling/worker-cache.test.mjs",
+      "source_sha256": "5c0042117e963147bc2b46cc7421eef3c44749ee141078e9993607862c160eab",
+      "target": "tests/own-history-safety/worker-cache.test.mjs",
+      "mapping": "Same actual callbacks and SAFE assertions; portable harness import only."
+    },
+    {
+      "source": "independent-web-v2-security/delta-independent.test.mjs",
+      "source_sha256": "f754d7965658790eff9d884a37d1f6c607ddb1a4cebe11c8e958809b9ca5b94d",
+      "target": "tests/own-history-safety/independent-delta.test.mjs",
+      "mapping": "18 actual SAFE/root/early callback cases; duplicate 2 private cases covered by private-editor and private-branch."
+    }
+  ],
+  "four_findings": {
+    "WEB-S05": [
+      "forward-continuation",
+      "forward-positive-control"
+    ],
+    "WEB-L03": [
+      "private-branch",
+      "private-editor"
+    ],
+    "WEB-L04": [
+      "private-note-display"
+    ],
+    "UI-R1": [
+      "ui-semantic",
+      "initial-proof"
+    ]
+  }
+}

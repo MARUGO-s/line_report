@@ -1,5 +1,18 @@
 'use strict';
 
+let composerDraftEpoch = 0;
+function composerSettlement(input) {
+  const lease = ownHistoryLease([currentGroupId]), epoch = composerDraftEpoch;
+  const value = input.value, silent = isSilentSendActive, note = isPrivateNoteMode;
+  const selection = [input.selectionStart, input.selectionEnd, input.selectionDirection];
+  const pending = pendingSendFiles;
+  return () => lease.identityValid() && lease.selection === currentGroupId && lease.selectionSequence === selectGroupSeq
+    && epoch === composerDraftEpoch && input === $('messageInput') && value === input.value
+    && selection[0] === input.selectionStart && selection[1] === input.selectionEnd && selection[2] === input.selectionDirection
+    && pending === pendingSendFiles
+    && silent === isSilentSendActive && note === isPrivateNoteMode;
+}
+
 async function sendChatText(content, options) {
   const text = String(content || '').trim();
   if (!text || !currentGroupId || !currentUser) return false;
@@ -9,6 +22,7 @@ async function sendChatText(content, options) {
     return false;
   }
   const withReply = options && options.withReply !== false;
+  const displayLease = ownHistoryLease([currentGroupId]);
   try {
     const { data, error } = await sb
       .from('chat_messages')
@@ -24,6 +38,7 @@ async function sendChatText(content, options) {
       .select(MESSAGE_COLUMNS)
       .single();
     if (error) throw error;
+    if (await ownHistorySettleSend(data, displayLease, () => { if (withReply) clearReplyTarget(); })) return true;
     if (withReply) clearReplyTarget();
     lastMessages[data.group_id] = data;
     followNewMessages = true;
@@ -50,8 +65,9 @@ async function sendMessage() {
   if (editingMessage) {
     const compact = !!stickerFromMessage(editingMessage) && stickerFromMessage(editingMessage).display === 'compact';
     if (!content && !compact) return;
-    const ok = await saveEditedMessage(content);
-    if (ok) {
+    const settleEditor = composerSettlement(input);
+    const ok = await saveEditedMessage(content, settleEditor);
+    if (ok && settleEditor()) {
       input.value = '';
       syncComposerModeUi();
       resizeComposer();
@@ -61,9 +77,10 @@ async function sendMessage() {
   if (!content && !pendingInlineSticker) return;
 
   if (isPrivateNoteMode) {
+    const settleEditor = composerSettlement(input);
     pendingPrivateNoteContent = content;
     const ok = await savePrivateNote();
-    if (ok) {
+    if (ok && settleEditor()) {
       input.value = '';
       isPrivateNoteMode = false;
       isSilentSendActive = false;
@@ -77,9 +94,11 @@ async function sendMessage() {
   resizeComposer();
   input.focus();
   const inlineSticker = pendingInlineSticker;
+  const settleEditor = composerSettlement(input);
   const ok = inlineSticker
     ? await sendSticker(inlineSticker.id, 'compact', content)
     : await sendChatText(content);
+  if (!settleEditor()) return;
   if (!ok) {
     input.value = content;
     resizeComposer();
@@ -92,6 +111,7 @@ async function sendMessage() {
 }
 
 function toggleSilentSend() {
+  ++composerDraftEpoch;
   if (editingMessage) cancelMessageEdit();
   isSilentSendActive = !isSilentSendActive;
   if (isSilentSendActive) isPrivateNoteMode = false;
@@ -101,6 +121,7 @@ function toggleSilentSend() {
 }
 
 function togglePrivateNoteMode() {
+  ++composerDraftEpoch;
   if (!currentGroupId || !currentUser) return;
   if (editingMessage) cancelMessageEdit();
   isPrivateNoteMode = !isPrivateNoteMode;
@@ -117,6 +138,7 @@ function togglePrivateNoteMode() {
 }
 
 function clearComposerMode() {
+  ++composerDraftEpoch;
   isSilentSendActive = false;
   isPrivateNoteMode = false;
   if (editingMessage) cancelMessageEdit();
@@ -515,8 +537,10 @@ async function addMessageToAlbum(albumId, messageId) {
 }
 
 // 個人メモ: 送信は一切行わない。保存先はDBだが、他の参加者・Bot・管理画面には見せない。
+let privateNoteEditorEpoch = 0;
 function openPrivateNoteComposer() {
   if (!currentGroupId || !currentUser) return;
+  ++privateNoteEditorEpoch;
   const input = $('privateNoteInput');
   if (input) input.value = '';
   $('privateNoteOverlay')?.classList.remove('hidden');
@@ -524,12 +548,17 @@ function openPrivateNoteComposer() {
 }
 
 function closePrivateNoteComposer() {
+  ++privateNoteEditorEpoch;
   $('privateNoteOverlay')?.classList.add('hidden');
 }
 
 async function savePrivateNote() {
   if (!currentGroupId || !currentUser) return;
+  const lease = ownHistoryLease([currentGroupId]);
+  const displayValid = () => lease.identityValid() && ownHistoryReadable(lease.selection)
+    && lease.selection === currentGroupId && lease.selectionSequence === selectGroupSeq;
   const input = $('privateNoteInput');
+  const editorEpoch = privateNoteEditorEpoch, editorValue = input?.value;
   const contentOverride = pendingPrivateNoteContent;
   pendingPrivateNoteContent = null;
   const content = contentOverride == null ? String(input?.value || '').trim() : String(contentOverride || '').trim();
@@ -542,7 +571,10 @@ async function savePrivateNote() {
       .select('id, group_id, content, created_at')
       .single();
     if (error) throw error;
-    if (contentOverride == null) closePrivateNoteComposer();
+    // Persistence succeeded even if this room/editor is no longer displayed.
+    if (!displayValid()) return true;
+    if (contentOverride == null && editorEpoch === privateNoteEditorEpoch && input === $('privateNoteInput')
+      && editorValue === input?.value) closePrivateNoteComposer();
     if (data && !currentPrivateNotes.some((n) => n.id === data.id)) {
       currentPrivateNotes = currentPrivateNotes.concat([data]);
       renderMessageList();
@@ -551,6 +583,7 @@ async function savePrivateNote() {
     return true;
   } catch (error) {
     console.error('Save private note error:', error);
+    if (!displayValid()) return false;
     alert(error.message || '個人メモの保存に失敗しました');
     return false;
   }

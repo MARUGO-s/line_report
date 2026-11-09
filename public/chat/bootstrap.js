@@ -303,7 +303,9 @@ $('stickerPicker').addEventListener('wheel', (e) => {
 }, { passive: false });
 
 // メンション候補
+$('privateNoteInput')?.addEventListener('input', () => { ++privateNoteEditorEpoch; });
 $('messageInput').addEventListener('input', () => {
+  ++composerDraftEpoch;
   updateMentionPicker();
   resizeComposer();
   syncComposerModeUi();
@@ -426,6 +428,7 @@ function consumeAuthRedirectUrl() {
   const pendingAuthLink = /access_token=|refresh_token=|type=signup|type=recovery|type=magiclink/.test(String(location.hash || ''))
     || new URLSearchParams(location.search).has('code');
   const { data } = await sb.auth.getSession();
+  ownHistorySetSession(data?.session || null);
   const fromAuthLink = consumeAuthRedirectUrl() || pendingAuthLink;
   if (data?.session) {
     if (fromAuthLink) showNotice('メールアドレスの確認が完了しました。');

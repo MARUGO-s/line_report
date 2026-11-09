@@ -1,0 +1,29 @@
+{
+  "provenance": {
+    "source": "backend-stale-cas-fix/stale-real-http-responses.json",
+    "source_sha256": "392fc17fe60a89e529a99ef91b664f09ae46c7a25aaad48c1e0f02d1f4667775",
+    "extraction": "indices 72(clear),74(read), HTTP status and exact PostgREST error fields only; no headers, credentials, or business data"
+  },
+  "responses": [
+    {
+      "index": 72,
+      "status": 400,
+      "json": {
+        "code": "22023",
+        "message": "OWN_HISTORY_STALE_REVISION",
+        "details": null,
+        "hint": null
+      }
+    },
+    {
+      "index": 74,
+      "status": 400,
+      "json": {
+        "code": "22023",
+        "message": "OWN_HISTORY_STALE_REVISION",
+        "details": null,
+        "hint": null
+      }
+    }
+  ]
+}

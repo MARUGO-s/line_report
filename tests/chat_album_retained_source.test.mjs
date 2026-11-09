@@ -32,6 +32,11 @@ function harness({ album = row, original = null, loaded = [], hold, keepError = 
     currentUser: { id: 'synthetic-owner', username: 'Fixture' }, currentGroupId: 7, currentMessages: loaded,
     MESSAGE_COLUMNS: 'id,group_id,kind,payload', forwardMessage: null, registeredUsers: [{ id: 'recipient' }],
     chatAccessAllows: () => permission, renderForwardUsers() {},
+    selectGroupSeq: 0, forwardSourceLease: null,
+    ownHistoryAuthorized: id => !!context.currentUser && id === context.currentGroupId,
+    ownHistoryLease: () => { const owner=context.currentUser, selection=context.currentGroupId, selectionSequence=context.selectGroupSeq;
+      return {selection,selectionSequence,valid:()=>owner===context.currentUser && selection===context.currentGroupId}; },
+    ownHistoryV1: () => false, currentGroup: () => ({id:7}), shouldHideAdminNotice: () => false,
     $: id => { if (!nodes.has(id)) nodes.set(id, makeNode()); return nodes.get(id); },
     alert: text => alerts.push(text), showChatToast: text => toasts.push(text), console: { error() {}, warn() {} },
     window: { location: { href: 'https://fixture.invalid/chat.html' } }, URL,
@@ -139,7 +144,7 @@ test('actual viewer forward opens permissions-checked chooser without automatic 
   await h.context.overlay.querySelector('forward').handlers.click(event);
   assert.ok(h.context.forwardMessage); assert.equal(h.context.forwardMessage.id, null); assert.deepEqual(h.writes, []); assert.deepEqual(h.storage, []);
   // Explicit destination send boundary; no real RPC, Storage or HTTP is contacted.
-  await h.context.insertForwardedMessage(h.context.forwardMessage, 11);
+  await h.context.insertForwardedMessage(h.context.forwardMessage, 11, h.context.forwardSourceLease);
   assert.deepEqual(h.storage.map(x => x.slice(0,2)), [['sign', path], ['upload','groups/11/synthetic-copy.jpg']]);
   assert.deepEqual(h.writes, [{ table: 'chat_messages', value: { group_id: 11, user_id: 'synthetic-owner', username: 'Fixture', content: '[画像]', kind: 'image', payload: { v: 1, kind: 'image', image: { path: 'groups/11/synthetic-copy.jpg' } } } }]);
 });

@@ -3,6 +3,8 @@
 // --- 参加者 / 既読 / リアクション / 引用元の読み込み ---
 
 async function loadGroupContext(groupId) {
+  if (Number(groupId) !== Number(currentGroupId)) return;
+  const lease = ownHistoryLease([groupId]), selection = selectGroupSeq;
   groupMembers = [];
   groupReadStates = [];
   try {
@@ -16,6 +18,7 @@ async function loadGroupContext(groupId) {
     ]);
     if (memberRes.error) throw memberRes.error;
     if (readRes.error) throw readRes.error;
+    if (!lease.valid() || selection !== selectGroupSeq || Number(currentGroupId) !== Number(groupId)) return;
     const memberRows = memberRes.data || [];
     groupMembers = memberRows.filter((row) => row.can_view === true).map((row) => row.chat_users).filter(Boolean);
     const mine = memberRows.find((row) => String(row.user_id) === String(currentUser.id)) || null;
@@ -59,6 +62,8 @@ async function loadPrivateNotes(groupId, seq) {
 }
 
 async function loadReactions(messageIds) {
+  const lease = ownHistoryLease([currentGroupId]);
+  const selection = selectGroupSeq, groupId = currentGroupId;
   const ids = messageIds.filter((id) => !reactionsByMessage.has(id));
   if (!ids.length) return;
   ids.forEach((id) => reactionsByMessage.set(id, []));
@@ -68,6 +73,7 @@ async function loadReactions(messageIds) {
       .select('message_id, user_id, emoji')
       .in('message_id', ids);
     if (error) throw error;
+    if (!lease.valid() || selection !== selectGroupSeq || currentGroupId !== groupId) return;
     (data || []).forEach((row) => {
       const list = reactionsByMessage.get(row.message_id) || [];
       list.push({ user_id: row.user_id, emoji: row.emoji });
@@ -80,17 +86,21 @@ async function loadReactions(messageIds) {
 
 // 引用元が画面に読み込まれていない場合だけ、まとめて取りに行く。
 async function loadQuotedMessages(list) {
+  const groupId = currentGroupId;
+  const selection = selectGroupSeq;
   const known = new Map(currentMessages.map((m) => [m.id, m]));
   const wanted = [...new Set(
     list.map((m) => m.reply_to_id).filter((id) => id && !known.has(id) && !quotedMessages.has(id))
   )];
   if (!wanted.length) return;
   try {
-    const { data, error } = await sb
+    const { data, error } = await ownHistoryRead([groupId], () => sb
       .from('chat_messages')
       .select('id, username, content, kind')
-      .in('id', wanted);
+      .eq('group_id', groupId)
+      .in('id', wanted));
     if (error) throw error;
+    if (currentGroupId !== groupId || selection !== selectGroupSeq) return;
     (data || []).forEach((row) => quotedMessages.set(row.id, row));
   } catch (error) {
     console.error('Load quoted messages error:', error);
@@ -159,6 +169,7 @@ function updateJumpLatestButton() {
 
 async function setMessages(list) {
   const groupId = currentGroupId;
+  const lease = ownHistoryLease([groupId]);
   currentMessages = list.slice();
   seenMessageIds = new Set(currentMessages.map((m) => m.id));
   renderMessageList();
@@ -167,7 +178,7 @@ async function setMessages(list) {
     loadReactions(currentMessages.map((m) => m.id)),
     loadQuotedMessages(currentMessages)
   ]);
-  if (Number(currentGroupId) !== Number(groupId)) return;
+  if (!lease.valid() || Number(currentGroupId) !== Number(groupId)) return;
   renderMessageList();
 }
 
@@ -605,6 +616,8 @@ async function fillLatestGap() {
   if (fillingLatestGap || jumpingToLatest || viewHasLatest || !currentGroupId) return viewHasLatest;
   fillingLatestGap = true;
   const groupId = currentGroupId;
+  const lease = ownHistoryLease([groupId]), selection = selectGroupSeq;
+  const valid = () => lease.valid() && currentGroupId === groupId && selection === selectGroupSeq;
   const el = $('messages');
   const keepNode = el
     ? [...el.querySelectorAll('.message')].find((node) => {
@@ -623,14 +636,14 @@ async function fillLatestGap() {
         viewHasLatest = true;
         break;
       }
-      const { data, error } = await sb.from('chat_messages')
+      const { data, error } = await ownHistoryRead([groupId], () => sb.from('chat_messages')
         .select(MESSAGE_COLUMNS)
         .eq('group_id', groupId)
         .gt('created_at', last.created_at)
         .order('created_at', { ascending: true })
-        .limit(MESSAGE_PAGE_SIZE);
+        .limit(MESSAGE_PAGE_SIZE));
       if (error) throw error;
-      if (Number(currentGroupId) !== Number(groupId)) return false;
+      if (!valid()) return false;
       const rows = data || [];
       const batch = rows.filter((msg) => !seenMessageIds.has(msg.id));
       if (batch.length) {
@@ -640,6 +653,7 @@ async function fillLatestGap() {
           loadReactions(batch.map((msg) => msg.id)),
           loadQuotedMessages(batch)
         ]);
+        if (!valid()) return false;
       }
       if (rows.length < MESSAGE_PAGE_SIZE) {
         viewHasLatest = true;
@@ -662,7 +676,7 @@ async function fillLatestGap() {
     console.error('Fill latest gap error:', error);
     return false;
   } finally {
-    fillingLatestGap = false;
+    if (valid()) fillingLatestGap = false;
   }
 }
 
@@ -808,7 +822,9 @@ function syncAiTyping() {
 
 // --- 操作メニュー（返信・リアクション） ---
 
+let messageMenuGeneration = 0;
 function closeMessageMenu() {
+  ++messageMenuGeneration;
   const open = document.querySelector('.msg-menu');
   if (open) open.remove();
 }
@@ -817,6 +833,8 @@ function openMessageMenu(messageId, anchor) {
   closeMessageMenu();
   const msg = currentMessages.find((m) => m.id === Number(messageId));
   if (!msg) return;
+  const lease = ownHistoryLease([msg.group_id]);
+  const selection = selectGroupSeq, menuGeneration = messageMenuGeneration;
 
   const menu = document.createElement('div');
   menu.className = 'msg-menu';
@@ -852,6 +870,8 @@ function openMessageMenu(messageId, anchor) {
   menu.style.top = `${Math.min(preferredTop, window.innerHeight - menuRect.height - 8)}px`;
 
   menu.addEventListener('click', (e) => {
+    if (!lease.valid() || selection !== selectGroupSeq || menuGeneration !== messageMenuGeneration
+      || Number(currentGroupId) !== Number(msg.group_id) || !currentMessages.includes(msg)) return;
     const emojiBtn = e.target.closest('[data-emoji]');
     if (emojiBtn) {
       toggleReaction(msg.id, emojiBtn.dataset.emoji);
@@ -957,6 +977,8 @@ function refreshReadMarks() {
 // --- 返信 ---
 
 function setReplyTarget(msg) {
+  if (!msg || !ownHistoryAuthorized(msg.group_id) || Number(currentGroupId) !== Number(msg.group_id)
+    || !currentMessages.includes(msg) || shouldHideAdminNotice(msg, currentGroup())) return;
   if (!requireCurrentRoomSend()) return;
   replyTarget = msg;
   $('replyBar').classList.remove('hidden');
@@ -1035,6 +1057,7 @@ function editableMessageText(msg) {
 
 function startMessageEdit(msg) {
   if (!messageIsEditable(msg) || !requireCurrentRoomSend()) return;
+  ++composerDraftEpoch;
   editingMessage = msg;
   isSilentSendActive = false;
   isPrivateNoteMode = false;
@@ -1054,6 +1077,7 @@ function startMessageEdit(msg) {
 
 function cancelMessageEdit() {
   if (!editingMessage) return;
+  ++composerDraftEpoch;
   editingMessage = null;
   const input = $('messageInput');
   if (input) input.value = '';
@@ -1061,7 +1085,7 @@ function cancelMessageEdit() {
   resizeComposer();
 }
 
-async function saveEditedMessage(content) {
+async function saveEditedMessage(content, settleEditor = () => false) {
   const msg = editingMessage;
   if (!msg || !currentUser) return false;
   if (!requireCurrentRoomSend()) return false;
@@ -1084,24 +1108,43 @@ async function saveEditedMessage(content) {
       .select(MESSAGE_COLUMNS)
       .single();
     if (error) throw error;
-    editingMessage = null;
+    if (editingMessage === msg && settleEditor()) editingMessage = null;
     handleUpdatedMessage(data);
     return true;
   } catch (error) {
     console.error('Edit message error:', error);
-    alert(error.message || '編集に失敗しました');
+    if (settleEditor()) alert(error.message || '編集に失敗しました');
     return false;
   }
 }
 
+let forwardSourceLease = null;
 async function openForward(msg) {
-  if (!msg || !currentUser) return;
+  if (!msg || !currentUser || Number(msg.group_id) !== Number(currentGroupId) || !ownHistoryAuthorized(msg.group_id)) return;
+  const lease = ownHistoryLease([msg.group_id]);
+  const fromTimeline = currentMessages.includes(msg);
+  let sourceSnapshot = JSON.stringify(msg);
+  const valid = () => lease.valid() && lease.selection === currentGroupId && lease.selectionSequence === selectGroupSeq
+    && (!fromTimeline || currentMessages.includes(msg)) && JSON.stringify(msg) === sourceSnapshot;
+  if (msg.id && ownHistoryV1(currentGroup()) && !currentMessages.includes(msg)) {
+    try {
+      const result = await ownHistoryRead([msg.group_id], () => sb.from('chat_messages').select(MESSAGE_COLUMNS)
+        .eq('group_id',msg.group_id).eq('id',msg.id).limit(1));
+      if (!valid() || result.error || !Array.isArray(result.data) || result.data.length !== 1
+        || String(result.data[0].id) !== String(msg.id) || String(result.data[0].group_id) !== String(msg.group_id)) return;
+      msg = result.data[0];
+      sourceSnapshot = JSON.stringify(msg);
+    } catch (_) { return; }
+  }
+  if (!valid() || shouldHideAdminNotice(msg,currentGroup())) return;
   if (!chatAccessAllows('can_browse_users') || !chatAccessAllows('can_start_direct')) {
     alert('転送先のユーザーを選ぶ権限がありません');
     return;
   }
   forwardMessage = msg;
+  forwardSourceLease = valid;
   if (!registeredUsers.length) await loadRegisteredUsers();
+  if (!valid() || forwardMessage !== msg || forwardSourceLease !== valid) return;
   $('forwardSearch').value = '';
   $('forwardOverlay').classList.remove('hidden');
   renderForwardUsers();
@@ -1110,6 +1153,7 @@ async function openForward(msg) {
 function closeForward() {
   $('forwardOverlay').classList.add('hidden');
   forwardMessage = null;
+  forwardSourceLease = null;
 }
 
 function renderForwardUsers() {
@@ -1141,7 +1185,10 @@ function renderForwardUsers() {
   });
 }
 
-async function insertForwardedMessage(msg, groupId) {
+async function insertForwardedMessage(msg, groupId, valid) {
+  // A source action owns every continuation, not just the first storage read.
+  // An already dispatched write is not undone or retried when this lease expires.
+  if (!valid?.()) return null;
   const sticker = stickerFromMessage(msg);
   if (sticker && sticker.id) {
     const { data, error } = await sb.from('chat_messages').insert({
@@ -1160,14 +1207,18 @@ async function insertForwardedMessage(msg, groupId) {
     const { data: signed, error: signedError } = await sb.storage
       .from('chat-images')
       .createSignedUrl(image.path, 60);
+    if (!valid()) return null;
     if (signedError) throw signedError;
     const res = await fetch(signed.signedUrl);
+    if (!valid()) return null;
     if (!res.ok) throw new Error('画像の取得に失敗しました');
     const blob = await res.blob();
+    if (!valid()) return null;
     const path = `groups/${groupId}/${crypto.randomUUID()}.jpg`;
     const { error: uploadError } = await sb.storage
       .from('chat-images')
       .upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '3600' });
+    if (!valid()) return null;
     if (uploadError) throw uploadError;
     const { data, error } = await sb.from('chat_messages').insert({
       group_id: groupId,
@@ -1192,8 +1243,8 @@ async function insertForwardedMessage(msg, groupId) {
 }
 
 async function forwardToUser(user) {
-  const msg = forwardMessage;
-  if (!msg || !user) return;
+  const msg = forwardMessage, valid = forwardSourceLease;
+  if (!msg || !user || !valid?.()) return;
   if (!chatAccessAllows('can_start_direct')) {
     alert('1対1トークを開始する権限がありません');
     return;
@@ -1201,14 +1252,17 @@ async function forwardToUser(user) {
   closeForward();
   try {
     const { data: groupId, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
+    if (!valid()) return;
     if (error) throw error;
     await loadGroups();
     const group = myGroups.find((item) => Number(item.id) === Number(groupId));
     if (!canCurrentUserSend(group)) throw new Error('転送先のトークは閲覧専用です');
-    const inserted = await insertForwardedMessage(msg, groupId);
+    if (!valid()) return;
+    const inserted = await insertForwardedMessage(msg, groupId, valid);
     if (inserted && inserted.id) dispatchPushForMessage(inserted.id);
-    showNotice(`${user.username} に転送しました`);
+    if (inserted && valid()) showNotice(`${user.username} に転送しました`);
   } catch (error) {
+    if (!valid()) return;
     console.error('Forward error:', error);
     alert(error.message || '転送に失敗しました');
   }
@@ -1308,6 +1362,10 @@ function applyMention(index) {
 
 async function loadOlderMessages() {
   if (loadingHistory || historyExhausted || !currentGroupId || !currentMessages.length) return;
+  const groupId = currentGroupId;
+  const lease = ownHistoryLease([groupId]);
+  const selection = selectGroupSeq;
+  const valid = () => lease.valid() && selection === selectGroupSeq && currentGroupId === groupId;
   loadingHistory = true;
 
   const el = $('messages');
@@ -1316,14 +1374,15 @@ async function loadOlderMessages() {
   const prevTop = el.scrollTop;
 
   try {
-    const { data, error } = await sb
+    const { data, error } = await ownHistoryRead([groupId], () => sb
       .from('chat_messages')
       .select(MESSAGE_COLUMNS)
       .eq('group_id', currentGroupId)
       .lt('created_at', currentMessages[0].created_at)
       .order('created_at', { ascending: false })
-      .limit(MESSAGE_PAGE_SIZE);
+      .limit(MESSAGE_PAGE_SIZE));
     if (error) throw error;
+    if (!valid()) return;
 
     const older = (data || []).reverse();
     if (older.length < MESSAGE_PAGE_SIZE) historyExhausted = true;
@@ -1334,6 +1393,7 @@ async function loadOlderMessages() {
         loadReactions(older.map((m) => m.id)),
         loadQuotedMessages(older)
       ]);
+      if (!valid()) return;
       renderMessageList();
       snapshotRoomView(currentGroupId);
       // 読み込み前に見ていた位置を保つ。
@@ -1342,8 +1402,10 @@ async function loadOlderMessages() {
   } catch (error) {
     console.error('Load older messages error:', error);
   } finally {
-    $('historySpinner').classList.add('hidden');
-    loadingHistory = false;
+    if (valid()) {
+      $('historySpinner').classList.add('hidden');
+      loadingHistory = false;
+    }
   }
 }
 

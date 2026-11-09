@@ -120,12 +120,12 @@ async function loadLastMessages() {
     return;
   }
   try {
-    const { data, error } = await sb
+    const { data, error } = await ownHistoryRead(ids, () => sb
       .from('chat_messages')
       .select('group_id, content, created_at, username, user_id')
       .in('group_id', ids)
       .order('created_at', { ascending: false })
-      .limit(200);
+      .limit(200));
     if (error) throw error;
     const next = {};
     (data || []).forEach((row) => {
@@ -141,12 +141,13 @@ async function loadUnread() {
   if (!currentUser) return;
   const requestSequence = ++unreadRequestSequence;
   const requestedUserId = currentUser.id;
+  const unreadLease = ownHistoryLease(myGroups.map(g=>g.id));
   try {
     const { data, error } = await sb.rpc('chat_unread_counts');
     if (error) throw error;
     // RPCs can finish out of order (for example, after a read receipt and a
     // push-triggered refresh). Only the newest response may replace the badge.
-    if (requestSequence !== unreadRequestSequence || currentUser?.id !== requestedUserId) return;
+    if (requestSequence !== unreadRequestSequence || currentUser?.id !== requestedUserId || !unreadLease.valid()) return;
 
     const counts = {};
     (data || []).forEach((row) => { counts[row.group_id] = Number(row.unread_count) || 0; });
@@ -1252,6 +1253,9 @@ function previewLocalIcon(el, file, fallbackName) {
 let talkSearchTimer = 0;
 
 function handleTalkSearchInput() {
+  ++messageSearchSeq;
+  messageSearchHits = [];
+  renderMessageSearch('');
   if (talkTab === 'users' || talkTab === 'bots') {
     renderRegisteredUsers();
     return;
@@ -1286,6 +1290,9 @@ function buildSearchSnippet(content, query) {
 async function runMessageSearch(query) {
   const seq = ++messageSearchSeq;
   const ids = myGroups.map((g) => g.id);
+  const searchLease = ownHistoryLease(ids);
+  const tab = talkTab, input = $('talkSearch').value;
+  const valid = () => seq === messageSearchSeq && searchLease.valid() && tab === talkTab && input === $('talkSearch').value;
   if (!query || query.length < 2 || !ids.length) {
     messageSearchHits = [];
     renderMessageSearch(query);
@@ -1293,18 +1300,19 @@ async function runMessageSearch(query) {
   }
 
   try {
-    const { data, error } = await sb
+    const { data, error } = await ownHistoryRead(ids, () => sb
       .from('chat_messages')
       .select('id, group_id, content, username, created_at')
       .in('group_id', ids)
       .ilike('content', `%${escapeLikePattern(query)}%`)
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(30));
     if (error) throw error;
     // 入力が進んで別の検索が始まっていたら、古い結果は捨てる。
-    if (seq !== messageSearchSeq) return;
-    messageSearchHits = data || [];
+    if (!valid()) return;
+    messageSearchHits = (data || []).filter(hit=>ownHistoryListVisible(findMineGroup(hit.group_id)));
   } catch (error) {
+    if (!valid()) return;
     console.error('Message search error:', error);
     messageSearchHits = [];
   }
@@ -1330,6 +1338,8 @@ function renderMessageSearch(query) {
 
   messageSearchHits.forEach((hit) => {
     const group = myGroups.find((g) => g.id === hit.group_id);
+    if (!ownHistoryListVisible(group)) return;
+    const valid = ownHistoryRowLease(hit.group_id), sequence = messageSearchSeq;
     const row = document.createElement('div');
     row.className = 'search-hit';
     row.innerHTML = `
@@ -1339,7 +1349,7 @@ function renderMessageSearch(query) {
       </div>
       <div class="search-hit-text">${escapeHtml(hit.username)}: ${buildSearchSnippet(hit.content, query)}</div>
     `;
-    row.onclick = () => openMessageAt(hit.group_id, hit.created_at, hit.id);
+    row.onclick = () => { if (valid() && sequence === messageSearchSeq) openMessageAt(hit.group_id, hit.created_at, hit.id); };
     list.appendChild(row);
   });
 }
@@ -1348,6 +1358,15 @@ function renderMessageSearch(query) {
 async function openMessageAt(groupId, createdAt, messageId) {
   const group = myGroups.find((g) => g.id === groupId);
   if (!group) return;
+  const targetLease = ownHistoryLease([groupId]);
+  try {
+    const result = await ownHistoryRead([groupId], () => sb.from('chat_messages').select('id, group_id, created_at')
+      .eq('group_id',groupId).eq('id',messageId).limit(1));
+    if (result.error) throw result.error;
+    if (!targetLease.valid() || !result.data?.length) return;
+    if (String(result.data[0].id)!==String(messageId) || String(result.data[0].group_id)!==String(groupId)) return;
+  } catch (_) { return; }
+  const contextLease = ownHistoryLease([groupId]);
   if (currentGroupId && Number(currentGroupId) !== Number(groupId)) {
     snapshotRoomView(currentGroupId);
   }
@@ -1365,24 +1384,27 @@ async function openMessageAt(groupId, createdAt, messageId) {
   syncComposerForGroup(group);
   resetMessageView();
   await loadGroupContext(groupId);
+  if (!contextLease.valid() || currentGroupId !== groupId) return;
   paintChatHeader(group);
   loadScheduledMessages();
 
   try {
-    const [olderRes, newerRes] = await Promise.all([
+    const [olderRes, newerRes] = await ownHistoryRead([groupId], () => Promise.all([
       sb.from('chat_messages').select(MESSAGE_COLUMNS)
         .eq('group_id', groupId).lte('created_at', createdAt)
         .order('created_at', { ascending: false }).limit(25),
       sb.from('chat_messages').select(MESSAGE_COLUMNS)
         .eq('group_id', groupId).gt('created_at', createdAt)
         .order('created_at', { ascending: true }).limit(25)
-    ]);
+    ]));
+    if (!contextLease.valid() || currentGroupId !== groupId) return;
     if (olderRes.error) throw olderRes.error;
     if (newerRes.error) throw newerRes.error;
 
     const older = (olderRes.data || []).reverse();
     if (older.length < 25) historyExhausted = true;
     await setMessages(older.concat(newerRes.data || []));
+    if (!contextLease.valid() || currentGroupId !== groupId) return;
     // 新しい側を取り切れていなければ、この画面は最新まで届いていない。
     viewHasLatest = (newerRes.data || []).length < 25;
     followNewMessages = viewHasLatest;
@@ -1526,6 +1548,11 @@ async function runTalkAction(fn) {
 function setSwipeX(wrap, x, animate) {
   const front = wrap.querySelector('.swipe-front');
   if (!front) return;
+  const previousSide = Math.sign(wrap._swipeX || 0);
+  if (previousSide !== Math.sign(x)) {
+    wrap._ownRevealGeneration = (wrap._ownRevealGeneration || 0) + 1;
+    if (x) wrap._bindOwnActions?.();
+  }
   wrap._swipeX = x;
   front.style.transition = animate ? 'transform 180ms ease' : 'none';
   front.style.transform = `translateX(${x}px)`;
@@ -1533,6 +1560,9 @@ function setSwipeX(wrap, x, animate) {
 
 function bindTalkSwipe(wrap, group) {
   const front = wrap.querySelector('.swipe-front');
+  const valid = ownHistoryRowLease(group.id);
+  const leftWidth = wrap.querySelectorAll('.swipe-actions-left button').length * SWIPE_BTN_W;
+  const rightWidth = wrap.querySelectorAll('.swipe-actions-right button').length * SWIPE_BTN_W;
   let pid = null;
   let x0 = 0;
   let y0 = 0;
@@ -1541,6 +1571,7 @@ function bindTalkSwipe(wrap, group) {
   let moved = false;
 
   const onDown = (e) => {
+    if (!valid()) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (openSwipeWrap && openSwipeWrap !== wrap) closeOpenSwipe();
     pid = e.pointerId;
@@ -1568,7 +1599,7 @@ function bindTalkSwipe(wrap, group) {
     if (axis !== 'x') return;
     e.preventDefault();
     moved = Math.abs(dx) > 6;
-    const next = Math.max(-SWIPE_OPEN, Math.min(SWIPE_OPEN, startX + dx));
+    const next = Math.max(-rightWidth, Math.min(leftWidth, startX + dx));
     setSwipeX(wrap, next, false);
   };
 
@@ -1578,8 +1609,8 @@ function bindTalkSwipe(wrap, group) {
     pid = null;
     axis = null;
     let snap = 0;
-    if (x > 48) snap = SWIPE_OPEN;
-    else if (x < -48) snap = -SWIPE_OPEN;
+    if (valid() && x > 48) snap = leftWidth;
+    else if (valid() && x < -48) snap = -rightWidth;
     setSwipeX(wrap, snap, true);
     openSwipeWrap = snap ? wrap : null;
     if (moved) {
@@ -1591,13 +1622,18 @@ function bindTalkSwipe(wrap, group) {
   front.addEventListener('pointerdown', onDown);
   front.addEventListener('pointermove', onMove, { passive: false });
   front.addEventListener('pointerup', onUp);
-  front.addEventListener('pointercancel', onUp);
+  front.addEventListener('pointercancel', () => {
+    pid = null; axis = null; moved = false;
+    setSwipeX(wrap, 0, true);
+    if (openSwipeWrap === wrap) openSwipeWrap = null;
+  });
   front.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (!isPcPointer()) return;
     openTalkContextMenu(group, e.clientX, e.clientY);
   });
   front.addEventListener('click', (e) => {
+    if (!valid()) { e.preventDefault(); return; }
     if (wrap._ignoreClick) {
       e.preventDefault();
       e.stopPropagation();
@@ -1782,6 +1818,7 @@ async function purgeTalk(group) {
 }
 
 function renderTalkRow(group, options) {
+  const ownRowValid = ownHistoryRowLease(group.id);
   const last = lastMessages[group.id];
   const title = roomTitle(group);
   const icon = roomIcon(group);
@@ -1848,33 +1885,34 @@ function renderTalkRow(group, options) {
       </button>
     </div>
     <div class="swipe-actions swipe-actions-right">
+      <button class="swipe-btn swipe-read" type="button">既読</button>
       <button class="swipe-btn swipe-hide" type="button">非表示</button>
-      <button class="swipe-btn swipe-delete" type="button">退出</button>
+      <button class="swipe-btn swipe-clear" type="button">削除</button>
     </div>
   `;
   wrap.appendChild(front);
 
-  wrap.querySelector('.swipe-pin').onclick = (e) => {
-    e.stopPropagation();
-    runTalkAction(() => setTalkPinned(group, !group.pinned_at));
+  wrap._bindOwnActions = () => {
+    const reveal = wrap._ownRevealGeneration || 0;
+    ['pin','mute','hide','read','clear'].forEach(action => {
+      wrap.querySelector('.swipe-' + action).onclick = (e) => {
+        e.stopPropagation();
+        if (!ownRowValid() || reveal !== (wrap._ownRevealGeneration || 0)) return;
+        // Transfer this one accepted activation to the scope lease before close
+        // invalidates the drawer and all queued sibling callbacks.
+        wrap._ownRevealGeneration = reveal + 1;
+        ownHistoryRowAction(group.id, ownRowValid, action);
+      };
+    });
   };
-  wrap.querySelector('.swipe-mute').onclick = (e) => {
-    e.stopPropagation();
-    runTalkAction(() => setTalkMuted(group, !group.muted_at));
-  };
-  wrap.querySelector('.swipe-hide').onclick = (e) => {
-    e.stopPropagation();
-    runTalkAction(() => setTalkHidden(group, true));
-  };
-  wrap.querySelector('.swipe-delete').onclick = (e) => {
-    e.stopPropagation();
-    runTalkAction(() => leaveTalk(group));
-  };
+  wrap._bindOwnActions();
   bindTalkSwipe(wrap, group);
   return wrap;
 }
 
 function renderGroups() {
+  ++ownHistoryRenderGeneration;
+  closeOpenSwipe();
   const usersWrap = $('registeredUsersWrap');
   const inviteBar = $('userInviteBar');
   const showUsers = talkTab === 'users' || talkTab === 'bots';
@@ -1898,6 +1936,7 @@ function renderGroups() {
     ? myGroups.filter((g) => {
         if (isStoreBotDirect(g)) return false;
         if (talkTab === 'trash') return !!g.trashed_at && matchesQuery(g, lastMessages[g.id] && lastMessages[g.id].content);
+        if (!ownHistoryListVisible(g)) return false;
         if (g.trashed_at) return false;
         if (talkTab === 'friends' && !g.is_direct) return false;
         if (talkTab === 'groups' && (g.is_direct || g.is_store_room)) return false;
@@ -1931,6 +1970,7 @@ function renderGroups() {
     });
   }
 
+  ownHistoryRenderRecovery(mineList);
   if (talkTab === 'friends') {
     const peerIds = new Set(
       myGroups.filter((g) => g.is_direct && g.peer).map((g) => g.peer.id)
@@ -2090,6 +2130,8 @@ function snapshotRoomView(groupId) {
 }
 
 function applyRoomViewCache(groupId) {
+  // v1 always verifies the authoritative server projection before displaying bodies.
+  if (ownHistoryV1(findMineGroup(groupId)) || !ownHistoryListVisible(findMineGroup(groupId))) return false;
   const cached = roomViewCache.get(Number(groupId));
   if (!cached || !cached.messages.length) return false;
   currentMessages = cached.messages.slice();
@@ -2115,7 +2157,7 @@ function latestMessageFingerprint(list) {
 }
 
 function mergeLatestPage(existing, latestPage) {
-  if (!latestPage.length) return (existing || []).slice();
+  if (!latestPage.length) return [];
   const latestIds = new Set(latestPage.map((m) => m.id));
   const firstNew = latestPage[0];
   const older = (existing || []).filter((m) => (
@@ -2167,6 +2209,7 @@ async function selectGroup(group) {
   currentGroupId = group.id;
   currentRoomMembership = group.membership || null;
   const seq = ++selectGroupSeq;
+  const displayLease = ownHistoryLease([group.id]);
   if (group.hidden_at) {
     group.hidden_at = null;
     setTalkHidden(group, false).catch((error) => console.error('Unhide error:', error));
@@ -2197,14 +2240,14 @@ async function selectGroup(group) {
   loadScheduledMessages();
 
   try {
-    const { data, error } = await sb
+    const { data, error } = await ownHistoryRead([group.id], () => sb
       .from('chat_messages')
       .select(MESSAGE_COLUMNS)
       .eq('group_id', group.id)
       .order('created_at', { ascending: false })
-      .limit(MESSAGE_PAGE_SIZE);
+      .limit(MESSAGE_PAGE_SIZE));
     if (error) throw error;
-    if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
+    if (!displayLease.valid() || seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
 
     const loaded = (data || []).reverse();
     if (loaded.length < MESSAGE_PAGE_SIZE) historyExhausted = true;
@@ -2217,7 +2260,7 @@ async function selectGroup(group) {
     followNewMessages = true;
     if (!fromCache || before !== after) {
       await setMessages(merged);
-      if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
+      if (!displayLease.valid() || seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
     }
     scrollMessagesToBottom();
     updateJumpLatestButton();
@@ -2227,7 +2270,7 @@ async function selectGroup(group) {
   }
 
   await Promise.all([contextPromise, notesPromise]);
-  if (seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
+  if (!displayLease.valid() || seq !== selectGroupSeq || Number(currentGroupId) !== Number(group.id)) return;
   paintChatHeader(group);
   renderGroups();
   if (!isMobileLayout()) $('messageInput').focus();
