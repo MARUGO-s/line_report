@@ -118,6 +118,16 @@ async function loadUserStores() {
   userStoreKeysById = next;
 }
 
+async function loadStoreCatalog() {
+  const { data, error } = await sb
+    .from('chat_store_catalog')
+    .select('store_key, display_name, sort_order')
+    .order('sort_order')
+    .order('store_key');
+  if (error) throw error;
+  storeCatalog = data || [];
+}
+
 async function loadPendingStoreRequest() {
   if (!currentUser) {
     pendingStoreRequest = null;

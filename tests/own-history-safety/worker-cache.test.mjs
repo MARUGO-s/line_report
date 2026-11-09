@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {ROOT} from './fixture.mjs';
 const V=process.env.CHAT_SAFETY_CANDIDATE_ROOT || ROOT;
-for(const name of ['permissions','own-history','realtime','rooms','messages','composer','bootstrap'])test('actual v73 worker delivers changed v2 '+name+' and v74 shell agrees',async()=>{
+for(const name of ['permissions','own-history','realtime','rooms','messages','composer','bootstrap'])test('actual v73 worker delivers changed v2 '+name+' and v76 shell agrees',async()=>{
  const old=readFileSync(V+'/tests/fixtures/own-history-baseline/chat-sw.js','utf8');
  const html=readFileSync(V+'/public/chat.html','utf8');const key=html.match(new RegExp('src="(chat/'+name+'\\.js[^\"]*)"'))[1];
  const source=readFileSync(V+'/public/chat/'+name+'.js','utf8'),origin='https://synthetic.invalid/';

@@ -1,17 +1,17 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v75';
+const CHAT_CACHE = 'line-report-chat-v76';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261109-own-history-1',
-  './chat/core.js?v=20261007-loan-report-1',
+  './chat/core.js?v=20261110-colleague-directory-1',
   './chat/auth.js?v=20261015-login-stability-1',
   './chat/permissions.js?v=20261109-own-history-2',
   './chat/own-history.js?v=20261109-own-history-3',
-  './chat/profile.js?v=20261007-loan-report-1',
+  './chat/profile.js?v=20261110-colleague-directory-1',
   './chat/realtime.js?v=20261109-own-history-2',
   './chat/notifications.js',
-  './chat/rooms.js?v=20261109-own-history-2',
+  './chat/rooms.js?v=20261110-colleague-directory-1',
   './chat/messages.js?v=20261109-own-history-3',
   './chat/attachments.js?v=20261109-own-history-1',
   './chat/composer.js?v=20261109-own-history-3',
