@@ -1,0 +1,73 @@
+{
+  "provenance": "Unmodified synthetic values returned by actual SQL in final/green-4/commands.json/results.json; no invented DTO examples.",
+  "capabilities": {
+    "contract_version": 1,
+    "snapshot_semantics": "statement_visible_ids",
+    "mark_read_supported": true,
+    "own_clear_supported": true
+  },
+  "clear": {
+    "kind": "clear",
+    "status": "applied",
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "group_id": "1",
+    "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+    "applied_revision": "1",
+    "contract_version": 1
+  },
+  "read": {
+    "kind": "read",
+    "status": "applied",
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "group_id": "1",
+    "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa21",
+    "snapshot_latest": {
+      "id": "605",
+      "created_at": "2026-01-01T00:00:00.000000Z"
+    },
+    "applied_revision": "0",
+    "contract_version": 1,
+    "effective_last_read_at": "2026-01-01T00:00:00.000000Z"
+  },
+  "read_empty": {
+    "kind": "read",
+    "status": "applied",
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "group_id": "2",
+    "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+    "snapshot_latest": null,
+    "applied_revision": "0",
+    "contract_version": 1,
+    "effective_last_read_at": null
+  },
+  "operation_inflight_not_found": {
+    "status": "not_found",
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "group_id": "1",
+    "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+    "contract_version": 1
+  },
+  "states": [
+    {
+      "user_id": "11111111-1111-4111-8111-111111111111",
+      "group_id": "1",
+      "revision": "1",
+      "contract_version": 1,
+      "timeline_suppressed": true
+    }
+  ],
+  "computed_membership": {
+    "hidden": null,
+    "revision": "1",
+    "suppressed": true
+  },
+  "bigint_group": {
+    "kind": "clear",
+    "status": "applied",
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "group_id": "9007199254740993",
+    "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+    "applied_revision": "1",
+    "contract_version": 1
+  }
+}

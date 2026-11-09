@@ -208,10 +208,10 @@ test('chat page wires the typing indicator into render, new message, and leaving
 test('typing animation respects reduced motion and assets are cache-busted', () => {
   assert.match(chatCss, /@keyframes aiTypingBounce/);
   assert.match(chatCss, /@media \(prefers-reduced-motion: reduce\) \{\s*\.typing-dots span \{ animation: none;/);
-  assert.match(chatHtml, /chat\/messages\.js\?v=20261001-ai-typing-1/);
-  assert.match(chatHtml, /chat\/chat\.css\?v=20261001-ai-typing-1/);
-  assert.match(serviceWorker, /'\.\/chat\/messages\.js\?v=20261001-ai-typing-1'/);
-  assert.match(serviceWorker, /'\.\/chat\/chat\.css\?v=20261001-ai-typing-1'/);
+  assert.match(chatHtml, /chat\/messages\.js\?v=20261109-own-history-3/);
+  assert.match(chatHtml, /chat\/chat\.css\?v=20261109-own-history-1/);
+  assert.match(serviceWorker, /'\.\/chat\/messages\.js\?v=20261109-own-history-3'/);
+  assert.match(serviceWorker, /'\.\/chat\/chat\.css\?v=20261109-own-history-1'/);
 });
 
 test('client notice text matches the server timeout message exactly', () => {

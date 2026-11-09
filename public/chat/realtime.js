@@ -80,8 +80,12 @@ async function subscribeRealtime() {
 }
 
 async function handleCurrentChatAccessChange() {
+  myGroups.filter(ownHistoryV1).forEach(group => ownHistoryInvalidate(group.id));
+  const session = ownHistorySession, epoch = ownHistoryAuthEpoch;
+  const sequence = chatAccessLoadSequence + 1;
   try {
     await loadCurrentChatAccess();
+    if (sequence !== chatAccessLoadSequence || session !== ownHistorySession || epoch !== ownHistoryAuthEpoch) return;
     if (chatAccessIsBlocked(currentChatAccess)) {
       closeInvite();
       closeChat();
@@ -97,6 +101,7 @@ async function handleCurrentChatAccessChange() {
     }
   } catch (error) {
     console.error('M-talk access refresh error:', error);
+    // The latest, identity-bound reader already applied the conservative state.
   }
 }
 
@@ -104,6 +109,9 @@ async function handleMembershipChanged(row) {
   if (!row || !currentUser) return;
   const groupId = Number(row.group_id);
   if (String(row.user_id) === String(currentUser.id)) {
+    const ownGroup = myGroups.find(g => Number(g.id) === groupId);
+    if (ownGroup && row.can_view !== true) ownGroup.membership.can_view = false;
+    ownHistoryInvalidate(groupId);
     if (groupId === Number(currentGroupId)) {
       currentRoomMembership = row;
       if (row.can_view !== true) {
@@ -151,6 +159,7 @@ function handleMemberRemoved(row) {
   const groupId = Number(row.group_id);
   if (String(row.user_id) === String(currentUser.id)) {
     const wasMine = myGroups.some((g) => Number(g.id) === groupId);
+    ownHistoryInvalidate(groupId);
     myGroups = myGroups.filter((g) => Number(g.id) !== groupId);
     if (Number(currentGroupId) === groupId) {
       closeInvite();
@@ -188,6 +197,7 @@ function handleDeletedNote(row) {
 
 function handleUpdatedMessage(msg) {
   if (!msg || !msg.id) return;
+  if (ownHistoryV1(findMineGroup(msg.group_id))) return ownHistoryAcceptMessage(msg).catch(() => false);
   const id = Number(msg.id);
   if (!Number.isSafeInteger(id)) return;
   const idx = currentMessages.findIndex((item) => Number(item.id) === id);
@@ -227,6 +237,7 @@ function handleDeletedMessage(row) {
 }
 
 function handleIncomingMessage(msg) {
+  if (ownHistoryV1(findMineGroup(msg.group_id))) return ownHistoryIncoming(msg).catch(() => false);
   if (shouldHideAdminNotice(msg, myGroups.find((g) => Number(g.id) === Number(msg.group_id)))) return;
   lastMessages[msg.group_id] = msg;
   const group = myGroups.find((g) => Number(g.id) === Number(msg.group_id));
@@ -249,12 +260,18 @@ function handleIncomingMessage(msg) {
   renderGroups();
 }
 
+let ownHistoryGroupsSequence = 0;
 async function loadGroups() {
   if (!currentUser) return false;
+  myGroups.forEach(ownHistoryV1);
+  const owner = currentUser.id, session = ownHistorySession, epoch = ownHistoryAuthEpoch;
+  const sequence = ++ownHistoryGroupsSequence;
+  const valid = () => owner === currentUser?.id && session === ownHistorySession
+    && epoch === ownHistoryAuthEpoch && sequence === ownHistoryGroupsSequence;
   try {
     const [mineRes, allRes] = await Promise.all([
       sb.from('chat_group_members')
-        .select('pinned_at, muted_at, hidden_at, can_view, can_send, can_invite, can_manage, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, is_admin_notice_room, trashed_at)')
+        .select('pinned_at, muted_at, hidden_at, can_view, can_send, can_invite, can_manage, own_history_revision, own_history_suppressed, chat_groups(id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, is_admin_notice_room, trashed_at)')
         .eq('user_id', currentUser.id),
       sb.from('chat_groups')
         .select('id, group_name, created_at, created_by, icon_url, is_direct, direct_key, store_key, is_store_room, is_admin_notice_room, trashed_at')
@@ -263,6 +280,7 @@ async function loadGroups() {
 
     if (mineRes.error) throw mineRes.error;
     if (allRes.error) throw allRes.error;
+    if (!valid()) return false;
 
     const mine = (mineRes.data || [])
       .filter((row) => row.can_view === true)
@@ -271,6 +289,8 @@ async function loadGroups() {
             pinned_at: row.pinned_at || null,
             muted_at: row.muted_at || null,
             hidden_at: row.hidden_at || null,
+            own_history_revision: row.own_history_revision,
+            own_history_suppressed: row.own_history_suppressed,
             membership: {
               user_id: currentUser.id,
               group_id: row.chat_groups.id,
@@ -284,17 +304,32 @@ async function loadGroups() {
       .filter(Boolean);
     const mineIds = new Set(mine.map((g) => g.id));
 
+    mine.forEach(group => {
+      const previous = findMineGroup(group.id);
+      ownHistoryCheckVersion(group);
+      if (previous && (previous.own_history_revision !== group.own_history_revision
+        || previous.own_history_suppressed !== group.own_history_suppressed)) ownHistoryInvalidate(group.id);
+    });
+    // Only the accepted authoritative membership result is a denial, not a
+    // suppressed list projection or a temporary failed refresh.
+    myGroups.forEach(group => { if (!mineIds.has(group.id)) ownHistoryInvalidate(group.id); });
     myGroups = mine;
     otherGroups = (allRes.data || []).filter((g) => !mineIds.has(g.id) && !g.is_direct && !g.is_admin_notice_room && !g.trashed_at);
     if (currentGroupId && !mineIds.has(currentGroupId)) closeChat();
     await attachDirectPeers(myGroups);
+    if (!valid()) return false;
     await loadLastMessages();
+    if (!valid()) return false;
     await loadMemberCounts();
+    if (!valid()) return false;
     renderGroups();
     loadUnread();
     syncGlobalCapabilityUi();
     return true;
   } catch (error) {
+    if (valid()) myGroups.filter(ownHistoryV1).forEach(group => {
+      group.own_history_unverified = true; ownHistoryInvalidate(group.id);
+    });
     console.error('Load groups error:', error);
     return false;
   }

@@ -16,15 +16,26 @@ function chatAccessSignupState(access) {
   return 'blocked';
 }
 
+let chatAccessLoadSequence = 0;
 async function loadCurrentChatAccess() {
   if (!currentUser) return null;
-  const { data, error } = await sb
-    .from('chat_user_access')
-    .select(CHAT_ACCESS_COLUMNS)
-    .eq('user_id', currentUser.id)
-    .maybeSingle();
+  const owner = currentUser.id, session = ownHistorySession, epoch = ownHistoryAuthEpoch;
+  const token = session?.access_token;
+  const sequence = ++chatAccessLoadSequence;
+  const valid = () => owner === currentUser?.id && session === ownHistorySession
+    && token === ownHistorySession?.access_token && epoch === ownHistoryAuthEpoch && sequence === chatAccessLoadSequence;
+  let result;
+  try {
+    result = await sb.from('chat_user_access').select(CHAT_ACCESS_COLUMNS).eq('user_id', owner).maybeSingle();
+  } catch (error) { result = {data:null,error}; }
+  if (!valid()) return currentChatAccess;
+  const {data,error} = result;
+  const next = error ? null : data || null;
+  if (JSON.stringify(currentChatAccess) !== JSON.stringify(next)) {
+    myGroups.forEach(group => ownHistoryInvalidate(group.id));
+  }
+  currentChatAccess = next;
   if (error) throw error;
-  currentChatAccess = data || null;
   return currentChatAccess;
 }
 

@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFileSync} from 'node:fs';
+import {ROOT} from './fixture.mjs';
+const V=process.env.CHAT_SAFETY_CANDIDATE_ROOT || ROOT;
+for(const name of ['permissions','own-history','realtime','rooms','messages','composer','bootstrap'])test('actual v73 worker delivers changed v2 '+name+' and v74 shell agrees',async()=>{
+ const old=readFileSync(V+'/tests/fixtures/own-history-baseline/chat-sw.js','utf8');
+ const html=readFileSync(V+'/public/chat.html','utf8');const key=html.match(new RegExp('src="(chat/'+name+'\\.js[^\"]*)"'))[1];
+ const source=readFileSync(V+'/public/chat/'+name+'.js','utf8'),origin='https://synthetic.invalid/';
+ const handlers={}, effects=[];
+ const self={location:{href:origin+'chat-sw.js',origin:origin.slice(0,-1)},addEventListener:(n,f)=>handlers[n]=f,skipWaiting:async()=>effects.push('skipWaiting'),clients:new Proxy({},{get:(_,k)=>()=>{effects.push(k);return [];}})};
+ const oldKey=name==='permissions'?'chat/permissions.js':name==='own-history'?'absent':'chat/'+name+'.js?v=20261007-loan-report-1';
+ const cache={match:async r=>(typeof r==='string'?r:r.url)===origin+oldKey?'OLD '+name:undefined,put:async()=>{},add:async()=>{},addAll:async()=>{}};
+ const ctx={self,URL,Request,Response,console,caches:{open:async()=>cache,keys:async()=>[],delete:async()=>{}},fetch:async()=>source};vm.runInNewContext(old,ctx);
+ let response;handlers.fetch({request:{url:origin+key,method:'GET',mode:'cors'},respondWith:p=>response=p});
+ assert.equal(response?await response:await ctx.fetch(),source,'old worker must not serve stale '+name);
+ const candidate=readFileSync(V+'/public/chat-sw.js','utf8');assert.ok(candidate.includes("'./"+key+"'"));vm.runInNewContext(candidate,{...ctx});
+ const waits=[];handlers.install({waitUntil:p=>waits.push(p)});await Promise.all(waits);handlers.activate({waitUntil:p=>waits.push(p)});await Promise.all(waits);assert.deepEqual(effects,['skipWaiting']);
+});

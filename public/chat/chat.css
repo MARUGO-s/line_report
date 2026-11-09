@@ -254,6 +254,10 @@ body {
 .swipe-hide { background: #3a3a3c; }
 .swipe-restore { background: #3b82f6; }
 .swipe-delete { background: #ff3b30; }
+.swipe-clear { background: #d32f2f; }
+.swipe-read { background: #247a38; }
+.own-history-recovery { padding: 12px 18px; border: 1px solid #b88a32; }
+.own-history-recovery button { min-height: 44px; margin: 4px; }
 
 .group-item {
   display: flex;

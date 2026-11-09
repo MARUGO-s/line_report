@@ -164,6 +164,7 @@ async function sendSticker(stickerId, display = 'large', messageText = '') {
   if (!currentGroupId || !currentUser || !stickerId) return;
   if (!requireCurrentRoomSend()) return false;
   $('stickerPicker')?.classList.add('hidden');
+  const displayLease = ownHistoryLease([currentGroupId]);
   try {
     const { data, error } = await sb.from('chat_messages').insert({
       group_id: currentGroupId,
@@ -177,6 +178,9 @@ async function sendSticker(stickerId, display = 'large', messageText = '') {
       is_silent: isSilentSendActive === true
     }).select(MESSAGE_COLUMNS).single();
     if (error) throw error;
+    if (await ownHistorySettleSend(data, displayLease, () => {
+      clearReplyTarget(); if (display === 'compact') clearInlineSticker();
+    })) return true;
     clearReplyTarget();
     if (display === 'compact') clearInlineSticker();
     lastMessages[data.group_id] = data;
@@ -460,6 +464,7 @@ async function sendChatImage(file) {
   uploadingImage = true;
   $('chatImageInput').disabled = true;
   const groupId = currentGroupId;
+  const displayLease = ownHistoryLease([groupId]);
 
   try {
     const image = await uploadChatImage(file, groupId);
@@ -485,6 +490,7 @@ async function sendChatImage(file) {
       showChatToast('画像は送信されましたが、メディアライブラリへの保存に失敗しました。');
     }
 
+    if (await ownHistorySettleSend(data, displayLease)) return true;
     lastMessages[data.group_id] = data;
     followNewMessages = true;
     if (viewHasLatest) addMessageToUI(data);
@@ -507,6 +513,7 @@ async function sendChatImage(file) {
 async function sendChatFile(file) {
   if (!currentGroupId || !currentUser || uploadingImage) return;
   if (!requireCurrentRoomSend()) return;
+  const displayLease = ownHistoryLease([currentGroupId]);
   uploadingImage = true;
   $('chatImageInput').disabled = true;
   try {
@@ -517,6 +524,7 @@ async function sendChatFile(file) {
       payload: { v: 1, kind: 'file', file: attachment }, is_silent: isSilentSendActive === true
     }).select(MESSAGE_COLUMNS).single();
     if (error) throw error;
+    if (await ownHistorySettleSend(data, displayLease)) return true;
     lastMessages[data.group_id] = data;
     followNewMessages = true;
     if (viewHasLatest) addMessageToUI(data);
@@ -1104,6 +1112,7 @@ async function sendCardCommand(text) {
   }
   if (!currentGroupId) return;
   if (!requireCurrentRoomSend()) return;
+  const displayLease = ownHistoryLease([currentGroupId]);
   try {
     const { data, error } = await sb
       .from('chat_messages')
@@ -1117,6 +1126,7 @@ async function sendCardCommand(text) {
       .select(MESSAGE_COLUMNS)
       .single();
     if (error) throw error;
+    if (await ownHistorySettleSend(data, displayLease)) return true;
     lastMessages[data.group_id] = data;
     followNewMessages = true;
     if (viewHasLatest) addMessageToUI(data);
