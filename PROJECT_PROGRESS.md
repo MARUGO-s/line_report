@@ -1,5 +1,11 @@
 # LINE Report Project Progress
 
+### 2026-11-09 - M-talkに8コマのアニメーション感情スタンプ10種を追加
+
+- 「うれしい」「ありがとう」「だいすき」「かなしい」「ごめん」「びっくり」「ぷんぷん」「困った」「ねむい」「応援」の透過WebPを `public/stickers/face/` に追加。各画像は512×512、8フレーム、約0.8秒ループ。
+- `chat_stickers` の画像パス制約を顔スタンプのWebPにも対応させ、10種を感情カテゴリ・sort_order 133〜142で登録するmigrationを追加。Web/アプリ既存の画像表示を利用。
+- GitHub Pagesの静的画像公開後にDB migrationを適用する。8フレームと画像パスを確認。
+
 ### 2026-11-04 - M-talkプライバシーポリシーの公開テンプレートを追加
 
 - App Store ConnectのプライバシーポリシーURL向けに `public/mtalk-privacy.html` を追加。M-talkの登録情報、投稿・添付、通知、保存先、および任意AI等のデータ送信を現行コードで確認できる範囲で説明する。
