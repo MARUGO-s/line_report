@@ -72,7 +72,9 @@ CSSカスタムプロパティ `--chat-viewport-height` 等は `syncChatViewport
   通常ルームの管理者、予約通知の1対1、店舗ルームの一般メンバーには見えない。
   許可されると閲覧のみで、申請した所属店舗が反映される。
   所属の後からの変更も管理者許可後に `chat_user_stores` へ書き込む。
-  新しい1対1は所属店舗が重なる相手だけ（既存の1対1はそのまま）。
+  「同僚を探す」は利用可能な人間ユーザー全員を対象にし、`chat_store_catalog`の表示順で店舗別にまとめる。
+  複数店舗所属者は各店舗に表示し、所属未設定者は「所属店舗未設定」に出す。店舗をまたぐ開始は検索専用RPCを使い、
+  通常の`chat_open_direct`、転送・ルーム招待の同店舗制限は維持する。
 
 ### 利用可否ゲート（`chat_user_access`）
 
@@ -89,9 +91,8 @@ CSSカスタムプロパティ `--chat-viewport-height` 等は `syncChatViewport
 管理画面から状態を変えられた場合も即座に反映される。
 
 `chat_user_access` は個別権限も持つ（`can_start_direct` / `can_create_group` /
-`can_browse_users` / `can_review_access` / `can_use_journal_ai`）。前3つは「友だち」
-「登録ユーザー」「Bot」タブの表示、FABの
-表示、1対1開始ボタンの活性・非活性などUI全体に反映される（`syncGlobalCapabilityUi()`）。
+`can_browse_users` / `can_review_access` / `can_use_journal_ai`）。`can_browse_users`は登録ユーザー一覧・同僚検索の閲覧、
+`can_start_direct`は1対1開始、`can_create_group`は新規グループ作成を制御する。Nativeの「同僚を探す」入口は閲覧と1対1開始の両方が必要。
 後2つは本部限定の明示権限で、通常ルームの`can_manage`や委任管理者権限からは付かない。
 
 ---
@@ -124,7 +125,8 @@ CSSカスタムプロパティ `--chat-viewport-height` 等は `syncChatViewport
   一覧には出る非DM・非店舗ルーム）。ボタンは「招待で参加」。リンクを貼ると
   `chat_join_by_invite` で入る。グループID指定の無断参加はしない。
 - **友だち**: 自分がDMを持っている相手、および「登録ユーザーから友だちにする」の
-  候補一覧（未DMの人間ユーザー）。
+  候補一覧（未DMの利用可能な人間ユーザー）。候補は全店舗から集めて店舗別に表示し、
+  複数店舗所属者は各店舗欄に出る。既存DMは1つの相手として再利用される。
 - **グループ**: DMでも店舗固定ルームでもない複数人ルーム。
 - **登録ユーザー**: 全ユーザー（Bot以外）を一覧し、チェックして「招待する」で
   既存ルームへ一括招待 or 新規グループ作成できる。

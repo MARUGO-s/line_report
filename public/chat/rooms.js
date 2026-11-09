@@ -92,18 +92,23 @@ function roomAvatarIsBot(group) {
   return !!(group.is_store_room && storeBotLogoForKey(group.store_key));
 }
 
-async function registerDirectFriend(user) {
+async function registerDirectFriend(user, { directorySearch = false } = {}) {
   if (!user || user.id === currentUser.id) return;
   if (!chatAccessAllows('can_start_direct')) {
     alert('1対1トークを開始する権限がありません');
     return;
   }
-  if (!sharesAffiliationWith(user)) {
+  if (directorySearch && !chatAccessAllows('can_browse_users')) {
+    alert('登録ユーザーを参照する権限がありません');
+    return;
+  }
+  if (!directorySearch && !sharesAffiliationWith(user)) {
     alert('1対1トークは所属店舗が同じ相手だけ始められます');
     return;
   }
   try {
-    const { data, error } = await sb.rpc('chat_open_direct', { p_other: user.id });
+    const rpcName = directorySearch ? 'chat_open_direct_for_directory' : 'chat_open_direct';
+    const { data, error } = await sb.rpc(rpcName, { p_other: user.id });
     if (error) throw error;
     await loadGroups();
     const group = myGroups.find((g) => Number(g.id) === Number(data));
@@ -111,6 +116,50 @@ async function registerDirectFriend(user) {
   } catch (error) {
     alert(error.message || '友だちの登録に失敗しました');
   }
+}
+
+function friendDirectoryGroups(query = '') {
+  const peerIds = new Set(
+    myGroups.filter((group) => group.is_direct && group.peer).map((group) => group.peer.id)
+  );
+  const q = String(query || '').trim().toLowerCase();
+  const catalogByKey = new Map(
+    (storeCatalog || []).map((store) => [String(store.store_key || ''), store])
+  );
+  const groupsByKey = new Map();
+  (registeredUsers || []).forEach((user) => {
+    if (!user || user.id === currentUser?.id || isBotUser(user) || peerIds.has(user.id)) return;
+    if (q && !String(user.username || '').toLowerCase().includes(q)) return;
+    const keys = [...new Set(userStoreKeysById[user.id] || [])]
+      .map((key) => String(key || ''))
+      .filter(Boolean);
+    if (!keys.length && user.store_key) keys.push(String(user.store_key));
+    const userKeys = keys.length ? keys : [''];
+    userKeys.forEach((key) => {
+      const store = catalogByKey.get(key);
+      const storeName = key
+        ? String(store?.display_name || storeDisplayLabel(key) || key)
+        : '所属店舗未設定';
+      const storeOrder = Number(store?.sort_order);
+      if (!groupsByKey.has(key)) {
+        groupsByKey.set(key, {
+          store_key: key,
+          store_name: storeName,
+          sort_order: Number.isFinite(storeOrder) ? storeOrder : Number.MAX_SAFE_INTEGER,
+          users: [],
+        });
+      }
+      groupsByKey.get(key).users.push(user);
+    });
+  });
+  return [...groupsByKey.values()]
+    .map((group) => ({
+      ...group,
+      users: group.users.sort((a, b) =>
+        String(a.username || '').localeCompare(String(b.username || ''), 'ja')
+      ),
+    }))
+    .sort((a, b) => a.sort_order - b.sort_order || a.store_name.localeCompare(b.store_name, 'ja'));
 }
 
 async function loadLastMessages() {
@@ -245,6 +294,7 @@ async function loadRegisteredUsers() {
     if (error) throw error;
     registeredUsers = data || [];
     await loadUserStores();
+    if (talkTab === 'friends') await loadStoreCatalog();
   } catch (error) {
     console.error('Load users error:', error);
     registeredUsers = [];
@@ -1972,47 +2022,50 @@ function renderGroups() {
 
   ownHistoryRenderRecovery(mineList);
   if (talkTab === 'friends') {
-    const peerIds = new Set(
-      myGroups.filter((g) => g.is_direct && g.peer).map((g) => g.peer.id)
-    );
     const q = ($('talkSearch').value || '').trim().toLowerCase();
-    const candidates = registeredUsers.filter((u) => (
-      u.id !== currentUser.id
-      && !isBotUser(u)
-      && !peerIds.has(u.id)
-      && sharesAffiliationWith(u)
-      && (!q || u.username.toLowerCase().includes(q))
-    ));
+    const groups = friendDirectoryGroups(q);
     const section = document.createElement('div');
     section.className = 'section-label';
     section.textContent = '登録ユーザーから友だちにする';
     mineList.appendChild(section);
-    if (!candidates.length && !mineVisible.length) {
+    if (!groups.length && !mineVisible.length) {
       const empty = document.createElement('div');
       empty.className = 'empty-note';
-      empty.textContent = myStoreKeys().length
-        ? '所属店舗が同じ登録ユーザーはいません'
-        : '所属店舗を設定すると、同じ店舗の相手と1対1を始められます';
+      empty.textContent = '表示できる登録ユーザーはいません';
       mineList.appendChild(empty);
     }
-    candidates.forEach((user) => {
-      const row = document.createElement('div');
-      row.className = 'user-row';
-      row.innerHTML = `
-        <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username)}">${avatarHtml(user.username, user.icon_url, isStoreBot(user))}</div>
-        <div class="talk-body">
-          <div class="group-item-name">${escapeHtml(user.username)}</div>
-          <div class="group-item-info">1対1トークを始める</div>
-        </div>
-      `;
-      const button = document.createElement('button');
-      button.className = 'join-btn';
-      button.textContent = '登録';
-      button.disabled = !chatAccessAllows('can_start_direct');
-      button.title = button.disabled ? '1対1トークを開始する権限がありません' : '';
-      button.onclick = (e) => { e.stopPropagation(); registerDirectFriend(user); };
-      row.appendChild(button);
-      mineList.appendChild(row);
+    groups.forEach((group) => {
+      const heading = document.createElement('div');
+      heading.className = 'section-label friend-store-heading';
+      heading.textContent = group.store_name;
+      mineList.appendChild(heading);
+      group.users.forEach((user) => {
+        const row = document.createElement('div');
+        row.className = 'user-row';
+        // Username and icon URL are escaped by escapeHtml/avatarHtml; the inline background is a fixed palette value.
+        row.innerHTML = `
+          <div class="talk-avatar" style="background:${user.icon_url ? '#2c2c2e' : avatarStyle(user.username || '')}">${avatarHtml(user.username, user.icon_url, false)}</div>
+          <div class="talk-body">
+            <div class="group-item-name">${escapeHtml(user.username || '')}</div>
+            <div class="group-item-info">1対1トークを始める</div>
+          </div>
+        `;
+        const button = document.createElement('button');
+        button.className = 'join-btn';
+        button.textContent = '登録';
+        const canBrowse = chatAccessAllows('can_browse_users');
+        const canStart = chatAccessAllows('can_start_direct');
+        button.disabled = !canBrowse || !canStart;
+        button.title = !canBrowse
+          ? '登録ユーザーを参照する権限がありません'
+          : (!canStart ? '1対1トークを開始する権限がありません' : '');
+        button.onclick = (e) => {
+          e.stopPropagation();
+          registerDirectFriend(user, { directorySearch: true });
+        };
+        row.appendChild(button);
+        mineList.appendChild(row);
+      });
     });
   }
 
