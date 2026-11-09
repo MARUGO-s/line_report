@@ -5,8 +5,9 @@ alter table public.chat_stickers
 alter table public.chat_stickers
   add constraint chat_stickers_asset_path_check
   check (
-    asset_path ~ '^stickers/face/.+\.(png|webp)$'
-    or asset_path ~ '^stickers/symbol/.+\.png$'
+    asset_path like 'stickers/face/%.png'
+    or asset_path like 'stickers/face/%.webp'
+    or asset_path like 'stickers/symbol/%.png'
   );
 
 insert into public.chat_stickers (id, label, asset_path, sort_order, category, is_active) values
