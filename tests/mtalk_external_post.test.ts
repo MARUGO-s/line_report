@@ -39,7 +39,11 @@ import {
   validateChatNoticeInput,
   INTERNAL_TERMS,
   buildStorePostCard,
+  buildStorePostLineMessages,
+  buildStorePostLineText,
+  isLinePushGroupOrRoomId,
   looksLikePersonalInfo,
+  selectGourmetWeeklyLineRooms,
   STORE_POST_CARD_KIND,
   STORE_POST_FILE_KIND,
   STORE_POST_LIMITS,
@@ -653,6 +657,9 @@ test("store post input: bot, dedupe key, type, title and at least one section ar
   assert.equal(input.dryRun, false)
   assert.equal(validateStorePostInput(storePostBody({ dry_run: true })).dryRun, true)
   assert.equal(validateStorePostInput(storePostBody({ dry_run: "true" })).dryRun, false, "true だけ")
+  assert.equal(validateStorePostInput(storePostBody()).line, false)
+  assert.equal(validateStorePostInput(storePostBody({ line: true })).line, true)
+  assert.equal(validateStorePostInput(storePostBody({ line: "true" })).line, false, "true だけ")
   assert.deepEqual(validateStorePostInput(storePostBody({ room_ids: [30, 5, 30] })).roomIds, [30, 5])
   assert.equal(validateStorePostInput(storePostBody({ files: undefined })).files.length, 0, "PDFは任意")
   assert.throws(() => validateStorePostInput(storePostBody({ bot_id: "x" })), /店舗Bot/)
@@ -724,8 +731,12 @@ test("store post route: signed like the others, posts as the store bot, PDFs sil
   assert.match(fn, /storePostFileDedupeKey\(input\.dedupeKey, i\)/)
   assert.doesNotMatch(fn, /AI_ANALYSIS_BOT_ID|REVIEW_ALERT_KIND/)
   const dry = fn.slice(fn.indexOf("if (input.dryRun)"), fn.indexOf("const results"))
-  assert.doesNotMatch(dry, /postChatCard|postPdfOnce|insert\(/, "dry_run は投稿・予約をしない")
+  assert.doesNotMatch(dry, /postChatCard|postPdfOnce|insert\(|pushLineMessagesToTarget|pushGourmetWeeklyLine/, "dry_run は投稿・予約・LINE送信をしない")
   assert.match(fn, /if \(failed\) throw new Error\("store post failed"\)/)
+  assert.match(fn, /input\.line \? await loadGourmetWeeklyLineRooms/)
+  assert.match(fn, /pushGourmetWeeklyLine\(/)
+  assert.match(fn, /buildStorePostLineMessages\(input\)/)
+  assert.doesNotMatch(fn, /pdf_base64|files\.pdf/, "LINE には PDF を付けない")
   const pdf = src.slice(src.indexOf("async function postPdfOnce("), src.indexOf("async function send("))
   assert.match(pdf, /is_silent: true/)
   assert.match(pdf, /user_id: author\.id/)
@@ -733,4 +744,47 @@ test("store post route: signed like the others, posts as the store bot, PDFs sil
   // /send（「AI分析」のPDF）は従来どおり
   assert.match(pdf, /options\.kind \?\? AI_REPORT_FILE_KIND/)
   assert.match(pdf, /options\.asUser \?\? \{ id: AI_ANALYSIS_BOT_ID, username: AI_ANALYSIS_BOT_USERNAME \}/)
+})
+
+test("store post LINE: only opted-in C/R rooms of the same store; 1:1 and test groups stay out", () => {
+  assert.equal(isLinePushGroupOrRoomId("C162737896a6b9b50ab39376568e3b05a"), true)
+  assert.equal(isLinePushGroupOrRoomId("Rabcdef"), true)
+  assert.equal(isLinePushGroupOrRoomId("U700427cd78f1b9acd6ae7df49f53cc52"), false)
+  assert.equal(isLinePushGroupOrRoomId("mtalk-group-30"), false)
+  const rows = [
+    { room_id: "C162737896a6b9b50ab39376568e3b05a", room_name: "Cava Cava", receipt_report_store_partition_key: "bistrocavacava", gourmet_weekly_line_enabled: true, is_enabled: true, bot_access_approved: true },
+    { room_id: "C4830cca6dfc3e52c0fff3b8b48687f64", room_name: "テストグループ", receipt_report_store_partition_key: "bistrocavacava", gourmet_weekly_line_enabled: false, is_enabled: true, bot_access_approved: true },
+    { room_id: "Cb8debcdb101f893adbc5a8ee2eb79ad5", room_name: "エリア会議", receipt_report_store_partition_key: "bistrocavacava", gourmet_weekly_line_enabled: true, is_enabled: false, bot_access_approved: true },
+    { room_id: "U700427cd78f1b9acd6ae7df49f53cc52", room_name: "personal", receipt_report_store_partition_key: "bistrocavacava", gourmet_weekly_line_enabled: true, is_enabled: true, bot_access_approved: true },
+    { room_id: "mtalk-group-30", room_name: "BistroCAVACAVA", receipt_report_store_partition_key: "bistrocavacava", gourmet_weekly_line_enabled: true, is_enabled: true, bot_access_approved: true },
+    { room_id: "Cffffffff", room_name: "他店", receipt_report_store_partition_key: "marugos", gourmet_weekly_line_enabled: true, is_enabled: true, bot_access_approved: true },
+  ]
+  assert.deepEqual(selectGourmetWeeklyLineRooms(rows, "BISTROCAVACAVA"), [{ roomId: "C162737896a6b9b50ab39376568e3b05a", roomName: "Cava Cava" }])
+  assert.deepEqual(selectGourmetWeeklyLineRooms(rows, ""), [])
+})
+
+test("store post LINE message: mirrors the M-talk card text, keeps the HTML link, and never mentions the PDF", () => {
+  const input = validateStorePostInput(storePostBody({
+    links: [{ label: "週報を開く", url: "https://marugo-s.github.io/gourmet/weekly/89831708-aeac-4d1d-a345-8b345579a27f/2026-11-10/" }],
+  }))
+  const text = buildStorePostLineText(input)
+  assert.match(text, /^\[週報\] BISTRO CAVA CAVA 週報（食べログ・一休）/)
+  assert.match(text, /2026\/10\/05 作成/)
+  assert.match(text, /【食べログ】\n直近7日のPV: 1,234 PV（前週比 \+5\.2%）\n評価: 3\.28（口コミ 50件）\n・ネット予約は前月比 \+12\.0%/)
+  assert.match(text, /【一休】\n直近7日のPV: 456 PV\n予約: 7件（受付日ベース）/)
+  assert.match(text, /数値は各サイトの管理画面・公開ページの取得値です。/)
+  assert.match(text, /週報を開く\nhttps:\/\/marugo-s\.github\.io\/gourmet\/weekly\/89831708-aeac-4d1d-a345-8b345579a27f\/2026-11-10\//)
+  assert.doesNotMatch(text, /PDF/)
+  const messages = buildStorePostLineMessages(input)
+  assert.equal(messages.length, 1)
+  assert.equal(messages[0].type, "flex")
+  const flex = messages[0] as { altText: string; contents: { footer: { contents: Array<{ action: { type: string; label: string; uri: string } }> } } }
+  assert.match(flex.altText, /\[週報\]/)
+  assert.doesNotMatch(flex.altText, /PDF/)
+  assert.equal(flex.contents.footer.contents[0].action.type, "uri")
+  assert.equal(flex.contents.footer.contents[0].action.label, "週報を開く")
+  assert.equal(flex.contents.footer.contents[0].action.uri, "https://marugo-s.github.io/gourmet/weekly/89831708-aeac-4d1d-a345-8b345579a27f/2026-11-10/")
+  const noLink = buildStorePostLineMessages(validateStorePostInput(storePostBody({ links: [], files: [] })))
+  assert.equal(noLink[0].type, "text")
+  assert.doesNotMatch(String((noLink[0] as { text: string }).text), /PDF/)
 })
