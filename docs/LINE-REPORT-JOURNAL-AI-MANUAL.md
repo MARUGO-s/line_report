@@ -775,11 +775,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 `npm run help:check` は、新しい入口が未分類のまま追加された場合に失敗します。
 
 - 公開コード入口: 44件
-- Edge Functions: 22件
+- Edge Functions: 23件
 - 共有TypeScriptモジュール: 116件
-- 補助・運用・レガシーコード: 40件
+- 補助・運用・レガシーコード: 41件
 - admin-api静的ルート: 146件
-- SQL migrations: 320件（全件の構文・関係はGraphify/knowledge:checkで監査）
+- SQL migrations: 321件（全件の構文・関係はGraphify/knowledge:checkで監査）
 - テストファイル: 126件
 
 ### 公開画面・ブラウザコード
@@ -845,6 +845,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `gmail-alert-cron` | RSV-01 / DEV-02 |
 | `line-admin-webhook` | ADM-01 / DEV-02 / SEC-01 |
 | `line-webhook` | SAL-01 / SAL-02 / RSV-01 / OPS-03 / KNW-02 / DEV-02 / SEC-01 |
+| `marugo-gourmet-weekly-line` | OPS-01 / DEV-02 / SEC-01 |
 | `mtalk-external-post` | OPS-01 / OPS-02 / DEV-02 / SEC-01 |
 | `mtalk-loan-report` | OPS-01 / OPS-02 / DEV-02 / SEC-01 |
 | `pv-japan-alert-cron` | FCT-06 / DEV-02 |
@@ -1007,6 +1008,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `scripts/generate-line-report-help-manual.ts` | DEV-04 |
 | `scripts/import-profile-icons.mjs` | OPS-01 / DEV-04 |
 | `scripts/local-line-report-pages.sh` | DEV-04 |
+| `scripts/marugo-gourmet-weekly.sh` | DEV-04 |
 | `scripts/migrate-bistrocavacava-jhpm-to-hocbn.mjs` | SAL-04 / SAL-06 / DEV-04 / SEC-01 |
 | `scripts/open-local-admin.sh` | DEV-04 |
 | `scripts/parse-pos-journal.py` | JRN-02 / JRN-05 / DEV-04 |

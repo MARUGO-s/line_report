@@ -75,6 +75,13 @@ verify_jwt = false
 [functions.tokyo-dome-weekly-cron]
 verify_jwt = false
 
+# marugo-gourmet-weekly-line は共有の作業用コンピューターの scripts/marugo-gourmet-weekly.sh から呼ばれ、
+# MARUGO S グルメサイト週報（GitHub Pages の HTML）のリンクを LINE グループ C51a3c…f52 へ 1 通送る。
+# 呼び出し元は Supabase の JWT を持たないため verify_jwt = false。関数入口で専用キー（SHA-256 を
+# marugo_gourmet_weekly_line_auth と固定時間比較）を必須にし、宛先・URL の形・本文の形は関数側で固定。
+[functions.marugo-gourmet-weekly-line]
+verify_jwt = false
+
 # foodcourt-forecast-cron は pg_cron（JST05:00）から呼ばれる自己再学習型の来客予測。verify_jwt は他cronと同様 false。
 # 関数入口では CRON_AUTH_TOKEN を必須にする。forecast_predictions の一意upsertは重複防止に使う。
 [functions.foodcourt-forecast-cron]
