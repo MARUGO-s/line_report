@@ -85,7 +85,8 @@ gourmet の `agent-api POST /weekly/deliver`（Grok Bot の月曜の作業から
   "note": "数値は各サイトの管理画面・公開ページの取得値です。",
   "links": [{ "label": "アプリで見る", "url": "https://marugo-s.github.io/gourmet/" }],
   "files": [{ "pdf_base64": "JVBERi0…", "filename": "BISTRO CAVA CAVA weekly 2026-10-05.pdf" }],
-  "dry_run": false
+  "dry_run": false,
+  "line": false
 }
 ```
 
@@ -96,10 +97,12 @@ gourmet の `agent-api POST /weekly/deliver`（Grok Bot の月曜の作業から
 - お客様の個人情報らしき文字列（メールアドレス・日本の電話番号）がカードのどこかにあれば 422 で受け付けません（gourmet 側でも同じ確認をします）。カードは件数・評価・PV などの集計だけにしてください。
 - `room_ids` を省くと Bot が参加している全グループ（1対1・ゴミ箱・管理者通知を除く）。指定しても参加していないルームには送りません（全部外れたら 404）。投稿者名は「<店舗名> bot」（`loadMtalkStoreBot`）。
 - 冪等性: 同じルームに同じ `dedupe_key` のカードは 1 回だけ、PDF は `<dedupe_key>:f<番号>` ごとに 1 回だけ（`chat_alert_dispatches`）。gourmet は店舗×週（作成日の週の月曜、日本時間）で同じキーを使うので、月曜の作業をやり直しても二重に届きません。
-- 応答: `{ ok, bot_id, bot_name, rooms: [{ group_id, name, card_message_id, file_message_ids, deduplicated }], deduplicated }`。1 つでもルームへの投稿に失敗すると 502（同じ `dedupe_key` でやり直すと投稿済みのカード・PDF は飛ばされる）。Bot・ルームが見つからないは 404、同じ PDF を処理中は 409。
-- `dry_run: true`: 何も投稿・予約せず、Bot・送り先ルーム（`already_sent` 付き）・組み立てたカード（`text`・`cards`）・PDF の名前と大きさだけを返す。最初の配信の前の確認に使う。
+- 応答: `{ ok, bot_id, bot_name, rooms: [{ group_id, name, card_message_id, file_message_ids, deduplicated }], deduplicated, line? }`。1 つでもルームへの投稿（または `line: true` の LINE 送信）に失敗すると 502（同じ `dedupe_key` でやり直すと投稿済みのカード・PDF・LINE は飛ばされる）。Bot・ルームが見つからないは 404、同じ PDF を処理中は 409。
+- `dry_run: true`: 何も投稿・予約せず、Bot・送り先ルーム（`already_sent` 付き）・組み立てたカード（`text`・`cards`）・PDF の名前と大きさだけを返す。最初の配信の前の確認に使う。`line: true` のときは、オプトイン済み LINE グループ（名前と `already_sent`）と LINE 用の本文プレビュー（`line.text`）も返す。LINE へは送らない。
+- `line: true`: M-talk のカードと同じ内容（見出し・項目・要点・注記）と「週報を開く」リンクを、店舗キーに紐づくオプトイン済み LINE グループ（`room_summary_settings.gourmet_weekly_line_enabled`、C…/R…のみ）へ 1 通だけ送る。PDF は付けない。同じ `dedupe_key` は `gourmet_weekly_line_sends` でルームごとに 1 回だけ。送り先が無ければ M-talk への投稿は成功のまま `line.skipped = "no_opted_in_line_rooms"`。既定は送らない。
+- トークンは既存の店舗別 `LINE_CHANNEL_ACCESS_TOKEN__<STORE_KEY>`（例: `bistrocavacava` → `LINE_CHANNEL_ACCESS_TOKEN__BISTROCAVACAVA`）。新しい秘密情報は不要。
 
-新しい migration・秘密情報はありません（`chat_alert_dispatches` に新しい kind の行が増えるだけ）。配備は `main` へのマージで Actions が `mtalk-external-post` を配備します。gourmet の `agent-api` は、この配備の後に配備してください（先に gourmet だけ配備すると `/store-post` が 404 "not found" になり、gourmet は 502 として失敗を返します）。
+`line` を使うには migration `20261111120000_gourmet_weekly_line_opt_in.sql`（列 `gourmet_weekly_line_enabled` と表 `gourmet_weekly_line_sends`）が必要です。新しい秘密情報はありません。配備は `main` へのマージで Actions が migration と `mtalk-external-post` を配備します。gourmet の `agent-api` は、この配備の後に配備してください（先に gourmet だけ配備すると `/store-post` が 404 "not found" になり、gourmet は 502 として失敗を返します）。LINE へ送りたいルームは、配備後に `gourmet_weekly_line_enabled = true` を対象グループだけへ設定する（例: BISTRO CAVA CAVA の「Cava Cava」）。migration だけでは有効になりません。
 
 ## DB（migration `20261001000000_chat_ai_analysis_bot.sql`）
 

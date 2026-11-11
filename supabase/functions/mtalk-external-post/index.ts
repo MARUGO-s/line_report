@@ -9,9 +9,10 @@
  *                     gourmet の口コミ通知（新着口コミ・食べログ総合点の変化）を店舗Botとしてルームへ。カードはこの関数が組み立て、
  *                     リンクは許可したホストだけ。同じルームに同じ dedupe_key は1回だけ（chat_alert_dispatches、kind = gourmet_review_alert）。
  *                     旧形式 { recipient_user_id, ... }（「AI分析」Botとの1対1）も互換のため受け付ける。
- *   POST /store-post  { bot_id, room_ids?, dedupe_key, type: "weekly_report", store_name, title, subtitle?, sections[], note?, links?, files?[], dry_run? }
+ *   POST /store-post  { bot_id, room_ids?, dedupe_key, type: "weekly_report", store_name, title, subtitle?, sections[], note?, links?, files?[], dry_run?, line? }
  *                     店舗Botとして要約カード1通＋PDF（最大3つ、静かに続ける）をルームへ（gourmet の週報）。/alert とは別の入口・別の kind
  *                     （カード gourmet_store_post、PDF gourmet_store_post_file。同じルームに同じ dedupe_key は1回だけ）。dry_run は投稿せず確認だけ。
+ *                     line: true なら、同じカード本文と週報HTMLリンクをオプトイン済み LINE グループへ1通だけ送る（PDFは付けない。gourmet_weekly_line_sends で重複防止）。
  *   POST /chat-dispatch { message_id }  ← DBトリガー（pg_net）専用。「AI分析」Botとの1対1への質問に答える。
  *                     認証は chat-search と同じ chat_push_internal_config.dispatch_secret（Bearer、定数時間比較）。
  *                     gourmet ai-analyst POST /mtalk-chat へは GOURMET_MTALK_TOKEN + HMAC 署名（逆方向も同じ規則）。
@@ -71,12 +72,18 @@ import {
   type LoginLink,
   validateChatNoticeInput,
   buildStorePostCard,
+  buildStorePostLineMessages,
+  buildStorePostLineText,
+  GOURMET_WEEKLY_LINE_CONTEXT,
+  GOURMET_WEEKLY_LINE_SENDS_TABLE,
+  selectGourmetWeeklyLineRooms,
   STORE_POST_CARD_KIND,
   STORE_POST_FILE_KIND,
   STORE_POST_PATH,
   storePostFileDedupeKey,
   validateStorePostInput,
 } from "../_shared/mtalk_external_post.ts"
+import { pushLineMessagesToTarget, resolveChannelAccessToken } from "../_shared/line_client.ts"
 import { loadMtalkStoreBot } from "../_shared/mtalk_room_settings.ts"
 
 // deno-lint-ignore no-explicit-any
@@ -302,7 +309,7 @@ async function storeBotRooms(supabase: DbClient, botId: string, roomIds: number[
   if (gError) throw new Error("store bot rooms failed")
   const rooms = alertRooms((groups ?? []) as BotRoomRow[], roomIds)
   if (!rooms.length) throw new ExternalPostError(roomIds ? "選んだルームにこの店舗Botが参加していません" : "この店舗Botが参加しているグループのルームがありません", 404)
-  return { asUser, rooms }
+  return { asUser, rooms, storeKey: String((bot as { store_key?: unknown }).store_key ?? "").trim() }
 }
 
 // gourmet の口コミ通知（カードのみ・PDFなし）
@@ -345,7 +352,59 @@ async function alert(supabase: DbClient, bodyText: string) {
   return { ok: true, bot_id: botId, bot_name: asUser.username, rooms: results, deduplicated: results.every((r) => r.deduplicated) }
 }
 
-// ---------- 店舗Botの投稿（gourmet の週報: カード＋PDF） ----------
+// ---------- 店舗Botの投稿（gourmet の週報: カード＋PDF。任意で LINE グループへ同じ本文） ----------
+async function loadGourmetWeeklyLineRooms(supabase: DbClient, storeKey: string) {
+  const key = String(storeKey ?? "").trim()
+  if (!key) return []
+  const { data, error } = await supabase
+    .from("room_summary_settings")
+    .select("room_id, room_name, receipt_report_store_partition_key, gourmet_weekly_line_enabled, is_enabled, bot_access_approved")
+    .eq("receipt_report_store_partition_key", key)
+  if (error) throw new Error("gourmet weekly line rooms failed")
+  return selectGourmetWeeklyLineRooms((data ?? []) as Record<string, unknown>[], key)
+}
+
+async function lineSendAlready(supabase: DbClient, roomId: string, dedupeKey: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from(GOURMET_WEEKLY_LINE_SENDS_TABLE)
+    .select("room_id")
+    .eq("room_id", roomId)
+    .eq("dedupe_key", dedupeKey)
+    .maybeSingle()
+  if (error) throw new Error("gourmet weekly line dedupe lookup failed")
+  return Boolean(data)
+}
+
+async function pushGourmetWeeklyLine(
+  supabase: DbClient,
+  input: { storeKey: string; roomId: string; roomName: string; dedupeKey: string; messages: Record<string, unknown>[] },
+): Promise<{ room_id: string; name: string; deduplicated: boolean }> {
+  const reserved = await supabase.from(GOURMET_WEEKLY_LINE_SENDS_TABLE).insert({
+    room_id: input.roomId,
+    dedupe_key: input.dedupeKey,
+    store_partition_key: input.storeKey,
+  })
+  if (reserved.error) {
+    if (String(reserved.error.code ?? "") === "23505") return { room_id: input.roomId, name: input.roomName, deduplicated: true }
+    throw new Error("gourmet weekly line dedupe reserve failed")
+  }
+  const token = resolveChannelAccessToken(input.storeKey)
+  if (!token) {
+    try { await supabase.from(GOURMET_WEEKLY_LINE_SENDS_TABLE).delete().eq("room_id", input.roomId).eq("dedupe_key", input.dedupeKey) } catch (_e) { /* noop */ }
+    throw new Error("missing line token")
+  }
+  const sent = await pushLineMessagesToTarget(input.roomId, input.messages, token, {
+    storePartitionKey: input.storeKey,
+    context: GOURMET_WEEKLY_LINE_CONTEXT,
+    roomId: input.roomId,
+  })
+  if (!sent.ok) {
+    try { await supabase.from(GOURMET_WEEKLY_LINE_SENDS_TABLE).delete().eq("room_id", input.roomId).eq("dedupe_key", input.dedupeKey) } catch (_e) { /* noop */ }
+    throw new Error(sent.error ?? "LINE push failed")
+  }
+  return { room_id: input.roomId, name: input.roomName, deduplicated: false }
+}
+
 async function storePost(supabase: DbClient, bodyText: string) {
   let raw: unknown
   try {
@@ -355,16 +414,30 @@ async function storePost(supabase: DbClient, bodyText: string) {
   }
   const input = validateStorePostInput(raw)
   const { text, cards } = buildStorePostCard(input)
-  const { asUser, rooms } = await storeBotRooms(supabase, input.botId, input.roomIds)
+  const { asUser, rooms, storeKey } = await storeBotRooms(supabase, input.botId, input.roomIds)
   const files = input.files.map((f) => ({ filename: f.fileName, bytes: f.pdf.byteLength }))
+  const lineTargets = input.line ? await loadGourmetWeeklyLineRooms(supabase, storeKey) : []
+  const lineText = input.line ? buildStorePostLineText(input) : null
   if (input.dryRun) {
-    // 投稿しない（Bot・ルーム・カードの確認だけ）。送信済みかどうかも返す
+    // 投稿しない（Bot・ルーム・カードの確認だけ）。送信済みかどうかも返す。LINE へも送らない。
     const preview = []
     for (const room of rooms) {
       const sent = await dispatchMessageId(supabase, STORE_POST_CARD_KIND, room.id, input.dedupeKey)
       preview.push({ group_id: room.id, name: room.name, is_store_room: room.isStoreRoom, already_sent: Boolean(sent?.message_id) })
     }
-    return { ok: true, dry_run: true, bot_id: input.botId, bot_name: asUser.username, rooms: preview, text, cards, files }
+    const line = input.line
+      ? {
+        enabled: true,
+        text: lineText,
+        targets: await Promise.all(lineTargets.map(async (t) => ({
+          room_id: t.roomId,
+          name: t.roomName,
+          already_sent: await lineSendAlready(supabase, t.roomId, input.dedupeKey),
+        }))),
+        skipped: lineTargets.length ? undefined : "no_opted_in_line_rooms",
+      }
+      : undefined
+    return { ok: true, dry_run: true, bot_id: input.botId, bot_name: asUser.username, rooms: preview, text, cards, files, line }
   }
 
   const results: { group_id: number; name: string; card_message_id: number | null; file_message_ids: number[]; deduplicated: boolean }[] = []
@@ -395,7 +468,26 @@ async function storePost(supabase: DbClient, bodyText: string) {
   }
   // 1つでも失敗したら 502（gourmet は同じ dedupe_key でやり直す。投稿済みのカード・PDFはルームごとに飛ばされる）
   if (failed) throw new Error("store post failed")
-  return { ok: true, bot_id: input.botId, bot_name: asUser.username, rooms: results, deduplicated: results.every((r) => r.deduplicated) }
+
+  const lineResults: { room_id: string; name: string; deduplicated: boolean }[] = []
+  if (input.line) {
+    const messages = buildStorePostLineMessages(input)
+    for (const target of lineTargets) {
+      try {
+        lineResults.push(await pushGourmetWeeklyLine(supabase, {
+          storeKey, roomId: target.roomId, roomName: target.roomName, dedupeKey: input.dedupeKey, messages,
+        }))
+      } catch (error) {
+        console.error("[mtalk-external-post] store post line failed:", error instanceof Error ? error.message.slice(0, 80) : "unknown")
+        failed++
+      }
+    }
+    if (failed) throw new Error("store post failed")
+  }
+  const line = input.line
+    ? { enabled: true, targets: lineResults, skipped: lineTargets.length ? undefined : "no_opted_in_line_rooms", deduplicated: lineResults.length ? lineResults.every((r) => r.deduplicated) : true }
+    : undefined
+  return { ok: true, bot_id: input.botId, bot_name: asUser.username, rooms: results, deduplicated: results.every((r) => r.deduplicated), line }
 }
 
 // ---------- 「AI分析」Bot への質問 → gourmet の AI分析 → Bot の返信 ----------

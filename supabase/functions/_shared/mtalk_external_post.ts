@@ -705,6 +705,8 @@ export function validateChatNoticeInput(raw: unknown): ChatNoticeInput {
 // お客様の個人情報（メールアドレス・電話番号）らしき文字列がカードにあれば受け付けない（念のため。gourmet 側でも確認する）。
 // 同じルームに同じ dedupe_key は1回だけ（カード: chat_alert_dispatches kind = gourmet_store_post、
 // PDF: kind = gourmet_store_post_file、dedupe_key = <dedupe_key>:f<番号>）。
+// line: true のときは、同じカード本文と週報HTMLリンクを、店舗キーに紐づくオプトイン済み LINE グループ（C…/R…）へ
+// 1通だけ push する（PDFは付けない。重複防止は gourmet_weekly_line_sends）。
 export const STORE_POST_PATH = '/store-post'
 export const STORE_POST_CARD_KIND = 'gourmet_store_post'
 export const STORE_POST_FILE_KIND = 'gourmet_store_post_file'
@@ -760,6 +762,8 @@ export type StorePostInput = {
   links: { label: string; url: string }[]
   files: StorePostFile[]
   dryRun: boolean
+  /** true のとき、店舗のオプトイン済み LINE グループへ同じカード本文＋週報HTMLリンクを1通送る（PDFは送らない）。 */
+  line: boolean
 }
 
 /** POST /store-post の本文を検証する。/alert の形式（score_changes・reviews）は受け付けない。 */
@@ -805,6 +809,7 @@ export function validateStorePostInput(raw: unknown): StorePostInput {
     botId: String(v.bot_id).toLowerCase(), roomIds, dedupeKey, type, storeName, title,
     subtitle: cleanText(v.subtitle, L.subtitleMax), sections, note: cleanText(v.note, L.noteMax, { multiline: true }), links, files,
     dryRun: v.dry_run === true,
+    line: v.line === true,
   }
   const texts = [input.storeName, input.title, input.subtitle, input.note, ...sections.flatMap((s) => [s.heading, ...s.fields.flatMap((f) => [f.label, f.value]), ...s.items])]
   if (texts.some(looksLikePersonalInfo)) throw new ExternalPostError('カードに個人情報らしき文字列（メールアドレス・電話番号）が含まれています', 422)
@@ -841,4 +846,146 @@ export function buildStorePostCard(input: Pick<StorePostInput, 'type' | 'storeNa
       actions: input.links.map((l, i) => ({ label: l.label, url: l.url, style: i === 0 ? 'primary' as const : 'secondary' as const })),
     }],
   }
+}
+
+
+export const GOURMET_WEEKLY_LINE_SENDS_TABLE = 'gourmet_weekly_line_sends'
+export const GOURMET_WEEKLY_LINE_CONTEXT = 'gourmet_weekly_line'
+
+export type GourmetWeeklyLineRoomRow = {
+  room_id?: unknown
+  room_name?: unknown
+  receipt_report_store_partition_key?: unknown
+  gourmet_weekly_line_enabled?: unknown
+  is_enabled?: unknown
+  bot_access_approved?: unknown
+}
+
+/** LINE のグループ(C…)/ルーム(R…)宛だけ。1:1(U…) と M-talk 合成IDは対象外。 */
+export function isLinePushGroupOrRoomId(roomId: string): boolean {
+  return /^[CR][A-Za-z0-9]+$/.test(String(roomId ?? '').trim())
+}
+
+/**
+ * 店舗の週報を LINE へ送ってよいルーム。
+ * オプトイン（gourmet_weekly_line_enabled）かつ有効・Bot承認済みで、同じ店舗キーのグループ/ルームだけ。
+ */
+export function selectGourmetWeeklyLineRooms(
+  rows: GourmetWeeklyLineRoomRow[] | null | undefined,
+  storeKey: string,
+): { roomId: string; roomName: string }[] {
+  const key = String(storeKey ?? '').trim().toLowerCase()
+  if (!key) return []
+  const seen = new Set<string>()
+  const out: { roomId: string; roomName: string }[] = []
+  for (const row of rows ?? []) {
+    if (row.gourmet_weekly_line_enabled !== true) continue
+    if (row.is_enabled === false) continue
+    if (row.bot_access_approved !== true) continue
+    if (String(row.receipt_report_store_partition_key ?? '').trim().toLowerCase() !== key) continue
+    const roomId = String(row.room_id ?? '').trim()
+    if (!isLinePushGroupOrRoomId(roomId) || seen.has(roomId)) continue
+    seen.add(roomId)
+    out.push({ roomId, roomName: String(row.room_name ?? '').trim() })
+  }
+  return out
+}
+
+/**
+ * M-talk の週報カードと同じ内容のテキスト（PDFの案内は付けない。リンクは末尾）。
+ * LINE の本文・通知用 altText の元にする。
+ */
+export function buildStorePostLineText(input: Pick<StorePostInput, 'type' | 'title' | 'subtitle' | 'sections' | 'note' | 'links'>): string {
+  const meta = STORE_POST_TYPES[input.type] ?? { eyebrow: 'お知らせ', prefix: '[お知らせ]' }
+  const lines = [`${meta.prefix} ${input.title}`]
+  if (input.subtitle) lines.push(input.subtitle)
+  for (const s of input.sections) {
+    lines.push('')
+    if (s.heading) lines.push(`【${s.heading}】`)
+    for (const f of s.fields) lines.push(`${f.label}: ${f.value}`)
+    for (const item of s.items) lines.push(`・${item}`)
+  }
+  if (input.note) {
+    lines.push('')
+    lines.push(input.note)
+  }
+  for (const l of input.links) {
+    lines.push('')
+    lines.push(l.label)
+    lines.push(l.url)
+  }
+  return cleanText(lines.join('\n'), 4900, { multiline: true })
+}
+
+/** LINE へ送る1通。同じ本文の Flex（主ボタン＝週報HTMLリンク）。リンクが無ければテキストのみ。PDFは付けない。 */
+export function buildStorePostLineMessages(input: Pick<StorePostInput, 'type' | 'storeName' | 'title' | 'subtitle' | 'sections' | 'note' | 'links'>): Record<string, unknown>[] {
+  const text = buildStorePostLineText(input)
+  const primary = input.links[0]
+  if (!primary) return [{ type: 'text', text }]
+  const meta = STORE_POST_TYPES[input.type] ?? { eyebrow: 'お知らせ', prefix: '[お知らせ]' }
+  const eyebrow = input.title.includes(input.storeName) ? meta.eyebrow : `${meta.eyebrow} · ${input.storeName}`
+  const alt = truncateLineAlt(text, 380)
+  const bodyLines: Array<Record<string, unknown>> = []
+  if (input.subtitle) {
+    bodyLines.push({ type: 'text', text: input.subtitle, size: 'xs', color: '#8A94A6', wrap: true })
+  }
+  let sectionStarted = false
+  for (const s of input.sections) {
+    if (sectionStarted) bodyLines.push({ type: 'separator', margin: 'lg' })
+    sectionStarted = true
+    if (s.heading) bodyLines.push({ type: 'text', text: s.heading, weight: 'bold', size: 'sm', color: '#1F2D3D', margin: 'md' })
+    for (const f of s.fields) {
+      bodyLines.push({
+        type: 'box',
+        layout: 'baseline',
+        margin: 'sm',
+        contents: [
+          { type: 'text', text: f.label, size: 'sm', color: '#8A94A6', flex: 4, wrap: true },
+          { type: 'text', text: f.value, size: 'sm', color: '#333333', flex: 6, wrap: true, align: 'end' },
+        ],
+      })
+    }
+    for (const item of s.items) {
+      bodyLines.push({ type: 'text', text: `・${item}`, size: 'sm', color: '#333333', wrap: true, margin: 'sm' })
+    }
+  }
+  if (input.note) {
+    bodyLines.push({ type: 'separator', margin: 'lg' })
+    bodyLines.push({ type: 'text', text: input.note, size: 'xs', color: '#8A94A6', wrap: true, margin: 'md' })
+  }
+  return [{
+    type: 'flex',
+    altText: alt,
+    contents: {
+      type: 'bubble',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#1F2D3D',
+        paddingAll: '16px',
+        spacing: 'xs',
+        contents: [
+          { type: 'text', text: eyebrow, color: '#FFFFFFCC', size: 'xs' },
+          { type: 'text', text: input.title, color: '#FFFFFF', size: 'md', weight: 'bold', wrap: true, margin: 'sm' },
+        ],
+      },
+      body: { type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'sm', contents: bodyLines.length ? bodyLines : [{ type: 'text', text, size: 'sm', wrap: true }] },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '12px',
+        contents: [{
+          type: 'button',
+          style: 'primary',
+          color: '#1F2D3D',
+          action: { type: 'uri', label: primary.label.slice(0, 20), uri: primary.url },
+        }],
+      },
+    },
+  }]
+}
+
+function truncateLineAlt(v: string, max: number): string {
+  const s = String(v ?? '').replace(/\s+/g, ' ').trim()
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
