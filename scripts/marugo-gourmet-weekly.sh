@@ -81,7 +81,7 @@ if [ "$skip_publish" -eq 0 ]; then
     if grep -qi 'name="robots"' "$html"; then
       cp "$html" "$dest_dir/$report_date.html"
     else
-      perl -0pe 's/(<head[^>]*>)/$1\n<meta name="robots" content="noindex,nofollow">/i' "$html" > "$dest_dir/$report_date.html"
+      perl -0pe 's/(<head(?:\s[^>]*)?>)/$1\n<meta name="robots" content="noindex,nofollow">/i' "$html" > "$dest_dir/$report_date.html"
     fi
     cp "$dest_dir/$report_date.html" "$dest_dir/latest.html"
     git add "$dest_dir/$report_date.html" "$dest_dir/latest.html"
