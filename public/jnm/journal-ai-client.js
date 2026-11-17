@@ -5,13 +5,13 @@
 (function (global) {
   'use strict';
 
-  // チャット画面の待機状態を永続させないための上限。Edge Function 側の
-  // 全体締切（85秒）より少し余裕を持たせ、失敗時は呼び出し元のローカル回答へ退避する。
+  // チャット画面の待機状態を永続させないための上限。
   // Supabase の request idle timeout は 150s。そこに達すると 504 になり
   // フォールバック文言すら出せないため、その内側で待つ。
-  // ai-analyze 側は 115s で自ら打ち切って説明付きの応答を返すので、
-  // クライアントはそれより長く待ち、サーバーの説明を優先させる。
-  var DEFAULT_AI_REQUEST_TIMEOUT_MS = 140000;
+  // ai-analyze の分析準備後の共通期限145s（OpenAI単独140s）より長く待つ。
+  // 認証・共有データ取得と合成後の記録時間はその期限の外側なので、
+  // サーバー応答を保証する値ではない。148sで中止し、呼び出し元のローカル回答へ退避する。
+  var DEFAULT_AI_REQUEST_TIMEOUT_MS = 148000;
 
   async function request(endpoint, payload, options) {
     var opts = options || {};

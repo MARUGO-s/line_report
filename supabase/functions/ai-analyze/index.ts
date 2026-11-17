@@ -1,5 +1,5 @@
 // Supabase Edge Function: AI Analyze / Chat
-// 数値検証・統合の既定は OpenAI gpt-5.6-luna。失敗時は Claude Haiku へフォールバック。
+// 数値検証・統合の既定は OpenAI gpt-6.1-sol。失敗時は Claude Haiku へフォールバック。
 // 戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから統合。
 // 外部AIへ送る直前に、予約氏名・連絡先・アレルギー詳細を最小化する。
 
@@ -40,7 +40,7 @@ import {
   normalizeKpiAssumptions,
 } from "../_shared/kpi_scenario.ts";
 
-const OPENAI_MODEL_DEFAULT = "gpt-5.6-luna";
+const OPENAI_MODEL_DEFAULT = "gpt-6.1-sol";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const CLAUDE_MODEL_DEFAULT = "claude-haiku-4-5";
 const CLAUDE_ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -93,9 +93,8 @@ type SynthesizerResult =
 // 実測の生成速度は約100トークン/秒（5,200トークンに51秒）。
 //   枠 5,200  -> 51秒で思考が枠を食い切り、本文が空(finish_reason=length)
 //   枠 12,000 -> 生成しきれず70秒で時間切れ
-// 与えられる時間(100秒)で完了しうる量にする。100秒×100トークン/秒 ≒ 10,000。
-// 余裕を見て 9,000。これを超える要求は単発では返せないため、質問の範囲を
-// 狭めるかストリーミング化が要る。
+// 従来100秒枠で採用した9,000を維持する。待機上限の延長だけで出力枠は増やさない。
+// 過大な要求は質問の範囲を狭めるかストリーミング化が要る。
 const OPENAI_COMPLETION_BUDGET_PRIMARY = 9000;
 /** 文脈長など入力由来の失敗時だけ使う縮小再試行枠。 */
 const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
@@ -105,10 +104,12 @@ const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
  * 上限の決め方（外側から順に決まる）:
  *   Supabase の request idle timeout 150s ... 超えると 504 になり、
  *     こちらのフォールバック文言もローカル集計も出せない。絶対に触れない。
- *   クライアント journal-ai-client.js  135s ... 150s の内側。
- *   このリクエスト全体 DEADLINE       115s ... クライアントより先に自分で
- *     打ち切り、AI接続エラーの説明とローカル集計へ確実に切り替える。
- *   OpenAI 70s + Claude 40s = 110s    ... DEADLINE の内側に収まる。
+ *   クライアント journal-ai-client.js  148s ... 150s の内側。
+ *   分析準備後の共通 DEADLINE         145s ... 外部ブリーフと合成が共有。
+ *   OpenAI 単独上限                   140s ... 残り期限でさらに短縮する。
+ *   Claude 上限55s / ヘッジ開始45sは維持。先着でなくOpenAI成功を優先する。
+ *   認証・共有データ取得は期限設定前、usage等の記録と応答送信は合成後。
+ *   この数値はHTTP受付から送信完了までの厳密な全体保証ではない。
  *
  * 旧値は 30s/25s で、合計54秒しか使わないまま85秒の枠を31秒残して失敗して
  * いた。gpt-5.6-luna は推論モデルで思考トークンも完了枠を食うため、7ヶ月分×
@@ -118,19 +119,18 @@ const OPENAI_COMPLETION_BUDGET_RETRY = 3200;
 // ヘッジ導入後、OpenAI と Claude は45秒以降そもそも並走する。したがって
 // 上限は「両者の合計」ではなく「各々が全体期限に収まるか」で決まる。
 // OpenAI が45秒より前に失敗した場合でも 45+55=100 秒で期限内に収まる。
-const OPENAI_REQUEST_TIMEOUT_MS = 100_000;
+const OPENAI_REQUEST_TIMEOUT_MS = 140_000;
 // Haiku も同じ枠を生成するため、40秒では足りず毎回時間切れになっていた
 // （実測 33〜50秒で打ち切り）。ヘッジ開始45秒＋55秒＝100秒で期限内。
 const CLAUDE_REQUEST_TIMEOUT_MS = 55_000;
-/** 外部ブリーフ取得を含む、1回の分析リクエスト全体の上限。 */
-const JOURNAL_AI_REQUEST_DEADLINE_MS = 125_000;
+/** 分析準備後に設定し、外部ブリーフ取得と合成が共有する期限。HTTP全体の上限ではない。 */
+const JOURNAL_AI_REQUEST_DEADLINE_MS = 145_000;
 /**
  * OpenAI を単独で待つ時間。これを過ぎても応答が無ければ Claude を併走させ、
- * 先に返った方を採る（ヘッジ）。
+ * OpenAI が失敗した場合だけ、その同じClaude実行を採る（ヘッジ）。
  *
- * 直列だと OpenAI の上限70秒を使い切ってから Claude の40秒が始まり、
- * 最悪110秒かかる。併走なら最悪85秒で、プロンプトも要求も同一なので
- * 出力内容は変わらない。
+ * OpenAI の成功待ちは140秒まで許容する。Claudeは45秒後に併走し、
+ * OpenAI失敗時の待ち時間だけを縮める。各試行は共通期限の残り時間で短縮する。
  *
  * 45秒にしているのは、実測で成功した重い分析の合成が約63秒だった一方、
  * 通常の応答はこれより十分速いため。45秒以内に返る限り Claude は起動せず、
@@ -1049,12 +1049,9 @@ function resolveOpenAiApiKey(): string {
 }
 
 function resolveOpenAiModel(): string {
-  return String(
-    Deno.env.get("JOURNAL_OPENAI_MODEL") ||
-      Deno.env.get("OPENAI_MODEL") ||
-      Deno.env.get("FOODCOURT_OPENAI_MODEL") ||
-      "",
-  ).trim() || OPENAI_MODEL_DEFAULT;
+  // Journal専用の指定だけを許可し、他アプリのモデル設定とは分離する。
+  return String(Deno.env.get("JOURNAL_OPENAI_MODEL") || "").trim() ||
+    OPENAI_MODEL_DEFAULT;
 }
 
 function resolveClaudeApiKey(): string {
@@ -1089,7 +1086,7 @@ async function callOpenAiClarifier(
       model,
     };
   }
-  const isReasoning = /^o\d/.test(model) || /^gpt-5/.test(model);
+  const isReasoning = /^o\d/.test(model) || /^gpt-(?:[5-9]|[1-9]\d+)(?:[.-]|$)/.test(model);
   const providerMessages = messages.map((item) =>
     isReasoning && item.role === "system"
       ? { ...item, role: "developer" }
@@ -1109,6 +1106,7 @@ async function callOpenAiClarifier(
         },
         body: JSON.stringify({
           model,
+          store: false,
           messages: providerMessages,
           ...tokenParam,
         }),
@@ -1360,9 +1358,9 @@ async function callOpenAiLuna(
     return { ok: false, error: "journal AI request deadline exceeded", model };
   }
 
-  // gpt-5 系は max_tokens を拒否し max_completion_tokens を要求。
+  // GPT-5以降とo系は max_completion_tokens と低い推論量を使う。
   // 思考トークンも同枠を消費するため余裕を足し、reasoning_effort:'low' で抑える。
-  const isReasoning = /^o\d/.test(model) || /^gpt-5/.test(model);
+  const isReasoning = /^o\d/.test(model) || /^gpt-(?:[5-9]|[1-9]\d+)(?:[.-]|$)/.test(model);
   const messages = contentsToOpenAiMessages(contents).map((m) =>
     isReasoning && m.role === "system" ? { ...m, role: "developer" } : m
   );
@@ -1379,6 +1377,7 @@ async function callOpenAiLuna(
       },
       body: JSON.stringify({
         model,
+        store: false,
         messages,
         ...tokenParam,
       }),
@@ -1469,7 +1468,7 @@ async function callClaude(
 }
 
 /**
- * 既定: gpt-5.6-luna（通常枠）→ gpt-5.6-luna（縮小枠）→ Claude Haiku。
+ * 既定: gpt-6.1-sol（通常枠）→ gpt-6.1-sol（縮小枠）→ Claude Haiku。
  *
  * 縮小枠での再試行を挟むのは、入力が大きいときに「入力＋完了枠」が
  * モデル上限を圧迫して弾かれる形の失敗を、Haiku へ落とさず救うため。
@@ -1546,7 +1545,7 @@ async function synthesizeWithFallback(
   if (firstSettled === "hedge") {
     hedged = true;
     console.warn(
-      `OpenAI Luna is still running after ${SYNTH_HEDGE_DELAY_MS}ms; pre-warming Claude Haiku`,
+      `OpenAI is still running after ${SYNTH_HEDGE_DELAY_MS}ms; pre-warming Claude Haiku`,
     );
     // 待たずに起動だけしておく。結果は下の共通経路で受け取る。
     // ここでは await しないので、未処理拒否の警告だけ抑えておく
@@ -1571,7 +1570,7 @@ async function synthesizeWithFallback(
     // ここで縮小枠を足すと待ち時間だけ伸びるので行わない。
     if (shouldRetryBudget && !hedged) {
       console.warn(
-        "OpenAI Luna failed; retrying with a smaller completion budget:",
+        "OpenAI failed; retrying with a smaller completion budget:",
         lunaResult.model,
         failReason,
         lunaResult.error.slice(0, 240),
@@ -1579,7 +1578,7 @@ async function synthesizeWithFallback(
       lunaResult = await tryLuna(OPENAI_COMPLETION_BUDGET_RETRY);
     } else {
       console.warn(
-        "OpenAI Luna failed; skipping budget retry:",
+        "OpenAI failed; skipping budget retry:",
         lunaResult.model,
         failReason,
         lunaResult.error.slice(0, 240),
@@ -1598,7 +1597,7 @@ async function synthesizeWithFallback(
   }
 
   console.warn(
-    "OpenAI Luna failed; falling back to Claude Haiku:",
+    "OpenAI failed; falling back to Claude Haiku:",
     lunaResult.model,
     lunaResult.error.slice(0, 240),
   );

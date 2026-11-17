@@ -418,6 +418,7 @@ function xSearchCallsFromModel(model) {
 function rateForModel(provider, model) {
   const p = String(provider || '').toLowerCase();
   const m = normalizeModelId(model);
+  if (p === 'openai' && m === 'gpt-6.1-sol') return { inUsd: 2.00, outUsd: 10.00, cachedUsd: 0.10 };
   if (p === 'gemini' && (m === 'gemini-3-flash-preview' || m === 'gemini-3.5-flash')) {
     return { inUsd: 0.50, outUsd: 3.00 };
   }
@@ -430,7 +431,16 @@ function modelUsd(m) {
   const rate = rateForModel(m.provider, m.model);
   const inTok = Number(m.input_tokens || 0);
   const outTok = Number(m.output_tokens || 0);
-  const tokenUsd = (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+  let tokenUsd = (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+  if (rate.cachedUsd !== undefined) { // Sol のみ。旧モデルの履歴計算は変えない。
+    const cached = Math.min(inTok, Math.max(0, Number(m.cached_tokens || 0)));
+    // 集計行の合計入力を1リクエストの文脈長と誤認しない。
+    // 現行APIはcache内訳・複数リクエストの長文内訳を返さないため、無い分は通常単価の概算。
+    const longContext = Number(m.event_count) === 1 && inTok > 272000;
+    tokenUsd = ((inTok - cached) * rate.inUsd * (longContext ? 2 : 1)
+      + cached * rate.cachedUsd * (longContext ? 2 : 1)
+      + outTok * rate.outUsd * (longContext ? 1.5 : 1)) / 1e6;
+  }
   const xCalls = xSearchCallsFromModel(m.model);
   const toolUsd = xCalls > 0
     ? xCalls * Math.max(1, Number(m.event_count || 1)) * X_SEARCH_FEE_PER_CALL_USD
