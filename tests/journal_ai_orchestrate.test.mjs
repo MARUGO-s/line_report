@@ -87,9 +87,9 @@ test('shared orchestration module is wired into ai-analyze', async () => {
   assert.match(ai, /shouldRetryBudget/);
   assert.match(ai, /auth_error/);
   assert.match(ai, /recordJournalAiFallback/);
-  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 100_000/);
+  assert.match(ai, /const OPENAI_REQUEST_TIMEOUT_MS = 140_000/);
   assert.match(ai, /const CLAUDE_REQUEST_TIMEOUT_MS = 55_000/);
-  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 125_000/);
+  assert.match(ai, /const JOURNAL_AI_REQUEST_DEADLINE_MS = 145_000/);
   assert.match(ai, /fetchTextWithTimeout\(OPENAI_ENDPOINT/);
   assert.match(ai, /fetchTextWithTimeout\(CLAUDE_ENDPOINT/);
   assert.match(ai, /providerTimeoutWithinDeadline\(deadlineAt/);
@@ -216,7 +216,7 @@ test('Journal Report sends its scoped admin session to every ai-analyze request'
   assert.match(client, /LINE_REPORT_AUTH/);
   assert.match(client, /ログインが必要です/);
   assert.match(client, /privacy\.sanitizePayload/);
-  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 140000/);
+  assert.match(client, /DEFAULT_AI_REQUEST_TIMEOUT_MS = 148000/);
   assert.match(client, /AIの応答が/);
   assert.match(client, /AbortController/);
 });
@@ -243,7 +243,7 @@ test('long-period chat hydrates report details with bounded parallel requests', 
   assert.match(html, /fetchSupabaseReportById\(r\.id, options\)/);
 });
 
-test('Journal AI timeout budgets nest inside the Supabase gateway limit', async () => {
+test('Journal AI configured timeout budgets nest inside the Supabase gateway limit (not an HTTP wall-clock guarantee)', async () => {
   const ai = await readFile(
     new URL('../supabase/functions/ai-analyze/index.ts', import.meta.url),
     'utf8',
@@ -266,6 +266,8 @@ test('Journal AI timeout budgets nest inside the Supabase gateway limit', async 
   // 説明もローカル集計フォールバックも画面に出せない。
   const GATEWAY_IDLE_TIMEOUT_MS = 150_000;
 
+  // 認証・共有データ取得は共通期限設定前、記録/送信は合成後。HTTP全体の上限ではない。
+  // 外部ブリーフは共通期限の設定後に取得し、合成はその残り時間だけを使う。
   // ヘッジ導入後、両者は45秒以降そもそも並走する。合計ではなく
   // 「各経路が期限に収まるか」で判定する。
   //   並走時   : OpenAI 単独 / ヘッジ開始 + Claude
@@ -277,7 +279,7 @@ test('Journal AI timeout budgets nest inside the Supabase gateway limit', async 
   assert.ok(
     deadline < clientWait,
     `server deadline ${deadline} must expire before the client gives up at ${clientWait}, ` +
-      'so the server response explains the failure instead of the client aborting blind',
+      'leaving a nominal response margin; preparation/recording can still exceed it',
   );
   assert.ok(
     clientWait < GATEWAY_IDLE_TIMEOUT_MS,

@@ -1,6 +1,6 @@
 /**
  * Journal Report AI チャット用の意図分類と外部AI（Perplexity / Grok）連携。
- * 数値正本は常に OpenAI gpt-5.6-luna + 保存済みレポート側。戦略・対策系だけ外部知見を足す。
+ * 数値正本は保存済みレポート。回答AIが検証・統合し、戦略・対策系だけ外部知見を足す。
  */
 
 export type JournalChatIntent = "data" | "strategy" | "mixed";
@@ -672,14 +672,14 @@ export function orchestrationNote(
   intent: JournalChatIntent,
   briefs: ExternalBrief[],
 ): string {
-  if (intent === "data") return "モード: 数値検証（gpt-5.6-luna）";
+  if (intent === "data") return "モード: 数値検証（回答AI）";
   const used = briefs.filter((b) => b.ok).map((b) => b.provider);
   if (!used.length) {
     return `モード: ${
       intent === "mixed" ? "数値+戦略" : "戦略"
-    }（外部AIキー未設定または取得失敗のため gpt-5.6-luna のみ）`;
+    }（外部AIキー未設定または取得失敗のため 回答AI のみ）`;
   }
   return `モード: ${
     intent === "mixed" ? "数値+戦略" : "戦略"
-  }（gpt-5.6-luna + ${used.join(" + ")}）`;
+  }（回答AI + ${used.join(" + ")}）`;
 }

@@ -713,6 +713,7 @@
       'gemini-3.5-flash',
       'claude-haiku-4-5',
       'gpt-5.6-luna',
+      'gpt-6.1-sol',
       'grok-3-mini',
       'grok-4.5',
       'openai/gpt-oss-120b',
@@ -939,6 +940,7 @@
     const GROQ_GPT_OSS_RATE = { inUsd: 0.15, outUsd: 0.60 };
     function rateForModel(provider, model) {
       const m = normalizeModelId(model);
+      if (provider === 'openai' && m === 'gpt-6.1-sol') return { inUsd: 2.00, outUsd: 10.00, cachedUsd: 0.10 };
       // Gemini はモデル帯ごとに単価が違う。Flash Lite は画面の編集値、Flash/Pro は公式帯の固定。
       if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') {
         return state.rates.gemini || GEMINI_FLASH_LITE_RATE;
@@ -978,7 +980,16 @@
       const rate = rateForModel(m.provider, m.model);
       const inTok = Number(m.input_tokens || 0);
       const outTok = Number(m.output_tokens || 0);
-      const tokenUsd = (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+      let tokenUsd = (inTok * rate.inUsd + outTok * rate.outUsd) / 1e6;
+      if (rate.cachedUsd !== undefined) { // Sol のみ。旧モデルの履歴計算は変えない。
+        const cached = Math.min(inTok, Math.max(0, Number(m.cached_tokens || 0)));
+        // 集計行の合計入力を1リクエストの文脈長と誤認しない。
+        // 現行APIはcache内訳・複数リクエストの長文内訳を返さないため、無い分は通常単価の概算。
+        const longContext = Number(m.event_count) === 1 && inTok > 272000;
+        tokenUsd = ((inTok - cached) * rate.inUsd * (longContext ? 2 : 1)
+          + cached * rate.cachedUsd * (longContext ? 2 : 1)
+          + outTok * rate.outUsd * (longContext ? 1.5 : 1)) / 1e6;
+      }
       const xCalls = xSearchCallsFromModel(m.model);
       const toolUsd = xCalls > 0
         ? xCalls * Math.max(1, Number(m.event_count || 1)) * X_SEARCH_FEE_PER_CALL_USD
@@ -1094,6 +1105,7 @@
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini / Pro', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
       { provider: 'openai', model: 'gpt-5.6-luna', title: 'OpenAI / Luna', className: 'openai' },
+      { provider: 'openai', model: 'gpt-6.1-sol', title: 'OpenAI / Sol', className: 'openai' },
       { provider: 'grok', model: 'grok-3-mini', title: 'Grok / 運営改善', className: 'grok' },
       { provider: 'grok', model: 'grok-4.5', title: 'Grok / Xトレンド', className: 'grok' },
       { provider: 'groq', model: 'openai/gpt-oss-120b', title: 'Groq / GPT-OSS', className: '' },
@@ -1152,6 +1164,7 @@
           output_tokens: Number(m.output_tokens || 0),
           thinking_tokens: Number(m.thinking_tokens || 0),
           total_tokens: Number(m.total_tokens || 0),
+          cached_tokens: Number(m.cached_tokens || 0),
         }));
       });
       return Array.from(byKey.values()).sort(function (a, b) {
@@ -1270,6 +1283,7 @@
     const MODEL_LABELS = {
       'gpt-5.4-nano': 'フードコート表抽出（本線）／レシート障害時の退避（Azure Foundry）',
       'gpt-5.6-luna': 'フードコート分析の最終統合',
+      'gpt-6.1-sol': 'Journal Report の分析・チャット・確認質問・深掘り統合',
       'grok-3-mini': 'フードコート運営改善AI（専門③）',
       'grok-4.5': 'Xトレンドブリーフ（Responses + x_search）',
       'openai/gpt-oss-120b': 'フードコート専門AI①（数値・他店比較 / Groq）／M-talk雑談AIの文章化',
