@@ -4,6 +4,8 @@ MARUGO S（東京ドーム）のグルメサイト掲載・口コミ分析レポ
 そのリンクを LINE グループ「マルゴエス運営チーム」（`C51a3c2386cb1fc4247139bed89d45f52`）へ 1 通送る仕組みです。
 毎週土曜 10:00 ごろ（日本時間）、Grok Bot の定期作業がレポートを作り直してから、共有の作業用コンピューターで次を実行します。
 
+`--store` を省略（または `--store marugo-s`）すれば、公開先・見出し・宛先は従来どおりです。CAVACAVA は `--store cavacava`（`docs/CAVACAVA-GOURMET-WEEKLY-LINE.md`）。
+
 ```bash
 /workspace/line_report_main/scripts/marugo-gourmet-weekly.sh \
   --html /workspace/MARUGO-S_gourmet_report.html \
@@ -22,7 +24,7 @@ MARUGO S（東京ドーム）のグルメサイト掲載・口コミ分析レポ
 
 - `POST /functions/v1/marugo-gourmet-weekly-line`、`verify_jwt = false`。`Authorization: Bearer <キー>` の SHA-256 を
   `marugo_gourmet_weekly_line_auth`（1行・hex のみ）と固定時間比較。キー本体は作業用コンピューターの `~/.marugo-line/gourmet_weekly_key`（600）だけにある。
-- 宛先は固定（引数で変えられない）。URL は上の公開場所（`<report_date>.html` か `latest.html`）だけ、送る前に 200 を確認。
+- 宛先は許可リストで固定（引数の `store` は `marugo-s`（省略時）または `cavacava` だけ。`room_id` は受けない）。URL は上の公開場所（`<report_date>.html` か `latest.html`）だけ、送る前に 200 を確認。
 - 要約は 3 行・各 160 文字まで、URL・メールアドレス・電話番号らしき文字列は 400。
 - LINE トークンはルームの店舗キー（`room_summary_settings.receipt_report_store_partition_key`、現在 `marugos`、無ければ `marugos`）の
   `LINE_CHANNEL_ACCESS_TOKEN__MARUGOS`（無ければ共通）。東京ドーム週次配信・レシート中間報告が同じグループへ送っているものと同じ Bot。

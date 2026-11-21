@@ -7,27 +7,59 @@ import {
 } from "../_shared/line_client.ts"
 import { constantTimeEqualSecret, extractBearerToken } from "../_shared/internal_cron_auth.ts"
 
-// MARUGO S グルメサイト週報（HTML を GitHub Pages に公開したもの）のリンクを、
-// LINE グループ「マルゴエス運営チーム」(C51a3c…f52) へ 1 通だけ送る。
-// 呼び出し元: 共有の作業用コンピューターの scripts/marugo-gourmet-weekly.sh（毎週土曜 10:00 ごろ）。
+// グルメサイト週報（HTML を GitHub Pages に公開したもの）のリンクを、
+// 店舗ごとの固定 LINE グループへ 1 通だけ送る。
+// 呼び出し元: 共有の作業用コンピューターの scripts/marugo-gourmet-weekly.sh（毎週土曜）。
 //
 // 安全のための固定:
-// - 宛先はこのグループだけ（引数で変えられない）。
-// - 本文は「見出し＋要約（3行まで）＋URL」をこの関数が組み立てる。URL は週報の公開場所だけ。
+// - 宛先は許可リストの店舗だけ（room_id を引数では受けない）。
+//   省略時は従来どおり marugo-s（マルゴエス運営チーム C51a3c…f52）。
+//   cavacava は Cava Cava グループ C1627…05a。
+// - 本文は「見出し＋要約（3行まで）＋URL」をこの関数が組み立てる。URL は店舗の週報公開場所だけ。
 // - URL が実際に 200 を返さなければ送らない。
-// - 週報の日付ごとに 1 回だけ（marugo_gourmet_weekly_line_sends）。
+// - 週報の日付ごとに、ルーム×日付で 1 回だけ（marugo_gourmet_weekly_line_sends）。
 // - 認証: Authorization: Bearer <キー>。SHA-256 を marugo_gourmet_weekly_line_auth と固定時間比較。
-// - LINE トークンは既存の店舗別シークレット（ルームの店舗キー、既定 marugos）。新しい LINE の秘密情報は無い。
+// - LINE トークンは既存の店舗別シークレット（ルームの店舗キー）。新しい LINE の秘密情報は無い。
 
-export const TARGET_ROOM_ID = "C51a3c2386cb1fc4247139bed89d45f52"
-export const REPORT_URL_PREFIX = "https://marugo-s.github.io/line_report/marugo-s/gourmet-report/"
-const DEFAULT_STORE_KEY = "marugos"
-const LOG_CONTEXT = "marugo_gourmet_weekly"
+export const STORE_CONFIGS = {
+  "marugo-s": {
+    roomId: "C51a3c2386cb1fc4247139bed89d45f52",
+    urlPrefix: "https://marugo-s.github.io/line_report/marugo-s/gourmet-report/",
+    headingPrefix: "【MARUGO S グルメサイト週報 ",
+    defaultStoreKey: "marugos",
+    logContext: "marugo_gourmet_weekly",
+  },
+  cavacava: {
+    roomId: "C162737896a6b9b50ab39376568e3b05a",
+    urlPrefix: "https://marugo-s.github.io/line_report/cavacava/gourmet-report/",
+    headingPrefix: "【BISTRO CAVA CAVA グルメサイト週報 ",
+    defaultStoreKey: "bistrocavacava",
+    logContext: "cavacava_gourmet_weekly",
+  },
+} as const
+
+export type StoreId = keyof typeof STORE_CONFIGS
+export const DEFAULT_STORE_ID: StoreId = "marugo-s"
+/** @deprecated 互換のため残す。marugo-s の宛先。 */
+export const TARGET_ROOM_ID = STORE_CONFIGS["marugo-s"].roomId
+/** @deprecated 互換のため残す。marugo-s の公開 URL 接頭辞。 */
+export const REPORT_URL_PREFIX = STORE_CONFIGS["marugo-s"].urlPrefix
 
 type DbClient = ReturnType<typeof createClient>
 
-export function buildWeeklyText(reportDate: string, summaryLines: string[], url: string): string {
-  const head = `【MARUGO S グルメサイト週報 ${reportDate.replaceAll("-", "/")}】`
+export function resolveStoreId(raw: unknown): { ok: true; id: StoreId } | { ok: false; error: string } {
+  const id = String(raw ?? "").trim() || DEFAULT_STORE_ID
+  if (id === "marugo-s" || id === "cavacava") return { ok: true, id }
+  return { ok: false, error: "store must be marugo-s or cavacava" }
+}
+
+export function buildWeeklyText(
+  reportDate: string,
+  summaryLines: string[],
+  url: string,
+  storeId: StoreId = DEFAULT_STORE_ID,
+): string {
+  const head = `${STORE_CONFIGS[storeId].headingPrefix}${reportDate.replaceAll("-", "/")}】`
   return [head, ...summaryLines, url].join("\n")
 }
 
@@ -44,8 +76,9 @@ export function normalizeSummary(raw: unknown): { ok: true; lines: string[] } | 
   return { ok: true, lines }
 }
 
-export function validateReportUrl(url: string, reportDate: string): boolean {
-  return url === `${REPORT_URL_PREFIX}${reportDate}.html` || url === `${REPORT_URL_PREFIX}latest.html`
+export function validateReportUrl(url: string, reportDate: string, storeId: StoreId = DEFAULT_STORE_ID): boolean {
+  const prefix = STORE_CONFIGS[storeId].urlPrefix
+  return url === `${prefix}${reportDate}.html` || url === `${prefix}latest.html`
 }
 
 export function isValidReportDate(value: string): boolean {
@@ -83,6 +116,40 @@ async function urlIsLive(url: string): Promise<{ ok: boolean; status: number }> 
   }
 }
 
+/** dry-run 専用。トークンはログにもレスポンスにも出さない。送信はしない。 */
+async function readLineMessageQuota(token: string): Promise<{
+  ok: boolean
+  type?: string
+  limit?: number | null
+  used?: number | null
+  error?: string
+}> {
+  if (!token) return { ok: false, error: "LINE token not configured" }
+  const headers = { Authorization: `Bearer ${token}` }
+  try {
+    const [quotaRes, usedRes] = await Promise.all([
+      fetch("https://api.line.me/v2/bot/message/quota", { headers }),
+      fetch("https://api.line.me/v2/bot/message/quota/consumption", { headers }),
+    ])
+    const quota = await quotaRes.json().catch(() => ({})) as { type?: unknown; value?: unknown; message?: unknown }
+    const used = await usedRes.json().catch(() => ({})) as { totalUsage?: unknown; message?: unknown }
+    if (!quotaRes.ok || !usedRes.ok) {
+      return {
+        ok: false,
+        error: `LINE quota HTTP ${quotaRes.status}/${usedRes.status}: ${String(quota.message ?? used.message ?? "").slice(0, 200)}`,
+      }
+    }
+    return {
+      ok: true,
+      type: String(quota.type ?? ""),
+      limit: quota.type === "none" ? null : (typeof quota.value === "number" ? quota.value : null),
+      used: typeof used.totalUsage === "number" ? used.totalUsage : null,
+    }
+  } catch (e) {
+    return { ok: false, error: String(e).slice(0, 200) }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ ok: false, error: "Method Not Allowed" }, 405)
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
@@ -100,40 +167,45 @@ Deno.serve(async (req) => {
   } catch {
     return json({ ok: false, error: "invalid JSON" }, 400)
   }
+  const store = resolveStoreId(body.store)
+  if (!store.ok) return json({ ok: false, error: store.error }, 400)
+  const cfg = STORE_CONFIGS[store.id]
+  const targetRoomId = cfg.roomId
   const reportDate = String(body.report_date ?? "").trim()
   const url = String(body.url ?? "").trim()
   const dryRun = body.dry_run === true
   if (!isValidReportDate(reportDate)) return json({ ok: false, error: "report_date must be YYYY-MM-DD" }, 400)
-  if (!validateReportUrl(url, reportDate)) {
-    return json({ ok: false, error: `url must be ${REPORT_URL_PREFIX}<report_date>.html or latest.html` }, 400)
+  if (!validateReportUrl(url, reportDate, store.id)) {
+    return json({ ok: false, error: `url must be ${cfg.urlPrefix}<report_date>.html or latest.html` }, 400)
   }
   const summary = normalizeSummary(body.summary)
   if (!summary.ok) return json({ ok: false, error: summary.error }, 400)
-  const text = buildWeeklyText(reportDate, summary.lines, url)
+  const text = buildWeeklyText(reportDate, summary.lines, url, store.id)
 
   const { data: room, error: roomError } = await supabase
     .from("room_summary_settings")
     .select("room_id, room_name, is_enabled, receipt_report_store_partition_key")
-    .eq("room_id", TARGET_ROOM_ID)
+    .eq("room_id", targetRoomId)
     .maybeSingle()
   if (roomError) return json({ ok: false, error: "room lookup failed" }, 500)
-  const storeKey = String((room as { receipt_report_store_partition_key?: unknown } | null)?.receipt_report_store_partition_key ?? "").trim() || DEFAULT_STORE_KEY
+  const storeKey = String((room as { receipt_report_store_partition_key?: unknown } | null)?.receipt_report_store_partition_key ?? "").trim() || cfg.defaultStoreKey
   const roomName = String((room as { room_name?: unknown } | null)?.room_name ?? "")
   const roomEnabled = (room as { is_enabled?: unknown } | null)?.is_enabled !== false
   const tokenConfigured = Boolean(resolveChannelAccessToken(storeKey))
-  const lockdownBlocked = isBlockedByMarugosecondLockdown(storeKey, TARGET_ROOM_ID)
+  const lockdownBlocked = isBlockedByMarugosecondLockdown(storeKey, targetRoomId)
 
   const { data: prior } = await supabase
     .from("marugo_gourmet_weekly_line_sends")
     .select("sent_at")
-    .eq("room_id", TARGET_ROOM_ID)
+    .eq("room_id", targetRoomId)
     .eq("report_date", reportDate)
     .maybeSingle()
   const alreadySent = Boolean(prior)
   const live = await urlIsLive(url)
 
-  const preview = {
-    room_id: TARGET_ROOM_ID,
+  const preview: Record<string, unknown> = {
+    store: store.id,
+    room_id: targetRoomId,
     room_name: roomName,
     room_enabled: roomEnabled,
     store_partition_key: storeKey,
@@ -143,7 +215,10 @@ Deno.serve(async (req) => {
     url_status: live.status,
     text,
   }
-  if (dryRun) return json({ ok: true, mode: "dry_run", ...preview }, 200)
+  if (dryRun) {
+    preview.line_quota = await readLineMessageQuota(resolveChannelAccessToken(storeKey))
+    return json({ ok: true, mode: "dry_run", ...preview }, 200)
+  }
 
   if (alreadySent) return json({ ok: true, skipped: "already_sent", ...preview }, 200)
   if (!roomEnabled) return json({ ok: false, error: "room disabled", ...preview }, 409)
@@ -153,19 +228,19 @@ Deno.serve(async (req) => {
 
   const { error: reserveError } = await supabase
     .from("marugo_gourmet_weekly_line_sends")
-    .insert({ room_id: TARGET_ROOM_ID, report_date: reportDate, report_url: url, store_partition_key: storeKey })
+    .insert({ room_id: targetRoomId, report_date: reportDate, report_url: url, store_partition_key: storeKey })
   if (reserveError) {
     if (String(reserveError.code ?? "") === "23505") return json({ ok: true, skipped: "already_sent", ...preview, already_sent: true }, 200)
     return json({ ok: false, error: "failed to reserve send log" }, 500)
   }
 
-  const r = await pushLineTextToTarget(TARGET_ROOM_ID, text, resolveChannelAccessToken(storeKey), {
+  const r = await pushLineTextToTarget(targetRoomId, text, resolveChannelAccessToken(storeKey), {
     storePartitionKey: storeKey,
-    context: LOG_CONTEXT,
-    roomId: TARGET_ROOM_ID,
+    context: cfg.logContext,
+    roomId: targetRoomId,
   })
   if (!r.ok) {
-    await supabase.from("marugo_gourmet_weekly_line_sends").delete().eq("room_id", TARGET_ROOM_ID).eq("report_date", reportDate)
+    await supabase.from("marugo_gourmet_weekly_line_sends").delete().eq("room_id", targetRoomId).eq("report_date", reportDate)
     return json({ ok: false, error: `LINE push failed: ${String(r.error ?? "").slice(0, 300)}`, ...preview }, 502)
   }
   return json({ ok: true, sent: true, ...preview }, 200)
