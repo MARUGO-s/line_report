@@ -1,39 +1,45 @@
 #!/usr/bin/env bash
-# MARUGO S グルメサイト週報（HTML）を GitHub Pages に公開し、そのリンクを
-# LINE グループ「マルゴエス運営チーム」(C51a3c2386cb1fc4247139bed89d45f52) へ 1 通送る。
-# 共有の作業用コンピューター（box）から、毎週土曜 10:00 ごろ定期作業として呼ぶ想定。
+# グルメサイト週報（HTML）を GitHub Pages に公開し、そのリンクを店舗ごとの固定
+# LINE グループへ 1 通送る。
+# 共有の作業用コンピューター（box）から、毎週土曜の定期作業として呼ぶ想定。
 #
 #   scripts/marugo-gourmet-weekly.sh --html <report.html> \
-#     --summary $'1行目\n2行目\n3行目' [--date YYYY-MM-DD] [--dry-run]
+#     --summary $'1行目\n2行目\n3行目' [--date YYYY-MM-DD] [--store marugo-s|cavacava] [--dry-run]
 #
-#   (a) public/marugo-s/gourmet-report/<日付>.html と latest.html に置き、main へ commit & push
+#   --store の省略時は marugo-s（従来どおり。宛先 C51a3c2386cb1fc4247139bed89d45f52、
+#     公開先 public/marugo-s/gourmet-report/、見出し【MARUGO S グルメサイト週報 YYYY/MM/DD】）。
+#   --store cavacava は宛先 C162737896a6b9b50ab39376568e3b05a、
+#     公開先 public/cavacava/gourmet-report/、見出し【BISTRO CAVA CAVA グルメサイト週報 YYYY/MM/DD】。
+#
+#   (a) public/<store>/gourmet-report/<日付>.html と latest.html に置き、main へ commit & push
 #       （専用の作業用 clone: $MARUGO_PUBLISH_DIR、既定 ~/.marugo-line/line_report-publish）
 #   (b) 公開 URL が 200 で同じ内容を返すまで待つ（既定 12 分）
 #   (c) Edge Function marugo-gourmet-weekly-line に送信を依頼（本文は関数側で
-#       「【MARUGO S グルメサイト週報 YYYY/MM/DD】\n要約\nURL」に固定）
+#       店舗ごとの見出し＋要約＋URL に固定。宛先は関数の許可リストで固定）
 #   (d) --dry-run: 公開と待機まで行い、関数を dry_run で呼んで送る本文・送り先・確認結果を表示（LINE へは送らない）
 #
-# 二重送信防止: 関数側（marugo_gourmet_weekly_line_sends、日付ごとに1回）と、
-# 手元の記録（~/.marugo-line/gourmet-weekly-sent/<日付>）の両方。
+# 二重送信防止: 関数側（marugo_gourmet_weekly_line_sends、ルーム×日付ごとに1回）と、
+# 手元の記録（marugo-s は ~/.marugo-line/gourmet-weekly-sent/<日付>、
+# cavacava は ~/.marugo-line/gourmet-weekly-sent/cavacava/<日付>）の両方。
 # 呼び出しキー: ~/.marugo-line/gourmet_weekly_key（600。値は表示しない）。
 set -euo pipefail
 
 REPO_URL="https://github.com/MARUGO-s/line_report.git"
 FN_URL="${MARUGO_GOURMET_WEEKLY_FN_URL:-https://hocbnifuactbvmyjraxy.supabase.co/functions/v1/marugo-gourmet-weekly-line}"
-PAGES_BASE="https://marugo-s.github.io/line_report/marugo-s/gourmet-report"
 STATE_DIR="${MARUGO_LINE_STATE_DIR:-$HOME/.marugo-line}"
 PUBLISH_DIR="${MARUGO_PUBLISH_DIR:-$STATE_DIR/line_report-publish}"
 KEY_FILE="${MARUGO_GOURMET_WEEKLY_KEY_FILE:-$STATE_DIR/gourmet_weekly_key}"
 SENT_DIR="$STATE_DIR/gourmet-weekly-sent"
 WAIT_SECONDS="${MARUGO_PAGES_WAIT_SECONDS:-720}"
 
-html="" summary="" report_date="" dry_run=0 skip_publish=0
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+html="" summary="" report_date="" store="marugo-s" dry_run=0 skip_publish=0
+usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --html) html="${2:-}"; shift 2 ;;
     --summary) summary="${2:-}"; shift 2 ;;
     --date) report_date="${2:-}"; shift 2 ;;
+    --store) store="${2:-}"; shift 2 ;;
     --dry-run) dry_run=1; shift ;;
     --skip-publish) skip_publish=1; shift ;;   # 公開済みの日付を送り直すとき（HTML の差し替えなし）
     -h|--help) usage; exit 0 ;;
@@ -52,10 +58,27 @@ summary="${summary//\\n/$'\n'}"   # 文字どおりの \n も改行として扱�
 [ -f "$KEY_FILE" ] || die "呼び出しキーがありません: $KEY_FILE"
 command -v jq >/dev/null || die "jq が必要です"
 
+case "$store" in
+  marugo-s)
+    PAGES_BASE="https://marugo-s.github.io/line_report/marugo-s/gourmet-report"
+    dest_dir="public/marugo-s/gourmet-report"
+    commit_msg="chore(marugo-s): グルメサイト週報 $report_date を公開"
+    sent_stamp="$SENT_DIR/$report_date"
+    ;;
+  cavacava)
+    PAGES_BASE="https://marugo-s.github.io/line_report/cavacava/gourmet-report"
+    dest_dir="public/cavacava/gourmet-report"
+    commit_msg="chore(cavacava): グルメサイト週報 $report_date を公開"
+    mkdir -p "$SENT_DIR/cavacava"
+    sent_stamp="$SENT_DIR/cavacava/$report_date"
+    ;;
+  *) die "--store は marugo-s または cavacava です（指定: $store）" ;;
+esac
+
 url="$PAGES_BASE/$report_date.html"
 mkdir -p "$SENT_DIR"
-if [ "$dry_run" -eq 0 ] && [ -e "$SENT_DIR/$report_date" ]; then
-  log "この日付（$report_date）は送信済みです（$SENT_DIR/$report_date）。何もしません。"
+if [ "$dry_run" -eq 0 ] && [ -e "$sent_stamp" ]; then
+  log "この日付（$store $report_date）は送信済みです（$sent_stamp）。何もしません。"
   exit 0
 fi
 
@@ -70,7 +93,6 @@ if [ "$skip_publish" -eq 0 ]; then
   cd "$PUBLISH_DIR"
   git config user.name >/dev/null || git config user.name "MARUGO-s"
   git config user.email >/dev/null || git config user.email "marugo-s@users.noreply.github.com"
-  dest_dir="public/marugo-s/gourmet-report"
   pushed=0
   for attempt in 1 2 3 4; do
     git fetch --quiet origin main
@@ -89,7 +111,7 @@ if [ "$skip_publish" -eq 0 ]; then
       log "公開内容に変更なし（main に同じ HTML があります）"
       pushed=1; break
     fi
-    git commit --quiet -m "chore(marugo-s): グルメサイト週報 $report_date を公開"
+    git commit --quiet -m "$commit_msg"
     if git push --quiet origin main; then
       log "main へ push: $(git rev-parse --short HEAD)"
       pushed=1; break
@@ -118,8 +140,8 @@ if [ "$skip_publish" -eq 0 ]; then
 fi
 
 # ---------- (c)/(d) LINE 送信（または dry-run） ----------
-payload="$(jq -n --arg d "$report_date" --arg s "$summary" --arg u "$url" --argjson dry "$([ "$dry_run" -eq 1 ] && echo true || echo false)" \
-  '{report_date: $d, summary: $s, url: $u, dry_run: $dry}')"
+payload="$(jq -n --arg d "$report_date" --arg s "$summary" --arg u "$url" --arg store "$store" --argjson dry "$([ "$dry_run" -eq 1 ] && echo true || echo false)" \
+  '{report_date: $d, summary: $s, url: $u, store: $store, dry_run: $dry}')"
 hdr="$(mktemp)"; chmod 600 "$hdr"
 trap 'rm -f "$hdr"' EXIT
 printf 'Authorization: Bearer %s\n' "$(tr -d '[:space:]' < "$KEY_FILE")" > "$hdr"
@@ -135,11 +157,11 @@ if [ "$dry_run" -eq 1 ]; then
   exit 0
 fi
 if [ "$status" = "200" ] && [ "$(printf '%s' "$resp" | jq -r '.ok')" = "true" ]; then
-  printf '%s\n' "$url" > "$SENT_DIR/$report_date"
+  printf '%s\n' "$url" > "$sent_stamp"
   if [ "$(printf '%s' "$resp" | jq -r '.skipped // empty')" = "already_sent" ]; then
-    log "送信済みだったため送っていません（$report_date）"
+    log "送信済みだったため送っていません（$store $report_date）"
   else
-    log "LINE へ送信しました（$report_date）"
+    log "LINE へ送信しました（$store $report_date）"
   fi
   exit 0
 fi
