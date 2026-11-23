@@ -418,7 +418,7 @@ function xSearchCallsFromModel(model) {
 function rateForModel(provider, model) {
   const p = String(provider || '').toLowerCase();
   const m = normalizeModelId(model);
-  if (p === 'openai' && m === 'gpt-6.1-sol') return { inUsd: 2.00, outUsd: 10.00, cachedUsd: 0.10 };
+  if (p === 'openai' && (m === 'gpt-6.1-sol' || m === 'gpt-6.2-sol')) return { inUsd: 2.00, outUsd: 10.00, cachedUsd: 0.10 };
   if (p === 'gemini' && (m === 'gemini-3-flash-preview' || m === 'gemini-3.5-flash')) {
     return { inUsd: 0.50, outUsd: 3.00 };
   }

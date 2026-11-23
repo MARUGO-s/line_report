@@ -714,6 +714,7 @@
       'claude-haiku-4-5',
       'gpt-5.6-luna',
       'gpt-6.1-sol',
+      'gpt-6.2-sol',
       'grok-3-mini',
       'grok-4.5',
       'openai/gpt-oss-120b',
@@ -940,7 +941,7 @@
     const GROQ_GPT_OSS_RATE = { inUsd: 0.15, outUsd: 0.60 };
     function rateForModel(provider, model) {
       const m = normalizeModelId(model);
-      if (provider === 'openai' && m === 'gpt-6.1-sol') return { inUsd: 2.00, outUsd: 10.00, cachedUsd: 0.10 };
+      if (provider === 'openai' && (m === 'gpt-6.1-sol' || m === 'gpt-6.2-sol')) return { inUsd: 2.00, outUsd: 10.00, cachedUsd: 0.10 };
       // Gemini はモデル帯ごとに単価が違う。Flash Lite は画面の編集値、Flash/Pro は公式帯の固定。
       if (provider === 'gemini' && m === 'gemini-3.1-flash-lite') {
         return state.rates.gemini || GEMINI_FLASH_LITE_RATE;
@@ -1105,7 +1106,8 @@
       { provider: 'gemini', model: 'gemini-3.1-pro-preview', title: 'Gemini / Pro', className: 'gemini' },
       { provider: 'claude', model: 'claude-haiku-4-5', title: 'Claude / Haiku', className: 'claude' },
       { provider: 'openai', model: 'gpt-5.6-luna', title: 'OpenAI / Luna', className: 'openai' },
-      { provider: 'openai', model: 'gpt-6.1-sol', title: 'OpenAI / Sol', className: 'openai' },
+      { provider: 'openai', model: 'gpt-6.1-sol', title: 'OpenAI / GPT-6.1 Sol', className: 'openai' },
+      { provider: 'openai', model: 'gpt-6.2-sol', title: 'OpenAI / GPT-6.2 Sol', className: 'openai' },
       { provider: 'grok', model: 'grok-3-mini', title: 'Grok / 運営改善', className: 'grok' },
       { provider: 'grok', model: 'grok-4.5', title: 'Grok / Xトレンド', className: 'grok' },
       { provider: 'groq', model: 'openai/gpt-oss-120b', title: 'Groq / GPT-OSS', className: '' },
@@ -1284,6 +1286,7 @@
       'gpt-5.4-nano': 'フードコート表抽出（本線）／レシート障害時の退避（Azure Foundry）',
       'gpt-5.6-luna': 'フードコート分析の最終統合',
       'gpt-6.1-sol': 'Journal Report の分析・チャット・確認質問・深掘り統合',
+      'gpt-6.2-sol': 'Journal Report の分析・チャット・確認質問・深掘り統合',
       'grok-3-mini': 'フードコート運営改善AI（専門③）',
       'grok-4.5': 'Xトレンドブリーフ（Responses + x_search）',
       'openai/gpt-oss-120b': 'フードコート専門AI①（数値・他店比較 / Groq）／M-talk雑談AIの文章化',

@@ -123,7 +123,7 @@ test('OpenAI remains preferred after the old 100s limit even when the 45s Claude
   assert.equal(answer.ok, true);
   assert.equal(answer.provider, 'openai');
   assert.equal(answer.text, 'OpenAI合成回答');
-  assert.equal(answer.model, 'gpt-6.1-sol');
+  assert.equal(answer.model, 'gpt-6.2-sol');
   assert.equal(app.calls.filter(call => call.provider === 'claude').length, 1);
   assert.equal(app.time.pending.size, 0, 'provider and hedge timers are cleaned up');
   assert.deepEqual([app.OPENAI_REQUEST_TIMEOUT_MS, app.JOURNAL_AI_REQUEST_DEADLINE_MS], [140_000, 145_000]);
@@ -153,7 +153,7 @@ test('OpenAI succeeds just before 140s with unchanged authentication, model and 
   assert.deepEqual(app.calls[0].headers, { 'Content-Type': 'application/json', Authorization: 'Bearer synthetic-openai' });
   assert.equal(app.calls[0].method, 'POST');
   assert.deepEqual(app.calls[0].body, {
-    model: 'gpt-6.1-sol', store: false,
+    model: 'gpt-6.2-sol', store: false,
     messages: [{ role: 'developer', content: contents[0].parts[0].text }, { role: 'user', content: contents[1].parts[0].text }],
     max_completion_tokens: 9000, reasoning_effort: 'low',
   });
