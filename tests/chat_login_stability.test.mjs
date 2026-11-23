@@ -158,6 +158,55 @@ test('authentication error restores the button without clearing the typed passwo
   assert.equal(cleared, true);
 });
 
+test('signup translates English Supabase errors such as weak password into Japanese', async () => {
+  const source = await readFile(new URL('chat/auth.js', root), 'utf8');
+  const elements = {
+    signupEmailInput: { value: 'probe@example.invalid' },
+    signupPasswordInput: { value: '12345678' },
+    signupPasswordConfirm: { value: '12345678' },
+    signupRememberInput: { checked: false },
+    signupBtn: { disabled: false },
+  };
+  const errors = [];
+  const context = {
+    $: (id) => elements[id],
+    authEmailRedirectUrl: () => 'https://marugo-s.github.io/line_report/chat.html',
+    sb: {
+      auth: {
+        signUp: async () => ({
+          data: null,
+          error: {
+            code: 'weak_password',
+            message: 'Password is known to be weak and easy to guess, please choose a different one.',
+          },
+        }),
+      },
+    },
+    showLoginError: (message) => errors.push(message),
+    console,
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  await context.signup();
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /推測されやすいため使用できません/);
+  assert.doesNotMatch(errors[0], /Password is known to be weak/i);
+  assert.equal(elements.signupBtn.disabled, false);
+
+  assert.match(
+    context.formatAuthError({ message: 'Unable to validate email address: invalid format' }, '登録に失敗しました'),
+    /有効なメールアドレス/,
+  );
+  assert.match(
+    context.formatAuthError({ message: 'For security purposes, you can only request this after 60 seconds.' }, '登録に失敗しました'),
+    /短時間に操作が集中しました/,
+  );
+  assert.equal(
+    context.formatAuthError({ message: 'Unexpected internal english error' }, '登録に失敗しました'),
+    '登録に失敗しました',
+  );
+});
+
 test('login scripts referenced by the page match the service worker shell URLs', async () => {
   const [html, worker] = await Promise.all([
     readFile(new URL('chat.html', root), 'utf8'),

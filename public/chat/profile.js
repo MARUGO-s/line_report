@@ -181,7 +181,10 @@ async function createProfile() {
       } else if (/duplicate|unique/i.test(error.message)) {
         showLoginError('その表示名は既に使われています');
       } else {
-        showLoginError(`登録に失敗しました: ${error.message}`);
+        const msg = typeof formatAuthError === 'function'
+          ? formatAuthError(error, '登録に失敗しました。しばらく時間をおいて再度お試しください')
+          : '登録に失敗しました。しばらく時間をおいて再度お試しください';
+        showLoginError(msg);
       }
       return;
     }
