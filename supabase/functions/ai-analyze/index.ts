@@ -1,5 +1,5 @@
 // Supabase Edge Function: AI Analyze / Chat
-// 数値検証・統合の既定は OpenAI gpt-6.1-sol。失敗時は Claude Haiku へフォールバック。
+// 数値検証・統合の既定は OpenAI gpt-6.2-sol。失敗時は Claude Haiku へフォールバック。
 // 戦略・対策系は Perplexity / Grok を自動オーケストレーションしてから統合。
 // 外部AIへ送る直前に、予約氏名・連絡先・アレルギー詳細を最小化する。
 
@@ -40,7 +40,7 @@ import {
   normalizeKpiAssumptions,
 } from "../_shared/kpi_scenario.ts";
 
-const OPENAI_MODEL_DEFAULT = "gpt-6.1-sol";
+const OPENAI_MODEL_DEFAULT = "gpt-6.2-sol";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const CLAUDE_MODEL_DEFAULT = "claude-haiku-4-5";
 const CLAUDE_ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -1468,7 +1468,7 @@ async function callClaude(
 }
 
 /**
- * 既定: gpt-6.1-sol（通常枠）→ gpt-6.1-sol（縮小枠）→ Claude Haiku。
+ * 既定: gpt-6.2-sol（通常枠）→ gpt-6.2-sol（縮小枠）→ Claude Haiku。
  *
  * 縮小枠での再試行を挟むのは、入力が大きいときに「入力＋完了枠」が
  * モデル上限を圧迫して弾かれる形の失敗を、Haiku へ落とさず救うため。

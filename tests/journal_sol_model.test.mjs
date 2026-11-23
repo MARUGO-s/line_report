@@ -51,15 +51,15 @@ function runtime({ env = {}, responses = [] } = {}) {
   return { ...api, calls, timers, envReads };
 }
 
-test('Journal defaults to gpt-6.1-sol in both main analysis and clarification', async () => {
+test('Journal defaults to gpt-6.2-sol in both main analysis and clarification', async () => {
   const app = runtime();
   const main = await app.callOpenAiLuna(contents);
   const clarification = await app.callOpenAiClarifier(messages);
   assert.equal(main.ok, true);
   assert.equal(clarification.ok, true);
-  assert.deepEqual(app.calls.map(call => call.body.model), ['gpt-6.1-sol', 'gpt-6.1-sol']);
-  assert.equal(main.model, 'gpt-6.1-sol');
-  assert.equal(clarification.model, 'gpt-6.1-sol');
+  assert.deepEqual(app.calls.map(call => call.body.model), ['gpt-6.2-sol', 'gpt-6.2-sol']);
+  assert.equal(main.model, 'gpt-6.2-sol');
+  assert.equal(clarification.model, 'gpt-6.2-sol');
 });
 
 test('Journal model ignores global and Foodcourt model settings but retains its own override', async () => {
@@ -71,10 +71,10 @@ test('Journal model ignores global and Foodcourt model settings but retains its 
     { JOURNAL_OPENAI_MODEL: '   ', FOODCOURT_OPENAI_MODEL: 'gpt-5.6-luna' },
   ]) {
     const app = runtime({ env });
-    assert.equal(app.resolveOpenAiModel(), 'gpt-6.1-sol', JSON.stringify(env));
+    assert.equal(app.resolveOpenAiModel(), 'gpt-6.2-sol', JSON.stringify(env));
     await app.callOpenAiLuna(contents);
     await app.callOpenAiClarifier(messages);
-    assert.deepEqual(app.calls.map(call => call.body.model), ['gpt-6.1-sol', 'gpt-6.1-sol']);
+    assert.deepEqual(app.calls.map(call => call.body.model), ['gpt-6.2-sol', 'gpt-6.2-sol']);
     assert.ok(!app.envReads.includes('OPENAI_MODEL'));
     assert.ok(!app.envReads.includes('FOODCOURT_OPENAI_MODEL'));
   }
@@ -86,13 +86,15 @@ test('Journal model ignores global and Foodcourt model settings but retains its 
 
 for (const path of ['main', 'clarifier']) {
   test(`GPT-6 and later use reasoning-compatible parameters for ${path}`, async () => {
-    for (const model of ['gpt-6.1-sol', 'gpt-6', 'gpt-6.2-synthetic', 'gpt-7-synthetic', 'gpt-10-synthetic', 'gpt-11.1-synthetic']) {
+    for (const model of ['gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6', 'gpt-6.2-synthetic', 'gpt-7-synthetic', 'gpt-10-synthetic', 'gpt-11.1-synthetic']) {
       const app = runtime({ env: { JOURNAL_OPENAI_MODEL: model } });
       const input = clone(path === 'main' ? contents : messages);
       const before = clone(input);
       const result = path === 'main' ? await app.callOpenAiLuna(input) : await app.callOpenAiClarifier(input);
       assert.equal(result.ok, true);
       const body = app.calls[0].body;
+      assert.equal(body.model, model, 'explicit Journal model override must survive both request paths');
+      assert.equal(result.model, model);
       assert.equal(body.max_completion_tokens, path === 'main' ? 9000 : 800, model);
       assert.equal(body.reasoning_effort, 'low', model);
       assert.ok(!Object.hasOwn(body, 'max_tokens'), model);
@@ -138,9 +140,9 @@ test('GPT-4 overrides retain legacy system roles, budgets and temperatures', asy
   }
 });
 
-test('Sol preserves Luna fixture text, non-model payload fields, usage and explicit timeout overrides; only default main wait is extended', async () => {
+test('Sol 6.2 preserves Luna and Sol 6.1 fixture text, non-model payload fields, usage and explicit timeout overrides', async () => {
   const sent = [], results = [];
-  for (const model of ['gpt-5.6-luna', 'gpt-6.1-sol']) {
+  for (const model of ['gpt-5.6-luna', 'gpt-6.1-sol', 'gpt-6.2-sol']) {
     const app = runtime({ env: { JOURNAL_OPENAI_MODEL: model }, responses: [
       { body: openAiResponse('<think>合成思考</think>\n【総評】合成回答本文') },
       { body: openAiResponse(JSON.stringify(readyPlan)) },
@@ -159,7 +161,9 @@ test('Sol preserves Luna fixture text, non-model payload fields, usage and expli
     results.push([main, clarification].map(({ model: _model, usage: { model: _usageModel, ...usage }, ...result }) => clone({ ...result, usage })));
   }
   assert.deepEqual(sent[0], sent[1]);
+  assert.deepEqual(sent[1], sent[2]);
   assert.deepEqual(results[0], results[1]);
+  assert.deepEqual(results[1], results[2]);
 });
 
 test('main synthesis succeeds on Sol without starting fallback', async () => {
@@ -167,11 +171,11 @@ test('main synthesis succeeds on Sol without starting fallback', async () => {
   const result = await app.synthesizeWithFallback(contents);
   assert.equal(result.ok, true);
   assert.equal(result.provider, 'openai');
-  assert.equal(result.model, 'gpt-6.1-sol');
+  assert.equal(result.model, 'gpt-6.2-sol');
   assert.equal(result.text, '合成回答本文');
   assert.equal(app.calls.length, 1);
   assert.equal(result.attempts.length, 1);
-  assert.equal(result.attempts[0].model, 'gpt-6.1-sol');
+  assert.equal(result.attempts[0].model, 'gpt-6.2-sol');
   assert.equal(result.attempts[0].max_completion_tokens, 9000);
   assert.equal(result.fallbackFrom, undefined);
 });
@@ -187,9 +191,9 @@ test('main context-limit failure keeps the 3200-token Sol retry and identical me
   assert.equal(result.text, '縮小枠の合成回答');
   assert.deepEqual(app.calls.map(call => call.body.max_completion_tokens), [9000, 3200]);
   assert.deepEqual(app.calls[0].body.messages, app.calls[1].body.messages);
-  assert.deepEqual(app.calls.map(call => call.body.model), ['gpt-6.1-sol', 'gpt-6.1-sol']);
+  assert.deepEqual(app.calls.map(call => call.body.model), ['gpt-6.2-sol', 'gpt-6.2-sol']);
   assert.deepEqual(clone(result.attempts.map(({ ok, model }) => ({ ok, model }))), [
-    { ok: false, model: 'gpt-6.1-sol' }, { ok: true, model: 'gpt-6.1-sol' },
+    { ok: false, model: 'gpt-6.2-sol' }, { ok: true, model: 'gpt-6.2-sol' },
   ]);
 });
 
@@ -208,7 +212,7 @@ test('main non-retryable failures retain one OpenAI attempt and one Claude fallb
     assert.equal(result.ok, true);
     assert.equal(result.provider, 'claude');
     assert.equal(result.text, 'Claude合成回答');
-    assert.equal(result.fallbackFrom.model, 'gpt-6.1-sol');
+    assert.equal(result.fallbackFrom.model, 'gpt-6.2-sol');
     assert.equal(app.calls.length, 2);
     assert.equal(result.attempts.length, 2);
     assert.deepEqual(clone(result.attempts.map(attempt => attempt.provider)), ['openai', 'claude']);
@@ -247,9 +251,9 @@ test('clarification preserves ready plans and Claude fallback for invalid JSON o
     assert.deepEqual(clone(result.plan), readyPlan);
     assert.equal(result.provider, fallback ? 'claude' : 'openai');
     assert.equal(app.calls.length, fallback ? 2 : 1);
-    assert.equal(app.calls[0].body.model, 'gpt-6.1-sol');
+    assert.equal(app.calls[0].body.model, 'gpt-6.2-sol');
     if (fallback) {
-      assert.equal(result.fallbackFrom.model, 'gpt-6.1-sol');
+      assert.equal(result.fallbackFrom.model, 'gpt-6.2-sol');
       assert.deepEqual(app.calls[1].body, {
         model: 'claude-haiku-4-5', max_tokens: 500, temperature: 0.2,
         system: messages[0].content, messages: messages.slice(1),
