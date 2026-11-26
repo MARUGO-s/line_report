@@ -1,6 +1,6 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v78';
+const CHAT_CACHE = 'line-report-chat-v79';
 const CHAT_SHELL = [
   './chat.html',
   './chat/chat.css?v=20261126-app-sync-1',
@@ -15,7 +15,7 @@ const CHAT_SHELL = [
   './chat/messages.js?v=20261126-app-sync-1',
   './chat/attachments.js?v=20261126-app-sync-1',
   './chat/composer.js?v=20261126-app-sync-1',
-  './chat/app_compat.js?v=20261126-app-sync-1',
+  './chat/app_compat.js?v=20261126-app-sync-2',
   './chat/bootstrap.js?v=20261126-app-sync-1',
   './chat.webmanifest',
   './pages-config.js',

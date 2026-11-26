@@ -960,14 +960,17 @@ async function callChatAiSummary(payload) {
   const { data: sessionData } = await sb.auth.getSession();
   const accessToken = String(sessionData?.session?.access_token || '');
   if (!accessToken) throw new Error('ログインセッションを確認できませんでした。');
-  const url = `${CONFIG.supabaseUrl}/functions/v1/chat-ai-summary`;
+  const baseUrl = String(typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : (CONFIG.PROJECT_URL || '')).replace(/\/+$/, '');
+  const anonKey = String(typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : (CONFIG.RECEIPT_ADMIN_ANON_KEY || ''));
+  const url = `${baseUrl}/functions/v1/chat-ai-summary`;
+  const headers = {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  };
+  if (anonKey) headers['apikey'] = anonKey;
   const resp = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'apikey': CONFIG.supabaseKey,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(payload || {}),
     cache: 'no-store',
   });
@@ -1656,10 +1659,18 @@ async function openQuietHoursModal() {
     const { data: sessionData } = await sb.auth.getSession();
     const accessToken = String(sessionData?.session?.access_token || '');
     if (!accessToken) throw new Error('ログインセッションを確認できませんでした。');
-    const url = `${CONFIG.supabaseUrl}/functions/v1/chat-push?action=preferences`;
+    const baseUrl = String(typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : (CONFIG.PROJECT_URL || '')).replace(/\/+$/, '');
+    const anonKey = String(typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : (CONFIG.RECEIPT_ADMIN_ANON_KEY || ''));
+    const url = `${baseUrl}/functions/v1/chat-push?action=preferences`;
+    const reqHeaders = {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    };
+    if (anonKey) reqHeaders['apikey'] = anonKey;
     const resp = await fetch(url, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': CONFIG.supabaseKey },
+      method: 'POST',
+      headers: reqHeaders,
+      body: JSON.stringify({}),
       cache: 'no-store',
     });
     const pref = await resp.json().catch(() => ({}));
@@ -1699,11 +1710,7 @@ async function openQuietHoursModal() {
       try {
         const saveResp = await fetch(url, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'apikey': CONFIG.supabaseKey,
-            'Content-Type': 'application/json',
-          },
+          headers: reqHeaders,
           body: JSON.stringify({
             quiet_hours_enabled: $('compatQuietEnabled')?.checked === true,
             quiet_start_minute: timeInputToMinutes($('compatQuietStart')?.value, 23 * 60),

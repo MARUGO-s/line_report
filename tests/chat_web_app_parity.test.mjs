@@ -210,6 +210,13 @@ test('chat.html, realtime.js, and chat-admin.html wire all app-parity hooks with
   assert.match(adminHtml, /src="chat\/admin_usage\.js\?v=/);
   assert.match(adminHtml, /MTALK_ADMIN_USAGE/);
 
+  const appCompatJs = fs.readFileSync(path.join(PUBLIC_DIR, 'chat', 'app_compat.js'), 'utf8');
+  assert.doesNotMatch(appCompatJs, /CONFIG\.supabaseUrl|CONFIG\.supabaseKey/);
+  assert.match(appCompatJs, /SUPABASE_URL/);
+  assert.match(appCompatJs, /SUPABASE_ANON_KEY/);
+  assert.match(appCompatJs, /\/functions\/v1\/chat-ai-summary/);
+  assert.match(appCompatJs, /\/functions\/v1\/chat-push\?action=preferences/);
+
   const adminUsageJs = fs.readFileSync(path.join(PUBLIC_DIR, 'chat', 'admin_usage.js'), 'utf8');
   assert.match(adminUsageJs, /\/functions\/v1\/chat-admin-usage/);
   assert.match(adminUsageJs, /x-admin-token/);
