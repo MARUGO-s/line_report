@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  cropBarPelotaCountNumberColumn,
   cropBarPelotaCountsDetail,
   estimateBarPelotaReceiptSkew,
   prepareBarPelotaReceiptImage,
@@ -50,6 +51,21 @@ test('provides a detail image with the full width and unchanged pixels', () => {
   assert.equal(cropped.width, width)
   assert.equal(cropped.height, 55)
   assert.deepEqual(cropped.data, data.subarray(72 * stride, 127 * stride))
+})
+
+test('copies the right column at the bottom without changing its row order', () => {
+  const width = 8
+  const height = 128
+  const data = Uint8Array.from({ length: width * height * 4 }, (_, i) => i % 251)
+  const cropped = cropBarPelotaCountNumberColumn({ data, width, height })
+  assert.equal(cropped.width, 3)
+  assert.equal(cropped.height, 62)
+  const rows = [66, 67, 127]
+  for (const row of rows) {
+    const source = (row * width + 5) * 4
+    const dest = (row - 66) * cropped.width * 4
+    assert.deepEqual(cropped.data.subarray(dest, dest + 12), data.subarray(source, source + 12))
+  }
 })
 
 test('preserves an unsupported or over-budget input without a replacement', async () => {

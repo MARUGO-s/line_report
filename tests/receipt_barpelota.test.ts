@@ -205,3 +205,37 @@ test('The printed sequence keeps counts tied to their rows and rejects misordere
     settlement: true, partyCount: null, guestCount: null,
   })
 })
+
+test('The isolated number column resolves an ambiguous equal count using the printed net anchor', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  const readRows = ['純売上 ¥200,000', '販売点数 122', '返品点数 0', '総取引数 37', '客数 37']
+  globalThis.fetch = async (_input, init) => {
+    calls++
+    const body = JSON.parse(String(init?.body))
+    const image = body.contents[0].parts[1].inline_data.data
+    assert.equal(image, calls === 1 ? 'AQ==' : 'Ag==')
+    const parsed = calls === 1 ? settlement(readRows) : { anchor: '¥200,000', numbers: [122, 0, 37, 77] }
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(parsed) }] } }] })
+  }
+  try {
+    const generalReceipt = { ...receipt, netSales: '¥200,000', partyCount: '37', guestCount: '37' }
+    const image = {
+      bytes: new Uint8Array([1]), contentType: 'image/jpeg',
+      countNumberColumn: { bytes: new Uint8Array([2]), contentType: 'image/jpeg' },
+    }
+    const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
+    assert.equal(calls, 3)
+    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.partyCount, '37')
+    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.guestCount, '77')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('An unreadable numeric row before the counts does not pass the printed-order check', () => {
+  const rows = ['純売上 ¥200,000', '販売点数 122', '返品点数', '総取引数 37', '客数 77']
+  assert.deepEqual(parseBarPelotaSettlementCounts(settlement(rows), true), {
+    settlement: true, partyCount: null, guestCount: null,
+  })
+})
