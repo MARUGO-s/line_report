@@ -13479,6 +13479,245 @@ async function searchPosJournalProductsFromIndex(
 }
 
 /**
+ * 店舗の登録商品一覧・売上/点数ランキングを返す（商品名・コードが分からないスマホ画面向け）。
+ * 月次商品インデックス（journal_product_monthly_index）を優先し、未構築時のみ
+ * 既存のページ分割スキャナ（scanPosJournalParsedRows）へフォールバックする。
+ */
+async function fetchPosJournalProductCatalog(
+  supabase: ReturnType<typeof createClient>,
+  storeKey: string,
+  url: URL,
+) {
+  const monthFromRaw = toSafeString(url.searchParams.get("month_from"))
+  const monthToRaw = toSafeString(url.searchParams.get("month_to"))
+  const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/
+  const monthFrom = monthPattern.test(monthFromRaw) ? monthFromRaw : ""
+  const monthTo = monthPattern.test(monthToRaw) ? monthToRaw : ""
+  if (monthFrom && monthTo && monthFrom > monthTo) {
+    throw { status: 400, message: "開始月が終了月より後になっています。" } satisfies AppError
+  }
+  const qRaw = toSafeString(url.searchParams.get("q"))
+  const qNorm = qRaw ? normalizePosProductSearchText(qRaw) : ""
+  const qLower = qRaw.normalize("NFKC").toLowerCase()
+  const sortRaw = toSafeString(url.searchParams.get("sort")).toLowerCase()
+  const sort: "amount" | "qty" | "name" =
+    sortRaw === "qty" || sortRaw === "name" ? sortRaw : "amount"
+  const rawLimit = Number(url.searchParams.get("limit") ?? "200")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(500, Math.trunc(rawLimit)))
+    : 200
+
+  type AggItem = {
+    norm: string
+    qty: number
+    amount: number
+    months: Set<string>
+    names: Map<string, number>
+    codes: Map<string, number>
+    units: Map<number, number>
+    first_date: string | null
+    last_date: string | null
+  }
+  const byNorm = new Map<string, AggItem>()
+  const addEntry = (entry: {
+    norm: string
+    name: string
+    code: string
+    unit: number
+    qty: number
+    amount: number
+    year_month: string
+    first_date: string | null
+    last_date: string | null
+  }) => {
+    if (!entry.norm || (entry.qty <= 0 && entry.amount <= 0)) return
+    let agg = byNorm.get(entry.norm)
+    if (!agg) {
+      agg = {
+        norm: entry.norm,
+        qty: 0,
+        amount: 0,
+        months: new Set<string>(),
+        names: new Map<string, number>(),
+        codes: new Map<string, number>(),
+        units: new Map<number, number>(),
+        first_date: null,
+        last_date: null,
+      }
+      byNorm.set(entry.norm, agg)
+    }
+    agg.qty += entry.qty
+    agg.amount += entry.amount
+    if (entry.year_month) agg.months.add(entry.year_month)
+    const weight = Math.max(1, entry.qty)
+    if (entry.name) {
+      agg.names.set(entry.name, (agg.names.get(entry.name) || 0) + weight)
+    }
+    if (entry.code) {
+      agg.codes.set(entry.code, (agg.codes.get(entry.code) || 0) + weight)
+    }
+    if (entry.unit > 0) {
+      agg.units.set(entry.unit, (agg.units.get(entry.unit) || 0) + weight)
+    }
+    if (entry.first_date && (!agg.first_date || entry.first_date < agg.first_date)) {
+      agg.first_date = entry.first_date
+    }
+    if (entry.last_date && (!agg.last_date || entry.last_date > agg.last_date)) {
+      agg.last_date = entry.last_date
+    }
+  }
+
+  let source: "index" | "live" = "live"
+  if (await storeHasJournalProductIndex(supabase, storeKey)) {
+    source = "index"
+    let afterId = 0
+    for (let page = 0; page < 200; page++) {
+      let query = supabase
+        .from("journal_product_monthly_index")
+        .select(
+          "id, year_month, product_name_norm, display_name, product_code, unit_price, qty, amount, first_date, last_date",
+        )
+        .eq("store_partition_key", storeKey)
+        .gt("id", afterId)
+        .order("id", { ascending: true })
+        .limit(500)
+      if (monthFrom) query = query.gte("year_month", monthFrom)
+      if (monthTo) query = query.lte("year_month", monthTo)
+      const { data, error } = await query
+      if (error) {
+        throw {
+          status: 500,
+          message: `登録商品一覧の取得に失敗しました: ${error.message}`,
+        } satisfies AppError
+      }
+      const rows = Array.isArray(data) ? data : []
+      if (!rows.length) break
+      for (const row of rows) {
+        if (!isRecord(row)) continue
+        afterId = Math.max(afterId, toNonNegativeInteger(row.id))
+        addEntry({
+          norm: String(row.product_name_norm || ""),
+          name: String(row.display_name || ""),
+          code: String(row.product_code || ""),
+          unit: toNonNegativeInteger(row.unit_price),
+          qty: toNonNegativeInteger(row.qty),
+          amount: toNonNegativeInteger(row.amount),
+          year_month: String(row.year_month || ""),
+          first_date: row.first_date == null ? null : String(row.first_date).slice(0, 10),
+          last_date: row.last_date == null ? null : String(row.last_date).slice(0, 10),
+        })
+      }
+      if (rows.length < 500) break
+    }
+  } else {
+    await scanPosJournalParsedRows(
+      supabase,
+      {
+        storeKey,
+        monthFrom: monthFrom || undefined,
+        monthTo: monthTo || undefined,
+        errorLabel: "登録商品一覧用ジャーナルの取得に失敗しました",
+      },
+      (rows) => {
+        for (const row of rows) {
+          if (!isRecord(row)) continue
+          const businessDate = String(row.business_date ?? "").slice(0, 10)
+          const yearMonth = String(row.year_month ?? businessDate.slice(0, 7))
+          const detail = reconcilePosJournalParsedRow(row)
+          if (!detail || !detail.detail_complete) continue
+          for (const receipt of detail.receipts) {
+            if (!isRecord(receipt) || !Array.isArray(receipt.items)) continue
+            for (const item of extractNetProductItemsFromReceipt(receipt)) {
+              addEntry({
+                norm: normalizePosProductSearchText(item.name),
+                name: item.name,
+                code: item.code,
+                unit: item.unit,
+                qty: item.qty,
+                amount: item.amount,
+                year_month: yearMonth,
+                first_date: businessDate || null,
+                last_date: businessDate || null,
+              })
+            }
+          }
+        }
+      },
+    )
+  }
+
+  const pickTop = <T,>(map: Map<T, number>, fallback: T): T => {
+    let best = fallback
+    let bestCount = -1
+    for (const [k, v] of map.entries()) {
+      if (v > bestCount) {
+        best = k
+        bestCount = v
+      }
+    }
+    return best
+  }
+
+  let allItems = [...byNorm.values()].map((agg) => ({
+    name: pickTop(agg.names, agg.norm),
+    code: pickTop(agg.codes, ""),
+    unit: pickTop(agg.units, 0),
+    qty: agg.qty,
+    amount: agg.amount,
+    months: agg.months.size,
+    first_date: agg.first_date,
+    last_date: agg.last_date,
+    _norm: agg.norm,
+  }))
+
+  const grandAmount = allItems.reduce((sum, item) => sum + item.amount, 0)
+  const grandQty = allItems.reduce((sum, item) => sum + item.qty, 0)
+
+  if (qRaw) {
+    allItems = allItems.filter((item) => {
+      const nameLower = item.name.normalize("NFKC").toLowerCase()
+      const codeLower = item.code.normalize("NFKC").toLowerCase()
+      return (qNorm && item._norm.includes(qNorm)) ||
+        nameLower.includes(qLower) ||
+        codeLower.includes(qLower)
+    })
+  }
+
+  allItems.sort((a, b) => {
+    if (sort === "qty") return b.qty - a.qty || b.amount - a.amount || a.name.localeCompare(b.name, "ja")
+    if (sort === "name") return a.name.localeCompare(b.name, "ja") || b.amount - a.amount
+    return b.amount - a.amount || b.qty - a.qty || a.name.localeCompare(b.name, "ja")
+  })
+
+  const items = allItems.slice(0, limit).map((item, idx) => ({
+    rank: idx + 1,
+    name: item.name,
+    code: item.code,
+    unit: item.unit,
+    qty: item.qty,
+    amount: item.amount,
+    share_pct: grandAmount > 0 ? Math.round((item.amount / grandAmount) * 1000) / 10 : 0,
+    months: item.months,
+    first_date: item.first_date,
+    last_date: item.last_date,
+  }))
+
+  return {
+    ok: true,
+    mode: "catalog",
+    source,
+    store_key: storeKey,
+    month_from: monthFrom || null,
+    month_to: monthTo || null,
+    sort,
+    total_products: allItems.length,
+    total_qty: grandQty,
+    total_amount: grandAmount,
+    items,
+  }
+}
+
+/**
  * 店舗の全電子ジャーナル（parsed_data）を横断し、商品名・コード・単価帯の初出月を返す。
  * 月次インデックスがあればそれを使い、未構築時のみフルスキャンへフォールバックする。
  */
@@ -13489,6 +13728,9 @@ async function searchPosJournalProducts(
   const storeKey = normalizePosJournalStoreKey(
     url.searchParams.get("store_key") || url.searchParams.get("store"),
   )
+  if (url.searchParams.get("mode") === "catalog") {
+    return await fetchPosJournalProductCatalog(supabase, storeKey, url)
+  }
   const filter = parsePosProductSearchFilter(url)
   const forceLive = url.searchParams.get("live") === "1" ||
     url.searchParams.get("source") === "live"
