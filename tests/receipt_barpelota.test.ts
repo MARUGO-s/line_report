@@ -142,8 +142,13 @@ test('A close-up is included and conflicting, plausible row readings are held', 
   globalThis.fetch = async (_input, init) => {
     const body = JSON.parse(String(init?.body))
     const parts = body.contents[0].parts
-    assert.match(body.system_instruction.parts[0].text, /2枚目は同じ精算票の下部/)
-    assert.deepEqual(parts.slice(1).map((part: { inline_data: { data: string } }) => part.inline_data.data), ['AQ==', 'Ag=='])
+    const images = parts.slice(1).map((part: { inline_data: { data: string } }) => part.inline_data.data)
+    if (responses.length === 2) {
+      assert.match(body.system_instruction.parts[0].text, /2枚目は同じ精算票の下部/)
+      assert.deepEqual(images, ['AQ==', 'Ag=='])
+    } else {
+      assert.deepEqual(images, ['AQ=='])
+    }
     return Response.json({
       candidates: [{ content: { parts: [{ text: JSON.stringify(settlement(responses.shift()!)) }] } }],
       usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 12, totalTokenCount: 42 },

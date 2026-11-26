@@ -209,19 +209,17 @@ export async function prepareBarPelotaReceiptImage(
     }
     if (image.width * image.height > MAX_DECODED_PIXELS) return original
     const angle = estimateBarPelotaReceiptSkew(image)
-    const needsFullEncoding = angle !== 0 || bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES
-    const prepared = needsFullEncoding ? straightenImage(image, angle) : image
-    let fullImage: PreparedBarPelotaReceiptImage = original
-    if (needsFullEncoding) {
-      const encoded = jpeg.encode(prepared, 94).data
-      if (encoded.byteLength <= GROQ_VISION_BASE64_MAX_BYTES) {
-        fullImage = {
-          bytes: new Uint8Array(encoded),
-          contentType: 'image/jpeg',
-          correctionDegrees: angle === 0 ? 0 : -Math.round(angle * 100) / 100,
-        }
-      }
+    if (angle === 0 && bytes.byteLength <= GROQ_VISION_BASE64_MAX_BYTES) return original
+    const prepared = straightenImage(image, angle)
+    const encoded = jpeg.encode(prepared, 94).data
+    if (encoded.byteLength > GROQ_VISION_BASE64_MAX_BYTES) return original
+    const fullImage: PreparedBarPelotaReceiptImage = {
+      bytes: new Uint8Array(encoded),
+      contentType: 'image/jpeg',
+      correctionDegrees: angle === 0 ? 0 : -Math.round(angle * 100) / 100,
     }
+    // A close-up helps align corrected lines. Otherwise use the full receipt's layout.
+    if (angle === 0) return fullImage
 
     try {
       const detail = jpeg.encode(cropBarPelotaCountsDetail(prepared), 94).data
