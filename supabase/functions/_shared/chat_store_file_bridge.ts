@@ -29,7 +29,7 @@ import {
   BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
   BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE,
   isBarPelotaReceiptStore,
-  readBarPelotaSettlementCounts,
+  verifyBarPelotaSettlementCounts,
 } from './barpelota_receipt.ts'
 import { prepareBarPelotaReceiptImage } from './receipt_barpelota_image.ts'
 import {
@@ -450,9 +450,9 @@ export async function processStoreRoomImageLikeLine(
   }
 
   const settlementCounts = isBarPelota
-    ? await readBarPelotaSettlementCounts(
-      receiptImage.bytes,
-      receiptImage.contentType,
+    ? await verifyBarPelotaSettlementCounts(
+      parsedReceipt,
+      receiptImage,
       `${media.lineMessageId}#settlement-counts`,
       geminiKey,
       resolveReceiptGeminiFlashLiteModel(),

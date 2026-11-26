@@ -17,6 +17,7 @@ export type PreparedBarPelotaReceiptImage = {
   bytes: Uint8Array
   contentType: string | null
   correctionDegrees: number
+  countsDetail?: { bytes: Uint8Array; contentType: string }
 }
 
 function pngCanBeDecoded(bytes: Uint8Array): boolean {
@@ -170,6 +171,18 @@ function straightenImage(image: RgbaImage, angle: number): RgbaImage {
   return { data, width, height }
 }
 
+/** Retain both printed columns at their original pixel spacing for the count OCR. */
+export function cropBarPelotaCountsDetail(image: RgbaImage): RgbaImage {
+  const top = Math.floor(image.height * 0.57)
+  const end = Math.ceil(image.height * 0.985)
+  const stride = image.width * 4
+  return {
+    width: image.width,
+    height: end - top,
+    data: image.data.subarray(top * stride, end * stride),
+  }
+}
+
 export async function prepareBarPelotaReceiptImage(
   bytes: Uint8Array,
   contentType: string | null,
@@ -196,15 +209,29 @@ export async function prepareBarPelotaReceiptImage(
     }
     if (image.width * image.height > MAX_DECODED_PIXELS) return original
     const angle = estimateBarPelotaReceiptSkew(image)
-    if (angle === 0 && bytes.byteLength <= GROQ_VISION_BASE64_MAX_BYTES) return original
-    const corrected = straightenImage(image, angle)
-    const encoded = jpeg.encode(corrected, 94).data
-    if (encoded.byteLength > GROQ_VISION_BASE64_MAX_BYTES) return original
-    return {
-      bytes: new Uint8Array(encoded),
-      contentType: 'image/jpeg',
-      correctionDegrees: angle === 0 ? 0 : -Math.round(angle * 100) / 100,
+    const needsFullEncoding = angle !== 0 || bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES
+    const prepared = needsFullEncoding ? straightenImage(image, angle) : image
+    let fullImage: PreparedBarPelotaReceiptImage = original
+    if (needsFullEncoding) {
+      const encoded = jpeg.encode(prepared, 94).data
+      if (encoded.byteLength <= GROQ_VISION_BASE64_MAX_BYTES) {
+        fullImage = {
+          bytes: new Uint8Array(encoded),
+          contentType: 'image/jpeg',
+          correctionDegrees: angle === 0 ? 0 : -Math.round(angle * 100) / 100,
+        }
+      }
     }
+
+    try {
+      const detail = jpeg.encode(cropBarPelotaCountsDetail(prepared), 94).data
+      if (detail.byteLength <= GROQ_VISION_BASE64_MAX_BYTES) {
+        return { ...fullImage, countsDetail: { bytes: new Uint8Array(detail), contentType: 'image/jpeg' } }
+      }
+    } catch {
+      // The full image is still available when the optional detail cannot be encoded.
+    }
+    return fullImage
   } catch {
     // The regular OCR and its verification gate still handle the original image.
     return original

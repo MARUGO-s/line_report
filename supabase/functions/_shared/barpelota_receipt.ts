@@ -1,5 +1,6 @@
 import { formatYenAmount, parseCurrencyAmount, parseFirstJsonObject } from './receipt_parse.ts'
 import type { LineImageReceiptAnalysis } from './receipt_types.ts'
+import type { PreparedBarPelotaReceiptImage } from './receipt_barpelota_image.ts'
 import { requestGeminiVisionText, type LineImageVisionUsage } from './receipt_vision.ts'
 
 const BAR_PELOTA_SETTLEMENT_PROMPT = [
@@ -9,7 +10,8 @@ const BAR_PELOTA_SETTLEMENT_PROMPT = [
   '精算票の「総取引数」と「客数」の2行を、左の印字ラベルから右端の同じ行の数字まで読み取ってください。',
   '紙が斜めなら各行の傾きに沿って右端まで目で追ってください。縦に近い別行や隣の行の数字を拾わないでください。',
   'rows は各行を1要素とする配列です。印字されたラベル、半角空白、右側の数字だけを返してください。数字が読めない行は読めたラベルだけを返します。',
-  '「通常取引数」などの隣接する別の行と混同せず、「総取引数」と「客数」それぞれの行の数字をそのまま転記してください。',
+  '「総取引数」「客数」「通常取引数」が近接する場合は、左側でその3つのラベルを上から順に確認してから、それぞれの高さを右端の数字まで水平にたどってください。',
+  '客数行の上にある「総取引数」と、客数行の下にある「通常取引数」は別の行です。「総取引数」と「客数」の数字だけを転記してください。',
 ].join('\n')
 
 const PARTY_COUNT_MAX = 9_999
@@ -71,19 +73,55 @@ export async function readBarPelotaSettlementCounts(
   fileName: string,
   geminiApiKey: string,
   geminiModel: string,
+  detailImage?: PreparedBarPelotaReceiptImage['countsDetail'],
 ): Promise<BarPelotaSettlementCounts & { providerFailed: boolean; usage?: LineImageVisionUsage | null }> {
+  const prompt = detailImage
+    ? BAR_PELOTA_SETTLEMENT_PROMPT + '\n1枚目は精算票全体、2枚目は同じ精算票の下部を拡大した画像です。店名と見出しは1枚目で確認し、件数の行が両方写っている場合は2枚目の文字と数字で照合してください。'
+    : BAR_PELOTA_SETTLEMENT_PROMPT
   const { content, usage } = await requestGeminiVisionText(
     bytes,
     contentType,
     fileName,
     geminiApiKey,
-    BAR_PELOTA_SETTLEMENT_PROMPT,
+    prompt,
     geminiModel,
     15_000,
     2_048,
+    detailImage,
   )
   const parsed = content ? parseFirstJsonObject(content) : null
   return { ...parseBarPelotaSettlementCounts(parsed), providerFailed: !parsed, usage }
+}
+
+/** Recheck the printed rows when the general and focused reads disagree. */
+export async function verifyBarPelotaSettlementCounts(
+  receipt: LineImageReceiptAnalysis,
+  image: Pick<PreparedBarPelotaReceiptImage, 'bytes' | 'contentType' | 'countsDetail'>,
+  fileName: string,
+  geminiApiKey: string,
+  geminiModel: string,
+): Promise<BarPelotaSettlementCounts & { providerFailed: boolean; usages: LineImageVisionUsage[] }> {
+  const read = (id: string) => readBarPelotaSettlementCounts(
+    image.bytes, image.contentType, id, geminiApiKey, geminiModel, image.countsDetail,
+  )
+  const { usage, ...focused } = await read(fileName)
+  const usages = usage ? [usage] : []
+  const { partyCount, guestCount } = focused
+  if (!focused.settlement || partyCount === null || guestCount === null || guestCount < partyCount) {
+    return { ...focused, usages }
+  }
+
+  if (readCount(receipt.partyCount, PARTY_COUNT_MAX) === partyCount &&
+    readCount(receipt.guestCount, GUEST_COUNT_MAX) === guestCount) {
+    return { ...focused, usages }
+  }
+
+  const confirmation = await read(fileName + '#cross-check')
+  if (confirmation.usage) usages.push(confirmation.usage)
+  if (confirmation.settlement && confirmation.partyCount === partyCount && confirmation.guestCount === guestCount) {
+    return { ...focused, usages }
+  }
+  return { settlement: true, partyCount: null, guestCount: null, providerFailed: confirmation.providerFailed, usages }
 }
 
 /** Validate the numbers alone. Callers must separately verify the source rows before automatic registration. */

@@ -20,7 +20,7 @@ import {
   BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
   BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE,
   isBarPelotaReceiptStore,
-  readBarPelotaSettlementCounts,
+  verifyBarPelotaSettlementCounts,
 } from '../_shared/barpelota_receipt.ts'
 import { prepareBarPelotaReceiptImage } from '../_shared/receipt_barpelota_image.ts'
 import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_shared/foodcourt_compare.ts'
@@ -1872,16 +1872,16 @@ async function processReceiptImageEvent(
     registry.receipt_phones,
   )
   const settlementCounts = currentStoreMatched && isBarPelota
-    ? await readBarPelotaSettlementCounts(
-      receiptImage.bytes,
-      receiptImage.contentType,
+    ? await verifyBarPelotaSettlementCounts(
+      parsedReceipt,
+      receiptImage,
       `${lineMessageId}#settlement-counts`,
       resolveGeminiApiKey(),
       normalReceiptGeminiModel,
     )
     : null
-  if (settlementCounts) {
-    await recordAiUsage('gemini', normalReceiptGeminiModel, settlementCounts.usage)
+  for (const usage of settlementCounts?.usages ?? []) {
+    await recordAiUsage('gemini', normalReceiptGeminiModel, usage)
   }
 
   // 日次精算票を確認できた場合は売上へ進む。単独のレジ出金伝票は小口現金に案内する。

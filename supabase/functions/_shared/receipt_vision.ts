@@ -818,6 +818,7 @@ export async function requestGeminiVisionText(
   model: string,
   timeoutMs = 30000,
   maxOutputTokens = 16384,
+  detailImage?: { bytes: Uint8Array; contentType: string },
 ): Promise<{ content: string | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
   if (!geminiApiKey) {
     return { content: null, failure: { stage: 'missing_api_key', message: 'GEMINI_API_KEY is missing.' } }
@@ -836,6 +837,11 @@ export async function requestGeminiVisionText(
     }
   }
 
+  if (detailImage && (!isVisionAnalyzableImageMime(detailImage.contentType) ||
+    detailImage.bytes.byteLength === 0 || detailImage.bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES)) {
+    return { content: null, failure: { stage: 'invalid_detail_image', message: 'Invalid detail image.' } }
+  }
+
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
   const body = {
@@ -846,6 +852,9 @@ export async function requestGeminiVisionText(
         parts: [
           { text: `この画像を解析してください。ファイル名: ${fileName || '(unknown)'}` },
           { inline_data: { mime_type: mime, data: encodeVisionImageBase64(bytes) } },
+          ...(detailImage ? [{
+            inline_data: { mime_type: detailImage.contentType, data: encodeVisionImageBase64(detailImage.bytes) },
+          }] : []),
         ],
       },
     ],
