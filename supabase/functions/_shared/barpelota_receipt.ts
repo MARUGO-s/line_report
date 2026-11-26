@@ -13,6 +13,13 @@ const BAR_PELOTA_SETTLEMENT_PROMPT = [
   '「通常取引数」などの隣接する別の行と混同せず、「総取引数」と「客数」それぞれの行の数字をそのまま転記してください。',
 ].join('\n')
 
+const COUNT_ROW_ORDER = ['純売上', '販売点数', '返品点数', '総取引数', '客数']
+const COUNT_ROW_ORDER_PROMPT = [
+  '店名と見出しを確認したら、用紙の左列の「純売上」「販売点数」「返品点数」「総取引数」「客数」が連続する箇所を探してください。',
+  '右列では「純売上」の金額を見つけ、その直下に並ぶ4つの数字を、右列だけを上から順番に読んでください。0も1行です。紙面が斜めでも左列と右列を横に行き来せず、両方の列の順番だけを対応させてください。',
+  'rows はこの5行だけを印字の順番で返してください。「総取引数」は返品点数の次、客数はその直下です。その後に続く「通常取引数」の数値はこの5行に含めません。ラベルや数字を確認できない行は推測しないでください。',
+].join('\n')
+
 const PARTY_COUNT_MAX = 9_999
 const GUEST_COUNT_MAX = 99_999
 
@@ -49,7 +56,10 @@ function countFromPrintedRow(rows: string[], label: string, max: number): number
 }
 
 /** Interpret the transcribed header and labeled rows without substituting a nearby value. */
-export function parseBarPelotaSettlementCounts(raw: unknown): BarPelotaSettlementCounts {
+export function parseBarPelotaSettlementCounts(
+  raw: unknown,
+  usePrintedOrder = false,
+): BarPelotaSettlementCounts {
   const fields = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const storeName = typeof fields.store_name === 'string' ? fields.store_name.normalize('NFKC').trim() : ''
   const heading = typeof fields.heading === 'string' ? fields.heading.normalize('NFKC').trim() : ''
@@ -59,6 +69,10 @@ export function parseBarPelotaSettlementCounts(raw: unknown): BarPelotaSettlemen
   const rows = (Array.isArray(fields.rows) ? fields.rows : [])
     .filter((row): row is string => typeof row === 'string' && !/[\r\n\u2028\u2029]/.test(row))
     .map((row) => row.normalize('NFKC').trim())
+  if (usePrintedOrder && (rows.length !== COUNT_ROW_ORDER.length ||
+    COUNT_ROW_ORDER.some((label, index) => !rows[index].startsWith(label)))) {
+    return { settlement, partyCount: null, guestCount: null }
+  }
   return {
     settlement,
     partyCount: countFromPrintedRow(rows, '総取引数', PARTY_COUNT_MAX),
@@ -73,24 +87,26 @@ export async function readBarPelotaSettlementCounts(
   geminiApiKey: string,
   geminiModel: string,
   detailImage?: PreparedBarPelotaReceiptImage['countsDetail'],
+  usePrintedOrder = false,
 ): Promise<BarPelotaSettlementCounts & { providerFailed: boolean; usage?: LineImageVisionUsage | null }> {
   const prompt = detailImage
     ? BAR_PELOTA_SETTLEMENT_PROMPT + '\n1枚目は精算票全体、2枚目は同じ精算票の下部を拡大した画像です。店名と見出しは1枚目で確認し、件数の行が両方写っている場合は2枚目の文字と数字で照合してください。' +
       '「総取引数」「客数」「通常取引数」が近接する場合は、左側でその3つのラベルを上から順に確認してから、それぞれの高さを右端まで水平にたどり、「総取引数」と「客数」の数字だけを転記してください。'
     : BAR_PELOTA_SETTLEMENT_PROMPT
+  const systemPrompt = usePrintedOrder ? prompt + '\n' + COUNT_ROW_ORDER_PROMPT : prompt
   const { content, usage } = await requestGeminiVisionText(
     bytes,
     contentType,
     fileName,
     geminiApiKey,
-    prompt,
+    systemPrompt,
     geminiModel,
     15_000,
     2_048,
     detailImage,
   )
   const parsed = content ? parseFirstJsonObject(content) : null
-  return { ...parseBarPelotaSettlementCounts(parsed), providerFailed: !parsed, usage }
+  return { ...parseBarPelotaSettlementCounts(parsed, usePrintedOrder), providerFailed: !parsed, usage }
 }
 
 /** Recheck the printed rows when the general and focused reads disagree. */
@@ -103,7 +119,7 @@ export async function verifyBarPelotaSettlementCounts(
 ): Promise<BarPelotaSettlementCounts & { providerFailed: boolean; usages: LineImageVisionUsage[] }> {
   const { bytes, contentType, countsDetail } = image
   const { usage, ...focused } = await readBarPelotaSettlementCounts(
-    bytes, contentType, fileName, geminiApiKey, geminiModel, countsDetail,
+    bytes, contentType, fileName, geminiApiKey, geminiModel, countsDetail, !countsDetail,
   )
   const usages = usage ? [usage] : []
   const { partyCount, guestCount } = focused
@@ -111,13 +127,14 @@ export async function verifyBarPelotaSettlementCounts(
     return { ...focused, usages }
   }
 
-  if (readCount(receipt.partyCount, PARTY_COUNT_MAX) === partyCount &&
+  if (partyCount !== guestCount &&
+    readCount(receipt.partyCount, PARTY_COUNT_MAX) === partyCount &&
     readCount(receipt.guestCount, GUEST_COUNT_MAX) === guestCount) {
     return { ...focused, usages }
   }
 
   const confirmation = await readBarPelotaSettlementCounts(
-    bytes, contentType, fileName + '#cross-check', geminiApiKey, geminiModel,
+    bytes, contentType, fileName + '#cross-check', geminiApiKey, geminiModel, undefined, true,
   )
   if (confirmation.usage) usages.push(confirmation.usage)
   if (confirmation.settlement && confirmation.partyCount === partyCount && confirmation.guestCount === guestCount) {

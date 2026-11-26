@@ -132,7 +132,10 @@ test('A failed focused request is distinguishable from unreadable printed values
 
 test('A close-up is included and conflicting, plausible row readings are held', async () => {
   const originalFetch = globalThis.fetch
-  const responses = [['総取引数 33', '客数 74'], ['総取引数 34', '客数 74']]
+  const responses = [
+    ['総取引数 32', '客数 71'],
+    ['純売上 ¥100,000', '販売点数 89', '返品点数 0', '総取引数 33', '客数 71'],
+  ]
   const image = {
     bytes: new Uint8Array([1]),
     contentType: 'image/jpeg',
@@ -148,6 +151,7 @@ test('A close-up is included and conflicting, plausible row readings are held', 
       assert.deepEqual(images, ['AQ==', 'Ag=='])
     } else {
       assert.deepEqual(images, ['AQ=='])
+      assert.match(body.system_instruction.parts[0].text, /右列だけを上から順番に/)
     }
     return Response.json({
       candidates: [{ content: { parts: [{ text: JSON.stringify(settlement(responses.shift()!)) }] } }],
@@ -174,18 +178,30 @@ test('A second focused reading can confirm a correction to the general OCR', asy
     calls++
     return Response.json({
       candidates: [{
-        content: { parts: [{ text: JSON.stringify(settlement(['総取引数 15', '客数 86'])) }] },
+        content: { parts: [{ text: JSON.stringify(settlement([
+          '純売上 ¥250,000', '販売点数 109', '返品点数 0', '総取引数 13', '客数 66',
+        ])) }] },
       }],
     })
   }
   try {
-    const generalReceipt = { ...receipt, partyCount: '15', guestCount: '15' }
+    const generalReceipt = { ...receipt, partyCount: '13', guestCount: '13' }
     const image = { bytes: new Uint8Array([1]), contentType: 'image/jpeg' }
     const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
     assert.equal(calls, 2)
-    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.partyCount, '15')
-    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.guestCount, '86')
+    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.partyCount, '13')
+    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.guestCount, '66')
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('The printed sequence keeps counts tied to their rows and rejects misordered evidence', () => {
+  const ordered = ['純売上 ¥200,000', '販売点数 122', '返品点数 0', '総取引数 37', '客数 77']
+  assert.deepEqual(parseBarPelotaSettlementCounts(settlement(ordered), true), {
+    settlement: true, partyCount: 37, guestCount: 77,
+  })
+  assert.deepEqual(parseBarPelotaSettlementCounts(settlement([...ordered.slice(0, 3), ordered[4], ordered[3]]), true), {
+    settlement: true, partyCount: null, guestCount: null,
+  })
 })
