@@ -130,63 +130,65 @@ test('A failed focused request is distinguishable from unreadable printed values
   }
 })
 
-test('A close-up is included and conflicting, plausible row readings are held', async () => {
+test('Matching general and close-up counts are held if either preceding number is unreadable', async () => {
   const originalFetch = globalThis.fetch
-  const responses = [
-    ['総取引数 32', '客数 71'],
-    ['純売上 ¥100,000', '販売点数 89', '返品点数 0', '総取引数 33', '客数 71'],
-  ]
   const image = {
     bytes: new Uint8Array([1]),
     contentType: 'image/jpeg',
     countsDetail: { bytes: new Uint8Array([2]), contentType: 'image/jpeg' },
+    countNumberColumn: { bytes: new Uint8Array([3]), contentType: 'image/jpeg' },
   }
-  const generalReceipt = { ...receipt, partyCount: null, guestCount: '74' }
-  globalThis.fetch = async (_input, init) => {
-    const body = JSON.parse(String(init?.body))
-    const parts = body.contents[0].parts
-    const images = parts.slice(1).map((part: { inline_data: { data: string } }) => part.inline_data.data)
-    if (responses.length === 2) {
-      assert.match(body.system_instruction.parts[0].text, /2枚目は同じ精算票の下部/)
-      assert.deepEqual(images, ['AQ==', 'Ag=='])
-    } else {
-      assert.deepEqual(images, ['AQ=='])
-      assert.match(body.system_instruction.parts[0].text, /右列だけを上から順番に/)
-    }
-    return Response.json({
-      candidates: [{ content: { parts: [{ text: JSON.stringify(settlement(responses.shift()!)) }] } }],
-      usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 12, totalTokenCount: 42 },
-    })
-  }
+  const generalReceipt = { ...receipt, netSales: '¥100,000', partyCount: '32', guestCount: '71' }
   try {
-    const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
-    assert.equal(responses.length, 0)
-    assert.equal(result.settlement, true)
-    assert.equal(result.partyCount, null)
-    assert.equal(result.guestCount, null)
-    assert.equal(result.usages.length, 2)
-    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result), null)
+    for (const numbers of [[null, 0, 32, 71], [89, null, 32, 71]]) {
+      const responses = [settlement(['総取引数 32', '客数 71']), { anchor: '¥100,000', numbers }]
+      globalThis.fetch = async (_input, init) => {
+        const body = JSON.parse(String(init?.body))
+        const parts = body.contents[0].parts
+        const images = parts.slice(1).map((part: { inline_data: { data: string } }) => part.inline_data.data)
+        if (responses.length === 2) {
+          assert.match(body.system_instruction.parts[0].text, /2枚目は同じ精算票の下部/)
+          assert.deepEqual(images, ['AQ==', 'Ag=='])
+        } else {
+          assert.deepEqual(images, ['Aw=='])
+          assert.match(body.system_instruction.parts[0].text, /その位置に null/)
+        }
+        return Response.json({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(responses.shift()) }] } }],
+          usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 12, totalTokenCount: 42 },
+        })
+      }
+      const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
+      assert.equal(responses.length, 0)
+      assert.equal(result.settlement, true)
+      assert.equal(result.providerFailed, false)
+      assert.equal(result.usages.length, 2)
+      assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result), null)
+    }
   } finally {
     globalThis.fetch = originalFetch
   }
 })
 
-test('A second focused reading can confirm a correction to the general OCR', async () => {
+test('A complete right column can confirm a correction to the general OCR', async () => {
   const originalFetch = globalThis.fetch
   let calls = 0
   globalThis.fetch = async () => {
     calls++
     return Response.json({
       candidates: [{
-        content: { parts: [{ text: JSON.stringify(settlement([
+        content: { parts: [{ text: JSON.stringify(calls === 1 ? settlement([
           '純売上 ¥250,000', '販売点数 109', '返品点数 0', '総取引数 13', '客数 66',
-        ])) }] },
+        ]) : { anchor: '¥250,000', numbers: [109, 0, 13, 66] }) }] },
       }],
     })
   }
   try {
-    const generalReceipt = { ...receipt, partyCount: '13', guestCount: '13' }
-    const image = { bytes: new Uint8Array([1]), contentType: 'image/jpeg' }
+    const generalReceipt = { ...receipt, netSales: '¥250,000', partyCount: '13', guestCount: '13' }
+    const image = {
+      bytes: new Uint8Array([1]), contentType: 'image/jpeg',
+      countNumberColumn: { bytes: new Uint8Array([2]), contentType: 'image/jpeg' },
+    }
     const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
     assert.equal(calls, 2)
     assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.partyCount, '13')
@@ -206,28 +208,37 @@ test('The printed sequence keeps counts tied to their rows and rejects misordere
   })
 })
 
-test('The isolated number column resolves an ambiguous equal count using the printed net anchor', async () => {
+test('Column reads must agree on all four printed rows before correcting an ambiguous pair', async () => {
   const originalFetch = globalThis.fetch
   let calls = 0
   const readRows = ['純売上 ¥200,000', '販売点数 122', '返品点数 0', '総取引数 37', '客数 37']
-  globalThis.fetch = async (_input, init) => {
-    calls++
-    const body = JSON.parse(String(init?.body))
-    const image = body.contents[0].parts[1].inline_data.data
-    assert.equal(image, calls === 1 ? 'AQ==' : 'Ag==')
-    const parsed = calls === 1 ? settlement(readRows) : { anchor: '¥200,000', numbers: [122, 0, 37, 77] }
-    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(parsed) }] } }] })
-  }
   try {
     const generalReceipt = { ...receipt, netSales: '¥200,000', partyCount: '37', guestCount: '37' }
     const image = {
       bytes: new Uint8Array([1]), contentType: 'image/jpeg',
       countNumberColumn: { bytes: new Uint8Array([2]), contentType: 'image/jpeg' },
     }
-    const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
-    assert.equal(calls, 3)
-    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.partyCount, '37')
-    assert.equal(applyBarPelotaSettlementCounts(generalReceipt, result)?.guestCount, '77')
+    for (const repeatedSold of [122, 123]) {
+      calls = 0
+      globalThis.fetch = async (_input, init) => {
+        calls++
+        const body = JSON.parse(String(init?.body))
+        assert.equal(body.contents[0].parts[1].inline_data.data, calls === 1 ? 'AQ==' : 'Ag==')
+        const parsed = calls === 1
+          ? settlement(readRows)
+          : { anchor: '¥200,000', numbers: [calls === 2 ? 122 : repeatedSold, 0, 37, 77] }
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(parsed) }] } }] })
+      }
+      const result = await verifyBarPelotaSettlementCounts(generalReceipt, image, 'fixture', 'test-key', 'test-model')
+      assert.equal(calls, 3)
+      const applied = applyBarPelotaSettlementCounts(generalReceipt, result)
+      if (repeatedSold === 122) {
+        assert.equal(applied?.partyCount, '37')
+        assert.equal(applied?.guestCount, '77')
+      } else {
+        assert.equal(applied, null)
+      }
+    }
   } finally {
     globalThis.fetch = originalFetch
   }
