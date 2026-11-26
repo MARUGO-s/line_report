@@ -10,6 +10,8 @@ export type LineImageReceiptAnalysis = {
   grossSales: string | null
   partyCount: string | null
   guestCount: string | null
+  /** バルペロタ精算票で「総取引数」と「客数」の印字行を別途照合したことを示す。 */
+  barPelotaCountsVerified?: true
   unitPrice: string | null
   items: string[]
   /** 商品明細（品名＋価格＋税率）。経費（小口現金）の明細表示・品目別税率に使用。任意（解析時のみ設定）。 */

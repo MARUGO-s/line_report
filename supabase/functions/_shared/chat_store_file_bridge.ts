@@ -25,6 +25,12 @@ import {
 } from './receipt_store_name_match.ts'
 import { attemptReceiptRegistration } from './receipt_save_flow.ts'
 import {
+  applyBarPelotaSettlementCounts,
+  BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+  isBarPelotaReceiptStore,
+  readBarPelotaSettlementCounts,
+} from './barpelota_receipt.ts'
+import {
   combineStoreReceiptPromptAdditions,
   fetchStoreReceiptAnalysisPromptAddition,
   resolveBuiltinStoreReceiptPrompt,
@@ -409,9 +415,9 @@ export async function processStoreRoomImageLikeLine(
   const receiptAligned = String(alignedStoreName ?? '') !== String(receiptRaw.storeName ?? '')
     ? { ...receiptRaw, storeName: alignedStoreName }
     : receiptRaw
-  const receipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
+  const parsedReceipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
   const confidence = mergeReceiptConfidence(
-    computeReceiptHeuristicConfidence(receipt),
+    computeReceiptHeuristicConfidence(parsedReceipt),
     analyzedResult.receiptModelConfidence ?? null,
   )
   if (confidence < RECEIPT_ANALYSIS_CONFIDENCE_MIN) {
@@ -425,15 +431,28 @@ export async function processStoreRoomImageLikeLine(
   const matched = receiptStoreNameMatchesRegistry(
     storeDisplayName,
     registry.store_partition_key,
-    receipt.storeName,
-    receipt.storePhone,
+    parsedReceipt.storeName,
+    parsedReceipt.storePhone,
     registry.receipt_phones,
   )
   if (!matched) {
     return {
-      text: `画像を確認しました。この店舗のレシートとして登録できませんでした（読み取り店名: ${receipt.storeName || '不明'}）。`,
+      text: `画像を確認しました。この店舗のレシートとして登録できませんでした（読み取り店名: ${parsedReceipt.storeName || '不明'}）。`,
       kind: 'media',
     }
+  }
+
+  const receipt = isBarPelotaReceiptStore(registry.store_partition_key)
+    ? applyBarPelotaSettlementCounts(parsedReceipt, await readBarPelotaSettlementCounts(
+      params.bytes,
+      params.contentType || 'image/jpeg',
+      `${media.lineMessageId}#settlement-counts`,
+      geminiKey,
+      resolveReceiptGeminiFlashLiteModel(),
+    ))
+    : parsedReceipt
+  if (!receipt) {
+    return { text: BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE, kind: 'error' }
   }
 
   const receiptDateIso = resolveReceiptDateIsoForPersist(receipt.date)

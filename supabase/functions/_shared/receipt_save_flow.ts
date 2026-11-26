@@ -1,6 +1,11 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis, LineReplyPayload } from './receipt_types.ts'
 import {
+  BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+  hasValidBarPelotaReceiptCounts,
+  isBarPelotaReceiptStore,
+} from './barpelota_receipt.ts'
+import {
   buildReceiptFlexMessage,
   type ReceiptReplyVisibilityOptions,
 } from './receipt_flex_reply.ts'
@@ -39,6 +44,14 @@ export async function attemptReceiptRegistration(
   payload: ReceiptRegistrationPayload,
   replyVisibility: ReceiptReplyVisibilityOptions = {},
 ): Promise<ReceiptRegistrationResult> {
+  const receipt = payload.receipt_payload
+  if (
+    isBarPelotaReceiptStore(registry.store_partition_key) &&
+    (receipt.barPelotaCountsVerified !== true || !hasValidBarPelotaReceiptCounts(receipt))
+  ) {
+    return { saved: false, reply: BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE, receiptRowId: null }
+  }
+
   const sameDateExists = await hasExistingReceiptForDate(
     supabase,
     registry.receipt_table,

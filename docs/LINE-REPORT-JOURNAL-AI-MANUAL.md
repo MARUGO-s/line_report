@@ -92,6 +92,7 @@ LINEレシート、売上照会、予算、Excel、売上分析と定期レポ�
 - 店舗LINEルームへ精算レシート画像を送ると、店舗・日付・売上・組数・客数等を解析し、確認カードを返して売上へ保存します。
 - 数値が違う場合はカードの「この結果を修正」、不要なら「この解析結果を削除」を使います。
 - 反射や傾きが強い写真は誤読しやすいため、まっすぐで文字が読める画像を送ります。
+- バルペロタでは「総取引数」を会計組数、「客数」を客数として扱います。いずれかが読めない、または客数が組数を下回る場合は売上登録を保留します。両方の行のラベルと右端の数字がはっきり写る写真を撮り直して送ります。
 - メニュー表や複数日をまとめた期間集計レポートは日々の売上として登録しません。単一日の精算レシートは通常どおり対象です。
 - 同じ画像の二重送信や同日データには、重複防止・加算・置換の確認経路があります。
 - 過去の売上を後からまとめて登録する場合は、この経路ではなくSAL-07のExcel一括取込を使います。レシート画像を過去分の一括登録に使うことはできません。
@@ -776,11 +777,11 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 44件
 - Edge Functions: 23件
-- 共有TypeScriptモジュール: 116件
+- 共有TypeScriptモジュール: 117件
 - 補助・運用・レガシーコード: 41件
 - admin-api静的ルート: 146件
 - SQL migrations: 321件（全件の構文・関係はGraphify/knowledge:checkで監査）
-- テストファイル: 130件
+- テストファイル: 131件
 
 ### 公開画面・ブラウザコード
 
@@ -868,6 +869,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/admin_receipt_sales.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/admin_utils.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/auto_link_room.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/barpelota_receipt.ts` | SAL-02 / SAL-03 / DEV-02 |
 | `supabase/functions/_shared/bistrocavacava_sheet_push.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/budget_entry_flow.ts` | SAL-01 / SAL-04 / DEV-02 |
 | `supabase/functions/_shared/business_goal_metrics.ts` | FCT-02 / JAI-01 / JAI-02 / DEV-02 |
