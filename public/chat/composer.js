@@ -90,6 +90,15 @@ async function sendMessage() {
     return;
   }
 
+  if (typeof isHelpQaInputText === 'function' && isHelpQaInputText(content) && !pendingInlineSticker) {
+    input.value = '';
+    resizeComposer();
+    syncComposerModeUi();
+    await submitHelpQaFromComposer(content);
+    input.focus();
+    return;
+  }
+
   input.value = '';
   resizeComposer();
   input.focus();
@@ -175,35 +184,42 @@ function syncComposerModeUi() {
   const sheet = $('composerSheet');
   const text = String(input?.value || '').trim();
   const compactEdit = !!(editingMessage && stickerFromMessage(editingMessage) && stickerFromMessage(editingMessage).display === 'compact');
-  const mode = editingMessage ? 'edit' : (isPrivateNoteMode ? 'memo' : (isSilentSendActive ? 'silent' : 'normal'));
+  const isHelpMode = !editingMessage && !isPrivateNoteMode && !pendingInlineSticker && typeof isHelpQaInputText === 'function' && isHelpQaInputText(text);
+  const mode = editingMessage ? 'edit' : (isPrivateNoteMode ? 'memo' : (isHelpMode ? 'help' : (isSilentSendActive ? 'silent' : 'normal')));
 
   if (chip) {
     chip.classList.toggle('visible', mode !== 'normal');
     chip.classList.toggle('memo', mode === 'memo');
     chip.classList.toggle('edit', mode === 'edit');
+    chip.classList.toggle('help', mode === 'help');
   }
-  if (chipIcon) chipIcon.textContent = mode === 'edit' ? '✎' : (mode === 'memo' ? '📝' : '🔕');
+  if (chipIcon) chipIcon.textContent = mode === 'edit' ? '✎' : (mode === 'memo' ? '📝' : (mode === 'help' ? '📖' : '🔕'));
   if (chipText) chipText.textContent = mode === 'edit'
     ? '編集中 ・ この発言の本文を直します'
     : mode === 'memo'
     ? '個人メモ ・ 自分だけに表示、送信されません'
+    : mode === 'help'
+    ? '使い方質問モード ・ 相手には送信されません（マニュアル参照AI）'
     : 'サイレント送信 ・ 全員に届くが通知は鳴りません';
   if (hint) hint.textContent = mode === 'edit'
     ? '保存で反映。通知は送り直しません'
     : mode === 'memo'
     ? '相手には届きません'
-    : mode === 'silent' ? '届きますが通知は鳴りません' : 'Enterで送信';
+    : mode === 'help'
+    ? 'EnterでマニュアルAIに質問（自分だけに表示）'
+    : mode === 'silent' ? '届きますが通知は鳴りません' : 'Enterで送信・先頭 / で使い方質問';
   if (input) {
-    input.placeholder = mode === 'edit' ? '直す本文を入力' : (mode === 'memo' ? '自分用のメモを入力' : 'メッセージを入力');
+    input.placeholder = mode === 'edit' ? '直す本文を入力' : (mode === 'memo' ? '自分用のメモを入力' : 'メッセージを入力（先頭 / で使い方質問）');
     input.classList.toggle('composer-input-active', mode !== 'normal');
     input.classList.toggle('composer-input-empty', !text);
   }
   if (send) {
     send.disabled = mode === 'edit' ? (!text && !compactEdit) : !text;
     send.classList.toggle('memo-mode', mode === 'memo');
-    send.setAttribute('aria-label', mode === 'edit' ? '編集を保存' : mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信');
+    send.classList.toggle('help-mode', mode === 'help');
+    send.setAttribute('aria-label', mode === 'edit' ? '編集を保存' : mode === 'memo' ? 'メモを保存' : mode === 'help' ? '質問する' : mode === 'silent' ? '通知せず送信' : '送信');
   }
-  if (sendLabel) sendLabel.textContent = mode === 'edit' ? '保存' : mode === 'memo' ? 'メモを保存' : mode === 'silent' ? '通知せず送信' : '送信';
+  if (sendLabel) sendLabel.textContent = mode === 'edit' ? '保存' : mode === 'memo' ? 'メモを保存' : mode === 'help' ? '質問する' : mode === 'silent' ? '通知せず送信' : '送信';
   if (plus) {
     plus.classList.toggle('active', composerSheetOpen);
     plus.setAttribute('aria-expanded', composerSheetOpen ? 'true' : 'false');

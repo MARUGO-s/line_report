@@ -83,16 +83,23 @@ $('newGroupIconInput').addEventListener('change', async (e) => {
 });
 
 $('chatImageInput').addEventListener('change', (e) => {
-  const file = e.target.files && e.target.files[0];
+  const picked = Array.from(e.target.files || []).filter(Boolean);
   e.target.value = '';
-  if (!file) return;
-  if (isJournalArchiveFile(file)) {
-    if (currentRoomAcceptsJournalArchive()) sendChatFile(file);
-    else promptJournalArchive();
-    return;
+  if (!picked.length) return;
+  const journalFiles = picked.filter(isJournalArchiveFile);
+  if (journalFiles.length) {
+    if (currentRoomAcceptsJournalArchive()) {
+      for (const jf of journalFiles) sendChatFile(jf);
+    } else {
+      promptJournalArchive();
+    }
   }
-  if (!isSupportedChatFile(file)) { showChatToast('対応形式または容量上限（10MB）を確認してください'); return; }
-  askSendModeForFiles([file]);
+  const normalFiles = picked.filter((f) => !isJournalArchiveFile(f));
+  if (!normalFiles.length) return;
+  const valid = normalFiles.filter(isSupportedChatFile);
+  if (!valid.length) { showChatToast('対応形式または容量上限（25MB）を確認してください'); return; }
+  if (valid.length < normalFiles.length) showChatToast('一部ファイルは非対応または容量超過のため除外しました');
+  askSendModeForFiles(valid);
 });
 
 document.addEventListener('dragenter', (e) => {
@@ -173,7 +180,7 @@ $('messages').addEventListener('click', (e) => {
   }
 
   const img = e.target.closest('img.msg-image');
-  if (img && img.src) { openImageViewer(img.src); return; }
+  if (img && img.src && !img.closest('[data-gallery-open]')) { openImageViewer(img.src); return; }
 
   const chip = e.target.closest('.reaction-chip');
   if (chip) { openReactionDetails(Number(chip.dataset.messageId)); return; }

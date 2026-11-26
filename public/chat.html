@@ -17,13 +17,13 @@
   <link rel="icon" type="image/png" sizes="16x16" href="icons/chat-favicon-16x16-v3.png">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/chat-apple-touch-icon-v3.png">
   <title>M-talk</title>
-  <link rel="stylesheet" href="chat/chat.css?v=20261109-own-history-1">
+  <link rel="stylesheet" href="chat/chat.css?v=20261126-app-sync-1">
 </head>
 <body>
   <input type="file" id="userIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
   <input type="file" id="groupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
   <input type="file" id="newGroupIconInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
-  <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.heic,.heif,.lzh" class="hidden">
+  <input type="file" id="chatImageInput" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,video/mp4,video/quicktime,video/webm,audio/mp4,audio/mpeg,audio/wav,audio/webm,audio/ogg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/zip,.mp4,.mov,.m4v,.webm,.m4a,.mp3,.wav,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.heic,.heif,.lzh" class="hidden">
 
   <nav class="nav-rail hidden" id="navRail">
     <button class="rail-avatar" id="userAvatar" type="button" title="メニュー" onclick="openAccountMenu()"></button>
@@ -159,7 +159,10 @@
       <div class="composer-sheet" id="composerSheet" aria-label="添付と機能">
         <button class="composer-tool-btn" type="button" onclick="pickChatImage(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          <span>画像・ファイル</span>
+          <span>写真・動画・ファイル</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="startVoiceRecording();">
+          <span aria-hidden="true">🎤</span><span>ボイス録音</span>
         </button>
         <button class="composer-tool-btn" type="button" onclick="toggleStickerPicker(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8.5 14.5a4.5 4.5 0 0 0 7 0"/></svg>
@@ -167,6 +170,24 @@
         </button>
         <!-- Legacy hook retained for existing sticker-picker integrations/tests. -->
         <button class="attach-btn sticker-trigger-btn" type="button" onclick="toggleStickerPicker()" aria-hidden="true" tabindex="-1" hidden style="display:none !important">スタンプ</button>
+        <button class="composer-tool-btn" type="button" onclick="openInteractiveComposerModal('ack');">
+          <span aria-hidden="true">✅</span><span>確認依頼</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openInteractiveComposerModal('checklist');">
+          <span aria-hidden="true">☑️</span><span>チェックリスト</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openInteractiveComposerModal('poll');">
+          <span aria-hidden="true">📊</span><span>投票</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openRoomAiSummaryModal();">
+          <span aria-hidden="true">✨</span><span>AI要約</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openPreSendTranslateModal();">
+          <span aria-hidden="true">🌐</span><span>送信前翻訳</span>
+        </button>
+        <button class="composer-tool-btn" type="button" onclick="openUnreadDigestModal();">
+          <span aria-hidden="true">📬</span><span>未読AIまとめ</span>
+        </button>
         <button class="composer-tool-btn" type="button" onclick="openTextScheduleSend(); closeComposerSheet();">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v4M16 3v4M3 10h18"/><path d="M12 14v3l2 1"/><rect x="3" y="5" width="18" height="16" rx="2"/></svg>
           <span>予約配信</span>
@@ -196,11 +217,12 @@
         <!-- 予約・予定 is now opened from this plus panel; keep the legacy callable hook. -->
         <button type="button" class="hidden" onclick="openReservationSchedule()" aria-hidden="true" tabindex="-1" hidden>予約・予定</button>
       </div>
+      <div class="voice-record-bar hidden" id="voiceRecordBar" aria-live="polite"></div>
       <div class="input-row">
         <button class="composer-plus-btn" id="composerPlusBtn" type="button" onclick="toggleComposerSheet()" title="添付と機能" aria-label="添付と機能">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         </button>
-        <textarea id="messageInput" rows="1" placeholder="メッセージを入力" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
+        <textarea id="messageInput" rows="1" placeholder="メッセージを入力（先頭 / で使い方質問）" onkeydown="handleKeyPress(event)" autocomplete="off"></textarea>
         <button class="composer-sticker-btn sticker-trigger-btn" id="composerStickerBtn" type="button" onclick="toggleStickerPicker()" title="感情イラスト" aria-label="感情イラスト">☺</button>
         <button class="send-btn composer-send-btn" id="composerSendBtn" type="button" onclick="sendMessage()" aria-label="送信" disabled>
           <span id="composerSendLabel">送信</span>
@@ -208,10 +230,12 @@
         </button>
       </div>
       <div class="composer-helper" id="composerHelper" aria-live="polite">
-        <span id="composerHintText">Enterで送信</span>
+        <span id="composerHintText">Enterで送信・先頭 / で使い方質問</span>
         <span class="composer-helper-divider" aria-hidden="true"></span>
         <button type="button" onclick="toggleSilentSend()">通知せず送る</button>
         <button id="composerNoteBtn" type="button" onclick="togglePrivateNoteMode()">個人メモ</button>
+        <button type="button" onclick="openRoomAiSummaryModal()">✨ AI要約</button>
+        <button type="button" onclick="startVoiceRecording()">🎤 ボイス</button>
         <button type="button" onclick="openTextScheduleSend()">予約配信</button>
         <button type="button" onclick="openReservationSchedule()">予約確認</button>
       </div>
@@ -340,6 +364,8 @@
       <div class="account-menu-list">
         <button type="button" role="menuitem" onclick="closeAccountMenu(); openProfileSettings()">プロフィール設定</button>
         <button type="button" role="menuitem" onclick="closeAccountMenu(); pickUserIcon()">アイコンを変更</button>
+        <button type="button" role="menuitem" onclick="openUnreadDigestModal()">未読の一括 AI まとめ</button>
+        <button type="button" role="menuitem" onclick="openQuietHoursModal()">通知のおやすみ時間</button>
         <a id="chatAdminMenuLink" href="./chat-admin.html" class="hidden" role="menuitem" aria-hidden="true" tabindex="-1">M-talk権限管理</a>
         <a href="./mtalk-help.html" role="menuitem">使い方</a>
         <button type="button" role="menuitem" class="account-menu-logout" onclick="logout()">ログアウト</button>
@@ -480,6 +506,16 @@
     </div>
   </div>
 
+  <div class="invite-overlay hidden" id="appCompatOverlay" onclick="if (event.target === this) closeAppCompatModal()">
+    <div class="invite-sheet app-compat-sheet" role="dialog" aria-modal="true" aria-labelledby="appCompatModalTitle">
+      <div class="reaction-detail-title">
+        <h2 id="appCompatModalTitle"></h2>
+        <button class="reaction-detail-close" type="button" onclick="closeAppCompatModal()" aria-label="閉じる">×</button>
+      </div>
+      <div id="appCompatModalBody"></div>
+    </div>
+  </div>
+
   <button type="button" class="push-restore-bar hidden" id="pushRestoreBar" onclick="repairPushSubscriptionFromBar()">
     通知が切れたので、ここをタップして再開
   </button>
@@ -491,12 +527,13 @@
   <script src="chat/permissions.js?v=20261109-own-history-2"></script>
   <script src="chat/own-history.js?v=20261109-own-history-3"></script>
   <script src="chat/profile.js?v=20261124-auth-ja-1"></script>
-  <script src="chat/realtime.js?v=20261109-own-history-2"></script>
+  <script src="chat/realtime.js?v=20261126-app-sync-1"></script>
   <script src="chat/notifications.js"></script>
-  <script src="chat/rooms.js?v=20261110-colleague-directory-1"></script>
-  <script src="chat/messages.js?v=20261109-own-history-3"></script>
-  <script src="chat/attachments.js?v=20261109-own-history-1"></script>
-  <script src="chat/composer.js?v=20261109-own-history-3"></script>
-  <script src="chat/bootstrap.js?v=20261109-own-history-3"></script>
+  <script src="chat/rooms.js?v=20261126-app-sync-1"></script>
+  <script src="chat/messages.js?v=20261126-app-sync-1"></script>
+  <script src="chat/attachments.js?v=20261126-app-sync-1"></script>
+  <script src="chat/composer.js?v=20261126-app-sync-1"></script>
+  <script src="chat/app_compat.js?v=20261126-app-sync-1"></script>
+  <script src="chat/bootstrap.js?v=20261126-app-sync-1"></script>
 </body>
 </html>

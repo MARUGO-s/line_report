@@ -1,21 +1,22 @@
 'use strict';
 
-const CHAT_CACHE = 'line-report-chat-v77';
+const CHAT_CACHE = 'line-report-chat-v78';
 const CHAT_SHELL = [
   './chat.html',
-  './chat/chat.css?v=20261109-own-history-1',
+  './chat/chat.css?v=20261126-app-sync-1',
   './chat/core.js?v=20261110-colleague-directory-1',
   './chat/auth.js?v=20261124-auth-ja-1',
   './chat/permissions.js?v=20261109-own-history-2',
   './chat/own-history.js?v=20261109-own-history-3',
   './chat/profile.js?v=20261124-auth-ja-1',
-  './chat/realtime.js?v=20261109-own-history-2',
+  './chat/realtime.js?v=20261126-app-sync-1',
   './chat/notifications.js',
-  './chat/rooms.js?v=20261110-colleague-directory-1',
-  './chat/messages.js?v=20261109-own-history-3',
-  './chat/attachments.js?v=20261109-own-history-1',
-  './chat/composer.js?v=20261109-own-history-3',
-  './chat/bootstrap.js?v=20261109-own-history-3',
+  './chat/rooms.js?v=20261126-app-sync-1',
+  './chat/messages.js?v=20261126-app-sync-1',
+  './chat/attachments.js?v=20261126-app-sync-1',
+  './chat/composer.js?v=20261126-app-sync-1',
+  './chat/app_compat.js?v=20261126-app-sync-1',
+  './chat/bootstrap.js?v=20261126-app-sync-1',
   './chat.webmanifest',
   './pages-config.js',
   './vendor/supabase/supabase-2.110.9.min.js',

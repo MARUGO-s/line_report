@@ -270,6 +270,8 @@ const CHAT_FILE_MIMES = new Set([
   // HEIC はブラウザ（Safari以外）が復号できないので画像扱いにせず、
   // 原本のままファイルとして送る。canvas 縮小に回すと失敗する。
   'image/heic', 'image/heif',
+  'video/mp4', 'video/quicktime', 'video/webm',
+  'audio/mp4', 'audio/x-m4a', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/aac',
   'application/pdf', 'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
@@ -322,7 +324,7 @@ function isSupportedChatFile(file) {
   if (isImageFile(file)) return true;
   const type = String(file.type || '').toLowerCase();
   const name = String(file.name || '').toLowerCase();
-  return CHAT_FILE_MIMES.has(type) || /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|heic|heif|lzh)$/.test(name);
+  return CHAT_FILE_MIMES.has(type) || /\.(mp4|mov|m4v|webm|m4a|mp3|wav|ogg|aac|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|heic|heif|lzh)$/.test(name);
 }
 
 function imageFilesFromList(list) {
@@ -383,12 +385,19 @@ async function uploadChatImage(file, groupId) {
 }
 
 async function uploadChatFile(file, groupId) {
-  if (!isSupportedChatFile(file)) throw new Error('対応形式または容量上限（10MB）を確認してください');
-  const ext = String(file.name || '').toLowerCase().match(/\.[a-z0-9]{1,8}$/)?.[0] || '.bin';
+  if (!isSupportedChatFile(file)) throw new Error('対応形式または容量上限（25MB）を確認してください');
+  const rawExt = String(file.name || '').toLowerCase().match(/\.[a-z0-9]{1,8}$/)?.[0] || '.bin';
+  const ext = rawExt === '.m4v' ? '.mp4' : rawExt;
+  const normalizedMime = rawExt === '.m4v'
+    ? 'video/mp4'
+    : (rawExt === '.mov' && !file.type ? 'video/quicktime'
+      : (rawExt === '.mp4' && !file.type ? 'video/mp4'
+        : (rawExt === '.m4a' && !file.type ? 'audio/mp4'
+          : (file.type || 'application/octet-stream'))));
   const path = `groups/${groupId}/${crypto.randomUUID()}${ext}`;
-  const { error } = await sb.storage.from('chat-images').upload(path, file, { contentType: file.type || 'application/octet-stream', cacheControl: '3600' });
+  const { error } = await sb.storage.from('chat-images').upload(path, file, { contentType: normalizedMime, cacheControl: '3600' });
   if (error) throw error;
-  return { path, name: String(file.name || '添付ファイル').slice(0, 180), mime: String(file.type || 'application/octet-stream').slice(0, 120), size: Number(file.size) || 0 };
+  return { path, name: String(file.name || '添付ファイル').slice(0, 180), mime: String(normalizedMime).slice(0, 120), size: Number(file.size) || 0 };
 }
 
 async function archiveChatImageInMediaLibrary(messageId, groupId) {
@@ -575,7 +584,16 @@ async function chooseSendNow() {
   scheduleTarget = 'text';
   $('sendModeOverlay').classList.add('hidden');
   document.body.classList.remove('modal-open');
-  for (const file of files) await sendChatImage(file);
+  const photoFiles = files.filter((file) => isImageFile(file) || isHeicFile(file));
+  const otherFiles = files.filter((file) => !isImageFile(file) && !isHeicFile(file));
+  if (photoFiles.length >= 2 && typeof sendChatImageGallery === 'function') {
+    for (let i = 0; i < photoFiles.length; i += APP_COMPAT_MAX_GALLERY_ITEMS) {
+      await sendChatImageGallery(photoFiles.slice(i, i + APP_COMPAT_MAX_GALLERY_ITEMS));
+    }
+  } else {
+    for (const file of photoFiles) await sendChatImage(file);
+  }
+  for (const file of otherFiles) await sendChatFile(file);
 }
 
 function chooseSendLater() {
@@ -788,35 +806,61 @@ async function openFileViewer(path, meta = {}) {
 }
 
 function openImageViewer(src, options = {}) {
-  const safeSrc = safeHttpUrl(src);
-  if (!safeSrc) return;
+  const gallery = Array.isArray(options.gallery) && options.gallery.length > 1
+    ? options.gallery.filter((item) => item && safeHttpUrl(item.src))
+    : null;
+  let currentIndex = gallery
+    ? Math.max(0, Math.min(gallery.length - 1, Number(options.galleryIndex) || 0))
+    : 0;
+  const activeItem = () => (gallery
+    ? { src: safeHttpUrl(gallery[currentIndex].src), storagePath: gallery[currentIndex].path }
+    : { src: safeHttpUrl(src), storagePath: options.storagePath });
+  const initial = activeItem();
+  if (!initial.src) return;
+
   const overlay = document.createElement('div');
   overlay.className = 'image-viewer';
-  overlay.innerHTML = `<button type="button" class="image-viewer-close" aria-label="画像を閉じる">閉じる</button><button type="button" class="image-viewer-download">ダウンロード</button><img src="${escapeHtml(safeSrc)}" alt="画像"><div class="image-viewer-actions"><button type="button" data-viewer-action="save">保存</button><button type="button" data-viewer-action="save-as">名前を付けて保存</button><button type="button" data-viewer-action="forward">転送</button><button type="button" data-viewer-action="keep">Keepメモに転送</button></div>`;
+  overlay.innerHTML = `<button type="button" class="image-viewer-close" aria-label="画像を閉じる">閉じる</button><button type="button" class="image-viewer-download">ダウンロード</button>${gallery ? `<div class="image-viewer-counter" id="imageViewerCounter">${currentIndex + 1} / ${gallery.length}</div><button type="button" class="image-viewer-nav prev" aria-label="前の画像">‹</button><button type="button" class="image-viewer-nav next" aria-label="次の画像">›</button>` : ''}<img src="${escapeHtml(initial.src)}" alt="画像"><div class="image-viewer-actions"><button type="button" data-viewer-action="save">保存</button><button type="button" data-viewer-action="save-as">名前を付けて保存</button><button type="button" data-viewer-action="forward">転送</button><button type="button" data-viewer-action="keep">Keepメモに転送</button></div>`;
+  const imgEl = overlay.querySelector('img');
+  const counterEl = overlay.querySelector('.image-viewer-counter');
+  const stepGallery = (delta) => {
+    if (!gallery) return;
+    currentIndex = (currentIndex + delta + gallery.length) % gallery.length;
+    const item = activeItem();
+    if (item.src) imgEl.src = item.src;
+    if (counterEl) counterEl.textContent = `${currentIndex + 1} / ${gallery.length}`;
+  };
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKeydown); };
-  const onKeydown = (event) => { if (event.key === 'Escape') close(); };
+  const onKeydown = (event) => {
+    if (event.key === 'Escape') close();
+    else if (event.key === 'ArrowLeft') stepGallery(-1);
+    else if (event.key === 'ArrowRight') stepGallery(1);
+  };
   overlay.onclick = (event) => { if (event.target === overlay) close(); };
   overlay.querySelector('.image-viewer-close').addEventListener('click', close);
-  overlay.querySelector('img').addEventListener('click', (event) => event.stopPropagation());
+  overlay.querySelector('.image-viewer-nav.prev')?.addEventListener('click', (event) => { event.stopPropagation(); stepGallery(-1); });
+  overlay.querySelector('.image-viewer-nav.next')?.addEventListener('click', (event) => { event.stopPropagation(); stepGallery(1); });
+  imgEl.addEventListener('click', (event) => event.stopPropagation());
   overlay.querySelector('.image-viewer-download').addEventListener('click', async (event) => {
     event.stopPropagation();
-    await downloadImage(safeSrc);
+    await downloadImage(activeItem().src);
   });
   overlay.querySelectorAll('[data-viewer-action]').forEach((button) => button.addEventListener('click', async (event) => {
     event.stopPropagation();
     const action = button.dataset.viewerAction;
-    if (action === 'save') return downloadImage(safeSrc);
+    const item = activeItem();
+    if (action === 'save') return downloadImage(item.src);
     if (action === 'save-as') {
       const name = window.prompt('保存するファイル名', `mtalk-image-${Date.now()}.jpg`);
-      if (name) await downloadImage(safeSrc, name);
+      if (name) await downloadImage(item.src, name);
       return;
     }
     if (action === 'keep') {
-      await saveImageToKeep(options.storagePath, options.messageId);
+      await saveImageToKeep(item.storagePath, options.messageId);
       return;
     }
     if (action === 'forward') {
-      const message = await resolveAlbumMessage(options.messageId, options.storagePath);
+      const message = await resolveAlbumMessage(options.messageId, item.storagePath);
       if (!message) { alert('この画像を転送できるメッセージ情報がありません'); return; }
       close();
       await openForward(message);

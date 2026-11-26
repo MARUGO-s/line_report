@@ -885,6 +885,7 @@ async function rotateInvite() {
 
 function closeChat() {
   if (editingMessage) cancelMessageEdit();
+  if (typeof cancelVoiceRecording === 'function') cancelVoiceRecording();
   if (currentGroupId) snapshotRoomView(currentGroupId);
   currentGroupId = null;
   currentRoomMembership = null;

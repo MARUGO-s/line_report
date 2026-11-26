@@ -71,6 +71,9 @@ async function subscribeRealtime() {
       { event: '*', schema: 'public', table: 'chat_message_reactions' },
       (payload) => handleReactionChange(payload))
     .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'chat_message_interactions' },
+      (payload) => { if (typeof handleInteractionRealtimeChange === 'function') handleInteractionRealtimeChange(payload); })
+    .on('postgres_changes',
       { event: '*', schema: 'public', table: 'chat_read_states' },
       (payload) => handleReadStateChange(payload.new || payload.old))
     .subscribe((status) => {

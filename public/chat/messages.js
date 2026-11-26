@@ -154,6 +154,7 @@ function resetMessageView() {
   followNewMessages = true;
   reactionsByMessage = new Map();
   quotedMessages = new Map();
+  if (typeof resetAppCompatMessageState === 'function') resetAppCompatMessageState();
   clearReplyTarget();
   closeMessageMenu();
   closeReadDetails();
@@ -176,7 +177,8 @@ async function setMessages(list) {
   // リアクションと引用元は後追いで足して描き直す（本文の表示を待たせない）。
   await Promise.all([
     loadReactions(currentMessages.map((m) => m.id)),
-    loadQuotedMessages(currentMessages)
+    loadQuotedMessages(currentMessages),
+    typeof loadMessageInteractions === 'function' ? loadMessageInteractions(currentMessages.map((m) => m.id)) : Promise.resolve()
   ]);
   if (!lease.valid() || Number(currentGroupId) !== Number(groupId)) return;
   renderMessageList();
@@ -475,11 +477,14 @@ function buildMessageNode(msg) {
   const file = fileFromMessage(msg);
   const sticker = stickerFromMessage(msg);
   const compactSticker = sticker && sticker.display === 'compact';
-  div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''} ${image ? 'image' : ''} ${file ? 'file' : ''} ${sticker ? 'sticker' : ''} ${compactSticker ? 'compact-sticker' : ''}`;
+  const compatBody = typeof renderAppCompatMessageBody === 'function' ? renderAppCompatMessageBody(msg) : null;
+  div.className = `message ${isOwn ? 'own' : ''} ${cards ? 'card' : ''} ${image ? 'image' : ''} ${file ? 'file' : ''} ${sticker ? 'sticker' : ''} ${compactSticker ? 'compact-sticker' : ''} ${compatBody && compatBody.extraClass ? compatBody.extraClass : ''}`;
   div.dataset.messageId = String(msg.id);
 
   let bodyHtml;
-  if (cards) {
+  if (compatBody && compatBody.html) {
+    bodyHtml = compatBody.html;
+  } else if (cards) {
     bodyHtml = cards.map((card) => renderCard(card, msg.group_id)).join('');
   } else if (image) {
     bodyHtml = `<img class="msg-image" data-path="${escapeHtml(image.path)}" alt="画像" loading="lazy" decoding="async">`;
@@ -506,8 +511,8 @@ function buildMessageNode(msg) {
       + `<div class="quote-name">${escapeHtml(quoted ? speakerName(quoted.user_id || quoted.id, quoted.username) : '')}</div>`
       + `<div class="quote-text">${escapeHtml(quotePreviewText(quoted))}</div>`
       + `</div>`;
-    // 引用は吹き出しの中に入れる。画像・カードのときは上に置く。
-    if (!cards && !image && !file && !sticker) {
+    // 引用は吹き出しの中に入れる。画像・カード・特殊ペイロードのときは上に置く。
+    if (!compatBody && !cards && !image && !file && !sticker) {
       bodyHtml = `<div class="message-bubble">${quoteHtml}`
         + renderStruckEditHistory(msg)
         + `<span class="bubble-text">${renderContentWithMentions(msg.content, msg.mentions)}</span>${renderLinkPreview(msg.content)}</div>`;
@@ -515,10 +520,13 @@ function buildMessageNode(msg) {
     }
   }
 
+  const translationHtml = typeof renderInlineTranslationHtml === 'function' ? renderInlineTranslationHtml(msg) : '';
+
   div.innerHTML = `
     <div class="message-content">
       ${quoteHtml}
       ${bodyHtml}
+      ${translationHtml}
       ${renderReactions(msg)}
       <div class="message-meta">
         ${isOwn ? '' : `<span class="username">${escapeHtml(speakerName(msg.user_id, msg.username))}</span>`}
@@ -607,6 +615,8 @@ function renderMessageList() {
   });
   hydrateMessageImages();
   hydrateMessageFiles();
+  if (typeof hydrateAppCompatMedia === 'function') hydrateAppCompatMedia();
+  if (typeof renderHelpQaCardsInTimeline === 'function') renderHelpQaCardsInTimeline();
   watchStickerLayout(el);
   syncAiTyping();
   requestAnimationFrame(resolveUnloadedLatestGap);
@@ -651,7 +661,8 @@ async function fillLatestGap() {
         batch.forEach((msg) => seenMessageIds.add(msg.id));
         await Promise.all([
           loadReactions(batch.map((msg) => msg.id)),
-          loadQuotedMessages(batch)
+          loadQuotedMessages(batch),
+          typeof loadMessageInteractions === 'function' ? loadMessageInteractions(batch.map((msg) => msg.id)) : Promise.resolve()
         ]);
         if (!valid()) return false;
       }
@@ -695,6 +706,9 @@ function addMessageToUI(msg) {
   seenMessageIds.add(msg.id);
   currentMessages.push(msg);
   if (!reactionsByMessage.has(msg.id)) reactionsByMessage.set(msg.id, []);
+  if (typeof interactionsByMessage !== 'undefined' && !interactionsByMessage.has(Number(msg.id))) {
+    interactionsByMessage.set(Number(msg.id), []);
+  }
   if (msg.reply_to_id) {
     loadQuotedMessages([msg]).then(() => refreshMessageNode(msg.id));
   }
@@ -708,6 +722,8 @@ function addMessageToUI(msg) {
 
   hydrateMessageImages();
   hydrateMessageFiles();
+  if (typeof hydrateAppCompatMedia === 'function') hydrateAppCompatMedia();
+  if (typeof renderHelpQaCardsInTimeline === 'function') renderHelpQaCardsInTimeline();
   watchStickerLayout(el);
   if (currentUser && String(msg.user_id) === String(currentUser.id)) {
     aiTypingLiveMessage = { id: msg.id, at: Date.now() };
@@ -855,6 +871,7 @@ function openMessageMenu(messageId, anchor) {
     </div>
   `;
   document.body.appendChild(menu);
+  if (typeof appendAppCompatMessageMenuActions === 'function') appendAppCompatMessageMenuActions(menu, msg);
 
   // アンカーの近くに出す。画面外へはみ出さないよう寄せる。
   const rect = anchor.getBoundingClientRect();
@@ -906,6 +923,12 @@ function openMessageMenu(messageId, anchor) {
     if (e.target.closest('[data-action="delete"]')) {
       closeMessageMenu();
       deleteMessage(msg);
+      return;
+    }
+    const compatBtn = e.target.closest('[data-action^="ai-"]');
+    if (compatBtn && typeof handleAppCompatMessageMenuAction === 'function') {
+      closeMessageMenu();
+      handleAppCompatMessageMenuAction(compatBtn.dataset.action, msg);
     }
   });
 }
@@ -958,6 +981,7 @@ function refreshMessageNode(messageId) {
   }
   node.replaceWith(replacement);
   hydrateMessageImages();
+  if (typeof hydrateAppCompatMedia === 'function') hydrateAppCompatMedia();
 }
 
 function refreshReadMarks() {
