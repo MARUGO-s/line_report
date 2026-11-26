@@ -58,4 +58,4 @@ for(const initial of ['empty','blocked'])test('INDEPENDENT actual afterSignIn ro
  await f.run('afterSignIn()');assert.equal(f.w.__starts,1);assert.equal(f.run('chatAccessIsBlocked(currentChatAccess)'),false);assert.equal(f.calls.filter(c=>c.table==='chat_user_access').length,1);
  }finally{await f.close();}
 });
-test('INDEPENDENT synchronous INITIAL_SESSION runs in actual HTML classic script order before later helpers',async()=>{const f=await earlyFixture();try{assert.ok(f.run('ownHistoryAuthEpoch')>=2);assert.ok(f.scripts.indexOf('chat/own-history.js')<f.scripts.indexOf('chat/messages.js'));assert.equal(f.diagnostics.length,0);assert.equal(f.scripts.length,12);}finally{await f.close();}});
+test('INDEPENDENT synchronous INITIAL_SESSION runs in actual HTML classic script order before later helpers',async()=>{const f=await earlyFixture();try{assert.ok(f.run('ownHistoryAuthEpoch')>=2);assert.ok(f.scripts.indexOf('chat/own-history.js')<f.scripts.indexOf('chat/messages.js'));assert.equal(f.diagnostics.length,0);assert.equal(f.scripts.length,13);}finally{await f.close();}});
