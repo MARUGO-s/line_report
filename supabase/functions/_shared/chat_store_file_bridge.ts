@@ -29,8 +29,9 @@ import {
   BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
   BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE,
   isBarPelotaReceiptStore,
-  readBarPelotaSettlementCounts,
+  verifyBarPelotaSettlementCounts,
 } from './barpelota_receipt.ts'
+import { prepareBarPelotaReceiptImage } from './receipt_barpelota_image.ts'
 import {
   combineStoreReceiptPromptAdditions,
   fetchStoreReceiptAnalysisPromptAddition,
@@ -329,9 +330,14 @@ export async function processStoreRoomImageLikeLine(
   // (including the authenticated store specialization) is always retained.
   const receiptBudget = Math.max(0, STORE_RECEIPT_PROMPT_MAX_CHARS - menuPrompt.length - 2)
   const prompt = [receiptPrompt.slice(0, receiptBudget), menuPrompt].filter(Boolean).join('\n\n')
+  const isBarPelota = isBarPelotaReceiptStore(registry.store_partition_key)
+  const imageContentType = params.contentType || 'image/jpeg'
+  const receiptImage = isBarPelota
+    ? await prepareBarPelotaReceiptImage(params.bytes, imageContentType)
+    : { bytes: params.bytes, contentType: imageContentType }
   let analyzed = await analyzeLineImageWithGemini(
-    params.bytes,
-    params.contentType || 'image/jpeg',
+    receiptImage.bytes,
+    receiptImage.contentType,
     media.lineMessageId,
     geminiKey,
     prompt,
@@ -343,8 +349,8 @@ export async function processStoreRoomImageLikeLine(
     const azureDeployment = String(Deno.env.get('AZURE_FOUNDRY_VISION_DEPLOYMENT') ?? '').trim() || AZURE_FOUNDRY_VISION_MODEL
     if (azureEndpoint && azureKey) {
       const fallback = await analyzeLineImageWithAzureFoundry(
-        params.bytes,
-        params.contentType || 'image/jpeg',
+        receiptImage.bytes,
+        receiptImage.contentType,
         media.lineMessageId,
         azureEndpoint,
         azureKey,
@@ -355,8 +361,8 @@ export async function processStoreRoomImageLikeLine(
     }
     if (!analyzed.analysis && shouldFallbackLineImageVisionFailure(analyzed.failure) && resolveClaudeApiKey()) {
       const claude = await analyzeLineImageWithClaude(
-        params.bytes,
-        params.contentType || 'image/jpeg',
+        receiptImage.bytes,
+        receiptImage.contentType,
         media.lineMessageId,
         resolveClaudeApiKey(),
         prompt,
@@ -443,10 +449,10 @@ export async function processStoreRoomImageLikeLine(
     }
   }
 
-  const settlementCounts = isBarPelotaReceiptStore(registry.store_partition_key)
-    ? await readBarPelotaSettlementCounts(
-      params.bytes,
-      params.contentType || 'image/jpeg',
+  const settlementCounts = isBarPelota
+    ? await verifyBarPelotaSettlementCounts(
+      parsedReceipt,
+      receiptImage,
       `${media.lineMessageId}#settlement-counts`,
       geminiKey,
       resolveReceiptGeminiFlashLiteModel(),
