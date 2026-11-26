@@ -96,7 +96,7 @@ const SHARED_MODULE_RULES: SharedModuleRule[] = [
   // 汎用の mtalk_.* より前に置くこと（helpCodesForSharedModule は先勝ち）。
   { pattern: /^mtalk_daily_sales_import\.ts$/, codes: ['SAL-05', 'SAL-07', 'OPS-01', 'DEV-02'] },
   { pattern: /^mtalk_menu_knowledge\.ts$/, codes: ['KNW-01', 'KNW-02', 'OPS-01', 'DEV-02'] },
-  { pattern: /^(chat_.*|mtalk_.*|web_push)\.ts$/, codes: ['OPS-01', 'OPS-02', 'RSV-01', 'JAI-02', 'DEV-02'] },
+  { pattern: /^(chat_.*|mtalk_.*|web_push|apns_push|call_push|native_push_dispatch)\.ts$/, codes: ['OPS-01', 'OPS-02', 'RSV-01', 'JAI-02', 'DEV-02'] },
   { pattern: /^competitor_review_context\.ts$/, codes: ['REV-01', 'REV-02', 'DEV-02'] },
   { pattern: /^(foodcourt_.*|tokyo_dome_schedule|tokyo_dome_weekly_window|weather_daily)\.ts$/, codes: ['FCT-01', 'FCT-02', 'FCT-03', 'FCT-04', 'FCT-05', 'FCT-06', 'DEV-02'] },
   { pattern: /^groq_model\.ts$/, codes: ['JAI-01', 'FCT-02', 'DEV-02'] },

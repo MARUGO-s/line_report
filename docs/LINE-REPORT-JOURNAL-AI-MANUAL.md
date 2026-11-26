@@ -777,7 +777,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 
 - 公開コード入口: 44件
 - Edge Functions: 23件
-- 共有TypeScriptモジュール: 117件
+- 共有TypeScriptモジュール: 120件
 - 補助・運用・レガシーコード: 41件
 - admin-api静的ルート: 146件
 - SQL migrations: 321件（全件の構文・関係はGraphify/knowledge:checkで監査）
@@ -868,12 +868,14 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/admin_dashboard_link_auth.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/admin_receipt_sales.ts` | SAL-04 / SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/admin_utils.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
+| `supabase/functions/_shared/apns_push.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/auto_link_room.ts` | ADM-01 / OPS-01 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/barpelota_receipt.ts` | SAL-02 / SAL-03 / DEV-02 |
 | `supabase/functions/_shared/bistrocavacava_sheet_push.ts` | SAL-05 / SAL-06 / DEV-02 |
 | `supabase/functions/_shared/budget_entry_flow.ts` | SAL-01 / SAL-04 / DEV-02 |
 | `supabase/functions/_shared/business_goal_metrics.ts` | FCT-02 / JAI-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/calendar_tomorrow_reminder.ts` | RSV-01 / JAI-04 / DEV-02 |
+| `supabase/functions/_shared/call_push.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/chat_admin_delegation.ts` | ADM-01 / ADM-03 / SEC-01 / DEV-02 |
 | `supabase/functions/_shared/chat_bridge.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/chat_flex_card.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
@@ -938,6 +940,7 @@ Gmail自動取込、予約スクショ、予約表、本日の予約
 | `supabase/functions/_shared/mtalk_schedule_register.ts` | RSV-01 / JAI-04 / DEV-02 |
 | `supabase/functions/_shared/mtalk_search.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/mtalk_web_search.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
+| `supabase/functions/_shared/native_push_dispatch.ts` | OPS-01 / OPS-02 / RSV-01 / JAI-02 / DEV-02 |
 | `supabase/functions/_shared/paged_row_scan.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |
 | `supabase/functions/_shared/petty_cash_flow.ts` | OPS-03 / DEV-02 |
 | `supabase/functions/_shared/pos_journal.ts` | JRN-02 / JRN-03 / JRN-04 / JRN-05 / JAI-01 / JAI-02 / JAI-03 / JAI-04 / SEC-03 / DEV-02 |

@@ -2,6 +2,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.0"
 import { sendWebPush, type VapidConfig, type WebPushSubscription } from "../_shared/web_push.ts"
 import { buildDeclarativeChatPushPayload } from "../_shared/chat_push_payload.ts"
+import { APNS_TOKEN_PATTERN, loadApnsConfig, MTALK_BUNDLE_ID, tokenHint } from "../_shared/apns_push.ts"
+import { type NativeDeviceRow, sendNativePushes } from "../_shared/native_push_dispatch.ts"
+import { parseFcmServiceAccount, sendFcmChatMessage } from "../_shared/call_push.ts"
 
 type DbClient = any
 
@@ -36,6 +39,52 @@ type SubscriptionPreferenceRow = {
   user_id: string
   notifications_enabled: boolean
   preview_enabled: boolean
+  quiet_hours_enabled?: boolean | null
+  quiet_start_minute?: number | null
+  quiet_end_minute?: number | null
+  quiet_allow_mentions?: boolean | null
+  quiet_days?: number[] | null
+}
+
+function normalizeQuietMinute(value: unknown, fallback: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  const t = Math.trunc(n)
+  return t >= 0 && t < 1440 ? t : fallback
+}
+
+function normalizeQuietDays(value: unknown): number[] {
+  if (!Array.isArray(value)) return [0, 1, 2, 3, 4, 5, 6]
+  const out = [...new Set(
+    value
+      .map((x) => Math.trunc(Number(x)))
+      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+  )].sort((a, b) => a - b)
+  return out
+}
+
+function isInQuietHoursJst(
+  pref: SubscriptionPreferenceRow | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!pref || pref.quiet_hours_enabled !== true) return false
+  const days = normalizeQuietDays(pref.quiet_days)
+  if (days.length === 0) return false
+  const start = normalizeQuietMinute(pref.quiet_start_minute, 23 * 60)
+  const end = normalizeQuietMinute(pref.quiet_end_minute, 8 * 60)
+  // Convert to JST (UTC+9)
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000)
+  const day = jst.getUTCDay() // 0=Sun..6=Sat
+  const minute = jst.getUTCHours() * 60 + jst.getUTCMinutes()
+  if (start === end) {
+    return days.includes(day)
+  }
+  if (start < end) {
+    return days.includes(day) && minute >= start && minute < end
+  }
+  // Spans midnight (e.g. 23:00 -> 08:00)
+  const prevDay = (day + 6) % 7
+  return (days.includes(day) && minute >= start) || (days.includes(prevDay) && minute < end)
 }
 
 type ChatMessageRow = {
@@ -58,7 +107,7 @@ type ChatMessageRow = {
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
 }
 
@@ -160,7 +209,7 @@ async function hasActiveChatAccess(
   const now = new Date().toISOString()
   const { data, error } = await supabase
     .from("chat_user_access")
-    .select("user_id")
+    .select("user_id, signup_status")
     .eq("user_id", userId)
     .eq("access_enabled", true)
     .is("deleted_at", null)
@@ -170,7 +219,11 @@ async function hasActiveChatAccess(
     console.error("Chat access check error:", error.message)
     return false
   }
-  return Boolean(data?.user_id)
+  if (!data?.user_id) return false
+  if (data.signup_status === "pending" || data.signup_status === "denied") {
+    return false
+  }
+  return true
 }
 
 async function internalDispatchAuthorized(
@@ -218,6 +271,28 @@ function messagePreview(content: string): string {
   return String(content ?? "").replace(/\s+/g, " ").trim().slice(0, 120)
 }
 
+// Web PushとアプリPushで同じ通知文を使う（DMは送信者名、グループはルーム名、メンション表記）。
+function notificationContent(
+  message: ChatMessageRow,
+  group: { group_name: string; is_direct: boolean } | null,
+  recipientUserId: string,
+  preference: SubscriptionPreferenceRow | undefined,
+): { title: string; body: string } {
+  const preview = preference?.preview_enabled !== false
+    ? messagePreview(message.content)
+    : "新しいメッセージがあります"
+  const title = group?.is_direct
+    ? String(message.username || "M-talk")
+    : String(group?.group_name || "M-talk")
+  // 名指しされた人には、通知本文の頭でそれと分かるようにする。
+  const mentioned = Array.isArray(message.mentions) && message.mentions.includes(recipientUserId)
+  const mentionPrefix = mentioned ? "@あなた宛 " : ""
+  const body = group?.is_direct
+    ? `${mentionPrefix}${preview}`
+    : `${mentionPrefix}${message.username}: ${preview}`
+  return { title, body }
+}
+
 function notificationUrl(groupId: number): string {
   return `/line_report/chat.html?group=${encodeURIComponent(String(groupId))}`
 }
@@ -252,6 +327,99 @@ async function markSubscriptionFailure(
     })
     .eq("id", row.id)
   console.error("Chat push failed:", { subscription_id: row.id, status, reason: reason.slice(0, 500) })
+}
+
+function parseNativeDevice(body: Record<string, unknown>): {
+  token: string
+  environment: "sandbox" | "production"
+} {
+  const platform = String(body.platform ?? "").trim()
+  const token = String(body.token ?? "").trim().toLowerCase()
+  const environment = String(body.apns_environment ?? "").trim()
+  const bundleId = String(body.bundle_id ?? "").trim()
+  if (platform !== "ios") throw new Error("platform must be ios.")
+  if (!APNS_TOKEN_PATTERN.test(token)) throw new Error("Device token is invalid.")
+  if (environment !== "sandbox" && environment !== "production") {
+    throw new Error("apns_environment must be sandbox or production.")
+  }
+  if (bundleId !== MTALK_BUNDLE_ID) throw new Error("bundle_id is not allowed.")
+  return { token, environment }
+}
+
+async function readJsonObject(req: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = await req.json()
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return null
+  }
+}
+
+async function handleNativeRegister(
+  req: Request,
+  supabase: DbClient,
+  userId: string,
+): Promise<Response> {
+  const body = await readJsonObject(req)
+  if (!body) return json({ ok: false, error: "Invalid JSON body." }, 400)
+  let device
+  try {
+    device = parseNativeDevice(body)
+  } catch (error) {
+    return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+  const now = new Date().toISOString()
+  // 同じ端末トークンは、最後にログインした利用者だけに紐づける（前の利用者には送らない）。
+  const { error } = await supabase
+    .from("chat_push_native_devices")
+    .upsert({
+      user_id: userId,
+      platform: "ios",
+      token: device.token,
+      apns_environment: device.environment,
+      bundle_id: MTALK_BUNDLE_ID,
+      is_active: true,
+      failure_count: 0,
+      last_seen_at: now,
+      updated_at: now,
+    }, { onConflict: "token" })
+  if (error) return json({ ok: false, error: `native device save failed: ${error.message}` }, 500)
+
+  // 通知ON/OFFはWeb版と共通。未作成なら既定ONで作り、既存のOFFは上書きしない。
+  const { error: preferenceError } = await supabase
+    .from("chat_push_user_preferences")
+    .upsert({
+      user_id: userId,
+      notifications_enabled: true,
+      preview_enabled: true,
+      updated_at: now,
+    }, { onConflict: "user_id", ignoreDuplicates: true })
+  if (preferenceError) {
+    return json({ ok: false, error: `notification preference save failed: ${preferenceError.message}` }, 500)
+  }
+  console.log("Chat native device registered:", { user_id: userId, token: tokenHint(device.token) })
+  return json({ ok: true }, 200)
+}
+
+async function handleNativeUnregister(
+  req: Request,
+  supabase: DbClient,
+  userId: string,
+): Promise<Response> {
+  const body = await readJsonObject(req)
+  if (!body) return json({ ok: false, error: "Invalid JSON body." }, 400)
+  const token = String(body.token ?? "").trim().toLowerCase()
+  if (!APNS_TOKEN_PATTERN.test(token)) return json({ ok: false, error: "Device token is invalid." }, 400)
+  // 本人に紐づく行だけを止める。他人のトークンは触らない。
+  const { error } = await supabase
+    .from("chat_push_native_devices")
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq("token", token)
+    .eq("user_id", userId)
+  if (error) return json({ ok: false, error: `native device unregister failed: ${error.message}` }, 500)
+  return json({ ok: true }, 200)
 }
 
 async function handleRegister(
@@ -574,7 +742,22 @@ async function handlePreferenceSync(
   if (typeof body.preview_enabled === "boolean") {
     patch.preview_enabled = body.preview_enabled
   }
-  if ("notifications_enabled" in patch || "preview_enabled" in patch) {
+  if (typeof body.quiet_hours_enabled === "boolean") {
+    patch.quiet_hours_enabled = body.quiet_hours_enabled
+  }
+  if (body.quiet_start_minute !== undefined) {
+    patch.quiet_start_minute = normalizeQuietMinute(body.quiet_start_minute, 23 * 60)
+  }
+  if (body.quiet_end_minute !== undefined) {
+    patch.quiet_end_minute = normalizeQuietMinute(body.quiet_end_minute, 8 * 60)
+  }
+  if (typeof body.quiet_allow_mentions === "boolean") {
+    patch.quiet_allow_mentions = body.quiet_allow_mentions
+  }
+  if (Array.isArray(body.quiet_days)) {
+    patch.quiet_days = normalizeQuietDays(body.quiet_days)
+  }
+  if (Object.keys(patch).length > 2) {
     const { error: updateError } = await supabase
       .from("chat_push_user_preferences")
       .upsert(patch, { onConflict: "user_id" })
@@ -583,7 +766,7 @@ async function handlePreferenceSync(
 
   const { data, error } = await supabase
     .from("chat_push_user_preferences")
-    .select("user_id, notifications_enabled, preview_enabled")
+    .select("user_id, notifications_enabled, preview_enabled, quiet_hours_enabled, quiet_start_minute, quiet_end_minute, quiet_allow_mentions, quiet_days")
     .eq("user_id", userId)
     .maybeSingle()
   if (error) return json({ ok: false, error: `preference load failed: ${error.message}` }, 500)
@@ -594,6 +777,11 @@ async function handlePreferenceSync(
     found: true,
     notifications_enabled: row.notifications_enabled === true,
     preview_enabled: row.preview_enabled !== false,
+    quiet_hours_enabled: row.quiet_hours_enabled === true,
+    quiet_start_minute: normalizeQuietMinute(row.quiet_start_minute, 23 * 60),
+    quiet_end_minute: normalizeQuietMinute(row.quiet_end_minute, 8 * 60),
+    quiet_allow_mentions: row.quiet_allow_mentions !== false,
+    quiet_days: normalizeQuietDays(row.quiet_days),
   }, 200)
 }
 
@@ -659,7 +847,7 @@ async function handleDispatch(
     const now = new Date().toISOString()
     const { data: accessRows, error: accessError } = await supabase
       .from("chat_user_access")
-      .select("user_id")
+      .select("user_id, signup_status")
       .in("user_id", memberRecipientIds)
       .eq("access_enabled", true)
       .is("deleted_at", null)
@@ -667,6 +855,9 @@ async function handleDispatch(
     if (accessError) throw new Error(`recipient access load failed: ${accessError.message}`)
     const activeRecipientIds = new Set<string>(
       (accessRows || [])
+        .filter((row: { signup_status?: unknown }) =>
+          row.signup_status !== "pending" && row.signup_status !== "denied"
+        )
         .map((row: { user_id?: unknown }) => String(row.user_id ?? "").trim())
         .filter(Boolean),
     )
@@ -684,7 +875,7 @@ async function handleDispatch(
 
   const { data: preferenceRows, error: preferencesError } = await supabase
     .from("chat_push_user_preferences")
-    .select("user_id, notifications_enabled, preview_enabled")
+    .select("user_id, notifications_enabled, preview_enabled, quiet_hours_enabled, quiet_start_minute, quiet_end_minute, quiet_allow_mentions, quiet_days")
     .in("user_id", recipientIds)
     .eq("notifications_enabled", true)
   if (preferencesError) throw new Error(`preference load failed: ${preferencesError.message}`)
@@ -692,7 +883,14 @@ async function handleDispatch(
   for (const row of (preferenceRows || []) as SubscriptionPreferenceRow[]) {
     preferences.set(row.user_id, row)
   }
-  const enabledRecipientIds = recipientIds.filter((id) => preferences.has(id))
+  const dispatchNow = new Date()
+  const enabledRecipientIds = recipientIds.filter((id) => {
+    const pref = preferences.get(id)
+    if (!pref) return false
+    if (!isInQuietHoursJst(pref, dispatchNow)) return true
+    const mentioned = Array.isArray(message.mentions) && message.mentions.includes(id)
+    return mentioned && pref.quiet_allow_mentions !== false
+  })
   if (!enabledRecipientIds.length) {
     await supabase.from("chat_push_dispatches").update({
       completed_at: new Date().toISOString(),
@@ -711,8 +909,19 @@ async function handleDispatch(
   if (subscriptionsError) throw new Error(`subscription load failed: ${subscriptionsError.message}`)
 
   const subscriptions = (subscriptionRows || []) as PushSubscriptionRow[]
+  // アプリ版の端末も同じ宛先（enabledRecipientIds）だけに絞る。
+  const { data: nativeRows, error: nativeError } = await supabase
+    .from("chat_push_native_devices")
+    .select("id, user_id, token, apns_environment, failure_count")
+    .in("user_id", enabledRecipientIds)
+    .eq("is_active", true)
+  if (nativeError) console.error("Chat native device load error:", nativeError.message)
+  const nativeDevices = nativeError ? [] : (nativeRows || []) as NativeDeviceRow[]
   const unreadTotals = new Map<string, number>()
-  const subscribedRecipientIds = [...new Set(subscriptions.map((row) => row.user_id))]
+  const subscribedRecipientIds = [...new Set([
+    ...subscriptions.map((row) => row.user_id),
+    ...nativeDevices.map((row) => row.user_id),
+  ])]
   if (subscribedRecipientIds.length) {
     const { data: unreadRows, error: unreadError } = await supabase.rpc(
       "chat_push_unread_totals",
@@ -748,16 +957,7 @@ async function handleDispatch(
       }).eq("id", row.id)
       continue
     }
-    const preference = preferences.get(row.user_id)
-    const preview = preference?.preview_enabled !== false
-      ? messagePreview(message.content)
-      : "新しいメッセージがあります"
-    const title = group?.is_direct
-      ? String(message.username || "M-talk")
-      : String(group?.group_name || "M-talk")
-    // 名指しされた人には、通知本文の頭でそれと分かるようにする。
-    const mentioned = Array.isArray(message.mentions) && message.mentions.includes(row.user_id)
-    const mentionPrefix = mentioned ? "@あなた宛 " : ""
+    const { title, body } = notificationContent(message, group, row.user_id, preferences.get(row.user_id))
     const pushSubscription: WebPushSubscription = {
       endpoint: row.endpoint,
       p256dh: row.p256dh,
@@ -768,9 +968,7 @@ async function handleDispatch(
         pushSubscription,
         buildDeclarativeChatPushPayload({
           title,
-          body: group?.is_direct
-            ? `${mentionPrefix}${preview}`
-            : `${mentionPrefix}${message.username}: ${preview}`,
+          body,
           navigatePath: notificationUrl(message.group_id),
           tag: `chat-message-${message.id}`,
           groupId: message.group_id,
@@ -801,6 +999,90 @@ async function handleDispatch(
     }
   }
 
+  let apnsConfig = null
+  if (nativeDevices.length) {
+    // 鍵はVault（Web PushのVAPIDと同じ置き場所）。環境変数があればそちらを優先する。
+    let vaultKey: string | null = null
+    if (!Deno.env.get("APNS_PRIVATE_KEY")) {
+      const { data, error } = await supabase.rpc("chat_get_apns_private_key")
+      if (error) console.error("Chat APNs key load error:", error.message)
+      vaultKey = typeof data === "string" ? data : null
+    }
+    apnsConfig = loadApnsConfig((name) => Deno.env.get(name), vaultKey)
+    if (!apnsConfig) console.error("Chat APNs config is unavailable; native devices skipped.")
+  }
+  const native = await sendNativePushes({
+    supabase,
+    devices: nativeDevices,
+    config: apnsConfig,
+    message: { id: message.id, group_id: message.group_id },
+    contentFor: (userId) => notificationContent(message, group, userId, preferences.get(userId)),
+    badgeFor: (userId) => unreadTotals.get(userId) ?? null,
+  })
+  sent += native.sent
+  failed += native.failed
+  errors.push(...native.errors)
+
+  // Android アプリ版（FCM）へも通常メッセージ通知を配信する（未設定時はスキップし既存通知を止めない）
+  let androidSent = 0
+  let androidFailed = 0
+  const { data: androidRows, error: androidLoadError } = await supabase
+    .from("chat_call_push_devices")
+    .select("id, user_id, token, failure_count")
+    .in("user_id", enabledRecipientIds)
+    .eq("platform", "android_fcm")
+    .eq("is_active", true)
+  if (!androidLoadError && Array.isArray(androidRows) && androidRows.length > 0) {
+    let rawFcm = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON") ?? null
+    if (!rawFcm) {
+      const fcmRes = await supabase.rpc("chat_get_fcm_service_account_json")
+      rawFcm = typeof fcmRes.data === "string" ? fcmRes.data : null
+    }
+    const fcmAccount = parseFcmServiceAccount(rawFcm)
+    if (fcmAccount) {
+      const nowIso = new Date().toISOString()
+      for (const row of androidRows as Array<{ id: string; user_id: string; token: string; failure_count: number | null }>) {
+        const content = notificationContent(message, group, row.user_id, preferences.get(row.user_id))
+        try {
+          const res = await sendFcmChatMessage(
+            row.token,
+            {
+              title: content.title,
+              body: content.body,
+              groupId: message.group_id,
+              messageId: message.id,
+            },
+            fcmAccount,
+          )
+          if (res.ok) {
+            androidSent += 1
+            await supabase.from("chat_call_push_devices").update({
+              failure_count: 0,
+              is_active: true,
+              last_success_at: nowIso,
+              updated_at: nowIso,
+            }).eq("id", row.id)
+          } else {
+            androidFailed += 1
+            errors.push(`android ${row.id}: HTTP ${res.status}${res.reason ? ` ${res.reason}` : ""}`)
+            const nextFailures = (Number(row.failure_count) || 0) + 1
+            await supabase.from("chat_call_push_devices").update({
+              is_active: res.expired || nextFailures >= 5 ? false : true,
+              failure_count: nextFailures,
+              updated_at: nowIso,
+            }).eq("id", row.id)
+          }
+        } catch (error) {
+          androidFailed += 1
+          const reason = error instanceof Error ? error.message : String(error)
+          errors.push(`android ${row.id}: ${reason.slice(0, 300)}`)
+        }
+      }
+    }
+  }
+  sent += androidSent
+  failed += androidFailed
+
   await supabase.from("chat_push_dispatches").update({
     completed_at: new Date().toISOString(),
     sent_count: sent,
@@ -812,6 +1094,10 @@ async function handleDispatch(
     message_id: messageId,
     recipients: recipientIds.length,
     subscriptions: subscriptions.length,
+    native_devices: nativeDevices.length,
+    native_sent: native.sent,
+    native_failed: native.failed,
+    native_skipped: native.skipped,
     sent,
     failed,
   }, 200)
@@ -853,6 +1139,12 @@ Deno.serve(async (req) => {
     }
     if (req.method === "DELETE" && action === "subscribe") {
       return await handleUnregister(req, supabase, user.id)
+    }
+    if (req.method === "POST" && action === "native-register") {
+      return await handleNativeRegister(req, supabase, user.id)
+    }
+    if (req.method === "DELETE" && action === "native-register") {
+      return await handleNativeUnregister(req, supabase, user.id)
     }
     if (req.method === "POST" && action === "preferences") {
       return await handlePreferenceSync(req, supabase, user.id)
