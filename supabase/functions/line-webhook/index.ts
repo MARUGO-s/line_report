@@ -15,6 +15,13 @@ import {
   clearPendingReceiptDuplicate,
 } from '../_shared/receipt_duplicate.ts'
 import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
+import {
+  applyBarPelotaSettlementCounts,
+  BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+  BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE,
+  isBarPelotaReceiptStore,
+  readBarPelotaSettlementCounts,
+} from '../_shared/barpelota_receipt.ts'
 import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_shared/foodcourt_compare.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
@@ -1635,7 +1642,7 @@ async function processReceiptImageEvent(
       '',
       '【強制再解析・絶対遵守】上の画像はこの店舗のレシート（精算）で確定しています。',
       '前述の「general / reservation にする」判断基準は、この店舗には一切適用しないでください。',
-      '必ず kind="receipt" を出力し、receipt に読み取れる主要項目（store_name, date, net_sales=純売上, gross_sales=合計/税込, party_count=通常取引数, guest_count=客数 など）を入れること。',
+      '必ず kind="receipt" を出力し、receipt に読み取れる主要項目（store_name, date, net_sales=純売上, gross_sales=合計/税込, party_count=総取引数, guest_count=客数 など）を入れること。',
       '反射・光・かすれがあっても、読める数値だけでも receipt に入れて kind=receipt を維持し、receipt_confidence は 0.6 以上にする。',
     ].join('\n')
     const forcedRetry = await analyzeLineImageWithGemini(
@@ -1849,11 +1856,30 @@ async function processReceiptImageEvent(
     ? { ...receiptRaw, storeName: alignedStoreName }
     : receiptRaw
   // ソバージュは「総売上」に出前の預かり金が含まれるため、売上は「純売上」を採用する。
-  const receipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
+  const parsedReceipt = applySauvageNetSalesAsGrossSales(receiptAligned, registry.store_partition_key)
+  const storeDisplayName = registry.display_name || registry.store_partition_key
+  const currentStoreMatched = receiptStoreNameMatchesRegistry(
+    storeDisplayName,
+    registry.store_partition_key,
+    parsedReceipt.storeName,
+    parsedReceipt.storePhone,
+    registry.receipt_phones,
+  )
+  const settlementCounts = currentStoreMatched && isBarPelotaReceiptStore(registry.store_partition_key)
+    ? await readBarPelotaSettlementCounts(
+      contentFetch.bytes,
+      contentFetch.contentType,
+      `${lineMessageId}#settlement-counts`,
+      resolveGeminiApiKey(),
+      normalReceiptGeminiModel,
+    )
+    : null
+  if (settlementCounts) {
+    await recordAiUsage('gemini', normalReceiptGeminiModel, settlementCounts.usage)
+  }
 
-  // レジ出金（経費）伝票は「売上」ではない → 売上登録せず、小口現金（経費）として記録を案内。
-  // 自店名と一致しても出金伝票は売上に入れない（売上の水増し防止）。検知しなければ従来処理へ。
-  {
+  // 日次精算票を確認できた場合は売上へ進む。単独のレジ出金伝票は小口現金に案内する。
+  if (!settlementCounts?.settlement) {
     const cashOutUserId = event.source?.userId ? String(event.source.userId) : null
     // 権限OFFでも検知自体は行い「売上への誤登録」は防ぐ（カード返信だけ出さない）。
     const cashOut = await handlePettyCashCashOutSlip(supabase, registry, {
@@ -1861,13 +1887,28 @@ async function processReceiptImageEvent(
       userId: cashOutUserId,
       replyToken: (allowPettyCash && receiptReplyToken) ? rawReplyToken : '',
       lineMessageId,
-      receipt,
+      receipt: parsedReceipt,
       summary: analyzed.analysis?.summary ?? '',
       reanalyze: reanalyzeAsExpense,
     })
     if (cashOut.handled) {
       return { saved: false, replied: !!cashOut.replied, reason: cashOut.reason ?? 'petty_cash_cashout' }
     }
+  }
+
+  const receipt = settlementCounts
+    ? applyBarPelotaSettlementCounts(parsedReceipt, settlementCounts)
+    : parsedReceipt
+  if (!receipt) {
+    if (receiptReplyToken) {
+      await replyLineText(
+        receiptReplyToken,
+        settlementCounts?.providerFailed ? BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE : BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+        accessToken,
+        webhookReplyLog(registry, roomId, 'barpelota_receipt_counts_held'),
+      )
+    }
+    return { saved: false, replied: !!receiptReplyToken, reason: 'barpelota_receipt_counts_held' }
   }
 
   const confidence = mergeReceiptConfidence(
@@ -1885,7 +1926,6 @@ async function processReceiptImageEvent(
     return { saved: false, replied: !!receiptReplyToken, reason: 'low_confidence' }
   }
 
-  const storeDisplayName = registry.display_name || registry.store_partition_key
   const receiptDateIso = resolveReceiptDateIsoForPersist(receipt.date)
   const userId = event.source?.userId ? String(event.source.userId) : null
   const parsedStoreName = resolveParsedStoreNameForDisplay(receipt.storeName)
@@ -1900,14 +1940,6 @@ async function processReceiptImageEvent(
     store_display_name: storeDisplayName,
     sender_display_name: null as string | null,
   }
-
-  const currentStoreMatched = receiptStoreNameMatchesRegistry(
-    storeDisplayName,
-    registry.store_partition_key,
-    receipt.storeName,
-    receipt.storePhone,
-    registry.receipt_phones,
-  )
 
   if (!currentStoreMatched) {
     await clearPendingReceiptCorrection(supabase, roomId, userId)

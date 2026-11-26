@@ -1,6 +1,11 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.44.0'
 import type { LineImageReceiptAnalysis, LineReplyPayload } from './receipt_types.ts'
 import {
+  BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+  hasValidBarPelotaReceiptCounts,
+  isBarPelotaReceiptStore,
+} from './barpelota_receipt.ts'
+import {
   buildReceiptFlexMessage,
   type ReceiptReplyVisibilityOptions,
 } from './receipt_flex_reply.ts'
@@ -247,6 +252,7 @@ function normalizeReceiptPayload(raw: unknown): LineImageReceiptAnalysis {
     grossSales: source.grossSales != null ? String(source.grossSales) : null,
     partyCount: source.partyCount != null ? String(source.partyCount) : null,
     guestCount: source.guestCount != null ? String(source.guestCount) : null,
+    ...(source.barPelotaCountsVerified === true ? { barPelotaCountsVerified: true } : {}),
     unitPrice: source.unitPrice != null ? String(source.unitPrice) : null,
     items: Array.isArray(source.items) ? source.items.map(String) : [],
   }
@@ -344,6 +350,23 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
   if (!pending) return null
   if (pending.store_partition_key !== registry.store_partition_key) return null
 
+  const choice = pending.awaiting_date_change ? null : normalizeReceiptDuplicateDecision(text)
+  if (!pending.awaiting_date_change && choice == null) return null
+  if (choice === 'cancel') {
+    await clearPendingReceiptDuplicate(supabase, roomId, userId)
+    return '登録を中止しました。'
+  }
+
+  // 旧バージョンの保留分は再読取が済んでいない。置き換えで既存行を削除する前に止める。
+  if (
+    isBarPelotaReceiptStore(pending.store_partition_key) &&
+    (pending.receipt_payload.barPelotaCountsVerified !== true ||
+      !hasValidBarPelotaReceiptCounts(pending.receipt_payload))
+  ) {
+    await clearPendingReceiptDuplicate(supabase, roomId, userId)
+    return BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE
+  }
+
   // 日付変更待機中: 入力を新しい日付として解析する
   if (pending.awaiting_date_change) {
     const newDateIso = parseReceiptDateToIso(text)
@@ -363,17 +386,6 @@ export async function tryHandlePendingReceiptDuplicateConfirmation(
     return completePendingDuplicateAndReply(supabase, registry, updatedPending, replyVisibility)
   }
 
-  const choice = normalizeReceiptDuplicateDecision(text)
-  if (choice == null) {
-    // 「加算／中止／置き換え／日付変更（＋ボタン・1／2／3／4）」以外の通常メッセージは無視する（催促しない）。
-    // 重複確認はリッチカードのボタンで操作してもらう想定。保留中に無関係な会話（別ユーザーの
-    // トーク等）へ誤って再プロンプトを返さないよう、ここでは null を返して通常処理へ通す。
-    return null
-  }
-  if (choice === 'cancel') {
-    await clearPendingReceiptDuplicate(supabase, roomId, userId)
-    return '登録を中止しました。'
-  }
   if (choice === 'date_change') {
     await markPendingReceiptDuplicateAwaitingDateChange(supabase, roomId, userId)
     return '新しい日付を入力してください（例: 2026年7月10日 / 2026-07-10 / 7/10）'

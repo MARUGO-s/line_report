@@ -808,33 +808,30 @@ function extractTextFromGeminiResponse(payload: unknown): string {
   return parts.join('\n').trim()
 }
 
-/**
- * Gemini（Google Generative Language API）でレシート画像を解析する。
- * 戻り値は analyzeLineImageWithGroqScout と同型なので、呼び出し側は差し替えるだけでよい。
- * 失敗（キー無し/HTTP/空/解析不能/タイムアウト）時は failure を返し、呼び出し側で Groq へフォールバックできる。
- */
-export async function analyzeLineImageWithGemini(
+/** Request raw Gemini vision output so each document reader can validate its own schema. */
+export async function requestGeminiVisionText(
   bytes: Uint8Array,
   contentType: string | null,
   fileName: string,
   geminiApiKey: string,
-  systemPromptAddition = '',
-  model = 'gemini-3.1-pro-preview',
+  systemPrompt: string,
+  model: string,
   timeoutMs = 30000,
-): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  maxOutputTokens = 16384,
+): Promise<{ content: string | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
   if (!geminiApiKey) {
-    return { analysis: null, failure: { stage: 'missing_api_key', message: 'GEMINI_API_KEY is missing.' } }
+    return { content: null, failure: { stage: 'missing_api_key', message: 'GEMINI_API_KEY is missing.' } }
   }
   if (bytes.byteLength <= 0 || bytes.byteLength > GROQ_VISION_BASE64_MAX_BYTES) {
     return {
-      analysis: null,
+      content: null,
       failure: { stage: 'invalid_image_size', message: `Image bytes out of range: ${bytes.byteLength}` },
     }
   }
   const mime = String(contentType ?? '').trim().toLowerCase()
   if (!isVisionAnalyzableImageMime(mime)) {
     return {
-      analysis: null,
+      content: null,
       failure: { stage: 'unsupported_mime', message: `Unsupported image mime: ${mime || '(empty)'}` },
     }
   }
@@ -842,7 +839,7 @@ export async function analyzeLineImageWithGemini(
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
   const body = {
-    system_instruction: { parts: [{ text: buildReceiptVisionSystemPrompt(systemPromptAddition) }] },
+    system_instruction: { parts: [{ text: systemPrompt }] },
     contents: [
       {
         role: 'user',
@@ -856,7 +853,7 @@ export async function analyzeLineImageWithGemini(
       temperature: 0.1,
       // Gemini 3.x Pro は思考型のため、思考トークンで本出力が枯渇しないよう余裕を持たせる
       // （枯渇すると空応答→Groqへ無言フォールバックになり精度が落ちる）。
-      maxOutputTokens: 16384,
+      maxOutputTokens,
       responseMimeType: 'application/json',
     },
   }
@@ -877,7 +874,7 @@ export async function analyzeLineImageWithGemini(
   } catch (err) {
     const aborted = err instanceof DOMException && err.name === 'AbortError'
     return {
-      analysis: null,
+      content: null,
       failure: {
         stage: aborted ? 'gemini_timeout' : 'gemini_network_error',
         message: (err instanceof Error ? err.message : String(err)).slice(0, 300),
@@ -891,7 +888,7 @@ export async function analyzeLineImageWithGemini(
     const err = await response.text().catch(() => '')
     console.error('Gemini image vision failed:', model, response.status, err.slice(0, 500))
     return {
-      analysis: null,
+      content: null,
       failure: {
         stage: 'gemini_http_error',
         httpStatus: response.status,
@@ -908,8 +905,32 @@ export async function analyzeLineImageWithGemini(
       (json as { candidates?: Array<{ finishReason?: unknown }> })?.candidates?.[0]?.finishReason ?? '',
     )
     console.error('Gemini image vision empty content:', model, 'finishReason=', finishReason)
-    return { analysis: null, failure: { stage: 'gemini_empty_content', message: `Gemini response content is empty (finishReason=${finishReason}).` }, usage }
+    return { content: null, failure: { stage: 'gemini_empty_content', message: `Gemini response content is empty (finishReason=${finishReason}).` }, usage }
   }
+  return { content, failure: null, usage }
+}
+
+/** Gemini（Google Generative Language API）で汎用のレシート画像を解析する。 */
+export async function analyzeLineImageWithGemini(
+  bytes: Uint8Array,
+  contentType: string | null,
+  fileName: string,
+  geminiApiKey: string,
+  systemPromptAddition = '',
+  model = 'gemini-3.1-pro-preview',
+  timeoutMs = 30000,
+): Promise<{ analysis: LineImageAnalysisResult | null; failure: LineImageVisionFailure | null; usage?: LineImageVisionUsage | null }> {
+  const { content, ...requestResult } = await requestGeminiVisionText(
+    bytes,
+    contentType,
+    fileName,
+    geminiApiKey,
+    buildReceiptVisionSystemPrompt(systemPromptAddition),
+    model,
+    timeoutMs,
+  )
+  if (!content) return { analysis: null, ...requestResult }
+  const { usage } = requestResult
 
   const extracted = parseFirstJsonObject(content)
   if (extracted && typeof extracted === 'object') {

@@ -108,6 +108,7 @@ const SHARED_MODULE_RULES: SharedModuleRule[] = [
   { pattern: /^(line_client|line_display_names|line_flex_messages|line_media_store|line_room_.*|line_search_bot|line_webhook_delivery_log|search_help_guide)\.ts$/, codes: ['SAL-01', 'OPS-02', 'OPS-04', 'ADM-01', 'DEV-02'] },
   { pattern: /^marugo_group_stores\.ts$/, codes: ['SYS-01', 'DEV-02'] },
   { pattern: /^petty_cash_flow\.ts$/, codes: ['OPS-03', 'DEV-02'] },
+  { pattern: /^barpelota_receipt\.ts$/, codes: ['SAL-02', 'SAL-03', 'DEV-02'] },
   { pattern: /^(receipt_.*|store_receipt.*)\.ts$/, codes: ['SAL-02', 'SAL-03', 'SAL-04', 'SAL-05', 'SAL-06', 'OPS-03', 'DEV-02'] },
 ]
 
