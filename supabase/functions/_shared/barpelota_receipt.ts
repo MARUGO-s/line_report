@@ -20,6 +20,9 @@ export const BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE = [
   '「総取引数」と「客数」の印字ラベルおよび右端の数字が両方はっきり写るように、精算票全体を撮り直して送ってください。',
 ].join('\n')
 
+export const BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE =
+  'バルペロタの精算票の件数を再確認できなかったため、売上登録を保留しました。少し時間をおいて、同じ画像をもう一度送ってください。'
+
 type BarPelotaCounts = {
   partyCount: number | null
   guestCount: number | null
@@ -68,7 +71,7 @@ export async function readBarPelotaSettlementCounts(
   fileName: string,
   geminiApiKey: string,
   geminiModel: string,
-): Promise<BarPelotaSettlementCounts & { usage?: LineImageVisionUsage | null }> {
+): Promise<BarPelotaSettlementCounts & { providerFailed: boolean; usage?: LineImageVisionUsage | null }> {
   const { content, usage } = await requestGeminiVisionText(
     bytes,
     contentType,
@@ -79,7 +82,8 @@ export async function readBarPelotaSettlementCounts(
     15_000,
     2_048,
   )
-  return { ...parseBarPelotaSettlementCounts(content ? parseFirstJsonObject(content) : null), usage }
+  const parsed = content ? parseFirstJsonObject(content) : null
+  return { ...parseBarPelotaSettlementCounts(parsed), providerFailed: !parsed, usage }
 }
 
 /** Validate the numbers alone. Callers must separately verify the source rows before automatic registration. */

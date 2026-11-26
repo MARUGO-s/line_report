@@ -108,9 +108,22 @@ test('The focused Gemini request reads the label evidence through the shared ima
   try {
     const result = await readBarPelotaSettlementCounts(new Uint8Array([1]), 'image/jpeg', 'fixture', 'test-key', 'test-model')
     assert.equal(result.settlement, true)
+    assert.equal(result.providerFailed, false)
     assert.equal(result.partyCount, 12)
     assert.equal(result.guestCount, 25)
     assert.equal(result.usage?.totalTokens, 42)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('A failed focused request is distinguishable from unreadable printed values', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('unavailable') }
+  try {
+    const result = await readBarPelotaSettlementCounts(new Uint8Array([1]), 'image/jpeg', 'fixture', 'test-key', 'test-model')
+    assert.equal(result.providerFailed, true)
+    assert.equal(applyBarPelotaSettlementCounts(receipt, result), null)
   } finally {
     globalThis.fetch = originalFetch
   }

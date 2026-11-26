@@ -18,6 +18,7 @@ import { attemptReceiptRegistration } from '../_shared/receipt_save_flow.ts'
 import {
   applyBarPelotaSettlementCounts,
   BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+  BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE,
   isBarPelotaReceiptStore,
   readBarPelotaSettlementCounts,
 } from '../_shared/barpelota_receipt.ts'
@@ -1902,7 +1903,7 @@ async function processReceiptImageEvent(
     if (receiptReplyToken) {
       await replyLineText(
         receiptReplyToken,
-        BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+        settlementCounts?.providerFailed ? BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE : BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
         accessToken,
         webhookReplyLog(registry, roomId, 'barpelota_receipt_counts_held'),
       )

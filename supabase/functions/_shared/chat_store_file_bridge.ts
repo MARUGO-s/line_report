@@ -27,6 +27,7 @@ import { attemptReceiptRegistration } from './receipt_save_flow.ts'
 import {
   applyBarPelotaSettlementCounts,
   BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+  BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE,
   isBarPelotaReceiptStore,
   readBarPelotaSettlementCounts,
 } from './barpelota_receipt.ts'
@@ -442,17 +443,21 @@ export async function processStoreRoomImageLikeLine(
     }
   }
 
-  const receipt = isBarPelotaReceiptStore(registry.store_partition_key)
-    ? applyBarPelotaSettlementCounts(parsedReceipt, await readBarPelotaSettlementCounts(
+  const settlementCounts = isBarPelotaReceiptStore(registry.store_partition_key)
+    ? await readBarPelotaSettlementCounts(
       params.bytes,
       params.contentType || 'image/jpeg',
       `${media.lineMessageId}#settlement-counts`,
       geminiKey,
       resolveReceiptGeminiFlashLiteModel(),
-    ))
-    : parsedReceipt
+    )
+    : null
+  const receipt = settlementCounts ? applyBarPelotaSettlementCounts(parsedReceipt, settlementCounts) : parsedReceipt
   if (!receipt) {
-    return { text: BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE, kind: 'error' }
+    return {
+      text: settlementCounts?.providerFailed ? BAR_PELOTA_RECEIPT_COUNTS_RETRY_MESSAGE : BAR_PELOTA_RECEIPT_COUNTS_HOLD_MESSAGE,
+      kind: 'error',
+    }
   }
 
   const receiptDateIso = resolveReceiptDateIsoForPersist(receipt.date)
