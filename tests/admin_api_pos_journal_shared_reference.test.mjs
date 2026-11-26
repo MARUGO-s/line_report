@@ -204,18 +204,32 @@ test("POS journal product lookup keeps product codes and ignores superseded mont
     await flush();
     serve("2026-07", [
       ...Array.from({ length: 43 }, (_, index) => ({ name: "商品" + index, code: "9" + index })),
-      { name: "〈赤ワイン〉", code: "0023" },
+      { name: "〈赤ワイン〉", code: "0023", qty: 7, amount: 17500 },
+      { name: "パン", code: "0099", qty: 23, amount: 6900 },
     ]);
     await flush();
-    get("pjTabFiles").click();
-    window.document.querySelector("#pjPanelFiles summary").click();
-    assert.equal(get("journalProductRows").rows.length, 44);
+    get("pjTabRanking").click();
+    get("openProductSalesBtn").click();
+    assert.equal(get("pjPanelFiles").hidden, false);
+    assert.equal(get("journalProductDetails").open, true);
+    assert.equal(get("journalProductRows").rows.length, 45);
 
+    const order = get("journalProductOrder");
+    const sortBy = (value) => {
+      order.value = value;
+      order.dispatchEvent(new window.Event("change"));
+    };
+    sortBy("amount");
+    assert.equal(get("journalProductRows").rows[0].cells[1].textContent, "0023");
+    sortBy("qty");
+    assert.equal(get("journalProductRows").rows[0].cells[1].textContent, "0099");
     const search = get("journalProductSearch");
     search.value = "ﾜｲﾝ";
     search.dispatchEvent(new window.Event("input"));
     assert.equal(get("journalProductRows").rows.length, 1);
-    assert.equal(get("journalProductRows").rows[0].cells[1].textContent, "0023");
+    assert.deepEqual(Array.from(get("journalProductRows").rows[0].cells).slice(1).map((cell) =>
+      cell.textContent
+    ), ["0023", "7", "¥17,500"]);
 
     const month = get("monthSel");
     const selectMonth = (value) => {
@@ -230,7 +244,7 @@ test("POS journal product lookup keeps product codes and ignores superseded mont
     serve("2026-08", [{ name: "古いワイン", code: "0001" }]);
     await flush();
     assert.equal(get("journalProductRows").rows.length, 1);
-    assert.equal(get("journalProductRows").rows[0].cells[0].textContent, "白ワイン");
+    assert.equal(get("journalProductRows").rows[0].cells[0].firstElementChild.textContent, "白ワイン");
   } finally {
     dom.window.close();
   }
