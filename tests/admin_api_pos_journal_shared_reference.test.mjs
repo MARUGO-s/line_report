@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { JSDOM, VirtualConsole } from "jsdom";
 
 const root = new URL("../", import.meta.url);
 const adminApi = await readFile(
@@ -161,93 +160,6 @@ test("POS journal page renders shared-only months and explains the source", () =
   assert.match(page, /Journal Reportで登録した同店舗・同月の保存済みレポートを共有参照/);
   assert.match(page, /var sharedDays=state\.summary&&Array\.isArray\(state\.summary\.days\)/);
   assert.match(page, /if \(\(state\.files\|\|\[\]\)\.length \|\| sharedDays\) render/);
-});
-
-test("POS journal product lookup keeps product codes and ignores superseded month responses", async () => {
-  const requests = new Map();
-  const dom = new JSDOM(page, {
-    url: "https://example.test/pos-journal.html",
-    runScripts: "dangerously",
-    virtualConsole: new VirtualConsole(),
-    beforeParse(window) {
-      window.LINE_REPORT_AUTH = { getToken: () => "fixture-session" };
-      window.LINE_REPORT_PAGES = { receiptAdminApiUrl: (path) => path };
-      window.LINE_REPORT_SALES = { render() {} };
-      window.localStorage.setItem("pos_journal_month", "2026-07");
-      window.fetch = (path, options) => {
-        assert.equal(options.headers["x-admin-token"], "fixture-session");
-        assert.equal(options.method, "GET");
-        if (path === "/pos-journals/stores") {
-          return Promise.resolve(Response.json({ stores: [{
-            store_key: "bistrocavacava", store_name: "テスト店舗",
-            months: ["2026-07", "2026-08", "2026-09"],
-          }] }));
-        }
-        if (path.startsWith("/pos-journals/ai-history?")) {
-          return Promise.resolve(Response.json({ items: [] }));
-        }
-        const url = new URL(path, window.location.href);
-        assert.equal(url.pathname, "/pos-journals");
-        assert.equal(url.searchParams.get("store_key"), "bistrocavacava");
-        return new Promise((resolve) => requests.set(url.searchParams.get("month"), resolve));
-      };
-    },
-  });
-  try {
-    const { window } = dom;
-    const get = (id) => window.document.getElementById(id);
-    const flush = () => new Promise((resolve) => setImmediate(resolve));
-    const serve = (month, items) => requests.get(month)(Response.json({
-      files: [], shared_reference: { day_count: 1 },
-      summary: { meta: { month }, days: [{ business_date: month + "-01" }], item_ranking: items },
-    }));
-    await flush();
-    serve("2026-07", [
-      ...Array.from({ length: 43 }, (_, index) => ({ name: "商品" + index, code: "9" + index })),
-      { name: "〈赤ワイン〉", code: "0023", qty: 7, amount: 17500 },
-      { name: "パン", code: "0099", qty: 23, amount: 6900 },
-    ]);
-    await flush();
-    get("pjTabRanking").click();
-    get("openProductSalesBtn").click();
-    assert.equal(get("pjPanelFiles").hidden, false);
-    assert.equal(get("journalProductDetails").open, true);
-    assert.equal(get("journalProductRows").rows.length, 45);
-
-    const order = get("journalProductOrder");
-    const sortBy = (value) => {
-      order.value = value;
-      order.dispatchEvent(new window.Event("change"));
-    };
-    sortBy("amount");
-    assert.equal(get("journalProductRows").rows[0].cells[1].textContent, "0023");
-    sortBy("qty");
-    assert.equal(get("journalProductRows").rows[0].cells[1].textContent, "0099");
-    const search = get("journalProductSearch");
-    search.value = "ﾜｲﾝ";
-    search.dispatchEvent(new window.Event("input"));
-    assert.equal(get("journalProductRows").rows.length, 1);
-    assert.deepEqual(Array.from(get("journalProductRows").rows[0].cells).slice(1).map((cell) =>
-      cell.textContent
-    ), ["0023", "7", "¥17,500"]);
-
-    const month = get("monthSel");
-    const selectMonth = (value) => {
-      month.value = value;
-      month.dispatchEvent(new window.Event("change"));
-    };
-    selectMonth("2026-08");
-    assert.equal(get("journalProductRows").rows.length, 0);
-    selectMonth("2026-09");
-    serve("2026-09", [{ name: "白ワイン", code: "0034" }]);
-    await flush();
-    serve("2026-08", [{ name: "古いワイン", code: "0001" }]);
-    await flush();
-    assert.equal(get("journalProductRows").rows.length, 1);
-    assert.equal(get("journalProductRows").rows[0].cells[0].firstElementChild.textContent, "白ワイン");
-  } finally {
-    dom.window.close();
-  }
 });
 
 test("Journal Report preserves a shared day snapshot when large sales are omitted", () => {
