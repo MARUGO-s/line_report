@@ -393,6 +393,13 @@
     .chip.warn { background: var(--warn-soft); color: var(--warn); }
     .pj-file-name { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .pj-file-card h2 .c-note.warn-count { color: var(--warn); }
+    .pj-file-products { margin: 0 0 14px; }
+    .pj-file-products summary { cursor: pointer; width: fit-content; font-weight: 700; color: var(--accent); }
+    .pj-file-products-panel { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+    .pj-file-products-search { display: grid; gap: 5px; max-width: 340px; }
+    .pj-file-products-search input { width: 100%; }
+    .pj-file-products-table { max-height: 22rem; overflow: auto; }
+    .pj-file-products-table .pj-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
     .rk-bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; min-width: 60px; }
     .rk-bar > span { display:block; height:100%; background: var(--accent); border-radius:999px; }
     .pj-rank-tabs { display:flex; gap:7px; flex-wrap:wrap; margin:-2px 0 13px; }
@@ -642,6 +649,22 @@
           <div class="pj-tab-panel" id="pjPanelFiles" role="tabpanel" aria-labelledby="pjTabFiles" tabindex="0" hidden>
           <section class="pj-card pj-file-card">
             <h2>保管ファイル <span class="c-note" id="fileListNote">原本ダウンロード・削除</span></h2>
+            <details class="pj-file-products">
+              <summary>商品一覧</summary>
+              <div class="pj-file-products-panel">
+                <label class="pj-file-products-search" for="journalProductSearch">
+                  商品名・商品コードで絞り込み
+                  <input class="input" id="journalProductSearch" type="search" autocomplete="off" disabled />
+                </label>
+                <p class="pj-message" id="journalProductStatus" role="status">ログインすると、選択した店舗・月の販売明細から商品を表示します。</p>
+                <div class="pj-file-products-table" id="journalProductTable" hidden>
+                  <table class="pj-table">
+                    <thead><tr><th class="l" scope="col">商品名</th><th class="l" scope="col">商品コード</th></tr></thead>
+                    <tbody id="journalProductRows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
             <div class="table-scroll">
               <table class="pj-table">
                 <thead><tr><th class="l">営業日</th><th class="l">ファイル名</th><th>サイズ</th><th>総売上</th><th>会計</th><th>アップロード</th><th>操作</th></tr></thead>
@@ -822,6 +845,7 @@
     var analysisDeleteTarget = null;
     var currentRanking = [];
     var activeRankingView = 'all';
+    var journalProductItems = [];
     var AI_SUGGESTIONS = ['一番売れた日は？','客単価を上げるには？','雨の日の傾向は？','売れ筋商品を教えて','決済方法の比率は？'];
 
     var el = function (id) { return document.getElementById(id); };
@@ -1087,6 +1111,31 @@
           + '<td><span class="file-action"><button class="btn" data-download="' + file.id + '"' + (bad && !(Number(file.file_size_bytes)||0) ? ' disabled title="原本未保管"' : '') + '>DL</button><button class="btn btn-danger" data-delete="' + file.id + '">削除</button></span></td>'
           + '</tr>';
       }).join('');
+    }
+
+    function journalProductSearchText(value) {
+      return String(value == null ? '' : value).normalize('NFKC').trim().toLowerCase();
+    }
+    function renderJournalProducts() {
+      var query = journalProductSearchText(el('journalProductSearch').value);
+      var matches = journalProductItems.filter(function(item) {
+        return journalProductSearchText(item.name).includes(query) || journalProductSearchText(item.code).includes(query);
+      });
+      el('journalProductRows').innerHTML = matches.map(function(item) {
+        return '<tr><td class="l">' + esc(item.name) + '</td><td class="l mono">' + esc(item.code || '未記録') + '</td></tr>';
+      }).join('');
+      el('journalProductTable').hidden = matches.length === 0;
+      el('journalProductStatus').textContent = !journalProductItems.length
+        ? '選択した店舗・月の販売明細に商品がありません。'
+        : matches.length ? '販売明細の商品 ' + num(matches.length) + '件' : '一致する商品がありません。';
+    }
+    function setJournalProducts(items, status) {
+      journalProductItems = Array.isArray(items) ? items.slice().sort(function(a, b) {
+        return a.name.localeCompare(b.name, 'ja') || String(a.code).localeCompare(String(b.code));
+      }) : [];
+      el('journalProductSearch').disabled = !journalProductItems.length;
+      renderJournalProducts();
+      if (status) el('journalProductStatus').textContent = status;
     }
 
     function resetAiForDataChange(preserveHistory) {
@@ -1757,7 +1806,16 @@
       el('unifiedSalesNotice').textContent='統一売上と差異を確認中…';
       var month=el('monthSel').value||savedMonth();
       try { localStorage.setItem('pos_journal_month',month); } catch (_) {}
-      if (!getToken()) { el('unifiedSalesNotice').textContent='統一売上は未確認です。ログインしてください。'; setAuth(false); renderFiles([]); renderSharedReference(null); await loadLegacy(month); return; }
+      if (!getToken()) {
+        setJournalProducts([], 'ログインすると、選択した店舗・月の販売明細から商品を表示します。');
+        el('unifiedSalesNotice').textContent='統一売上は未確認です。ログインしてください。';
+        setAuth(false);
+        renderFiles([]);
+        renderSharedReference(null);
+        await loadLegacy(month);
+        return;
+      }
+      setJournalProducts([], '商品を読み込んでいます…');
       setAuth(true);
       try {
         var state=await apiFetch('/pos-journals?store_key='+encodeURIComponent(STORE_KEY)+'&month='+encodeURIComponent(month),{method:'GET'});
@@ -1766,6 +1824,8 @@
         renderSharedReference(state);
         var sharedError=state.shared_reference&&state.shared_reference.error;
         var sharedDays=state.summary&&Array.isArray(state.summary.days)?state.summary.days.length:0;
+        var journalItems = state.summary && state.summary.item_ranking;
+        setJournalProducts(journalItems, sharedError && !journalItems?.length ? '販売明細を確認できませんでした。再読込してください。' : '');
         window.LINE_REPORT_SALES.render(el('unifiedSalesNotice'),state.unified_sales||{series:[]});
         if ((state.files||[]).length || sharedDays) render(state.summary||{});
         else if (sharedError) {
@@ -1777,8 +1837,10 @@
         if(loadSequence!==unifiedSalesLoadSequence)return;
         el('unifiedSalesNotice').textContent='統一売上を確認できませんでした。以下は原本/保存時点の値であり、現在の統一値とは区別してください。';
         if (/認証|ログイン|トークン|Unauthorized|Forbidden/i.test(String(error.message||''))) {
+          setJournalProducts([], '商品一覧を表示するにはログインしてください。');
           renderFiles([]); renderSharedReference(null); await loadLegacy(month,true); return;
         }
+        setJournalProducts([], '商品一覧を読み込めませんでした。再読込してください。');
         renderFiles([]); renderSharedReference(null); setMessage(el('uploadMsg'),error.message,'err'); await loadLegacy(month,true);
       }
     }
@@ -1930,6 +1992,7 @@
     function closeDelete(){el('deleteModal').hidden=true;deleteTarget=null;}
     async function submitDelete(){if(!deleteTarget||el('deleteConfirmInput').value!=='delete')return;el('deleteSubmitBtn').disabled=true;try{await apiFetch('/pos-journals/file',{method:'DELETE',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({id:deleteTarget.id,store_key:STORE_KEY,confirmation:'delete'})});setMessage(el('uploadMsg'),deleteTarget.original_file_name+' を削除しました。','ok');closeDelete();await loadCurrent();}catch(error){setMessage(el('deleteMsg'),error.message,'err');el('deleteSubmitBtn').disabled=false;}}
 
+    el('journalProductSearch').addEventListener('input', renderJournalProducts);
     var mo=new MutationObserver(function(){if(trendChart&&lastSummary)drawTrend((lastSummary.days||[]).filter(function(d){return(d.gross_sales||0)>0;}));});mo.observe(document.body,{attributes:true,attributeFilter:['data-theme']});
     document.addEventListener('DOMContentLoaded',async function(){populateControls();setupJournalTabs();setupProductRankingTabs();renderQaSuggestions();renderQaThread(false);if(AUTH&&AUTH.consumeUrlAuthParams){try{await AUTH.consumeUrlAuthParams({exchangeUrl:PAGES.adminApiUrl('/auth/link-login',PAGES.PROJECT_URL),adminSurface:PAGES.ADMIN_SURFACE||'line_report'});}catch(_){}}setAuth(!!getToken());el('saveTokenBtn').addEventListener('click',saveToken);el('tokenInput').addEventListener('keydown',function(e){if(e.key==='Enter')saveToken();});el('monthSel').addEventListener('change',loadCurrent);el('storeSel').addEventListener('change',function(){changeStore(this.value);});el('reloadBtn').addEventListener('click',async function(){await refreshStoreDirectory();await loadCurrent();});el('pagePdfBtn').addEventListener('click',savePagePdf);el('aiAnalyzeBtn').addEventListener('click',analyzeWithAi);el('aiPdfBtn').addEventListener('click',function(){saveAnalysisPdf(currentAnalysis);});el('aiHistoryReloadBtn').addEventListener('click',loadAnalysisHistory);el('aiHistoryList').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.analysisView)showAnalysisHistoryItem(b.dataset.analysisView);else if(b.dataset.analysisPdf)saveHistoryPdf(b.dataset.analysisPdf);else if(b.dataset.analysisDelete)openAnalysisDelete(b.dataset.analysisDelete);});el('qaAskBtn').addEventListener('click',function(){askAiQuestion();});el('qaInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();askAiQuestion();}});el('qaClearBtn').addEventListener('click',function(){qaHistory=[];renderQaThread(false);el('qaInput').focus();});el('uploadPickBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadInput').click();});el('uploadDrop').addEventListener('click',function(){el('uploadInput').click();});el('uploadDrop').addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();el('uploadInput').click();}});el('uploadInput').addEventListener('change',function(){uploadFiles(this.files);});['dragenter','dragover'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.add('dragover');});});['dragleave','drop'].forEach(function(n){el('uploadDrop').addEventListener(n,function(e){e.preventDefault();el('uploadDrop').classList.remove('dragover');});});el('uploadFolderBtn').addEventListener('click',function(e){e.stopPropagation();el('uploadFolderInput').click();});el('uploadFolderInput').addEventListener('change',function(){uploadFiles(this.files);});el('uploadDrop').addEventListener('drop',function(e){var dt=e.dataTransfer;setMessage(el('uploadMsg'),'ファイルを読み込んでいます…','');collectDroppedFiles(dt).then(uploadFiles).catch(function(err){setMessage(el('uploadMsg'),'ドロップされた項目を読み取れませんでした: '+(err&&err.message?err.message:String(err)),'err');});});el('fileBody').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.download)downloadFile(b.dataset.download);if(b.dataset.delete)openDelete(b.dataset.delete);});el('deleteConfirmInput').addEventListener('input',function(){el('deleteSubmitBtn').disabled=this.value!=='delete';});el('deleteCancelBtn').addEventListener('click',closeDelete);el('deleteSubmitBtn').addEventListener('click',submitDelete);el('deleteModal').addEventListener('click',function(e){if(e.target===el('deleteModal'))closeDelete();});el('analysisDeleteInput').addEventListener('input',function(){el('analysisDeleteSubmit').disabled=this.value!=='delete';});el('analysisDeleteCancel').addEventListener('click',closeAnalysisDelete);el('analysisDeleteSubmit').addEventListener('click',submitAnalysisDelete);el('analysisDeleteModal').addEventListener('click',function(e){if(e.target===el('analysisDeleteModal'))closeAnalysisDelete();});await refreshStoreDirectory();var startMonth=monthWithDataFor(STORE_KEY,el('monthSel').value||savedMonth());if(startMonth&&startMonth!==el('monthSel').value)el('monthSel').value=startMonth;await loadCurrent();});
   })();
