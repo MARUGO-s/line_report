@@ -22,6 +22,7 @@ import {
   isBarPelotaReceiptStore,
   readBarPelotaSettlementCounts,
 } from '../_shared/barpelota_receipt.ts'
+import { prepareBarPelotaReceiptImage } from '../_shared/receipt_barpelota_image.ts'
 import { maybeHandleFoodCourtReport, handleFoodCourtReportPostback } from '../_shared/foodcourt_compare.ts'
 import { handleBudgetEntryTextMessage } from '../_shared/budget_entry_flow.ts'
 import { extractExpenseFromReceipt, handlePettyCashTextMessage, handlePettyCashImageIfPending, handlePettyCashPostback, savePettyCashPendingFromReceipt, handlePettyCashCashOutSlip } from '../_shared/petty_cash_flow.ts'
@@ -1490,13 +1491,18 @@ async function processReceiptImageEvent(
     }
   }
 
+  const isBarPelota = isBarPelotaReceiptStore(registry.store_partition_key)
+  const receiptImage = isBarPelota
+    ? await prepareBarPelotaReceiptImage(contentFetch.bytes, contentFetch.contentType)
+    : contentFetch
+
   let analyzed: Awaited<ReturnType<typeof analyzeLineImageWithGemini>> | Awaited<ReturnType<typeof analyzeLineImageWithAzureFoundry>>
 
   // 全店舗の通常レシートは Gemini Flash Lite を最初の画像解析として使う。
   // Gemini障害時だけ Azure Foundry nano、さらに失敗時だけClaudeへ退避する。
   analyzed = await analyzeLineImageWithGemini(
-    contentFetch.bytes,
-    contentFetch.contentType,
+    receiptImage.bytes,
+    receiptImage.contentType,
     lineMessageId,
     resolveGeminiApiKey(),
     receiptPromptAddition,
@@ -1509,8 +1515,8 @@ async function processReceiptImageEvent(
       `[receipt_analysis_fallback] Gemini Flash Lite failed; retrying with Azure Foundry (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${analyzed.failure?.stage ?? 'unknown'})`,
     )
     const fallback = await analyzeLineImageWithAzureFoundry(
-      contentFetch.bytes,
-      contentFetch.contentType,
+      receiptImage.bytes,
+      receiptImage.contentType,
       lineMessageId,
       azureFoundryProjectEndpoint,
       azureFoundryApiKey,
@@ -1525,8 +1531,8 @@ async function processReceiptImageEvent(
         `[receipt_analysis_fallback] Azure Foundry also failed; retrying with Claude (store=${registry.store_partition_key}, msg=${lineMessageId}, stage=${fallback.failure?.stage ?? 'unknown'})`,
       )
       const secondFallback = await analyzeLineImageWithClaude(
-        contentFetch.bytes,
-        contentFetch.contentType,
+        receiptImage.bytes,
+        receiptImage.contentType,
         lineMessageId,
         resolveClaudeApiKey(),
         receiptPromptAddition,
@@ -1561,8 +1567,8 @@ async function processReceiptImageEvent(
       countRetryInstruction,
     ].join('\n')
     const countRetry = await analyzeLineImageWithGemini(
-      contentFetch.bytes,
-      contentFetch.contentType,
+      receiptImage.bytes,
+      receiptImage.contentType,
       `${lineMessageId}#footer-counts`,
       resolveGeminiApiKey(),
       countRetryPrompt,
@@ -1603,8 +1609,8 @@ async function processReceiptImageEvent(
       '日付と時刻を別々に出力すること。例: 「2026-07-11 00:12:02」なら receipt.date="2026-07-11"、receipt_time="00:12:02"。00:00〜04:59 は前日の営業日に登録するため、時刻の省略は絶対にしない。',
     ].join('\n')
     const timeRetry = await analyzeLineImageWithGemini(
-      contentFetch.bytes,
-      contentFetch.contentType,
+      receiptImage.bytes,
+      receiptImage.contentType,
       `${lineMessageId}#printed-time`,
       resolveGeminiApiKey(),
       timeRetryPrompt,
@@ -1646,8 +1652,8 @@ async function processReceiptImageEvent(
       '反射・光・かすれがあっても、読める数値だけでも receipt に入れて kind=receipt を維持し、receipt_confidence は 0.6 以上にする。',
     ].join('\n')
     const forcedRetry = await analyzeLineImageWithGemini(
-      contentFetch.bytes,
-      contentFetch.contentType,
+      receiptImage.bytes,
+      receiptImage.contentType,
       lineMessageId,
       resolveGeminiApiKey(),
       forcedReceiptPrompt,
@@ -1865,10 +1871,10 @@ async function processReceiptImageEvent(
     parsedReceipt.storePhone,
     registry.receipt_phones,
   )
-  const settlementCounts = currentStoreMatched && isBarPelotaReceiptStore(registry.store_partition_key)
+  const settlementCounts = currentStoreMatched && isBarPelota
     ? await readBarPelotaSettlementCounts(
-      contentFetch.bytes,
-      contentFetch.contentType,
+      receiptImage.bytes,
+      receiptImage.contentType,
       `${lineMessageId}#settlement-counts`,
       resolveGeminiApiKey(),
       normalReceiptGeminiModel,
