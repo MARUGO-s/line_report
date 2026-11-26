@@ -33,6 +33,7 @@
     "ai_chat_pdf_history",
     "sales_forecasts",
     "pos_journal_files",
+    "pos_journal_trash",
     "pos_journal_ai_analyses",
     "store_knowledge_documents",
     "store_knowledge_chunks",
