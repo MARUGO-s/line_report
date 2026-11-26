@@ -9,7 +9,7 @@ Journal Report（`public/jnm/`）の**現行機能を一冊にまとめた正本
 | 本番URL | https://marugo-s.github.io/line_report/jnm/jnl2txt.html |
 | リポジトリ | `MARUGO-s/line_report`（`main`） |
 | Supabase | `hocbnifuactbvmyjraxy`（hocbn） |
-| 最終同期 | 2026-09-11（統一売上・差異通知を追記） |
+| 最終同期 | 2026-11-26（電子ジャーナルの商品一覧を追記） |
 
 **設計の一言:** 数値はプログラムが確定する。AIは解釈する。資料・`#メモ` は背景である。
 
@@ -142,6 +142,9 @@ LINE Reportの `pos-journal.html` は、同店舗・同月の `saved_reports` �
 共有レポートだけの月もKPI・日別・決済・商品・会計明細を表示するが、
 「保管ファイル」一覧とダウンロード／削除は実在するLZH原本だけを対象にする。
 画面の「PDFにまとめる」は、表示中の月の売上サマリーと商品ランキングを1つの印刷用PDFにする。アップロード・保管原本・会計明細の展開は含めない。
+
+「保管ファイル」タブで「商品一覧」を開くと、選択中の店舗・対象月の商品名と商品コードを確認できる。商品名や商品コードの一部で絞り込めるため、商品コードを知らなくても探せる。
+一覧には、原本や保存済みレポートから照合できた販売明細の商品を表示する。取引のないPOS登録商品は会計明細に現れない。
 
 `pos-journal.html` の店舗プルダウンは固定ではなく、`GET /pos-journals/stores` が返す
 「LZH原本（`pos_journal_files`）とJournal Reportの保存済みレポート（`saved_reports`）の
