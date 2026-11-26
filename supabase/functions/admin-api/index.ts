@@ -1687,6 +1687,8 @@ Deno.serve(async (req, info) => {
       "/pos-journals/upload",
       "/pos-journals/file",
       "/pos-journals/download",
+      "/pos-journals/trash",
+      "/pos-journals/trash/item",
       "/pos-journals/ai-analysis",
       "/pos-journals/ai-ask",
       "/pos-journals/ai-history",
@@ -4448,6 +4450,23 @@ Deno.serve(async (req, info) => {
     }
     if (req.method === "DELETE" && path === "/pos-journals/file") {
       return json(await deletePosJournalFile(supabase, workReq, storeScope), 200)
+    }
+    if (req.method === "GET" && path === "/pos-journals/trash") {
+      return json(await fetchPosJournalTrashList(supabase, url), 200)
+    }
+    if (req.method === "POST" && path === "/pos-journals/trash") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await movePosJournalItemToTrash(supabase, body, storeScope), 200)
+    }
+    if (req.method === "PATCH" && path === "/pos-journals/trash/item") {
+      const body = await parseJson(workReq)
+      if (!isRecord(body)) {
+        throw { status: 400, message: "Invalid JSON body." } satisfies AppError
+      }
+      return json(await handlePosJournalTrashItemAction(supabase, body, storeScope), 200)
     }
 
     const permissionPath = parseDocumentPermissionPath(path)
@@ -16400,7 +16419,7 @@ async function fetchSavedReportsList(
     ? reportQuery.not("deleted_at", "is", null)
     : reportQuery.is("deleted_at", null)
   const { data, error } = await reportQuery
-    .order("created_at", { ascending: false })
+    .order(trash ? "deleted_at" : "created_at", { ascending: false })
     .limit(fetchLimit)
   if (error) {
     throw {
@@ -16961,7 +16980,7 @@ async function fetchSalesForecastsList(
     ? forecastQuery.not("deleted_at", "is", null)
     : forecastQuery.is("deleted_at", null)
   const { data, error } = await forecastQuery
-    .order("forecasted_at", { ascending: false })
+    .order(trash ? "deleted_at" : "forecasted_at", { ascending: false })
     .limit(limit)
   if (error) {
     throw {
@@ -18793,7 +18812,7 @@ async function fetchReportAiHistoryList(
     ? aiHistoryQuery.not("deleted_at", "is", null)
     : aiHistoryQuery.is("deleted_at", null)
   const { data, error } = await aiHistoryQuery
-    .order("created_at", { ascending: false })
+    .order(trash ? "deleted_at" : "created_at", { ascending: false })
     .limit(limit)
   if (error) {
     throw {
@@ -18914,7 +18933,7 @@ async function fetchChatPdfHistoryList(
     ? chatHistoryQuery.not("deleted_at", "is", null)
     : chatHistoryQuery.is("deleted_at", null)
   const { data, error } = await chatHistoryQuery
-    .order("created_at", { ascending: false })
+    .order(trash ? "deleted_at" : "created_at", { ascending: false })
     .limit(limit)
   if (error) {
     throw {
@@ -19309,6 +19328,576 @@ async function deletePosJournalFile(
       store_key: storeKey,
       business_date: String(row.business_date ?? ""),
       original_file_name: String(row.original_file_name ?? ""),
+    },
+  }
+}
+
+type PosJournalTrashKind = "pos_journal_file" | "store_knowledge_document"
+const POS_JOURNAL_TRASH_KINDS = new Set<PosJournalTrashKind>([
+  "pos_journal_file",
+  "store_knowledge_document",
+])
+
+async function fetchPosJournalTrashList(
+  supabase: ReturnType<typeof createClient>,
+  url: URL,
+) {
+  const storeKey = normalizePosJournalStoreKey(
+    url.searchParams.get("store_key") || url.searchParams.get("store"),
+  )
+  const kindRaw = toSafeString(url.searchParams.get("kind"))
+  const kind = POS_JOURNAL_TRASH_KINDS.has(kindRaw as PosJournalTrashKind)
+    ? (kindRaw as PosJournalTrashKind)
+    : "all"
+  const rawLimit = Number(url.searchParams.get("limit") ?? "200")
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(300, Math.trunc(rawLimit)))
+    : 200
+
+  let query = supabase
+    .from("pos_journal_trash")
+    .select(
+      "id, store_partition_key, item_kind, original_id, title, subtitle, target_month, business_date, storage_bucket, storage_path, trashed_at, created_at",
+    )
+    .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(storeKey))
+  if (kind !== "all") {
+    query = query.eq("item_kind", kind)
+  }
+  const { data, error } = await query
+    .order("trashed_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw {
+      status: 500,
+      message: `ゴミ箱一覧の取得に失敗しました: ${error.message}`,
+    } satisfies AppError
+  }
+  const items = (Array.isArray(data) ? data : []).map((row) => {
+    const record: Record<string, unknown> = isRecord(row) ? row : {}
+    return {
+      id: Number(record.id),
+      store_key: String(record.store_partition_key ?? storeKey),
+      item_kind: String(record.item_kind ?? ""),
+      original_id: String(record.original_id ?? ""),
+      title: String(record.title ?? ""),
+      subtitle: String(record.subtitle ?? ""),
+      target_month: record.target_month == null ? null : String(record.target_month),
+      business_date: record.business_date == null ? null : String(record.business_date),
+      storage_bucket: record.storage_bucket == null ? null : String(record.storage_bucket),
+      storage_path: record.storage_path == null ? null : String(record.storage_path),
+      trashed_at: String(record.trashed_at ?? ""),
+      created_at: String(record.created_at ?? ""),
+    }
+  })
+  return { ok: true, store_key: storeKey, kind, items }
+}
+
+async function movePosJournalItemToTrash(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const itemKindRaw = toSafeString(body.item_kind)
+  if (!POS_JOURNAL_TRASH_KINDS.has(itemKindRaw as PosJournalTrashKind)) {
+    throw {
+      status: 400,
+      message: "item_kind must be pos_journal_file or store_knowledge_document.",
+    } satisfies AppError
+  }
+  const itemKind = itemKindRaw as PosJournalTrashKind
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+
+  const trashedAt = new Date().toISOString()
+
+  if (itemKind === "pos_journal_file") {
+    const id = Number(body.id)
+    if (!Number.isInteger(id) || id <= 0) {
+      throw { status: 400, message: "id is required." } satisfies AppError
+    }
+    const { data: row, error: fetchError } = await supabase
+      .from("pos_journal_files")
+      .select(
+        "id, store_partition_key, store_code, business_date, year_month, original_file_name, inner_file_name, storage_bucket, storage_path, mime_type, file_size_bytes, sha256_hex, parsed_data, net_sales, tax_yen, gross_sales, groups_count, guests_count, receipts_count, uploaded_at, created_at, updated_at",
+      )
+      .eq("id", id)
+      .eq("store_partition_key", storeKey)
+      .is("storage_deleted_at", null)
+      .maybeSingle()
+    if (fetchError) {
+      throw {
+        status: 500,
+        message: `ゴミ箱へ移動する原本の取得に失敗しました: ${fetchError.message}`,
+      } satisfies AppError
+    }
+    if (!row) {
+      throw { status: 404, message: "対象の電子ジャーナル原本が見つかりません。" } satisfies AppError
+    }
+
+    const title = toSafeString(row.original_file_name) || "POS原本"
+    const businessDate = toSafeString(row.business_date)
+    const grossSales = Number(row.gross_sales ?? 0)
+    const subtitle = `${businessDate} ・ ¥${Math.round(grossSales).toLocaleString("ja-JP")}`
+    const targetMonth = toSafeString(row.year_month) || businessDate.slice(0, 7) || null
+    const storageBucket = toSafeString(row.storage_bucket) || POS_JOURNAL_BUCKET
+    const storagePath = toSafeString(row.storage_path) || null
+
+    const { data: trashRow, error: trashInsertError } = await supabase
+      .from("pos_journal_trash")
+      .insert({
+        store_partition_key: String(row.store_partition_key ?? storeKey),
+        item_kind: "pos_journal_file",
+        original_id: String(row.id),
+        title,
+        subtitle,
+        target_month: targetMonth,
+        business_date: businessDate || null,
+        storage_bucket: storagePath ? storageBucket : null,
+        storage_path: storagePath,
+        original_row: row,
+        related_rows: [],
+        trashed_at: trashedAt,
+      })
+      .select("id, trashed_at")
+      .single()
+    if (trashInsertError || !trashRow) {
+      throw {
+        status: 500,
+        message: `ゴミ箱への退避に失敗しました: ${trashInsertError?.message ?? "unknown error"}`,
+      } satisfies AppError
+    }
+
+    const { error: removeRowError } = await supabase
+      .from("pos_journal_files")
+      .delete()
+      .eq("id", id)
+      .eq("store_partition_key", storeKey)
+    if (removeRowError) {
+      await supabase.from("pos_journal_trash").delete().eq("id", Number(trashRow.id))
+      throw {
+        status: 500,
+        message: `原本一覧からの移動に失敗しました: ${removeRowError.message}`,
+      } satisfies AppError
+    }
+
+    const movedMonth = businessDate.slice(0, 7)
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(movedMonth)) {
+      await ensureJournalProductIndexMonths(supabase, storeKey, [movedMonth])
+    }
+    return {
+      ok: true,
+      trashed: {
+        id: Number(trashRow.id),
+        item_kind: "pos_journal_file",
+        original_id: String(row.id),
+        store_key: String(row.store_partition_key ?? storeKey),
+        title,
+        trashed_at: String(trashRow.trashed_at ?? trashedAt),
+      },
+    }
+  }
+
+  // store_knowledge_document
+  const id = toNonNegativeInteger(body.id)
+  if (!id) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+  const normStoreKey = normalizeStoreKnowledgeStoreKey(storeKey)
+  const { data: doc, error: docError } = await supabase
+    .from("store_knowledge_documents")
+    .select("*")
+    .eq("id", id)
+    .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(normStoreKey))
+    .maybeSingle()
+  if (docError) {
+    throw {
+      status: 500,
+      message: `ゴミ箱へ移動する資料の取得に失敗しました: ${docError.message}`,
+    } satisfies AppError
+  }
+  if (!doc) {
+    throw { status: 404, message: "資料が見つかりません。" } satisfies AppError
+  }
+
+  const { data: chunks, error: chunksError } = await supabase
+    .from("store_knowledge_chunks")
+    .select("chunk_index, chunk_text, search_text, embedding, token_count, created_at")
+    .eq("document_id", id)
+    .order("chunk_index", { ascending: true })
+  if (chunksError) {
+    throw {
+      status: 500,
+      message: `資料チャンクの退避に失敗しました: ${chunksError.message}`,
+    } satisfies AppError
+  }
+
+  const title = toSafeString(doc.title) || "資料"
+  const category = toSafeString(doc.category)
+  const summaryShort = toSafeString(doc.summary).slice(0, 80)
+  const subtitle = [
+    category,
+    doc.is_active === false ? "無効" : "有効",
+    summaryShort,
+  ].filter(Boolean).join(" ・ ")
+  const periodStart = toSafeString(doc.period_start) || null
+  const storagePath = toSafeString(doc.storage_path) || null
+  const storageBucket = storagePath
+    ? (toSafeString(doc.storage_bucket) || STORE_KNOWLEDGE_BUCKET)
+    : null
+
+  const { data: trashRow, error: trashInsertError } = await supabase
+    .from("pos_journal_trash")
+    .insert({
+      store_partition_key: String(doc.store_partition_key ?? normStoreKey),
+      item_kind: "store_knowledge_document",
+      original_id: String(doc.id),
+      title,
+      subtitle,
+      target_month: periodStart ? periodStart.slice(0, 7) : null,
+      business_date: periodStart,
+      storage_bucket: storageBucket,
+      storage_path: storagePath,
+      original_row: doc,
+      related_rows: Array.isArray(chunks) ? chunks : [],
+      trashed_at: trashedAt,
+    })
+    .select("id, trashed_at")
+    .single()
+  if (trashInsertError || !trashRow) {
+    throw {
+      status: 500,
+      message: `資料のゴミ箱退避に失敗しました: ${trashInsertError?.message ?? "unknown error"}`,
+    } satisfies AppError
+  }
+
+  const { error: deleteDocError } = await supabase
+    .from("store_knowledge_documents")
+    .delete()
+    .eq("id", id)
+    .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(normStoreKey))
+  if (deleteDocError) {
+    await supabase.from("pos_journal_trash").delete().eq("id", Number(trashRow.id))
+    throw {
+      status: 500,
+      message: `資料一覧からの移動に失敗しました: ${deleteDocError.message}`,
+    } satisfies AppError
+  }
+
+  return {
+    ok: true,
+    trashed: {
+      id: Number(trashRow.id),
+      item_kind: "store_knowledge_document",
+      original_id: String(doc.id),
+      store_key: String(doc.store_partition_key ?? normStoreKey),
+      title,
+      trashed_at: String(trashRow.trashed_at ?? trashedAt),
+    },
+  }
+}
+
+async function handlePosJournalTrashItemAction(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+  storeScope: string | null,
+) {
+  const requestedStore = toSafeString(body.store_key)
+  const storeKey = storeScope || requestedStore
+  if (!storeKey) {
+    throw { status: 400, message: "store_key is required." } satisfies AppError
+  }
+  if (
+    storeScope && requestedStore &&
+    requestedStore.toLowerCase() !== storeScope.toLowerCase()
+  ) {
+    throw { status: 403, message: "他店舗のデータにはアクセスできません。" } satisfies AppError
+  }
+
+  const action = String(body.action ?? "")
+  if (action !== "restore" && action !== "purge") {
+    throw { status: 400, message: "action must be restore or purge." } satisfies AppError
+  }
+  const trashId = Number(body.id)
+  if (!Number.isInteger(trashId) || trashId <= 0) {
+    throw { status: 400, message: "id is required." } satisfies AppError
+  }
+
+  if (action === "purge" && String(body.confirmation ?? "") !== "delete") {
+    throw {
+      status: 400,
+      message: "完全削除には confirmation に delete を指定してください。",
+    } satisfies AppError
+  }
+
+  const { data: trashRow, error: fetchError } = await supabase
+    .from("pos_journal_trash")
+    .select("*")
+    .eq("id", trashId)
+    .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(storeKey))
+    .maybeSingle()
+  if (fetchError) {
+    throw {
+      status: 500,
+      message: `ゴミ箱項目の取得に失敗しました: ${fetchError.message}`,
+    } satisfies AppError
+  }
+  if (!trashRow) {
+    throw { status: 404, message: "ゴミ箱に対象の項目が見つかりません。" } satisfies AppError
+  }
+
+  const itemKind = String(trashRow.item_kind ?? "") as PosJournalTrashKind
+  const rowStoreKey = String(trashRow.store_partition_key ?? storeKey)
+
+  if (action === "purge") {
+    const storagePath = toSafeString(trashRow.storage_path)
+    if (storagePath) {
+      if (itemKind === "pos_journal_file") {
+        const bucket = toSafeString(trashRow.storage_bucket) || POS_JOURNAL_BUCKET
+        const { error: removeError } = await supabase.storage.from(bucket).remove([storagePath])
+        if (removeError) {
+          throw {
+            status: 500,
+            message: `原本ファイルの完全削除に失敗しました: ${removeError.message}`,
+          } satisfies AppError
+        }
+      } else if (itemKind === "store_knowledge_document") {
+        const safePath = normalizeStoreKnowledgeStoragePath(
+          storagePath,
+          normalizeStoreKnowledgeStoreKey(rowStoreKey),
+        )
+        if (safePath) {
+          const { error: removeError } = await supabase.storage
+            .from(STORE_KNOWLEDGE_BUCKET)
+            .remove([safePath])
+          if (removeError) {
+            console.error("store-knowledge trash purge storage remove failed:", removeError.message)
+          }
+        }
+      }
+    }
+    const { error: deleteError } = await supabase
+      .from("pos_journal_trash")
+      .delete()
+      .eq("id", trashId)
+      .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(storeKey))
+    if (deleteError) {
+      throw {
+        status: 500,
+        message: `ゴミ箱からの完全削除に失敗しました: ${deleteError.message}`,
+      } satisfies AppError
+    }
+    return {
+      ok: true,
+      purged: {
+        id: trashId,
+        item_kind: itemKind,
+        title: String(trashRow.title ?? ""),
+      },
+    }
+  }
+
+  // action === "restore"
+  const original = isRecord(trashRow.original_row) ? trashRow.original_row : null
+  if (!original) {
+    throw { status: 500, message: "復元用データが破損しているため復元できません。" } satisfies AppError
+  }
+
+  if (itemKind === "pos_journal_file") {
+    const businessDate = toSafeString(original.business_date)
+    const sha256Hex = toSafeString(original.sha256_hex)
+    const { data: existingByDate } = await supabase
+      .from("pos_journal_files")
+      .select("id, original_file_name")
+      .eq("store_partition_key", rowStoreKey)
+      .eq("business_date", businessDate)
+      .is("storage_deleted_at", null)
+      .maybeSingle()
+    if (existingByDate) {
+      throw {
+        status: 409,
+        message: `同じ営業日（${businessDate}）の原本がすでに存在するため復元できません。`,
+      } satisfies AppError
+    }
+    if (sha256Hex) {
+      const { data: existingByHash } = await supabase
+        .from("pos_journal_files")
+        .select("id, original_file_name")
+        .eq("store_partition_key", rowStoreKey)
+        .eq("sha256_hex", sha256Hex)
+        .is("storage_deleted_at", null)
+        .maybeSingle()
+      if (existingByHash) {
+        throw {
+          status: 409,
+          message: "同一内容の原本がすでに存在するため復元できません。",
+        } satisfies AppError
+      }
+    }
+
+    const nowIso = new Date().toISOString()
+    const { data: restored, error: restoreError } = await supabase
+      .from("pos_journal_files")
+      .insert({
+        store_partition_key: rowStoreKey,
+        store_code: String(original.store_code ?? ""),
+        business_date: businessDate,
+        year_month: String(original.year_month ?? businessDate.slice(0, 7)),
+        original_file_name: String(original.original_file_name ?? trashRow.title ?? ""),
+        inner_file_name: original.inner_file_name == null ? null : String(original.inner_file_name),
+        storage_bucket: String(original.storage_bucket ?? POS_JOURNAL_BUCKET),
+        storage_path: String(original.storage_path ?? ""),
+        mime_type: String(original.mime_type ?? "application/x-lzh-compressed"),
+        file_size_bytes: Number(original.file_size_bytes ?? 1),
+        sha256_hex: sha256Hex,
+        parsed_data: original.parsed_data ?? {},
+        net_sales: Number(original.net_sales ?? 0),
+        tax_yen: Number(original.tax_yen ?? 0),
+        gross_sales: Number(original.gross_sales ?? 0),
+        groups_count: Number(original.groups_count ?? 0),
+        guests_count: Number(original.guests_count ?? 0),
+        receipts_count: Number(original.receipts_count ?? 0),
+        storage_deleted_at: null,
+        storage_delete_error: null,
+        delete_snapshot: null,
+        uploaded_at: String(original.uploaded_at ?? nowIso),
+        created_at: String(original.created_at ?? nowIso),
+        updated_at: nowIso,
+      })
+      .select("id")
+      .single()
+    if (restoreError || !restored) {
+      throw {
+        status: 500,
+        message: `原本の復元に失敗しました: ${restoreError?.message ?? "unknown error"}`,
+      } satisfies AppError
+    }
+
+    const { error: cleanupError } = await supabase
+      .from("pos_journal_trash")
+      .delete()
+      .eq("id", trashId)
+    if (cleanupError) {
+      console.error("pos_journal_trash cleanup failed after restore:", cleanupError.message)
+    }
+
+    const restoredMonth = businessDate.slice(0, 7)
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(restoredMonth)) {
+      await ensureJournalProductIndexMonths(supabase, rowStoreKey, [restoredMonth])
+    }
+    return {
+      ok: true,
+      restored: {
+        trash_id: trashId,
+        item_kind: "pos_journal_file",
+        id: Number(restored.id),
+        title: String(trashRow.title ?? ""),
+      },
+    }
+  }
+
+  // store_knowledge_document restore
+  const sha256Hex = toSafeString(original.sha256_hex) || null
+  const isActive = original.is_active !== false
+  const normStoreKey = normalizeStoreKnowledgeStoreKey(rowStoreKey)
+  if (isActive && sha256Hex) {
+    const { data: dupDoc } = await supabase
+      .from("store_knowledge_documents")
+      .select("id, title")
+      .ilike("store_partition_key", storeKnowledgeStoreKeyPattern(normStoreKey))
+      .eq("is_active", true)
+      .eq("sha256_hex", sha256Hex)
+      .maybeSingle()
+    if (dupDoc) {
+      throw {
+        status: 409,
+        message: "同じ添付ファイルの有効な資料がすでに存在するため復元できません。",
+      } satisfies AppError
+    }
+  }
+
+  const nowIso = new Date().toISOString()
+  const { data: restoredDoc, error: restoreDocError } = await supabase
+    .from("store_knowledge_documents")
+    .insert({
+      store_partition_key: rowStoreKey,
+      category: String(original.category ?? "その他"),
+      title: String(original.title ?? trashRow.title ?? "資料"),
+      summary: String(original.summary ?? ""),
+      body_text: String(original.body_text ?? ""),
+      search_text: String(original.search_text ?? ""),
+      period_start: original.period_start == null ? null : String(original.period_start),
+      period_end: original.period_end == null ? null : String(original.period_end),
+      tags: Array.isArray(original.tags) ? original.tags : [],
+      storage_bucket: String(original.storage_bucket ?? STORE_KNOWLEDGE_BUCKET),
+      storage_path: original.storage_path == null ? null : String(original.storage_path),
+      original_file_name: original.original_file_name == null ? null : String(original.original_file_name),
+      mime_type: original.mime_type == null ? null : String(original.mime_type),
+      file_size_bytes: original.file_size_bytes == null ? null : Number(original.file_size_bytes),
+      sha256_hex: sha256Hex,
+      source_type: String(original.source_type ?? "manual"),
+      is_active: isActive,
+      created_by: String(original.created_by ?? ""),
+      created_at: String(original.created_at ?? nowIso),
+      updated_at: nowIso,
+    })
+    .select("id")
+    .single()
+  if (restoreDocError || !restoredDoc) {
+    throw {
+      status: 500,
+      message: `資料の復元に失敗しました: ${restoreDocError?.message ?? "unknown error"}`,
+    } satisfies AppError
+  }
+
+  const relatedChunks = Array.isArray(trashRow.related_rows) ? trashRow.related_rows : []
+  if (relatedChunks.length > 0) {
+    const chunkPayload = relatedChunks
+      .filter((c) => isRecord(c) && toSafeString(c.chunk_text))
+      .map((c, idx) => ({
+        document_id: Number(restoredDoc.id),
+        store_partition_key: rowStoreKey,
+        chunk_index: Number.isInteger(Number(c.chunk_index)) ? Number(c.chunk_index) : idx,
+        chunk_text: String(c.chunk_text),
+        search_text: String(c.search_text ?? ""),
+        embedding: c.embedding ?? null,
+        token_count: Number(c.token_count ?? 0),
+        created_at: String(c.created_at ?? nowIso),
+      }))
+    if (chunkPayload.length > 0) {
+      const { error: chunkRestoreError } = await supabase
+        .from("store_knowledge_chunks")
+        .insert(chunkPayload)
+      if (chunkRestoreError) {
+        console.error("store_knowledge_chunks restore failed:", chunkRestoreError.message)
+      }
+    }
+  }
+
+  const { error: cleanupError } = await supabase
+    .from("pos_journal_trash")
+    .delete()
+    .eq("id", trashId)
+  if (cleanupError) {
+    console.error("pos_journal_trash cleanup failed after knowledge restore:", cleanupError.message)
+  }
+
+  return {
+    ok: true,
+    restored: {
+      trash_id: trashId,
+      item_kind: "store_knowledge_document",
+      id: Number(restoredDoc.id),
+      title: String(trashRow.title ?? ""),
     },
   }
 }
