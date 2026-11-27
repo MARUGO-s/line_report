@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta name="robots" content="noindex,nofollow">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BISTRO CAVA CAVA グルメサイト掲載・口コミ分析（2026年11月28日）</title>
+<style>
+    :root {
+      --bg: #f6f3ee;
+      --paper: #fffdf9;
+      --ink: #1c1916;
+      --muted: #5c564e;
+      --line: #e4ddd3;
+      --line-strong: #cfc6b8;
+      --accent: #8b1e2d;
+      --accent-soft: #f3e6e7;
+      --info: #1f4b63;
+      --info-bg: #eef5f8;
+      --danger: #9b1c1c;
+      --danger-bg: #fdecec;
+      --warning: #8a5a12;
+      --warning-bg: #f8f0de;
+      --pro: #1f5a3a;
+      --pro-bg: #eaf5ee;
+      --con: #8a3a1a;
+      --con-bg: #f8eee8;
+      --chart: #2c5f7a;
+      --chart-emphasis: #8b1e2d;
+      --chart-rest: #8aa4b3;
+      --radius: 12px;
+      --shadow: 0 1px 2px rgba(28, 25, 22, 0.06), 0 8px 24px rgba(28, 25, 22, 0.05);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", YuGothic, "Meiryo", sans-serif;
+      font-size: 16px;
+      line-height: 1.8;
+      letter-spacing: 0.01em;
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    header.hero {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 36px 36px 28px;
+      box-shadow: var(--shadow);
+      margin-bottom: 28px;
+    }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 700;
+      margin: 0 0 10px;
+    }
+    h1 {
+      font-size: 28px;
+      line-height: 1.4;
+      margin: 0 0 16px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .summary {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .meta {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    nav.toc {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 36px;
+    }
+    nav.toc h2 {
+      font-size: 13px;
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    nav.toc ol {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      columns: 2;
+      gap: 0 24px;
+    }
+    nav.toc li { break-inside: avoid; }
+    nav.toc a {
+      display: block;
+      padding: 4px 0;
+      color: var(--ink);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+    }
+    nav.toc a:hover { color: var(--accent); border-bottom-color: var(--line); }
+    nav.toc span.num {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      margin-right: 8px;
+      font-size: 12px;
+    }
+    section.block {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 28px 32px 32px;
+      margin-bottom: 22px;
+      box-shadow: var(--shadow);
+    }
+    section.block > h2 {
+      font-size: 20px;
+      margin: 0 0 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 16px;
+      margin: 22px 0 10px;
+    }
+    p { margin: 0 0 14px; }
+    p:last-child { margin-bottom: 0; }
+    .caption {
+      font-size: 13px;
+      color: var(--muted);
+      margin: -6px 0 16px;
+    }
+    .callout {
+      background: var(--info-bg);
+      border-left: 4px solid var(--info);
+      border-radius: 0 10px 10px 0;
+      padding: 16px 18px;
+      margin: 0 0 16px;
+    }
+    .callout .lead {
+      font-weight: 700;
+      color: var(--info);
+      margin: 0 0 6px;
+    }
+    .callout p { margin: 0; }
+    dl.props {
+      margin: 16px 0 0;
+      border-top: 1px solid var(--line);
+    }
+    dl.props > div {
+      display: grid;
+      grid-template-columns: 7.5em 1fr;
+      gap: 8px 16px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+    dl.props dt {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    dl.props dd { margin: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin: 8px 0 16px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--line-strong);
+      white-space: nowrap;
+    }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover td { background: #faf7f2; }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 1px 8px;
+      border-radius: 999px;
+      line-height: 1.6;
+    }
+    .badge.high { background: var(--danger-bg); color: var(--danger); }
+    .badge.mid, .badge.low { background: var(--warning-bg); color: var(--warning); }
+    .chart-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px 18px 10px;
+      margin: 16px 0;
+      background: #fff;
+    }
+    .chart-card .chart-label {
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+    .hbar {
+      display: grid;
+      grid-template-columns: 6.5em 1fr 3em;
+      gap: 6px 10px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .hbar .name { color: var(--ink); text-align: right; }
+    .hbar .track {
+      height: 14px;
+      background: #efeae3;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .hbar .fill {
+      height: 100%;
+      background: var(--chart);
+      border-radius: 999px;
+    }
+    .hbar.emphasis .fill { background: var(--chart-emphasis); }
+    .hbar .val { font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
+    .axis-note { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+    .cols {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      height: 180px;
+      padding: 8px 8px 0;
+      border-bottom: 1px solid var(--line-strong);
+    }
+    .col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 100%;
+      min-width: 0;
+    }
+    .col .bar-wrap {
+      width: 100%;
+      max-width: 48px;
+      height: 140px;
+      display: flex;
+      align-items: flex-end;
+    }
+    .col .bar {
+      width: 100%;
+      background: var(--chart);
+      border-radius: 6px 6px 0 0;
+      min-height: 2px;
+    }
+    .col .cval {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 4px;
+      color: var(--muted);
+    }
+    .col .clabel {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+    blockquote.quote {
+      margin: 16px 0;
+      padding: 14px 18px 14px 20px;
+      border-left: 3px solid var(--accent);
+      background: #fbf8f4;
+      border-radius: 0 10px 10px 0;
+    }
+    blockquote.quote p { margin: 0 0 8px; }
+    blockquote.quote footer {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    ul.procon, ol.steps, ol.ops {
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    ul.procon li, ol.steps li, ol.ops li {
+      position: relative;
+      padding: 8px 0 8px 28px;
+    }
+    ul.pro.procon li::before, ul.con.procon li::before {
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 18px;
+    }
+    ul.pro.procon li::before { content: "+"; background: var(--pro-bg); color: var(--pro); }
+    ul.con.procon li::before { content: "−"; background: var(--con-bg); color: var(--con); }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .card.pro { background: var(--pro-bg); border-color: #d5e8db; }
+    .card.con { background: var(--con-bg); border-color: #eddcd3; }
+    .card h3 { margin: 0 0 8px; }
+    ol.steps { counter-reset: step; }
+    ol.steps li { padding-left: 42px; margin-bottom: 10px; }
+    ol.steps li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 26px;
+    }
+    ol.steps .stitle { font-weight: 700; display: block; }
+    ol.steps .sdetail { color: var(--muted); font-size: 14.5px; }
+    ol.ops { counter-reset: op; }
+    ol.ops li { padding-left: 36px; margin-bottom: 8px; }
+    ol.ops li::before {
+      counter-increment: op;
+      content: counter(op) ".";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      color: var(--muted);
+      font-weight: 700;
+      width: 24px;
+    }
+    .sources {
+      display: grid;
+      gap: 8px;
+    }
+    .sources a {
+      display: block;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      background: #fff;
+    }
+    .sources a:hover { border-color: var(--accent); }
+    .sources .site {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .sources .title { font-weight: 700; }
+    a.ext { color: var(--info); word-break: break-all; }
+    td a.ext { font-size: 12.5px; }
+    footer.note {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .top-link {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .top-link:hover { color: var(--accent); }
+    @media (max-width: 720px) {
+      header.hero, section.block { padding: 22px 18px; }
+      nav.toc ol { columns: 1; }
+      .split { grid-template-columns: 1fr; }
+      dl.props > div { grid-template-columns: 1fr; gap: 2px; }
+      table { display: block; overflow-x: auto; }
+    }
+    @media print {
+      body { background: #fff; }
+      .page { padding: 0; max-width: none; }
+      header.hero, section.block, nav.toc {
+        box-shadow: none;
+        border-color: #ddd;
+        break-inside: avoid;
+      }
+      a.ext { color: inherit; }
+    }
+    .delta { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+    .delta.up { background: var(--pro-bg); color: var(--pro); }
+    .delta.flat { background: #efeae3; color: var(--muted); }
+    .delta.down { background: var(--con-bg); color: var(--con); }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 8px 0 16px; }
+    .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 12px; background: #fff; }
+    .kpi .k { font-size: 12px; color: var(--muted); font-weight: 700; display: block; }
+    .kpi .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; display: block; }
+    .kpi .d { font-size: 12px; color: var(--muted); }
+    @media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+      th:first-child, td:first-child { min-width: 7.5em; white-space: nowrap; }
+    @media (max-width: 640px) { th:first-child, td:first-child { white-space: normal; min-width: 0; } }
+      .badge.new { background: var(--info-bg); color: var(--info); }
+    .badge.done { background: var(--pro-bg); color: var(--pro); }
+    .igshot { max-width: 100%; border: 1px solid var(--line); border-radius: 10px; display:block; margin: 8px 0 6px; }
+    .stack { display:flex; height: 22px; border-radius: 6px; overflow:hidden; border:1px solid var(--line); margin: 6px 0 4px; }
+    .stack span { display:block; height:100%; color:#fff; font-size:12px; line-height:22px; text-align:center; }
+  </style>
+</head>
+<body>
+<div class="page" id="top">
+  <header class="hero">
+    <p class="eyebrow">社内向けレポート（週次）</p>
+    <h1>BISTRO CAVA CAVA グルメサイト掲載・口コミ分析</h1>
+    <p class="summary">新宿区荒木町のBISTRO CAVA CAVA（ビストロ サヴァサヴァ）について、2026年11月28日（土）時点で取得できたグルメサイトの掲載・口コミ、X上の言及、公式Instagramの状況をまとめた週次レポートです。前回（2026年11月21日版）と同じ方法で取り直し、前回比を付けています。数値と引用は確認できた出典のものだけです。取れなかった情報は「取得不可」とし、理由を添えています。</p>
+    <p class="meta">取得日時：2026年11月28日 08:40〜08:50ごろ（日本時間・Asia/Tokyo）。食べログ店舗ページは08:41に直接取得。Instagramは同日08:40ごろ、boxのブラウザでログインせずに確認／比較対象：2026年11月21日版レポート（バックアップ：BistroCAVACAVA_gourmet_report_2026-11-21.html）</p>
+  </header>
+
+  <nav class="toc">
+    <h2>目次</h2>
+    <ol>
+      <li><a href="#s1"><span class="num">01</span>調査の要点</a></li>
+      <li><a href="#s2"><span class="num">02</span>前回からの変化</a></li>
+      <li><a href="#s3"><span class="num">03</span>店舗の確認</a></li>
+      <li><a href="#s4"><span class="num">04</span>サイト横断の評価</a></li>
+      <li><a href="#s5"><span class="num">05</span>食べログの詳細</a></li>
+      <li><a href="#s6"><span class="num">06</span>各サイトの掲載内容</a></li>
+      <li><a href="#s7"><span class="num">07</span>掲載内容の整合性</a></li>
+      <li><a href="#s8"><span class="num">08</span>掲載内容チェック</a></li>
+      <li><a href="#s9"><span class="num">09</span>口コミの傾向</a></li>
+      <li><a href="#s10"><span class="num">10</span>X上の言及</a></li>
+      <li><a href="#s11"><span class="num">11</span>公式Instagramの状況</a></li>
+      <li><a href="#s12"><span class="num">12</span>強みと課題</a></li>
+      <li><a href="#s13"><span class="num">13</span>改善提案</a></li>
+      <li><a href="#s14"><span class="num">14</span>取得不可・要確認</a></li>
+      <li><a href="#s15"><span class="num">15</span>主な出典</a></li>
+    </ol>
+  </nav>
+
+  <section class="block" id="s1">
+    <h2>調査の要点</h2>
+    <div class="callout">
+      <p class="lead">食べログは店舗点数3.30・口コミ51人のまま、保存が4,135人（+21）に増えました。いちばん急ぐのは、12月1日以降に古くなる「【11月】」コース名と「11月も…八幡平フェア」の文言の差し替えです。</p>
+      <p>あわせて、食べログにだけ載っている「【12月24.25日限定】ノエルコース 9品 15,000円」を公式・Instagramへ展開することを勧めます。前回指摘した14項目は、今週も直っていませんでした。</p>
+    </div>
+    <p>食べログは、2026年11月28日08:41に店舗ページ本体から直接読んだ値で、店舗点数3.30（前回比±0）、口コミ51人（±0）、保存4,135人（+21）、写真454枚（±0）です。評価平均ページの単純平均（総合3.90、酒・ドリンク3.81、料理・味3.78、雰囲気3.72、サービス3.57、コストパフォーマンス3.31）と点数分布も前回と同じです。新しい口コミは見当たらず、店舗返信のいちばん新しい日付も2026年11月4日のままです。</p>
+    <p>一休.comレストランはクチコミページの総合表示4.38・口コミ4件、Rettyはおすすめ度100%・3件、ぐるなびは口コミ7件（いずれも2019年）で、どれも前回から変わっていません。ホットペッパー（東京で「サヴァサヴァ」検索0件）、PayPayグルメ（検索403）、TripAdvisor、OZmallでは、今週も掲載を確認できませんでした。X上でこの店に触れた投稿は、2026年10月1日以降を対象にした検索で0件でした。</p>
+    <p>今週は公式Instagramの数値が取れました。フォロワー859人で、11月25日の基準値859人から±0です。フォロー中は403人です。最終投稿は11月10日で、取得時点で18日間投稿がありません。直近30日の投稿は2件です。キャプション定型文の営業時間が夜だけになっていること、11月の月曜営業・貸切営業の告知がグルメサイトに反映されていないこと、予約案内が「DMまたはお電話」だけであることを、掲載内容チェックに加えました。</p>
+  </section>
+
+  <section class="block" id="s2">
+    <h2>前回からの変化</h2>
+    <p class="caption">前回値は2026年11月21日版レポートです。今週値は2026年11月28日に各サイトのページを直接取得した値です。食べログの点数・口コミ人数・保存人数は店舗ページのHTMLから読み、評価平均ページ・口コミ一覧とも照合しました。検索結果の抜粋やキャッシュは使っていません。</p>
+    <div class="kpis">
+      <div class="kpi"><span class="k">食べログ 店舗点数</span><span class="v">3.30</span><span class="d">前回 3.30 <span class="delta flat">±0</span></span></div>
+      <div class="kpi"><span class="k">食べログ 口コミ</span><span class="v">51人</span><span class="d">前回 51人 <span class="delta flat">±0</span></span></div>
+      <div class="kpi"><span class="k">食べログ 保存</span><span class="v">4,135人</span><span class="d">前回 4,114人 <span class="delta up">+21</span></span></div>
+      <div class="kpi"><span class="k">食べログ 写真</span><span class="v">454枚</span><span class="d">前回 454枚 <span class="delta flat">±0</span></span></div>
+    </div>
+    <table>
+      <thead><tr><th>項目</th><th class="num">前回（11/21）</th><th class="num">今週（11/28）</th><th>変化</th></tr></thead>
+      <tbody>
+        <tr><td>食べログ ユーザー総合平均</td><td class="num">3.90</td><td class="num">3.90</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>食べログ 項目平均（味/サービス/雰囲気/酒/CP）</td><td class="num">3.78/3.57/3.72/3.81/3.31</td><td class="num">3.78/3.57/3.72/3.81/3.31</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>食べログ 点数分布（5.0/4.5台/4.0台/3.5台/3.0台/1.5台）</td><td class="num">6/4/15/18/7/1</td><td class="num">6/4/15/18/7/1</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>食べログ 写真内訳（料理/ドリンク/内観/外観）</td><td class="num">368/52/10/13</td><td class="num">368/52/10/13</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>食べログ 店舗返信の最新日付</td><td class="num">2026/11/04</td><td class="num">2026/11/04</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>食べログ コース掲載</td><td>【11月】A・B各2プラン</td><td>【11月】A・B各2プラン＋「【12月24.25日限定】ノエルコース 9品」15,000円</td><td>ノエルコースを今週初めて確認（コース一覧の更新日表示は2026/11/06）</td></tr>
+        <tr><td>一休 総合表示・口コミ</td><td class="num">4.38・4件</td><td class="num">4.38・4件</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>Retty おすすめ度・口コミ</td><td class="num">100%・3件</td><td class="num">100%・3件</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>ぐるなび 口コミ</td><td class="num">7件（2019年）</td><td class="num">7件（2019年）</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>ヒトサラ</td><td>新宿三丁目の旧住所</td><td>新宿三丁目の旧住所</td><td><span class="delta flat">変化なし</span></td></tr>
+        <tr><td>Google 評点（件数）</td><td class="num">4.3（31件）※二次情報</td><td class="num">4.3（31件）※二次情報</td><td><span class="delta flat">±0</span>（別の二次サイト「こよいのワイン」は4.3・27件と表示）</td></tr>
+        <tr><td>X 言及（2026/10/01以降）</td><td class="num">0件</td><td class="num">0件</td><td><span class="delta flat">±0</span></td></tr>
+        <tr><td>Instagram フォロワー／フォロー中</td><td class="num">取得不可（11/25基準値 859／403）</td><td class="num">859／403</td><td><span class="delta flat">±0</span>（11/25比。11/18は857／410）</td></tr>
+        <tr><td>Instagram 最終投稿</td><td>取得不可</td><td>2026/11/10</td><td>取得時点で18日間投稿なし</td></tr>
+      </tbody>
+    </table>
+    <p>数値で動いたのは食べログの保存（+21人）だけです。口コミ・点数・分布・写真は変わらず、新しい口コミも店舗返信もありません。掲載面では、食べログのコース一覧にノエルコースが加わりました。一方、コース名の「【11月】」とPR文の「11月も…八幡平フェア」は残っており、12月1日（火）の営業開始時点で古い情報になります。前回の指摘14項目は、すべて未修正です。</p>
+  </section>
+
+  <section class="block" id="s3">
+    <h2>店舗の確認</h2>
+    <p>対象は新宿区荒木町の <strong>BISTRO CAVA CAVA（ビストロ サヴァサヴァ）</strong> です。公式サイトはマルゴグループ（MARUGO-s）のオフィシャルサイトにリンクしており、運営は同グループの店舗と判断しています。食べログでは2020年8月20日オープン、「新宿区新宿3-20-6」から移転と表示されています。名古屋の「サヴァサヴァ」、靴ブランドの「cavacava」、米国のCAVA Groupなど名前が似ているものは別物として除外しました。</p>
+    <dl class="props">
+      <div><dt>店名</dt><dd>BISTRO CAVA CAVA（ビストロ サヴァサヴァ）。公式サイトの表記は「BISTRO CAVA,CAVA」</dd></div>
+      <div><dt>住所</dt><dd>〒160-0007 東京都新宿区荒木町9-7 ナオビル1F</dd></div>
+      <div><dt>電話</dt><dd>公式・一休・Retty・トレタ：03-6457-4938。食べログの予約欄：050-5589-3178</dd></div>
+      <div><dt>最寄駅</dt><dd>公式は丸ノ内線 四谷三丁目駅徒歩4分、都営新宿線 曙橋駅徒歩5分</dd></div>
+      <div><dt>営業時間（公式）</dt><dd>金・土 11:30-15:00［L.O. 14:00］、火〜土 17:00-23:00［L.O. 22:00／コースL.O. 21:00］。定休日：日・月</dd></div>
+      <div><dt>コース（公式）</dt><dd>Aコース（8品）￥10,000、Bコース（6品）￥8,000。ワインペアリング＋5,000〜（総量約350ml）</dd></div>
+      <div><dt>予約</dt><dd>公式サイトの「ウェブ予約」（トレタ）。トレタのページには「席種のご指定はできません」とあります</dd></div>
+    </dl>
+  </section>
+
+  <section class="block" id="s4">
+    <h2>サイト横断の評価</h2>
+    <p class="caption">評点の尺度はサイトごとに違うので、数値を横並びで比べてはいません。Googleはマップ本体ではなく、二次サイトの記載です。</p>
+    <table>
+      <thead><tr><th>サイト</th><th>評点</th><th>口コミ</th><th>掲載状況（11/28）</th></tr></thead>
+      <tbody>
+        <tr><td>食べログ</td><td>店舗3.30／平均3.90</td><td>51人</td><td>写真454枚・保存4,135人。店舗返信あり（最新2026/11/04）</td></tr>
+        <tr><td>一休.comレストラン</td><td>クチコミページで4.38</td><td>4件</td><td>現行住所。写真16枚。料理・味4.50、雰囲気4.50、コスパ4.63。営業時間は夜だけ。curlは403のため公開表示を別の方法で取得</td></tr>
+        <tr><td>楽天ぐるなび</td><td>総合点の記載なし</td><td>7件（2019年）</td><td>現行住所。営業時間は夜だけ。「飲み放題メニューあり」の表記が残る</td></tr>
+        <tr><td>Retty</td><td>おすすめ度100%</td><td>3件（2024年）</td><td>「行った」5人。最終更新2025年2月26日。ランチは「営業時間外」</td></tr>
+        <tr><td>ヒトサラ</td><td>記載なし</td><td>—</td><td>新宿3-20-6の旧店舗情報のまま</td></tr>
+        <tr><td>Googleマップ</td><td>4.3（二次情報）</td><td>31件（二次情報）</td><td>Taveri・ふるなびトラベル（2026/11/12時点と記載）は4.3・31件。こよいのワインは4.3・27件。マップ本体は取得不可</td></tr>
+        <tr><td>ホットペッパー</td><td colspan="2">掲載なし</td><td>東京で「サヴァサヴァ」を検索して0件</td></tr>
+        <tr><td>PayPayグルメ／TripAdvisor／OZmall</td><td colspan="2">掲載確認できず</td><td>PayPayグルメは検索が403。ウェブ検索でも店舗ページは見つからず</td></tr>
+        <tr><td>その他（二次）</td><td colspan="3">REGLI（3.88と表示）、HAMONI、こよいのワインに掲載がありますが、いずれも他サイトの情報を集めたページです。新しく出稿したグルメサイトは見つかりませんでした</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="block" id="s5">
+    <h2>食べログの詳細</h2>
+    <p>店舗点数3.30・口コミ51人・保存4,135人は、2026年11月28日08:41に<a class="ext" href="https://tabelog.com/tokyo/A1309/A130903/13245351/">店舗ページ本体</a>から直接読んだ値です。評価平均ページでも店舗点数3.30を照合しました。写真454枚は店舗ページのリンク表示「写真 454」です（料理368、ドリンク52、内観10、外観13）。</p>
+    <dl class="props">
+      <div><dt>店舗点数</dt><dd>3.30（独自アルゴリズム、前回と同じ）</dd></div>
+      <div><dt>口コミ</dt><dd>51人。口コミ一覧の表示は「全55件」で、同じ人の複数投稿を含みます。これとは別に、一覧の先頭に店舗のピックアップ枠が1件あります。前回レポートの「56件」はこの枠を数えていた可能性があり、口コミが減ったわけではないと考えています（人数と分布は不変）</dd></div>
+      <div><dt>保存</dt><dd>4,135人（前回4,114人、+21）</dd></div>
+      <div><dt>写真</dt><dd>454枚（前回と同じ）</dd></div>
+    </dl>
+    <h3>ユーザー評価の平均</h3>
+    <p class="caption">評価平均ページの注記は「ユーザーの皆様が投稿された評価の単純平均」です。お店の点数3.30とは算出方法が違います。前回と同じ値です。</p>
+    <div class="chart-card">
+      <p class="chart-label">項目別の平均（5点満点）</p>
+      <p class="axis-note">バーの長さは、5.00を100%としたときの比率です。</p>
+      <div class="hbar"><span class="name">総合</span><div class="track"><div class="fill" style="width:78.0%"></div></div><span class="val">3.90</span></div>
+      <div class="hbar"><span class="name">酒・ドリンク</span><div class="track"><div class="fill" style="width:76.2%"></div></div><span class="val">3.81</span></div>
+      <div class="hbar"><span class="name">料理・味</span><div class="track"><div class="fill" style="width:75.6%"></div></div><span class="val">3.78</span></div>
+      <div class="hbar"><span class="name">雰囲気</span><div class="track"><div class="fill" style="width:74.4%"></div></div><span class="val">3.72</span></div>
+      <div class="hbar"><span class="name">サービス</span><div class="track"><div class="fill" style="width:71.4%"></div></div><span class="val">3.57</span></div>
+      <div class="hbar emphasis"><span class="name">コスパ</span><div class="track"><div class="fill" style="width:66.2%"></div></div><span class="val">3.31</span></div>
+    </div>
+    <h3>点数の分布</h3>
+    <p class="caption">評価平均ページの「各ユーザーが投稿した総合評価の分布」（51人）です。前回と同じです。</p>
+    <div class="chart-card">
+      <p class="chart-label">ユーザー総合評価の分布（人）</p>
+      <div class="cols">
+        <div class="col"><span class="cval">6</span><div class="bar-wrap"><div class="bar" style="height:33.3%"></div></div><span class="clabel">5.0</span></div>
+        <div class="col"><span class="cval">4</span><div class="bar-wrap"><div class="bar" style="height:22.2%"></div></div><span class="clabel">4.5–4.9</span></div>
+        <div class="col"><span class="cval">15</span><div class="bar-wrap"><div class="bar" style="height:83.3%"></div></div><span class="clabel">4.0–4.4</span></div>
+        <div class="col"><span class="cval">18</span><div class="bar-wrap"><div class="bar" style="height:100%"></div></div><span class="clabel">3.5–3.9</span></div>
+        <div class="col"><span class="cval">7</span><div class="bar-wrap"><div class="bar" style="height:38.9%"></div></div><span class="clabel">3.0–3.4</span></div>
+        <div class="col"><span class="cval">0</span><div class="bar-wrap"><div class="bar" style="height:1.4%"></div></div><span class="clabel">2.5–2.9</span></div>
+        <div class="col"><span class="cval">0</span><div class="bar-wrap"><div class="bar" style="height:1.4%"></div></div><span class="clabel">2.0–2.4</span></div>
+        <div class="col"><span class="cval">1</span><div class="bar-wrap"><div class="bar" style="height:5.6%"></div></div><span class="clabel">1.5–1.9</span></div>
+        <div class="col"><span class="cval">0</span><div class="bar-wrap"><div class="bar" style="height:1.4%"></div></div><span class="clabel">1.0–1.4</span></div>
+      </div>
+    </div>
+    <h3>利用金額（口コミ集計）</h3>
+    <p>店舗ページの「予算（口コミ集計）」は夜￥10,000〜￥14,999です。評価平均ページによると、最新10件の夜の利用金額は、￥10,000〜￥14,999が4件、￥8,000〜￥9,999が2件、￥3,000〜￥3,999と￥4,000〜￥4,999が各1件です。店舗が掲げる予算（夜￥8,000〜￥9,999、昼￥2,000〜￥2,999）より、口コミ上の夜の実勢は高めです。前回と同じ内訳です。</p>
+    <h3>コース・メニュー（今週の掲載）</h3>
+    <p>コース一覧（ページの更新日表示2026/11/06）は、「【11月】Aコース８品 自家製パン付き」10,000円、「【11月】Bコース6品 自家製パン付き」8,000円、「【11月】Aコース８品 ワインペアリング7杯付き」15,000円、「【11月】Bコース6品 ワインペアリング6杯付き」13,000円、そして今週初めて確認した「【12月24.25日限定】ノエルコース 9品」15,000円（2〜4名様）です。料理メニュー（更新日表示2026/11/04）には、秋鮭のリエット900円、八幡平マッシュルームのソーセージ1,500円、岩手県八幡平産 杜仲茶ポーク 肩ロースの炭火焼き2,600円、佐賀県産 黒毛和牛もも肉の炭火焼き3,500円、愛知県産 真鯛のポワレ2,400円などが載っています。ランチメニュー（更新日表示2026/07/11）は、本日のリゾット1,800円、本日のお魚料理2,200円、仔羊と鴨のカスレ2,500円です。</p>
+  </section>
+
+  <section class="block" id="s6">
+    <h2>各サイトの掲載内容</h2>
+    <h3>一休.comレストラン</h3>
+    <p>現行の荒木町住所で掲載されています。予算は8,000円〜9,999円、座席「18席（半個室1室）」、チャージ「チャージ代として500円頂戴致します。」、QRコード決済不可、お子様の同伴は年齢制限なしです。営業時間は「【火～土】 17：00～23：00（22：00）」だけで、金・土のランチがありません。クチコミページの表示は総合4.38、料理・味4.50、雰囲気4.50、コスパ4.63です。口コミは4件（2026/08/23、08/02、07/15、2025/07/24）で、新しい投稿はありません。curlでの取得は403だったため、公開表示を別の取得方法で確認しました。コースの中身は今週も確認できていません。</p>
+    <h3>楽天ぐるなび</h3>
+    <p>現行住所で掲載されています。営業時間は「火～土 17:00～23:00（L.O.22:00）」で、ランチがありません。平均予算7,500円、総席数18席、「テーブル個室あり（1室/3名～6名様用/扉・壁あり）」、「小学生からOK」、メニューのサービス欄に「飲み放題メニューあり」「ドリンクの持込可」とあります。お店の紹介文では「半個室」、こだわり欄では「3～6名席の完全個室」と書かれ、同じページの中でも呼び方がそろっていません。口コミは全7件で、すべて2019年（5/22と12/12）です。移転前の時期の投稿です。</p>
+    <h3>Retty</h3>
+    <p>現行住所で、公式表示があります。おすすめ度100%（Excellent 5 / Good 0 / Average 0）、口コミ3件、「行った」5人です。最新の口コミは2024年6月24日、ページの最終更新は2025年2月26日 19:27です。予算欄は「ランチ：営業時間外」です。コースは「MENU B」8,000円で、「コース提供期間: 02月26日〜」のままです。座席はカウンター11席、個室は「4人用」です。</p>
+    <h3>ヒトサラ</h3>
+    <p>見つかったのは <a class="ext" href="https://hitosara.com/0006081068/">hitosara.com/0006081068</a> だけです。住所は「東京都新宿区新宿3-20-6 wamall FSビル4F」、最寄は「JR各線 新宿駅 徒歩2分」、ディナーは「17:00～00:00 (L.O.23:00)」、キャパシティは着席36人と、移転前の情報のままです。</p>
+    <h3>公式サイト・予約</h3>
+    <p>公式サイトの内容は前回と同じです。コース価格、営業時間、個室（「4～6名席の完全個室のプライベートサロン」）、貸切相談の記載に変更はありません。ノエル（クリスマス）コースの案内は、公式サイトでは見つかりませんでした。トレタの予約ページには「予約不可のお日にちでも、店舗に直接お問い合わせいただければお席がご用意できることがあります」「席種のご指定はできません」とあります。</p>
+    <h3>Google（二次情報）・その他</h3>
+    <p>Taveriでは、Googleの星4.3（31件）、Taveriスコア4.11、決済方法「PayPay・クレジットカード・デビットカード」と表示されています。こよいのワインはGoogleの評価を4.3（27件）と表示しており、営業時間は金・土に11:30〜15:00の昼営業あり、月・日は定休日です。Googleマップ本体は今週も読み取れていないため、件数が違う理由（取得時期の差など）は確定できません。</p>
+  </section>
+
+  <section class="block" id="s7">
+    <h2>掲載内容の整合性</h2>
+    <p class="caption">公式サイトを基準に、食い違っている項目をまとめています。前回から変わったものには「今週」と書いています。</p>
+    <table>
+      <thead><tr><th>項目</th><th>公式サイト</th><th>食い違い</th></tr></thead>
+      <tbody>
+        <tr><td>金・土のランチ</td><td>11:30-15:00（L.O. 14:00）</td><td>一休・ぐるなびは夜だけ、Rettyは「ランチ：営業時間外」。Instagramのキャプション定型文も「営業時間 17:00～23:00」だけ。食べログは公式どおり</td></tr>
+        <tr><td>臨時営業・貸切（今週）</td><td>定休日：日・月。貸切は相談可</td><td>Instagram 11/2の投稿では「11月は2日、16日と月曜日営業」「18日は貸切営業」。グルメサイトの営業時間欄には載っておらず、食べログは「貸切 不可」</td></tr>
+        <tr><td>コースの時期表記（今週）</td><td>「月替わり」とだけ記載</td><td>食べログのコース名はすべて「【11月】」、PR文は「11月も…八幡平フェア」。12月1日以降は古い表記になる</td></tr>
+        <tr><td>ノエルコース（今週）</td><td>記載なし</td><td>食べログだけに「【12月24.25日限定】ノエルコース 9品」15,000円。Instagramの直近投稿にも告知なし</td></tr>
+        <tr><td>予約方法（今週）</td><td>「ウェブ予約」（トレタ）、電話</td><td>Instagramは「ご予約・お問い合わせはDMまたはお電話にてどうぞ」で、ウェブ予約に触れていない。食べログの予約電話は050-5589-3178</td></tr>
+        <tr><td>個室の呼び方・人数</td><td>「4～6名席の完全個室」</td><td>食べログ・一休・ぐるなび紹介文は「半個室」、ぐるなびのこだわり欄は「3～6名席の完全個室」、Rettyは「4人用」。Instagramは「個室（4名様～/最大6名様・3名以下は要相談）」で公式と一致</td></tr>
+        <tr><td>徒歩分数</td><td>四谷三丁目4分、曙橋5分</td><td>食べログは四ツ谷3丁目5分・曙橋3分、PR見出しは「徒歩5分」。ぐるなびはどちらも5分。Rettyは曙橋3分・四谷三丁目4分</td></tr>
+        <tr><td>席数</td><td>総数の明記なし</td><td>食べログ「18席（カウンター12席テーブル1席）」、Retty「カウンター席 有（11席）」</td></tr>
+        <tr><td>アラカルト</td><td>オリーブ￥700、パテ・ド・カンパーニュ￥900、近江牛￥3,800、愛媛県産真鯛￥2,200</td><td>食べログはオリーブ600円、パテ・ド・ボー・バスク1,500円、佐賀県産黒毛和牛3,500円、愛知県産真鯛2,400円</td></tr>
+        <tr><td>グラスワイン</td><td>日替わり「6～12種類前後」</td><td>食べログのコース本文は「常時15種類程度」</td></tr>
+        <tr><td>チャージ・子ども・決済</td><td>トップページに記載なし</td><td>一休のチャージは対象の限定なし（食べログは「アラカルトのお客様」）。子どもは一休が年齢制限なし、ぐるなびは小学生から。PayPayはTaveri（二次）で可、食べログ・一休は「QRコード決済不可」</td></tr>
+        <tr><td>所在地</td><td>荒木町9-7</td><td>ヒトサラは新宿3-20-6のまま</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="block" id="s8">
+    <h2>掲載内容チェック</h2>
+    <p>2026年11月28日 08:40〜08:50ごろ（日本時間・Asia/Tokyo）に、公式サイトと各媒体の公開ページを取り直し、社内ガイド（2026-11-21版：特長ワードの扱い、広告表現、価格・品数・飲み放題・営業時間・席・アクセスの食い違い）の5手順に沿って点検しました。今週から、公式Instagramのキャプションとの食い違いも対象に加えています。引用はページ上で確認できた文言だけです。</p>
+    <p>基準は公式サイトの公開情報です。管理画面には入っていないため、食べログ「特長ワード」の登録内容は確認できていません。公開ページに「お店の特長ワード」という欄もありませんでした。他店の資料で表示対象外と指摘された語を、この店に当てはめることはしていません。食べログのPR本文には、予約方法や営業時間は書かれていませんでした。検索順位や予約への効果は測定していません。</p>
+    <table>
+      <thead><tr><th>媒体</th><th>欄</th><th>現在の記載</th><th>問題の可能性</th><th>修正案</th><th>重要度</th></tr></thead>
+      <tbody>
+        <tr><td>食べログ</td><td>コース名・PR文・こだわり</td><td>コース名「【11月】Aコース８品 自家製パン付き」ほか4プランすべて「【11月】」。PR文「【大好評！11月も岩手を味わう・八幡平フェア開催！】」、こだわり「大好評！11月も岩手・八幡平フェア開催！」</td><td><span class="badge new">新規</span> 12月1日（火）の営業から、月の表記が古くなります。12月の内容と違えば誤認につながります。「大好評」には根拠が示されていません</td><td>11月30日までに12月のコース名・本文・PR文に差し替える。「大好評」は外すか根拠を添える</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>食べログ／公式／Instagram</td><td>期間限定コース</td><td>食べログ「【12月24.25日限定】ノエルコース 9品」「15,000 円 (税込)」「2～4名様」。公式サイトとInstagramの直近12投稿には見当たらず</td><td><span class="badge new">新規</span> 告知が食べログだけで、公式・Instagram・一休から来る人には届きません。品数・価格が媒体ごとに違う状態になりやすいです</td><td>公式とInstagramに同じ品数・価格で告知する。一休・トレタで扱うかどうかを決める。12/26以降は掲載を外す</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>Instagram</td><td>キャプション定型文（営業時間）</td><td>「●営業時間 17:00～23:00 （L.O.22:00）」（11/10・11/2・10/22・10/7の各投稿）。基準値（11/25）のプロフィールには金・土ランチの記載あり</td><td><span class="badge new">新規</span> 金・土ランチ（公式11:30-15:00、L.O. 14:00）が抜けていて、プロフィールと投稿で内容が違います</td><td>定型文を「金・土 11:30-15:00（L.O.14:00）／火〜土 17:00-23:00（L.O.22:00）／定休日 日・月」に直す</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>Instagram／トレタ／食べログ</td><td>予約案内</td><td>Instagram「ご予約・お問い合わせはDMまたはお電話にてどうぞ。」。トレタ「席種のご指定はできません」。食べログこだわり「半個室席【予約必須】」</td><td><span class="badge new">新規</span> 公式のウェブ予約（トレタ）が案内されていません。個室は予約必須なのにウェブ予約では席種を選べず、どこから予約すればよいか分かりにくいです</td><td>定型文にウェブ予約の案内（プロフィールのリンク）を加え、「個室希望はお電話で」と書き分ける</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>Instagram／食べログ／一休／ぐるなび</td><td>臨時営業・貸切</td><td>Instagram 11/2「11月は2日、16日と月曜日営業がございます」「18日は貸切営業となります」。食べログ「月・日 定休日」「貸切 不可」</td><td><span class="badge new">新規</span> 月曜の臨時営業や貸切日がグルメサイトに出ていません。食べログの「貸切 不可」は、実際の貸切営業や公式の「貸切をご希望の際には…」と矛盾します</td><td>今後の臨時営業・貸切日は食べログ等の営業時間欄にも載せる。食べログの貸切欄を実態（相談可）に合わせる</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>Instagram</td><td>10/7投稿キャプション</td><td>「0月の月替わりコースのご案内です。」</td><td><span class="badge new">新規</span> 「10月」の誤字とみられます</td><td>キャプションを編集して「10月」に直す</td><td><span class="badge low">低</span></td></tr>
+        <tr><td>食べログ</td><td>料理メニューの品名</td><td>「北海道産 蝦夷直と季節のフルーツの炭火焼き」「八幡平ひうじのブレゼ」（更新日表示2026/11/04）</td><td><span class="badge new">新規</span> 品名に誤字の可能性があります（正しい品名は公開ページからは確定できません）</td><td>正しい品名を店舗で確認して直す</td><td><span class="badge low">低</span></td></tr>
+        <tr><td>ヒトサラ</td><td>住所・営業・席</td><td>「東京都新宿区新宿3-20-6 wamall FSビル4F」「ディナー 17:00～00:00 (L.O.23:00)」「着席:36人」「JR各線 新宿駅 徒歩2分」</td><td><span class="badge high">継続</span> 移転前の情報のままです。電話番号が現行と同じなので、旧住所へ案内してしまうおそれがあります</td><td>ヒトサラで移転処理するか、荒木町の情報に差し替える</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>一休／ぐるなび／Retty</td><td>営業時間・ランチ</td><td>一休「【火～土】 17：00～23：00（22：00）」、ぐるなび「火～土 17:00～23:00（L.O.22:00）」、Retty「ランチ：営業時間外」</td><td><span class="badge high">継続</span> 公式の金・土ランチが抜けています</td><td>金・土 11:30〜15:00（L.O. 14:00）を追加する</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>食べログ</td><td>コース本文の品数</td><td>「【11月】Bコース6品 自家製パン付き 6品」「【11月】Bコース6品 ワインペアリング6杯付き 6品」の本文に「旬の食材を使用した8品と」</td><td><span class="badge high">継続</span> タイトルは6品、本文は8品です</td><td>12月版に差し替えるときに、本文の品数をタイトルとそろえる</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>ぐるなび</td><td>メニューのサービス</td><td>「飲み放題メニューあり」「ドリンクの持込可」</td><td><span class="badge high">継続</span> 公式に飲み放題の記載がなく、時間・料金・条件も書かれていません</td><td>提供していなければ外す。提供しているなら条件を書く</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>食べログ</td><td>料理メニュー（産地・価格）</td><td>「ミックスオリーブ 600円」「フランス産 パテ・ド・ボー・バスク 1,500円」「愛知県産 真鯛のポワレ 2,400円」「佐賀県産 黒毛和牛もも肉の炭火焼き 3,500円」</td><td><span class="badge high">継続</span> 公式（イタリア産オリーブ￥700、茨城県産パテ￥900、愛媛県産真鯛￥2,200、滋賀県産近江牛￥3,800）と品名・産地・価格が違います</td><td>今出している内容に合わせる。月替わりなら注記を入れる</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>食べログ</td><td>営業時間（期間限定の案内）</td><td>「■ ３月の営業時間のご案内■ イベント出店のため、3/10～3/29の期間中のディナータイムが18時オープンとなります。」（「お店が更新（2026/02）」）</td><td><span class="badge high">継続</span> 終わった臨時案内が残っています</td><td>削除する</td><td><span class="badge high">高</span></td></tr>
+        <tr><td>各媒体</td><td>個室・席数・貸切</td><td>公式「4～6名席の完全個室」、食べログ「18席（カウンター12席テーブル1席）」「半個室あり」「貸切 不可」、一休「18席（半個室1室）」、ぐるなび「3～6名席の完全個室」、Retty「個室 有 4人用」</td><td><span class="badge mid">継続</span> 個室の形態・人数、席の内訳、貸切の可否が媒体ごとに違います</td><td>公式で1つの定義を決め、各媒体をそろえる</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>公式／食べログ／ぐるなび</td><td>アクセス（徒歩分数）</td><td>食べログ「四ツ谷3丁目駅から徒歩5分」「曙橋駅から徒歩3分」、PR見出し「四谷三丁目＆曙橋駅から徒歩5分」、ぐるなび「四谷三丁目駅 徒歩5分」</td><td><span class="badge mid">継続</span> 公式（四谷三丁目4分・曙橋5分）と違います</td><td>公式の分数にそろえる</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>一休／ぐるなび／Taveri（二次）</td><td>チャージ・子ども・決済</td><td>一休「チャージ代として500円頂戴致します。」「年齢制限：なし」、ぐるなび「小学生からOK」、Taveri「PayPay・クレジットカード・デビットカード」</td><td><span class="badge mid">継続</span> 条件が媒体ごとに違います</td><td>公式に条件を書き、一休のチャージ文に「ディナーのアラカルト時」と加える</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>Retty</td><td>コース</td><td>「MENU B」「8,000円（税込）」「コース提供期間: 02月26日〜」「最終更新 2025年02月26日」</td><td><span class="badge mid">継続</span> 情報が古く、品数の記載もありません</td><td>現行のコース名・品数に更新する</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>食べログ／公式</td><td>グラスワイン数・ランチ名</td><td>食べログ「グラスワインは常時15種類程度ご用意」。ランチメニュー（更新日2026/07/11）「仔羊と鴨のカスレ 2,500円」</td><td><span class="badge mid">継続</span> 公式は「6～12種類前後」「本日のお肉ランチ ¥2,500」</td><td>公式に合わせる</td><td><span class="badge mid">中</span></td></tr>
+        <tr><td>食べログ</td><td>PR見出し</td><td>「隠れ家ビストロ＆ワインバー！四谷三丁目＆曙橋駅から徒歩5分」</td><td><span class="badge low">継続</span> ジャンル名・駅名が入っています。特長ワードに設定されているかは公開ページからは分かりません</td><td>徒歩分数を直す。特長ワードは管理画面で確認する</td><td><span class="badge low">低</span></td></tr>
+        <tr><td>ホットペッパー／PayPayグルメ</td><td>店舗ページ</td><td>掲載なし（ホットペッパーは東京で「サヴァサヴァ」検索0件、PayPayグルメは検索が403）</td><td><span class="badge low">継続</span> 点検できる掲載がありません</td><td>出稿するかどうかは別途判断する</td><td><span class="badge low">低</span></td></tr>
+      </tbody>
+    </table>
+    <h3>前回（11/21）の指摘への対応状況</h3>
+    <table>
+      <thead><tr><th>前回の指摘</th><th>今週（11/28）の状況</th></tr></thead>
+      <tbody>
+        <tr><td>ヒトサラの旧住所</td><td>未修正（新宿3-20-6のまま）</td></tr>
+        <tr><td>一休・ぐるなび・Rettyの金・土ランチ欠落</td><td>未修正</td></tr>
+        <tr><td>食べログ Bコースの本文「8品」</td><td>未修正</td></tr>
+        <tr><td>ぐるなび「飲み放題メニューあり」</td><td>未修正</td></tr>
+        <tr><td>食べログ料理メニューの産地・価格</td><td>未修正（更新日表示2026/11/04のまま）</td></tr>
+        <tr><td>食べログの3月臨時営業案内</td><td>未修正</td></tr>
+        <tr><td>個室・席数・貸切の表記ゆれ</td><td>未修正</td></tr>
+        <tr><td>徒歩分数のずれ</td><td>未修正</td></tr>
+        <tr><td>チャージ・子ども・決済</td><td>未修正</td></tr>
+        <tr><td>Rettyのコース（2025年2月）</td><td>未修正</td></tr>
+        <tr><td>グラスワイン数・ランチ名</td><td>未修正（ランチメニューの更新日2026/07/11のまま）</td></tr>
+        <tr><td>PR見出しの徒歩5分</td><td>未修正</td></tr>
+        <tr><td>「大好評！11月も…」</td><td>未修正。今週は12月の切り替えが近いため、重要度を「高」に上げました</td></tr>
+        <tr><td>ホットペッパー・PayPayグルメ掲載なし</td><td>変化なし</td></tr>
+      </tbody>
+    </table>
+    <h3>確認できなかったこと</h3>
+    <ul>
+      <li>食べログ管理画面の特長ワード（登録語、枠数、表示対象外の判定、登録エラー）。公開ページに「お店の特長ワード」欄はありません。利用シーン「接待」やこだわり欄は、特長ワード欄ではありません。</li>
+      <li>一休のコース詳細（店舗ページのコース欄は中身を取得できず）。ノエルコースを一休でも販売しているかは不明です。</li>
+      <li>Instagramプロフィール文の全文（「more」を押しても末尾が「…」のまま）。そのため、今週のプロフィールのランチ時刻は再確認できていません。</li>
+      <li>管理画面での入力エラー、公開後の検索表示・アクセス・予約との因果関係（測定していません）。</li>
+    </ul>
+  </section>
+
+  <section class="block" id="s9">
+    <h2>口コミの傾向</h2>
+    <p>食べログの口コミは51人のままで、新しい口コミはありません。訪問月がいちばん新しいのは2026年10月の投稿です。10月訪問の口コミには、2026年11月4日付で店舗返信が付いています。2026年9月訪問の2件は、一覧上で本文が見えず、返信もありません。いずれも前回と同じ状態です。</p>
+    <p>評価されている点は、焼き立ての自家製パン、ワインペアリング、カウンターの落ち着いた雰囲気、産地の分かる料理で、食べログ・一休・Rettyに共通しています。相対的に低いのはコストパフォーマンス（平均3.31）です。量の多さ・少なさ、ペアリングの注ぎ量、価格帯への言及が複数のサイトにあります。一休の口コミは4件のままで、7月15日の口コミには「ペアリングのワインは、気になるほど少なめでした」とあります。</p>
+    <blockquote class="quote"><p>お料理と、多様なペアリングワインをいただいていたらあっという間に時間がたっていました。</p><footer>一休.comレストラン／ぎん３／投稿日 2026/08/23（料理・味5.0、雰囲気5.0、接客・サービス5.0、コストパフォーマンス5.0）</footer></blockquote>
+    <blockquote class="quote"><p>ワインとのセットでした。料理は抜群でしたが、ペアリングのワインは、気になるほど少なめでした。あれは改善した方がいいですね、</p><footer>一休.comレストラン／みるともつよえみ／投稿日 2026/07/15（料理・味5.0、コストパフォーマンス4.0）</footer></blockquote>
+  </section>
+
+  <section class="block" id="s10">
+    <h2>X上の言及</h2>
+    <p>店舗公式と確認できるXアカウントは見つかりませんでした。今週は、XのAPI検索で「サヴァサヴァ」「cavacava」「cava cava」「BISTRO CAVA」「ビストロサヴァサヴァ」「荒木町 ビストロ」などを、2026年10月1日（または11月1日）以降の期間で調べました。この店への言及と確認できる投稿は<strong>0件</strong>でした。ヒットしたのは、Juice=Juiceの楽曲「Ça va ? Ça va ?（サヴァサヴァ）」の話題、靴ブランドのcavacava、米国のCAVA Group、荒木町の別の店のイベント告知などで、すべて対象外です。</p>
+    <p>直近で確認できている言及は、前回レポートと同じく2026年7月16日の1件（@ztsztzl、「荒木町のBISTRO CAVA CAVAさんもですかね」）です。</p>
+  </section>
+
+  <section class="block" id="s11">
+    <h2>公式Instagramの状況</h2>
+    <p>対象は <a class="ext" href="https://www.instagram.com/bistro.cavacava/">@bistro.cavacava</a>（表示名：ビストロサヴァサヴァ）です。2026年11月28日08:40ごろ（日本時間）に、boxのブラウザでログインせずにプロフィールを開いて確認しました。ログインを求めるポップアップは出ず、ログインの案内バナーは無視しています。投稿数はログインしていない状態では表示されません。</p>
+    <img class="igshot" alt="Instagramプロフィール上部のスクリーンショット（2026-11-28 08:40ごろ）" src="data:image/jpeg;base64,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UAS0VF9mg/54xf8AfAo+zQf88Yv++BQBLRUX2aD/AJ4xf98Cj7NB/wA8Yv8AvgUAS0VF9mg/54xf98Cj7NB/zxi/74FAEtFRfZoP+eMX/fAo+zQf88Yv++BQBLRUX2aD/njF/wB8Cj7NB/zxi/74FAEtFRfZoP8AnjF/3wKPs0H/ADxi/wC+BQBLRUX2aD/njF/3wKPs0H/PGL/vgUAS0VF9mg/54xf98Cj7NB/zxi/74FAEtFRfZoP+eMX/AHwKPs0H/PGL/vgUAS0VF9mg/wCeMX/fAooAlooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAoo6da4TxV8VPDPh93g+0tf3a8GKzAcA+7fdH5k+1JyS1ZUYuTskd3RXzfrfxz1+d3GnWljYwk/KxBlkH4khf0qlZv8AEfxh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">
+    <p class="caption">プロフィール上部のスクリーンショット（全体は /workspace/screenshots/cavacava_instagram_2026-11-28.png）。撮影時点では投稿一覧の画像はまだ読み込まれていませんでした。</p>
+    <div class="kpis">
+      <div class="kpi"><span class="k">フォロワー</span><span class="v">859</span><span class="d">11/25基準 859 <span class="delta flat">±0</span></span></div>
+      <div class="kpi"><span class="k">フォロー中</span><span class="v">403</span><span class="d">11/25基準 403 <span class="delta flat">±0</span></span></div>
+      <div class="kpi"><span class="k">直近30日の投稿</span><span class="v">2件</span><span class="d">11/02・11/10</span></div>
+      <div class="kpi"><span class="k">最終投稿</span><span class="v">11/10</span><span class="d">取得時点で18日間投稿なし</span></div>
+    </div>
+    <dl class="props">
+      <div><dt>プロフィール</dt><dd>「フレンチをベースに和のテイストを加えて、/ 自家製の焼き立てパンと合わせて。/ 月替わりお任せコース / ¥8,000 / ¥10,000 / アラカルトもご用意しております。…」（「more」を押しても全文は確認できず）。リンクは x.gd/cavacava、ハイライトは「お席情報」だけ</dd></div>
+      <div><dt>写真とリール</dt><dd>直近12投稿（9/8〜11/10）のうち、写真・カルーセル7件、リール5件。リールはすべて9月（9/11〜9/24）で、9月24日を最後にリールの投稿はありません</dd></div>
+      <div><dt>いいね・コメント</dt><dd>投稿日の上に小さな数字（11/10が11、11/2が7、10/22が6、10/7が5）が出ていました。ラベルがないため、いいね数とみられる参考値（未確定）として扱います。コメントはいずれも「No comments yet」でした</dd></div>
+      <div><dt>前回比</dt><dd>11/18（ログインなしのメタ情報）は857／410／投稿622件、11/21は取得不可、11/25は859／403でした。フォロワーは11/18から+2、11/25から±0です</dd></div>
+    </dl>
+    <div class="chart-card">
+      <p class="chart-label">直近12投稿の種類</p>
+      <div class="stack"><span style="width:58.3%;background:var(--chart)">写真・カルーセル 7</span><span style="width:41.7%;background:var(--chart-emphasis)">リール 5</span></div>
+      <p class="axis-note">写真が1枚だけの投稿とカルーセルは区別していません。</p>
+    </div>
+    <h3>最近の投稿の要点</h3>
+    <table>
+      <thead><tr><th>投稿日（日本時間）</th><th>種類</th><th>内容</th><th>参考値（ラベルなし）</th></tr></thead>
+      <tbody>
+        <tr><td>2026/11/10 20:08</td><td>写真</td><td>11月のコース。「引き続き、岩手･八幡平の食材を使用したコース」。おすすめはメインの魚料理に使う「幻の魚･イトウ」</td><td>11</td></tr>
+        <tr><td>2026/11/02 18:07</td><td>写真</td><td>11月の営業日カレンダー。「11月は2日、16日と月曜日営業」、「18日は貸切営業」</td><td>7</td></tr>
+        <tr><td>2026/10/22 18:46</td><td>写真</td><td>姉妹店マルゴ四谷（@marugoyotsuya）で自家製パンを数量限定販売。「週1回、16時より販売」</td><td>6</td></tr>
+        <tr><td>2026/10/07 20:06</td><td>写真</td><td>「0月の月替わりコースのご案内」（10月の誤字とみられる）。岩手･八幡平の特別コース。個室の問い合わせが増えているとの案内</td><td>5</td></tr>
+        <tr><td>2026/10/01</td><td>写真</td><td>説明文から、カレンダー・ポスターの投稿とみられる（キャプションは未確認）</td><td>取得不可</td></tr>
+        <tr><td>2026/09/11〜09/24</td><td>リール5件</td><td>ワイン・料理（説明文にワイン、刺身、オッソブーコ、シャンパン、イワシなど）</td><td>取得不可</td></tr>
+      </tbody>
+    </table>
+    <p class="caption">投稿日時はInstagramのUTC表示を日本時間に直しました。10/1以前はグリッドの日付と説明文（Instagramの自動説明）だけです。</p>
+    <h3>グルメサイトとの食い違い（掲載内容チェックにも記載）</h3>
+    <ul>
+      <li><strong>営業時間：</strong>各投稿の定型文は「●営業時間 17:00～23:00 （L.O.22:00）」だけで、金・土ランチがありません。11/25の基準値では、プロフィールにランチ金・土の記載がありました。</li>
+      <li><strong>臨時営業・貸切：</strong>11/2の投稿にある月曜営業（11/2・11/16）と貸切営業（11/18）は、グルメサイトに出ていません。食べログは「貸切 不可」です。</li>
+      <li><strong>予約方法：</strong>定型文は「DMまたはお電話」だけです。公式のウェブ予約（トレタ）や食べログ・一休の予約には触れていません。</li>
+      <li><strong>コース・告知：</strong>コース価格（¥8,000／¥10,000）は公式・食べログと一致しています。食べログに出ているノエルコース（12/24・25、15,000円）は、Instagramではまだ告知されていません。</li>
+      <li><strong>誤字：</strong>10/7の投稿に「0月」とあります。</li>
+      <li><strong>個室：</strong>定型文の「個室（4名様～/最大6名様・3名以下は要相談）」は公式と一致しています。食べログ・一休の「半個室」とは呼び方が違います。</li>
+    </ul>
+    <h3>改善提案</h3>
+    <ul>
+      <li>投稿のない期間が18日続いています。12月のコースとノエルコースの告知を、11月中に1本出すことを勧めます。</li>
+      <li>リールは9月だけで、それ以降は告知画像が中心です。パンの焼き上がりや炭火調理など、口コミで評価されている場面を短いリールにすると、強みが伝わりやすくなります。</li>
+      <li>定型文の営業時間にランチを加え、予約案内を「ウェブ予約（プロフィールのリンク）／お電話／DM」に直してください。</li>
+      <li>臨時営業や貸切の日は、Instagramと同じ日に食べログの営業時間欄にも載せてください。</li>
+    </ul>
+  </section>
+
+  <section class="block" id="s12">
+    <h2>強みと課題</h2>
+    <div class="split">
+      <div class="card pro">
+        <h3>強み</h3>
+        <ul class="pro procon">
+          <li>食べログの保存が4,135人で、今週も+21人増えました。写真454枚と、見て選べる情報が多い店です。</li>
+          <li>ユーザー平均3.90に対して店舗点数は3.30で、点数が伸びる余地があります。</li>
+          <li>パン、ワインペアリング、カウンターの雰囲気、産地の分かる料理が、どのサイトでも共通して評価されています。</li>
+          <li>Instagramではコースの食材（岩手・八幡平、イトウ）や営業日カレンダーを毎月出しており、フォロワーも減っていません。</li>
+          <li>ノエルコースを食べログに早めに載せており、年末の予約の受け皿があります。</li>
+        </ul>
+      </div>
+      <div class="card con">
+        <h3>課題</h3>
+        <ul class="con procon">
+          <li>前回指摘した14項目が1つも直っていません（ヒトサラの旧住所、ランチ欠落、品数、飲み放題、メニューの産地・価格、3月の案内など）。</li>
+          <li>12月1日から、食べログの「【11月】」コース名とPR文が古い情報になります。</li>
+          <li>口コミは増えておらず、最新の店舗返信は11月4日のままです。9月訪問の2件にはまだ返信がありません。</li>
+          <li>Instagramは18日間投稿がなく、リールも9月から止まっています。予約案内と営業時間がグルメサイトと合っていません。</li>
+          <li>コスパの評点が相対的に低く、量やペアリングの注ぎ量への指摘があります。</li>
+          <li>X上の言及はなく、ホットペッパー・PayPayグルメにも掲載がないため、集客の入口が限られています。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="s13">
+    <h2>改善提案</h2>
+    <ol class="steps">
+      <li><span class="stitle">11月30日までに食べログを12月版へ切り替える</span><span class="sdetail">コース名の「【11月】」、PR文・こだわりの「11月も…八幡平フェア」を12月の内容に差し替えます。そのときにBコース本文の「8品」も6品に直し、「大好評」は外すか根拠を添えてください。</span></li>
+      <li><span class="stitle">ノエルコースを全媒体で同じ内容にする</span><span class="sdetail">食べログの「9品・15,000円・2〜4名様」を、公式サイト・Instagramで告知します。一休・トレタで受け付けるかも決めてください。12/26以降は掲載を外します。</span></li>
+      <li><span class="stitle">止まっている修正をまとめて片づける</span><span class="sdetail">優先順は、（1）一休・ぐるなび・Rettyへの金・土ランチ追加、（2）ヒトサラの移転処理、（3）食べログの3月臨時営業案内の削除、（4）ぐるなびの「飲み放題」確認、（5）食べログ料理メニューを公式に合わせる（品名の誤字の可能性も確認）、です。</span></li>
+      <li><span class="stitle">Instagramの定型文を直す</span><span class="sdetail">営業時間にランチを加え、予約案内にウェブ予約を入れ、10/7の「0月」を直します。臨時営業・貸切の日は食べログにも載せ、「貸切 不可」は実態に合わせてください。</span></li>
+      <li><span class="stitle">席・個室・貸切・子ども・決済を一文で定義する</span><span class="sdetail">公式サイトに、総席数と内訳、個室の形態と人数、貸切の条件、子どもの同伴、使える決済をはっきり書き、各サイトをそれに合わせます。</span></li>
+      <li><span class="stitle">コスパの指摘に先回りする</span><span class="sdetail">コースの量、ハーフポーション、ペアリングの総量（約350ml）を、一休・食べログのプラン文と予約時の案内ではっきり伝えます。返信のない直近の口コミにも短いお礼を返してください。</span></li>
+    </ol>
+  </section>
+
+  <section class="block" id="s14">
+    <h2>取得不可・要確認</h2>
+    <table>
+      <thead><tr><th>項目</th><th>状況</th><th>理由</th></tr></thead>
+      <tbody>
+        <tr><td>Googleマップ本体の評点・口コミ・営業時間</td><td>取得不可（二次情報のみ）</td><td>マップ本体はJavaScriptなしでは中身が出ません。Taveri・ふるなびトラベルは4.3（31件）、こよいのワインは4.3（27件）で、件数が違います</td></tr>
+        <tr><td>Instagramの投稿数・プロフィール全文・いいね数</td><td>投稿数は取得不可、いいねは参考値（未確定）</td><td>ログインしていない表示では投稿数が出ません。プロフィールは「more」を押しても全文になりませんでした。投稿日の上の数字にはラベルがありません</td></tr>
+        <tr><td>Instagram 10/1以前の投稿キャプション</td><td>取得不可</td><td>今回はグリッドの日付と自動説明だけを確認し、キャプションは最新4件だけ読みました</td></tr>
+        <tr><td>食べログ口コミの全文と投稿日</td><td>一部のみ</td><td>一覧に出るのは冒頭と訪問月が中心です</td></tr>
+        <tr><td>一休のコース内容・サービス項目平均</td><td>取得不可</td><td>コース欄の中身が取れず、今週の取得ではサービス項目の平均も表示されませんでした</td></tr>
+        <tr><td>PayPayグルメ・TripAdvisor・OZmall</td><td>掲載を確認できず</td><td>PayPayグルメは検索が403。ウェブ検索でも店舗ページは見つかりませんでした</td></tr>
+        <tr><td>食べログ特長ワード・管理画面のエラー</td><td>確認できず</td><td>管理画面にしか出ない情報です</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="block" id="s15">
+    <h2>主な出典</h2>
+    <div class="sources">
+      <a href="https://www.bistro-cavacava.com/"><span class="site">bistro-cavacava.com</span><span class="title">公式サイト</span></a>
+      <a href="https://tabelog.com/tokyo/A1309/A130903/13245351/"><span class="site">tabelog.com</span><span class="title">食べログ 店舗ページ（点数・口コミ人数・保存・写真の出典）</span></a>
+      <a href="https://tabelog.com/tokyo/A1309/A130903/13245351/dtlratings/"><span class="site">tabelog.com</span><span class="title">食べログ 評価平均・分布</span></a>
+      <a href="https://tabelog.com/tokyo/A1309/A130903/13245351/dtlrvwlst/"><span class="site">tabelog.com</span><span class="title">食べログ 口コミ一覧（3ページ）</span></a>
+      <a href="https://tabelog.com/tokyo/A1309/A130903/13245351/party/"><span class="site">tabelog.com</span><span class="title">食べログ コース一覧</span></a>
+      <a href="https://tabelog.com/tokyo/A1309/A130903/13245351/dtlmenu/"><span class="site">tabelog.com</span><span class="title">食べログ 料理メニュー・ランチメニュー</span></a>
+      <a href="https://restaurant.ikyu.com/112789/"><span class="site">restaurant.ikyu.com</span><span class="title">一休.comレストラン 店舗・クチコミ</span></a>
+      <a href="https://r.gnavi.co.jp/m0e5110p0000/"><span class="site">r.gnavi.co.jp</span><span class="title">楽天ぐるなび 店舗・口コミ</span></a>
+      <a href="https://retty.me/area/PRE13/ARE6/SUB603/100001719956/"><span class="site">retty.me</span><span class="title">Retty</span></a>
+      <a href="https://hitosara.com/0006081068/"><span class="site">hitosara.com</span><span class="title">ヒトサラ（移転前の住所のまま）</span></a>
+      <a href="https://yoyaku.toreta.in/cavacava"><span class="site">yoyaku.toreta.in</span><span class="title">トレタ ウェブ予約</span></a>
+      <a href="https://www.instagram.com/bistro.cavacava/"><span class="site">instagram.com</span><span class="title">公式Instagram（11/28 ログインなしで確認）</span></a>
+      <a href="https://www.taveri.jp/store/ChIJU4_V8GKNGGARIFui1OoF-3g"><span class="site">taveri.jp</span><span class="title">Taveri（Google評点の二次情報）</span></a>
+      <a href="https://tp.furunavi.jp/Plan/Detail?plId=15537"><span class="site">tp.furunavi.jp</span><span class="title">ふるなびトラベル（Google評点、2026/11/12時点と記載）</span></a>
+      <a href="https://www.koyoino-wine.com/stores/ChIJU4_V8GKNGGARIFui1OoF-3g"><span class="site">koyoino-wine.com</span><span class="title">こよいのワイン（Google評点の二次情報）</span></a>
+    </div>
+    <footer class="note"><p>取得日時は2026年11月28日 08:40〜08:50ごろ（日本時間・Asia/Tokyo）です。食べログの店舗点数3.30・口コミ51人・保存4,135人・写真454枚は、同日08:41に直接取得した店舗ページの値です。評価平均ページ・口コミ一覧とも照合しており、検索結果の抜粋やキャッシュは使っていません。Instagramの数値は、同日08:40ごろにboxのブラウザでログインせずに見た表示です。比較対象は2026年11月21日版レポートです。口コミや投稿は書かれた当時の主観です。メニューは月替わりなので、掲載価格は最新の公式情報と照らし合わせてください。</p></footer>
+    <p><a class="top-link" href="#top">ページ先頭へ戻る</a></p>
+  </section>
+</div>
+</body>
+</html>
