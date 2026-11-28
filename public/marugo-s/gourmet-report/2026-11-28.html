@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta name="robots" content="noindex,nofollow">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MARUGO S グルメサイト掲載・口コミ分析（2026年11月28日）</title>
+  <style>
+    :root {
+      --bg: #f6f3ee;
+      --paper: #fffdf9;
+      --ink: #1c1916;
+      --muted: #5c564e;
+      --line: #e4ddd3;
+      --line-strong: #cfc6b8;
+      --accent: #8b1e2d;
+      --accent-soft: #f3e6e7;
+      --info: #1f4b63;
+      --info-bg: #eef5f8;
+      --danger: #9b1c1c;
+      --danger-bg: #fdecec;
+      --warning: #8a5a12;
+      --warning-bg: #f8f0de;
+      --pro: #1f5a3a;
+      --pro-bg: #eaf5ee;
+      --con: #8a3a1a;
+      --con-bg: #f8eee8;
+      --chart: #2c5f7a;
+      --chart-emphasis: #8b1e2d;
+      --chart-rest: #8aa4b3;
+      --radius: 12px;
+      --shadow: 0 1px 2px rgba(28, 25, 22, 0.06), 0 8px 24px rgba(28, 25, 22, 0.05);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", YuGothic, "Meiryo", sans-serif;
+      font-size: 16px;
+      line-height: 1.8;
+      letter-spacing: 0.01em;
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    header.hero {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 36px 36px 28px;
+      box-shadow: var(--shadow);
+      margin-bottom: 28px;
+    }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 700;
+      margin: 0 0 10px;
+    }
+    h1 {
+      font-size: 28px;
+      line-height: 1.4;
+      margin: 0 0 16px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .summary {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .meta {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    nav.toc {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 36px;
+    }
+    nav.toc h2 {
+      font-size: 13px;
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    nav.toc ol {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      columns: 2;
+      gap: 0 24px;
+    }
+    nav.toc li { break-inside: avoid; }
+    nav.toc a {
+      display: block;
+      padding: 4px 0;
+      color: var(--ink);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+    }
+    nav.toc a:hover { color: var(--accent); border-bottom-color: var(--line); }
+    nav.toc span.num {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      margin-right: 8px;
+      font-size: 12px;
+    }
+    section.block {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 28px 32px 32px;
+      margin-bottom: 22px;
+      box-shadow: var(--shadow);
+    }
+    section.block > h2 {
+      font-size: 20px;
+      margin: 0 0 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 16px;
+      margin: 22px 0 10px;
+    }
+    p { margin: 0 0 14px; }
+    p:last-child { margin-bottom: 0; }
+    .caption {
+      font-size: 13px;
+      color: var(--muted);
+      margin: -6px 0 16px;
+    }
+    .callout {
+      background: var(--info-bg);
+      border-left: 4px solid var(--info);
+      border-radius: 0 10px 10px 0;
+      padding: 16px 18px;
+      margin: 0 0 16px;
+    }
+    .callout .lead {
+      font-weight: 700;
+      color: var(--info);
+      margin: 0 0 6px;
+    }
+    .callout p { margin: 0; }
+    dl.props {
+      margin: 16px 0 0;
+      border-top: 1px solid var(--line);
+    }
+    dl.props > div {
+      display: grid;
+      grid-template-columns: 7.5em 1fr;
+      gap: 8px 16px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+    dl.props dt {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    dl.props dd { margin: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin: 8px 0 16px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--line-strong);
+      white-space: nowrap;
+    }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover td { background: #faf7f2; }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 1px 8px;
+      border-radius: 999px;
+      line-height: 1.6;
+    }
+    .badge.high { background: var(--danger-bg); color: var(--danger); }
+    .badge.mid, .badge.low { background: var(--warning-bg); color: var(--warning); }
+    .chart-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px 18px 10px;
+      margin: 16px 0;
+      background: #fff;
+    }
+    .chart-card .chart-label {
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+    .hbar {
+      display: grid;
+      grid-template-columns: 6.5em 1fr 3em;
+      gap: 6px 10px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .hbar .name { color: var(--ink); text-align: right; }
+    .hbar .track {
+      height: 14px;
+      background: #efeae3;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .hbar .fill {
+      height: 100%;
+      background: var(--chart);
+      border-radius: 999px;
+    }
+    .hbar.emphasis .fill { background: var(--chart-emphasis); }
+    .hbar .val { font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
+    .axis-note { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+    .cols {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      height: 180px;
+      padding: 8px 8px 0;
+      border-bottom: 1px solid var(--line-strong);
+    }
+    .col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 100%;
+      min-width: 0;
+    }
+    .col .bar-wrap {
+      width: 100%;
+      max-width: 48px;
+      height: 140px;
+      display: flex;
+      align-items: flex-end;
+    }
+    .col .bar {
+      width: 100%;
+      background: var(--chart);
+      border-radius: 6px 6px 0 0;
+      min-height: 2px;
+    }
+    .col .cval {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 4px;
+      color: var(--muted);
+    }
+    .col .clabel {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+    blockquote.quote {
+      margin: 16px 0;
+      padding: 14px 18px 14px 20px;
+      border-left: 3px solid var(--accent);
+      background: #fbf8f4;
+      border-radius: 0 10px 10px 0;
+    }
+    blockquote.quote p { margin: 0 0 8px; }
+    blockquote.quote footer {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    ul.procon, ol.steps, ol.ops {
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    ul.procon li, ol.steps li, ol.ops li {
+      position: relative;
+      padding: 8px 0 8px 28px;
+    }
+    ul.pro.procon li::before, ul.con.procon li::before {
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 18px;
+    }
+    ul.pro.procon li::before { content: "+"; background: var(--pro-bg); color: var(--pro); }
+    ul.con.procon li::before { content: "−"; background: var(--con-bg); color: var(--con); }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .card.pro { background: var(--pro-bg); border-color: #d5e8db; }
+    .card.con { background: var(--con-bg); border-color: #eddcd3; }
+    .card h3 { margin: 0 0 8px; }
+    ol.steps { counter-reset: step; }
+    ol.steps li { padding-left: 42px; margin-bottom: 10px; }
+    ol.steps li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 26px;
+    }
+    ol.steps .stitle { font-weight: 700; display: block; }
+    ol.steps .sdetail { color: var(--muted); font-size: 14.5px; }
+    ol.ops { counter-reset: op; }
+    ol.ops li { padding-left: 36px; margin-bottom: 8px; }
+    ol.ops li::before {
+      counter-increment: op;
+      content: counter(op) ".";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      color: var(--muted);
+      font-weight: 700;
+      width: 24px;
+    }
+    .sources {
+      display: grid;
+      gap: 8px;
+    }
+    .sources a {
+      display: block;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      background: #fff;
+    }
+    .sources a:hover { border-color: var(--accent); }
+    .sources .site {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .sources .title { font-weight: 700; }
+    a.ext { color: var(--info); word-break: break-all; }
+    td a.ext { font-size: 12.5px; }
+    footer.note {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .top-link {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .top-link:hover { color: var(--accent); }
+    @media (max-width: 720px) {
+      header.hero, section.block { padding: 22px 18px; }
+      nav.toc ol { columns: 1; }
+      .split { grid-template-columns: 1fr; }
+      dl.props > div { grid-template-columns: 1fr; gap: 2px; }
+      table { display: block; overflow-x: auto; }
+    }
+    @media print {
+      body { background: #fff; }
+      .page { padding: 0; max-width: none; }
+      header.hero, section.block, nav.toc {
+        box-shadow: none;
+        border-color: #ddd;
+        break-inside: avoid;
+      }
+      a.ext { color: inherit; }
+    }
+    .delta { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+    .delta.up { background: var(--pro-bg); color: var(--pro); }
+    .delta.flat { background: #efeae3; color: var(--muted); }
+    .delta.down { background: var(--con-bg); color: var(--con); }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 8px 0 16px; }
+    .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 12px; background: #fff; }
+    .kpi .k { font-size: 12px; color: var(--muted); font-weight: 700; display: block; }
+    .kpi .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; display: block; }
+    .kpi .d { font-size: 12px; color: var(--muted); }
+    @media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+    th:first-child, td:first-child { min-width: 7.5em; white-space: nowrap; }
+    @media (max-width: 640px) { th:first-child, td:first-child { white-space: normal; min-width: 5em; } }
+      .badge.mid { background: var(--warning-bg); color: var(--warning); }
+    .badge.low { background: #efeae3; color: var(--muted); }
+    .badge.new { background: var(--accent-soft); color: var(--accent); }
+    table.check td { font-size: 13.5px; }
+    table.check td:nth-child(2) { min-width: 6.5em; }
+    @media (max-width: 640px) { table.check td:nth-child(2) { min-width: 0; } }
+  </style>
+</head>
+<body>
+<div class="page" id="top">
+<header class="hero">
+  <p class="eyebrow">社内向けレポート（週次）</p>
+  <h1>MARUGO S グルメサイト掲載・口コミ分析</h1>
+  <p class="summary">東京ドームシティ黄色いビル2F・FOOD STADIUM TOKYO内のMARUGO S（マルゴエス／スパイスカレー＆ワインバル）について、2026年11月28日（日本時間）時点で取得できたグルメサイトの掲載内容と口コミ、X上の言及、公式Instagramの状況をまとめた週次レポートです。11月11日の初回、11月14日・11月21日と同じ方法で取得し、前週（11月21日版）と比べています。数値と引用は確認できた出典だけを使い、取得できなかったものは「取得不可」と理由を書いています。</p>
+  <div class="meta">取得日：2026年11月28日（JST＝日本時間、9:06〜9:20ごろ）／比較対象：2026年11月21日版レポート／食べログの数値は当日の店舗ページから直接取得（9:09 JST）し、同じ時刻にブラウザで開いた店舗ページの表示とも照合済み</div>
+</header>
+
+<nav class="toc">
+  <h2>目次</h2>
+  <ol>
+    <li><a href="#s1"><span class="num">01</span>調査の要点</a></li>
+    <li><a href="#s2"><span class="num">02</span>前週からの変化</a></li>
+    <li><a href="#s3"><span class="num">03</span>店舗の確認</a></li>
+    <li><a href="#s4"><span class="num">04</span>サイト横断の評価</a></li>
+    <li><a href="#s5"><span class="num">05</span>食べログ口コミ（全31件）と傾向</a></li>
+    <li><a href="#s6"><span class="num">06</span>サイト間の情報の食い違い</a></li>
+    <li><a href="#s7"><span class="num">07</span>掲載内容チェック</a></li>
+    <li><a href="#s8"><span class="num">08</span>X上の言及</a></li>
+    <li><a href="#s9"><span class="num">09</span>公式Instagramの状況</a></li>
+    <li><a href="#s10"><span class="num">10</span>強みと課題</a></li>
+    <li><a href="#s11"><span class="num">11</span>改善提案</a></li>
+    <li><a href="#s12"><span class="num">12</span>取得不可・要確認／主な出典</a></li>
+  </ol>
+</nav>
+
+<section class="block" id="s1">
+  <h2>調査の要点</h2>
+  <div class="callout">
+    <p class="lead">3週ぶりに食べログの口コミが1件増えました（総合3.5）。一方で、ホットペッパーのコース説明に「食べログ限定」という文言が残っているのが見つかりました。今週いちばん優先して直したい点です。</p>
+    <p>食べログの店舗点数は3.20（前週比±0）、口コミ31人（+1）、保存393人（+4）、写真117枚（+4）でした。新しい口コミは、口コミ13,343件・フォロワー5,497人の投稿者による11月訪問・夜の利用で、総合3.5、タイトルは「観戦前の腹ごしらえで、思わぬ本格派に遭遇！」です。項目別の点数が入っていないため、項目別平均（総合3.53、コスパ3.25が最低）は前週と同じです。点数分布は3.5〜3.9の人数が7人から8人になりました。Googleマップは4.4（23件）、写真85枚で、前週と変わりません。Xでは直近7日間の言及が0件でした。公式Instagramはフォロワー221人（+1）・フォロー中169（+1）で、最後の投稿は10月26日。直近1か月（10/28〜11/28）の投稿はありません。</p>
+  </div>
+  <p>掲載内容チェックでは、次の点を新たに見つけました。ホットペッパーのパーティープラン説明に「食べログ限定オープン記念価格…」と書かれていること。開業から約1年経っても「オープン記念」の名称が残っていること。ホットペッパーの「最高の生牡蠣」、食べログメニューの「世界初となる…いけす」が根拠を示さない表現であること。ぐるなびのアクセスが「三田線A5口」で、食べログの「A2出口」と食い違っていること。前週から指摘している3種カレーの価格（公式1,800円／ホットペッパー2,100円）、席数（24席／22席／480席）、飲み放題・設備の表記の違いは、4週連続で直っていません。</p>
+  <p>このほか、外部で次の2件を確認しました。①FOOD STADIUM TOKYOのコカ・コーラ企画（11/27〜12/25）で、MARUGO Sは「スパイスカレー3種 2,300円」のコンボを出しています。②運営会社の11月10日付プレスリリースで、マルゴSの「安比舞茸カレー」（11/10〜12/10）が告知されています。ただし、どちらもMARUGO S自身のグルメサイト・公式サイト・Instagramには載っていません。</p>
+  <p>調べた範囲：食べログ（店舗トップ、口コミ一覧2ページ、評価平均、メニュー、写真、コース）、ホットペッパー（店舗、口コミ、コース、料理、写真）、楽天ぐるなび、ヒトサラ、公式サイト、東京ドームシティの店舗案内とFOOD STADIUMのお知らせ、Googleマップ本体（未ログインのブラウザ）、Xの投稿検索、公式Instagram（ログインせずにブラウザで取得したデータ）。一休.comレストラン、Retty、Yahoo!ロコ／PayPayグルメ、TripAdvisor、OZmallでは、今週もこの店舗の掲載は見つかりませんでした。</p>
+</section>
+
+<section class="block" id="s2">
+  <h2>前週からの変化</h2>
+  <p class="caption">前週値は2026年11月21日版、今週値は2026年11月28日9:09〜9:12（JST）に各ページを直接取得した値です。</p>
+  <div class="kpis">
+    <div class="kpi"><span class="k">食べログ 店舗点数</span><span class="v">3.20</span><span class="d">前週 3.20 <span class="delta flat">±0</span></span></div>
+    <div class="kpi"><span class="k">食べログ 口コミ</span><span class="v">31人</span><span class="d">前週 30人 <span class="delta up">+1</span></span></div>
+    <div class="kpi"><span class="k">食べログ 保存</span><span class="v">393人</span><span class="d">前週 389人 <span class="delta up">+4</span></span></div>
+    <div class="kpi"><span class="k">食べログ 写真</span><span class="v">117枚</span><span class="d">前週 113枚 <span class="delta up">+4</span></span></div>
+  </div>
+  <table>
+    <thead><tr><th>項目</th><th>前週（11/21）</th><th>今週（11/28）</th><th>変化</th></tr></thead>
+    <tbody>
+      <tr><td>食べログ ユーザー総合平均</td><td>3.53</td><td>3.53</td><td><span class="delta flat">±0</span></td></tr>
+      <tr><td>食べログ 項目平均</td><td>味3.52／サービス3.41／雰囲気3.37／CP3.25／酒3.41</td><td>同じ</td><td><span class="delta flat">±0</span>（新規口コミは項目別の点数なし）</td></tr>
+      <tr><td>食べログ 点数分布</td><td>5.0:1／4.0台:7／3.5台:7／3.0台:15</td><td>5.0:1／4.0台:7／3.5台:8／3.0台:15</td><td><span class="delta up">3.5台 +1</span></td></tr>
+      <tr><td>食べログ 写真内訳</td><td>料理68／ドリンク27／内観10／外観1（店舗35・投稿78）</td><td>料理72／ドリンク27／内観10／外観1（店舗35・投稿82）</td><td><span class="delta up">料理 +4</span></td></tr>
+      <tr><td>食べログ 利用金額（最新10件）</td><td>夜1,000円台4件、昼〜999円3・1,000円台6・2,000円台1</td><td>同じ表示</td><td><span class="delta flat">変化なし</span></td></tr>
+      <tr><td>ホットペッパー</td><td>口コミ2件・評点未表示・写真8枚</td><td>口コミ2件・評点未表示・写真8枚</td><td><span class="delta flat">±0</span></td></tr>
+      <tr><td>ぐるなび／ヒトサラ</td><td>基本情報のみ</td><td>基本情報のみ</td><td><span class="delta flat">変化なし</span></td></tr>
+      <tr><td>Googleマップ</td><td>4.4（23件）・写真85枚</td><td>4.4（23件）・写真85枚</td><td><span class="delta flat">±0</span></td></tr>
+      <tr><td>Google 星分布</td><td>5★17／4★2／3★1／2★2／1★1</td><td>同じ</td><td><span class="delta flat">±0</span></td></tr>
+      <tr><td>X 言及（直近7日）</td><td>1件</td><td>0件</td><td><span class="delta down">−1</span></td></tr>
+      <tr><td>Instagram</td><td>フォロワー220／フォロー168</td><td>フォロワー221／フォロー169</td><td><span class="delta up">+1／+1</span></td></tr>
+      <tr><td>Instagram 最終投稿</td><td>推定10/27（投稿IDから計算）</td><td>10/26（グリッドの代替テキストの日付）</td><td>新規投稿なし（日付を訂正）</td></tr>
+    </tbody>
+  </table>
+  <div class="chart-card">
+    <p class="chart-label">食べログ 保存数の推移（人）</p>
+    <div class="cols">
+      <div class="col"><span class="cval">381</span><div class="bar-wrap"><div class="bar" style="height:30%"></div></div><span class="clabel">11/11</span></div>
+      <div class="col"><span class="cval">383</span><div class="bar-wrap"><div class="bar" style="height:40%"></div></div><span class="clabel">11/14</span></div>
+      <div class="col"><span class="cval">389</span><div class="bar-wrap"><div class="bar" style="height:70%"></div></div><span class="clabel">11/21</span></div>
+      <div class="col"><span class="cval">393</span><div class="bar-wrap"><div class="bar" style="height:90%;background:var(--chart-emphasis)"></div></div><span class="clabel">11/28</span></div>
+    </div>
+    <p class="axis-note">縦軸は375〜395人の範囲を拡大しています。11/11→11/14は3日間、それ以降は7日間ごとの変化です。</p>
+  </div>
+  <p>今週動いたのは、食べログの口コミ（+1）・写真（+4、新規口コミの投稿写真とみられる）・保存（+4）と、Instagram（フォロワー+1）です。食べログの新規口コミは10月下旬以来、3週ぶりでした。保存の伸びは前週の+6からやや鈍りましたが、計測を始めてから増え続けています。Xの言及はゼロに戻りました。サイト間の食い違いは、今週も1件も直っていません。</p>
+</section>
+
+<section class="block" id="s3">
+  <h2>店舗の確認</h2>
+  <p>住所・電話番号が公式サイト、食べログ、Googleマップで一致するため、同じ店舗と判断しています。グループの新宿・四谷・丸の内などの「マルゴ」各店とは別の店舗です。</p>
+  <dl class="props">
+    <div><dt>店名</dt><dd>MARUGO S（マルゴエス）。Googleマップ上の名称は「マルゴエス / MARUGO S」、カテゴリは「ワインバー」</dd></div>
+    <div><dt>住所</dt><dd>東京都文京区後楽1-3-61 東京ドームシティ 黄色いビル2F FOOD STADIUM TOKYO</dd></div>
+    <div><dt>電話</dt><dd>03-6801-8705</dd></div>
+    <div><dt>営業時間</dt><dd>11:00〜23:00（料理L.O.22:00／ドリンクL.O.22:30）、年中無休。12月31日は翌2時まで、1月1日も営業（公式・食べログ・ホットペッパー・ぐるなび）。FOOD STADIUMのお知らせでは11/7・8・25・26に10:00開店（いずれも過ぎた日程）</dd></div>
+    <div><dt>専用席</dt><dd>公式では専用カウンター24席。フードコート全体は約480席</dd></div>
+    <div><dt>公式</dt><dd><a class="ext" href="https://marugo-s.com/s/">https://marugo-s.com/s/</a>／Instagram <a class="ext" href="https://www.instagram.com/marugo_s.official/">@marugo_s.official</a>（フォロワー221）。店舗公式のXアカウントは確認できず</dd></div>
+    <div><dt>食べログ</dt><dd>3.20・口コミ31人・保存393人・写真117枚（2026/11/28 9:09 JST、ライブの店舗ページから取得。ブラウザで開いた画面の表示も同じ値）</dd></div>
+  </dl>
+</section>
+
+<section class="block" id="s4">
+  <h2>サイト横断の評価</h2>
+  <p class="caption">評点の尺度はサイトごとに違うため、数字をそのまま並べて比べることはしていません。</p>
+  <table>
+    <thead><tr><th>サイト</th><th>評点</th><th>口コミ</th><th>掲載状況（11/28）</th></tr></thead>
+    <tbody>
+      <tr><td>食べログ</td><td>店舗3.20／平均3.53</td><td>31人</td><td>充実。写真117枚・保存393人。コース1件（パーティープラン）、料理メニュー21件（更新は2026/08/27）、ドリンクメニューは0件</td></tr>
+      <tr><td>Googleマップ</td><td>4.4</td><td>23件</td><td>写真85枚。予約リンクはホットペッパー。オーナー返信あり（最新は約1か月前）</td></tr>
+      <tr><td>ホットペッパー</td><td>未表示</td><td>2件</td><td>予約・コース・クーポンあり、写真8枚。評点は2026年1月以降の口コミ5件以上で表示（あと3件）。このお店をブックマークしたレポーターは8人</td></tr>
+      <tr><td>楽天ぐるなび</td><td>記載なし</td><td>募集中</td><td>基本情報のみ（ジャンルは「カレーライス」）</td></tr>
+      <tr><td>ヒトサラ</td><td>記載なし</td><td>表示なし</td><td>基本情報のみ。写真を募集中</td></tr>
+      <tr><td>一休・Retty・Yahoo!/PayPay・TripAdvisor・OZmall</td><td>—</td><td>—</td><td>この店舗の掲載は見つからず（詳しくは12章）</td></tr>
+    </tbody>
+  </table>
+  <div class="split">
+    <div class="chart-card">
+      <p class="chart-label">食べログ 項目別のユーザー平均（5点満点・前週比はすべて±0）</p>
+      <div class="hbar"><span class="name">総合</span><div class="track"><div class="fill" style="width:70.6%"></div></div><span class="val">3.53</span></div>
+      <div class="hbar"><span class="name">料理・味</span><div class="track"><div class="fill" style="width:70.4%"></div></div><span class="val">3.52</span></div>
+      <div class="hbar"><span class="name">サービス</span><div class="track"><div class="fill" style="width:68.2%"></div></div><span class="val">3.41</span></div>
+      <div class="hbar"><span class="name">酒・ドリンク</span><div class="track"><div class="fill" style="width:68.2%"></div></div><span class="val">3.41</span></div>
+      <div class="hbar"><span class="name">雰囲気</span><div class="track"><div class="fill" style="width:67.4%"></div></div><span class="val">3.37</span></div>
+      <div class="hbar emphasis"><span class="name">コスパ</span><div class="track"><div class="fill" style="width:65%"></div></div><span class="val">3.25</span></div>
+      <p class="axis-note">バーの長さは5.00を100%として表示。最も低いコスパを色で強調しています。</p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-label">食べログ 点数分布（31件）</p>
+      <div class="hbar"><span class="name">5.0</span><div class="track"><div class="fill" style="width:6.7%"></div></div><span class="val">1</span></div>
+      <div class="hbar"><span class="name">4.5〜4.9</span><div class="track"><div class="fill" style="width:0%"></div></div><span class="val">0</span></div>
+      <div class="hbar"><span class="name">4.0〜4.4</span><div class="track"><div class="fill" style="width:46.7%"></div></div><span class="val">7</span></div>
+      <div class="hbar emphasis"><span class="name">3.5〜3.9</span><div class="track"><div class="fill" style="width:53.3%"></div></div><span class="val">8</span></div>
+      <div class="hbar"><span class="name">3.0〜3.4</span><div class="track"><div class="fill" style="width:100%"></div></div><span class="val">15</span></div>
+      <p class="axis-note">2点台以下は0人。今週増えた3.5〜3.9を色で強調しています。</p>
+    </div>
+  </div>
+  <div class="chart-card">
+    <p class="chart-label">Googleマップ 星の分布（23件、11/28 9:10 JSTにマップ本体で確認）</p>
+    <div class="hbar"><span class="name">5つ星</span><div class="track"><div class="fill" style="width:100%"></div></div><span class="val">17</span></div>
+    <div class="hbar"><span class="name">4つ星</span><div class="track"><div class="fill" style="width:11.8%"></div></div><span class="val">2</span></div>
+    <div class="hbar"><span class="name">3つ星</span><div class="track"><div class="fill" style="width:5.9%"></div></div><span class="val">1</span></div>
+    <div class="hbar"><span class="name">2つ星</span><div class="track"><div class="fill" style="width:11.8%"></div></div><span class="val">2</span></div>
+    <div class="hbar"><span class="name">1つ星</span><div class="track"><div class="fill" style="width:5.9%"></div></div><span class="val">1</span></div>
+  </div>
+  <p>食べログの3.20は食べログ独自の計算による点数、3.53は投稿の単純平均です。新しい口コミは総合3.5でしたが、平均の表示は3.53のまま変わっていません。利用金額の分布（最新10件）は前週と同じ表示で、新規口コミ（夜・1,000〜1,999円）はまだ反映されていないようです。店舗ページのディナー予算は3,000〜3,999円ですが、口コミの実際の利用金額は昼も夜も1,000円台が中心です。</p>
+</section>
+
+<section class="block" id="s5">
+  <h2>食べログ口コミ（全31件）と傾向</h2>
+  <p>11月28日に口コミ一覧2ページ（31件）を取得し、前週の30件と1件ずつ照合しました。新しく増えたのは下の表で「新規」と付けた1件だけです。前週からあった30件は、訪問月と点数の組み合わせが変わっていません（変わったのは投稿者の累計口コミ数などだけ）。表の「返信」欄は、一覧ページにお店のコメントが表示されているかで判定しています。</p>
+  <table>
+    <thead><tr><th>訪問月</th><th>投稿者</th><th class="num">総合</th><th>昼夜</th><th>利用金額</th><th>タイトル</th><th>返信</th><th>リンク</th></tr></thead>
+    <tbody>
+<tr><td>2026/11 <span class="badge new">新規</span></td><td>アイアンマン哲生</td><td class="num">3.5</td><td>夜</td><td>￥1,000～￥1,999</td><td>観戦前の腹ごしらえで、思わぬ本格派に遭遇！</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B539733573/">口コミ</a></td></tr>
+<tr><td>2026/11</td><td>mmmm5275</td><td class="num">3.0</td><td>昼</td><td>～￥999</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B538939608/">口コミ</a></td></tr>
+<tr><td>2026/11</td><td>here_376</td><td class="num">3.4</td><td>昼</td><td>－</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B538475199/">口コミ</a></td></tr>
+<tr><td>2026/10</td><td>satoru001</td><td class="num">3.2</td><td>夜</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B538061263/">口コミ</a></td></tr>
+<tr><td>2026/10</td><td>8b2e13</td><td class="num">3.0</td><td>昼</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B537437364/">口コミ</a></td></tr>
+<tr><td>2026/08</td><td>かゆかゆ0126</td><td class="num">3.0</td><td>昼</td><td>～￥999</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B533954604/">口コミ</a></td></tr>
+<tr><td>2026/08</td><td>がだい</td><td class="num">4.0</td><td>昼</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B532838211/">口コミ</a></td></tr>
+<tr><td>2026/07</td><td>timothy0615</td><td class="num">3.2</td><td>夜</td><td>￥1,000～￥1,999</td><td>楽しい空間</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B536842304/">口コミ</a></td></tr>
+<tr><td>2026/07</td><td>いちょうさん</td><td class="num">3.8</td><td>昼</td><td>￥2,000～￥2,999</td><td>美味しいビールとソーセージとスパイスカレー</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B531957399/">口コミ</a></td></tr>
+<tr><td>2026/07</td><td>神まんじゅう</td><td class="num">3.5</td><td>夜</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B531839202/">口コミ</a></td></tr>
+<tr><td>2026/06</td><td>eat_time</td><td class="num">5.0</td><td>夜</td><td>￥1,000～￥1,999</td><td>観戦しながらカレーを食べられる</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B530505151/">口コミ</a></td></tr>
+<tr><td>2026/06</td><td>ynさん</td><td class="num">3.3</td><td>昼</td><td>￥1,000～￥1,999</td><td>カルダモンが前面に出ているカレーでした</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B530183830/">口コミ</a></td></tr>
+<tr><td>2026/06</td><td>メイコ573766</td><td class="num">3.0</td><td>昼</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B534726706/">口コミ</a></td></tr>
+<tr><td>2026/06</td><td>ns9ks</td><td class="num">4.0</td><td>昼</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B529624416/">口コミ</a></td></tr>
+<tr><td>2026/06</td><td>キヤマノモコ</td><td class="num">3.2</td><td>昼</td><td>￥2,000～￥2,999</td><td>SPICE CURRY3種</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B529476445/">口コミ</a></td></tr>
+<tr><td>2026/06</td><td>ぶれないスパークリング</td><td class="num">4.0</td><td>—</td><td>￥1,000～￥1,999</td><td>祝杯♪</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B530243063/">口コミ</a></td></tr>
+<tr><td>2026/05</td><td>マコ0702</td><td class="num">3.8</td><td>昼</td><td>～￥999</td><td>カレーやさんのスパイス香るラッシー♪</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B528130836/">口コミ</a></td></tr>
+<tr><td>2026/05</td><td>よっしー★☆★</td><td class="num">3.5</td><td>昼</td><td>－</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B527554544/">口コミ</a></td></tr>
+<tr><td>2026/04</td><td>ももたす2525</td><td class="num">4.0</td><td>昼</td><td>－</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B526439566/">口コミ</a></td></tr>
+<tr><td>2026/04</td><td>cake4414</td><td class="num">3.4</td><td>昼</td><td>￥1,000～￥1,999</td><td>フードコートにもMARUGOが！！</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B526610873/">口コミ</a></td></tr>
+<tr><td>2026/03</td><td>Masami。</td><td class="num">4.0</td><td>夜</td><td>－</td><td>WBC観戦におすすめ</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B524056634/">口コミ</a></td></tr>
+<tr><td>2026/03</td><td>126357</td><td class="num">3.4</td><td>夜</td><td>－</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B524975535/">口コミ</a></td></tr>
+<tr><td>2026/02</td><td>TA・KA</td><td class="num">3.0</td><td>昼</td><td>￥1,000～￥1,999</td><td>2種のカレーをいただく</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B523226302/">口コミ</a></td></tr>
+<tr><td>2026/02</td><td>KamA</td><td class="num">3.4</td><td>昼</td><td>￥1,000～￥1,999</td><td>東京ドームシティでスパイスカレー</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B522997560/">口コミ</a></td></tr>
+<tr><td>2026/01</td><td>さちゃ丸</td><td class="num">3.5</td><td>夜</td><td>￥1,000～￥1,999</td><td>LIVE前にぴったり！東京ドーム近くで楽しむ本格スパイスカレー</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B521672432/">口コミ</a></td></tr>
+<tr><td>2026/01</td><td>もぐもぐひつじ</td><td class="num">3.5</td><td>夜</td><td>－</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B520924163/">口コミ</a></td></tr>
+<tr><td>2026/01</td><td>油の大将</td><td class="num">3.3</td><td>夜</td><td>￥1,000～￥1,999</td><td>個性あふれる３種類のスパイスカレーは、賛否が分かれる？のかな？？？</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B520251332/">口コミ</a></td></tr>
+<tr><td>2025/12</td><td>hideomi</td><td class="num">4.0</td><td>—</td><td>￥5,000～￥5,999</td><td>新宿三丁目のワインバーMARUGOによるお店が水道橋に2025/12/9 新オープン！</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B518642413/">口コミ</a></td></tr>
+<tr><td>2025/12</td><td>カレーおじさん＼(^o^)／</td><td class="num">3.5</td><td>昼</td><td>￥1,000～￥1,999</td><td>大フードコートのスパイスカレー店</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B520143248/">口コミ</a></td></tr>
+<tr><td>2025/12</td><td>SPYNo2</td><td class="num">3.0</td><td>昼</td><td>￥1,000～￥1,999</td><td>（タイトルなし）</td><td>あり</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B518791087/">口コミ</a></td></tr>
+<tr><td>-</td><td>m-pink</td><td class="num">4.0</td><td>昼</td><td>－</td><td>（タイトルなし）</td><td>—</td><td><a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B524910604/">口コミ</a></td></tr>
+    </tbody>
+  </table>
+  <h3>今週の新規口コミ</h3>
+  <blockquote class="quote">
+    <p>ひと口いただくと、スパイスがしっかり効いた、なかなか本格的なカレーです。完熟トマトの旨味にガーリックの風味、そして海老の存在感。</p>
+    <p>いやいや、フードコートのお店と侮ってはいけませんね。</p>
+    <footer>アイアンマン哲生（食べログ、2026年11月訪問・夜、総合3.5、¥1,000〜¥1,999、1人）「観戦前の腹ごしらえで、思わぬ本格派に遭遇！」 <a class="ext" href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/B539733573/">口コミページ</a></footer>
+  </blockquote>
+  <p>この口コミは、キックボクシング観戦前の少し早めの夕食での利用です。「完熟トマトのガーリックシュリンプカレー」を注文し、途中でライムを絞る味変も楽しんだと書かれています。本文には「こんなお店があったんですね。最近できたのでしょうか。今まで気が付きませんでした。」ともあり、フードコート内での認知度にはまだ伸びしろがあると読めます。なお、口コミにはカレーの価格が「1,000円」と書かれていますが、公式の1種1,400円とは合いません。季節限定品なのか、投稿者の記載違いなのかは確認できていません。11月28日時点では、この口コミへのお店の返信は表示されていません。</p>
+  <div class="split">
+    <div class="card pro">
+      <h3>よく出てくる強み</h3>
+      <ul class="pro procon">
+        <li>スパイスの効いた本格的なカレーと、味変（ライム、アチャール、追いスパイス）。今週の新規口コミも同じ評価</li>
+        <li>専用カウンターがあり、ドームのイベント日でも座りやすい</li>
+        <li>観戦・ライブの前後に使える立地と通し営業（新規口コミもキックボクシング観戦前の利用）</li>
+        <li>ソムリエや店員によるワインの提案、フードコートにしては丁寧な接客</li>
+      </ul>
+    </div>
+    <div class="card con">
+      <h3>繰り返し出る不満や留保</h3>
+      <ul class="con procon">
+        <li>フードコートにしては価格が高めという声。コスパは項目別で最低の3.25</li>
+        <li>ご飯やルーの量・腹持ち（店側の返信では大盛り＋200円を案内）</li>
+        <li>スパイスの個性が強く、好みが分かれる。付け合わせの酸味が強めという指摘も</li>
+        <li>テイクアウトの待ち時間と接客への不満（Googleの2つ星クチコミ、約1か月前）</li>
+      </ul>
+    </div>
+  </div>
+  <blockquote class="quote">
+    <p>テイクアウトで注文したら、30分以上待たされた。遅いからレジの女性店員にまだかかるか聞いたら、そっけなく「まだですね。」の一言で感じが悪い。</p>
+    <footer>りんK（Googleマップ、約1か月前、2つ星。オーナー返信あり。11/28にも表示を確認）</footer>
+  </blockquote>
+  <p>食べログでは、10月〜11月に訪問した5件（新規を含め3.0〜3.5）すべてで、お店の返信が一覧上に表示されていません。Googleマップでは、最初に表示されるクチコミ3件にすべてオーナー返信が付いています。</p>
+</section>
+
+<section class="block" id="s6">
+  <h2>サイト間の情報の食い違い</h2>
+  <p>営業時間の基本（11:00〜23:00、料理L.O.22:00、ドリンクL.O.22:30、年中無休）は、公式・食べログ・ホットペッパー・ぐるなび・ヒトサラ・東京ドームシティ・Googleマップで一致しています。ほかの各ページの本文は、空席カレンダーなどを除いて前週から変わっておらず、前週までに挙げた食い違いはすべて残っています。</p>
+  <table>
+    <thead><tr><th>項目</th><th>食い違い（11/28時点）</th><th>優先度</th></tr></thead>
+    <tbody>
+      <tr><td>3種カレーの価格</td><td>公式は3種1,800円（1種1,400円・2種1,600円）。ホットペッパーは3種2,100円（2026/02/24更新）。食べログは「1,400円〜」。このほか、FOOD STADIUMのコカ・コーラ企画では「スパイスカレー3種 2,300円」のコンボ（瓶のコカ・コーラとのセット）。未解消（4週連続）</td><td><span class="badge high">高</span></td></tr>
+      <tr><td>席数</td><td>公式は専用カウンター24席。食べログは「480席（専用カウンター席24席）」。ホットペッパーは「総席数22席」「最大宴会収容人数480人」。東京ドームシティは「FOOD STADIUM TOKYO内480席」。未解消</td><td><span class="badge high">高</span></td></tr>
+      <tr><td>飲み放題</td><td>ホットペッパーの店舗情報は「飲み放題 なし」。しかし同じサイトのコースは「フリードリンク30種／2時間制」。食べログと東京ドームシティは飲み放題「あり」。未解消</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>アクセス</td><td>公式はJR水道橋 徒歩3分。食べログは西口徒歩2分・三田線A2出口徒歩4分だが、PR文は「水道橋徒歩１分」。ホットペッパーは西口約5分・A2出口約6分。ぐるなびは「都営三田線水道橋駅A5口 徒歩3分」（今週の照合で出口番号の違いを確認）</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>設備</td><td>ホットペッパーはWi-Fiなし・ソファーなし。食べログは無料Wi-Fiあり・ソファー席あり。未解消</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>メニュー</td><td>Instagram（10/26）ではクロスティーニ8種へのフードリニューアルを告知。食べログのメニュー（2026/08/27更新）、ホットペッパー（2026/02/24更新）、公式サイトにはクロスティーニの記載なし</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>年末年始</td><td>12月31日の翌2時までの延長と元日の営業は、公式・食べログ・ホットペッパー・ぐるなびに記載あり（ぐるなびは前週版で「未確認」としていたが、本文に記載があったため訂正）。ヒトサラは「年中無休／元旦も営業」のみ。Googleマップの特別営業時間とInstagramでの告知は確認できず</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>ジャンル</td><td>食べログはカレー・バル、ホットペッパーはダイニングバー・バル、ぐるなびはカレーライス、ヒトサラはカレー、Googleはワインバー、公式はWine Bar &amp; Spice Curry</td><td><span class="badge low">低</span></td></tr>
+      <tr><td>ディナー予算</td><td>食べログ・ヒトサラは3,000〜3,999円、ホットペッパーは3,001〜4,000円、東京ドームシティは3,000〜5,000円。食べログの口コミの実際の利用金額は1,000円台が中心</td><td><span class="badge low">低</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="s7">
+  <h2>掲載内容チェック</h2>
+  <p>参照ガイド（/home/box/agent-data/reference/gourmet_listing_check_guide_2026-11-21.md）に沿って、11月28日に公開されている各サイトの掲載を確認しました。確認した観点は、食べログ特長ワード（ジャンル・エリア・駅名との重複、表示対象外の語、1枠に複数語）、根拠のない最上級・No.1表現、根拠のない限定・プレミアム表現、サイト間の価格・コース品数・飲み放題時間・営業時間・席数・アクセスの不一致、古いお知らせ、PR文への予約誘導などです。</p>
+  <div class="callout"><p><strong>前提：</strong>食べログの特長ワード欄そのものは公開ページに表示されないため、設定内容は確認できません。メニューページ下部の「関連のキーワード」は自動で表示されるものとみられ、特長ワードの設定とは別です。下の表は公開ページから見た「問題の可能性」です。<strong>管理画面での登録の可否や、検索順位・予約数への影響は、公開ページからは検証できません。</strong></p></div>
+  <table class="check">
+    <thead><tr><th>サイト</th><th>項目</th><th>現在の文言</th><th>問題の可能性</th><th>修正案</th><th>重要度</th></tr></thead>
+    <tbody>
+      <tr><td>ホットペッパー</td><td>コース説明</td><td>「【オープン記念】パーティープラン（料理6皿10品＋フリードリンク30種／2時間制）」の説明に「食べログ限定オープン記念価格…」</td><td>別の媒体（食べログ）の名前と「限定」が、ホットペッパー上に載っている。利用者が誤解しやすく、食べログ用の文面を流用したとみられる</td><td>ホットペッパー用の文面に書き換える。価格・期限・条件を両サイトでそろえる（例：「ネット予約特典で6,000円→5,500円（2026年12月末まで）」）</td><td><span class="badge high">高</span></td></tr>
+      <tr><td>食べログ／ホットペッパー</td><td>コース名・クーポン</td><td>「【オープン記念】パーティプランご予約で6000円が5500円に！」（食べログのコース説明は「（2026年12月末まで）」）</td><td>開業（2025年12月9日）から約1年経っても「オープン記念」が残る古いお知らせ。ホットペッパーのコース説明の見える範囲には期限の記載がない</td><td>名称を実態に合わせて変える（例：年末・忘年会向けの名称）。期限を両サイトに明記し、期限が来たら終了または更新する</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>ホットペッパー</td><td>料理説明</td><td>「時期によって最高の生牡蠣を各地から。安心安全。売り切れ御免。」</td><td>根拠を示さない最上級表現（「最高の」）</td><td>「時期ごとに各地から旬の生牡蠣を仕入れています」など、事実で言える表現にする</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>食べログ</td><td>メニュー（フレッシュオイスター）</td><td>「取り扱いの生牡蠣は世界初となる減菌・紫外線殺菌の塩水シャワー型いけすを使用しており、安心安全な牡蠣を供給してます。」</td><td>「世界初」は客観的な根拠が必要な表現。仕入れ先の説明であれば、その旨と根拠が分かるようにしたい</td><td>仕入れ先の公表資料で根拠を確認し、「仕入れ先・山小三の○○いけすを使用」などの事実表現にするか、「世界初」を削る</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>食べログ</td><td>お店のPR</td><td>「【水道橋徒歩１分】厳選ワイン、スパイスカレーの新しいマルゴがフードコートに誕生！」</td><td>同じページの交通手段（西口徒歩2分）、公式（徒歩3分）、ホットペッパー（約5分）と合わない。PR文の冒頭が所在地・アクセスの説明になっている。「誕生！」は開業時の文面のまま</td><td>PR文はお店の特徴に絞る。徒歩分数は交通欄の表記にそろえる。開業告知の文面を今の訴求（冬メニュー・観戦前後の利用など）に更新する</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>ホットペッパー</td><td>店舗情報（飲み放題）</td><td>「飲み放題 なし」</td><td>同じサイトのコースは「フリードリンク30種／2時間制」。食べログ・東京ドームシティは飲み放題あり</td><td>実際の提供条件（コース限定・2時間制）で「あり」とし、条件を備考に書く</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>全サイト</td><td>価格・席数</td><td>3種カレー：公式1,800円／ホットペッパー2,100円／食べログ1,400円〜。席数：24席／22席／480席</td><td>サイト間で価格と席数が合わない（4週連続）</td><td>正しい価格を確定して同じ日に全サイトを更新する。席数は「専用カウンター24席（フードコート共用約480席）」に統一</td><td><span class="badge high">高</span></td></tr>
+      <tr><td>ぐるなび</td><td>アクセス</td><td>「都営三田線水道橋駅A5口 徒歩3分」</td><td>食べログ・ホットペッパーは「A2出口」。出口番号が合わない</td><td>実際に使う出口を確認して、全サイトで同じ出口・分数にする</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>ホットペッパー</td><td>設備</td><td>「Wi-Fi なし」「ソファー なし」</td><td>食べログは「無料Wi-Fiあり」「ソファー席あり」</td><td>フードコート共用の設備かどうかを含め、実態に合わせて両サイトをそろえる</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>食べログ・HP・公式</td><td>メニュー更新</td><td>食べログのメニューは2026/08/27更新、ホットペッパーは2026/02/24更新。クロスティーニ8種（Instagram 10/26）、安比舞茸カレー（11/10〜12/10）、コカ・コーラ企画のコンボ（11/27〜12/25）はいずれも記載なし</td><td>Instagram・外部告知とグルメサイトの内容が合っていない。古い価格が残る原因にもなる</td><td>メニュー・期間限定品を各サイトに登録し、終了日に外す</td><td><span class="badge mid">中</span></td></tr>
+      <tr><td>Instagram</td><td>営業時間の表記</td><td>投稿の定型文「毎日：11:00〜23:00（L.O.22:30）」</td><td>各サイトは料理L.O.22:00・ドリンクL.O.22:30。料理のL.O.が分からない</td><td>「L.O. 料理22:00／ドリンク22:30」に統一する</td><td><span class="badge low">低</span></td></tr>
+      <tr><td>ホットペッパー</td><td>キャッチのタグ</td><td>「カレー/バル/カクテル/牡蛎/打ち上げ/女子会/デート/水道橋/後楽園/東京ドーム」</td><td>エリア・駅名を含む。食べログの特長ワードでは駅名などが対象外になる場合があるが、ホットペッパーに同じ種類のNG一覧があるかは公開情報で確認できない（参考扱い）</td><td>現状維持でよい。女子会・デートなどは実態（専用カウンター・予約可否）に合うかだけ確認する</td><td><span class="badge low">低</span></td></tr>
+      <tr><td>食べログ</td><td>特長ワード</td><td>公開ページには表示されないため取得不可</td><td>ジャンル（カレー・バル）、エリア・駅名（水道橋・後楽園・東京ドーム）との重複や、1枠に複数語を入れていないかは確認できない</td><td>管理画面で、ガイドの基準（実態に合う短い語を1枠に1つ、ジャンル・駅名は避ける）に沿っているか確認する</td><td><span class="badge low">要確認</span></td></tr>
+    </tbody>
+  </table>
+  <p>今週の最重要の指摘は、ホットペッパーのコース説明に「食べログ限定オープン記念価格」が残っていることです。PR文に予約方法を誘導する文言は、食べログ・ホットペッパーとも見つかりませんでした。「プレミアム」の表記は、食べログのメニュー「プレミアムハイボール［デュワーズ15年］」（商品名）とサイト側のサービス名だけで、店舗の宣伝文言としては見当たりません。</p>
+</section>
+
+<section class="block" id="s8">
+  <h2>X上の言及</h2>
+  <p>XのAPI検索で「MARUGO S」「MARUGO-S」「マルゴエス」「マルゴS」「#MARUGOS」「marugo_s」を対象に集計しました（リポストは除外）。</p>
+  <dl class="props">
+    <div><dt>直近7日間</dt><dd><strong>0件</strong>（2026/11/21 9:30〜11/28 9:10 JST、件数APIで日別すべて0件）</dd></div>
+    <div><dt>組み合わせ検索</dt><dd>「マルゴ／MARUGO」と「東京ドーム／ドームシティ／黄色いビル／FOOD STADIUM／フードスタジアム／水道橋」の組み合わせでも、同じ期間は0件</dd></div>
+    <div><dt>直近の言及</dt><dd>11/17の1件のみ（前週報告済み）：@teruteru07b06r「フードスタジアムのMARUGO-S選ばしてくれました！」 <a class="ext" href="https://x.com/teruteru07b06r/status/2122588781371109790">https://x.com/teruteru07b06r/status/2122588781371109790</a>（11/28時点でいいね1、表示946）</dd></div>
+    <div><dt>感情</dt><dd>今週は対象の投稿なし。否定的な投稿も見当たらない</dd></div>
+    <div><dt>公式アカウント</dt><dd>店舗公式のXアカウントは引き続き確認できず。公式の発信拠点はInstagram</dd></div>
+  </dl>
+  <p>FOOD STADIUM TOKYOのコカ・コーラ企画（11/27開始、対象メニューで「めじるしチャーム」がもらえる）は、施設全体の話題になる可能性があります。ただし、取得した時点では、MARUGO Sに触れた投稿はまだありませんでした。</p>
+</section>
+
+<section class="block" id="s9">
+  <h2>公式Instagramの状況</h2>
+  <p>データは、2026年11月28日9:06〜9:12（JST）ごろに、ログインせずにボックスのブラウザで公式アカウント <a class="ext" href="https://www.instagram.com/marugo_s.official/">https://www.instagram.com/marugo_s.official/</a> を開いて取得したものです（ログイン・認証情報の入力はなし。ポップアップは×で閉じただけ）。いいね数などの一部の項目は、画面上で取得できませんでした。</p>
+  <table>
+    <thead><tr><th>項目</th><th>11/28の状況</th><th>前回（11/21）からの変化</th></tr></thead>
+    <tbody>
+      <tr><td>表示名</td><td>MARUGO S(マルゴエス)｜Wine Bar &amp; Spice Curry</td><td>変化なし</td></tr>
+      <tr><td>フォロワー</td><td>221</td><td><span class="delta up">+1</span>（220→221）</td></tr>
+      <tr><td>フォロー中</td><td>169</td><td><span class="delta up">+1</span>（168→169）</td></tr>
+      <tr><td>投稿総数</td><td>取得不可（画面に表示されない）</td><td>—</td></tr>
+      <tr><td>最終投稿</td><td>2026年10月26日（クロスティーニ8種のフードリニューアル告知）</td><td>新規投稿なし。前回の推定10/27を10/26に訂正</td></tr>
+      <tr><td>直近1か月の投稿</td><td>0件（10/28〜11/28）。最終投稿から33日</td><td>—</td></tr>
+      <tr><td>写真／リール比率</td><td>判別不可。グリッド12件の代替テキストはすべて「Photo by…」で、リールを示す表記はなし。カルーセル（複数枚）のアイコンは2件</td><td>—</td></tr>
+      <tr><td>いいね・コメント</td><td>画面上は取得不可。参考値：投稿ページのメタ情報では10/26がいいね9・コメント0、7/19がいいね8・コメント0、7/1がいいね7・コメント0（画面表示の値ではない）</td><td>—</td></tr>
+      <tr><td>ハイライト・リンク</td><td>ハイライト名は取得不可。リンクは「marugo-s.com/s and 1 more」で、2本目は取得不可</td><td>—</td></tr>
+      <tr><td>プロフィール文</td><td>スパイス×ワイン、2025年12月9日OPEN、スパイスカレー全3種、スノー・シェイブ、生牡蠣2種、グラスワイン全10種、ボトルワイン約50本、抹茶白玉ラテ、Open 11:00／Close 23:00</td><td>変化なし</td></tr>
+    </tbody>
+  </table>
+  <h3>最新の投稿のポイント</h3>
+  <p>10月26日の投稿は、秋冬向けのフードリニューアルとして8種のクロスティーニ（生ハムとパイナップル、レバームース、アボカドとスモークサーモン、牡蠣の冷製コンフィなど）を紹介しています。定型の締めくくりで「試合・ライブの前後は MARUGO S へ」「タグ付け歓迎／DM歓迎」と案内しています。その前の投稿は7/19（スノーシェイブ2種）と7/1（文京区「がんばるお店応援キャンペーン」のソコヂカラセット、8/15まで）です。グリッドの上位3件に、期限切れのキャンペーン告知が今も残っています。</p>
+  <h3>グルメサイトとの食い違い</h3>
+  <table>
+    <thead><tr><th>観点</th><th>Instagram</th><th>グルメサイト・公式</th></tr></thead>
+    <tbody>
+      <tr><td>営業時間</td><td>プロフィール11:00〜23:00、投稿の定型文「L.O.22:30」</td><td>料理L.O.22:00／ドリンクL.O.22:30。年末12/31は翌2時まで（Instagramでは告知なし）</td></tr>
+      <tr><td>定休日</td><td>「毎日」営業</td><td>年中無休で一致</td></tr>
+      <tr><td>コース価格</td><td>パーティープランの記載なし</td><td>食べログ・ホットペッパーで6,000円→5,500円の「オープン記念」プラン</td></tr>
+      <tr><td>予約リンク</td><td>リンクは公式サイト（＋取得できなかった1本）。公式サイトには予約リンクなし</td><td>Googleマップの予約リンクはホットペッパー。食べログはコース予約・電話</td></tr>
+      <tr><td>メニュー</td><td>クロスティーニ8種（10/26）、グラスワイン10種・ボトル約50本</td><td>食べログ・ホットペッパー・公式にクロスティーニの記載なし。ワインの本数は各サイトに記載なし。安比舞茸カレー（プレスリリース）とコカ・コーラ企画のコンボもInstagramでは告知なし</td></tr>
+    </tbody>
+  </table>
+  <h3>改善提案</h3>
+  <ul class="pro procon">
+    <li>1か月以上の空白（33日）を解消する。今すぐ使える話題は、コカ・コーラ企画の「スパイスカレー3種コンボ」（〜12/25）、安比舞茸カレー（〜12/10）、年末の延長営業（12/31は翌2時まで）、クロスティーニの続報</li>
+    <li>リールを使う。カレーのあいがけを盛り付ける様子、スノーシェイブ、ソムリエのワイン提案など、動きのある短い動画が向いている（今は写真投稿だけとみられる）</li>
+    <li>期限切れの「ソコヂカラセット」（8/15まで）の画像を、新しい投稿で押し下げるか固定を外す</li>
+    <li>投稿の定型文のL.O.を「料理22:00／ドリンク22:30」に直す。プロフィールのリンクに予約先（ホットペッパーなど）を分かりやすく入れる</li>
+    <li>フォロワー221人は、食べログ保存393人の約56%。口コミにある「今まで気が付きませんでした」に応えるため、カウンターにQRを置いてフォローを促す</li>
+  </ul>
+</section>
+
+<section class="block" id="s10">
+  <h2>強みと課題</h2>
+  <div class="split">
+    <div class="card pro">
+      <h3>強み</h3>
+      <ul class="pro procon">
+        <li>「本格スパイスカレー」の評価が安定。今週の新規口コミ（投稿者フォロワー5,497人）も「フードコートのお店と侮ってはいけません」と評価</li>
+        <li>専用カウンター24席による座りやすさと、観戦・ライブ前後の利用シーン</li>
+        <li>Googleマップ4.4（23件中17件が5つ星）、食べログは2点台以下ゼロ</li>
+        <li>食べログ保存は4週連続で増加（381→393人）</li>
+        <li>施設側の企画（コカ・コーラ企画・トレカ企画）や、グループのフェア（八幡平フェア）で露出の機会がある</li>
+      </ul>
+    </div>
+    <div class="card con">
+      <h3>課題</h3>
+      <ul class="con procon">
+        <li>ホットペッパーのコース説明に「食べログ限定」が残る。開業1年近くで「オープン記念」の名称も古い</li>
+        <li>価格・席数・飲み放題・設備・アクセスの表記がサイトごとに違い、4週連続で直っていない</li>
+        <li>メニュー更新の遅れ（食べログ8月、ホットペッパー2月）。新メニューや期間限定品がグルメサイトに出ていない</li>
+        <li>食べログで10〜11月訪問の口コミ5件に返信がない。コスパが最低（3.25）</li>
+        <li>Instagramは33日間投稿なし。X言及は0件</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="s11">
+  <h2>改善提案</h2>
+  <h3>今週すぐ着手したいこと</h3>
+  <ol class="steps">
+    <li><span class="stitle">ホットペッパーのパーティープランの説明を書き換える</span><span class="sdetail">「食べログ限定オープン記念価格…」を削除してホットペッパー用の文面にし、価格・期限（食べログは2026年12月末まで）を両サイトでそろえる。あわせて「オープン記念」を年末向けの名称に変える。</span></li>
+    <li><span class="stitle">3種カレーの価格・席数・飲み放題・設備・出口番号を全サイトで統一する（4週連続の持ち越し）</span><span class="sdetail">公式1,800円とホットペッパー2,100円のどちらが正しいかを確定し、同じ日に更新する。席数は「専用カウンター24席（フードコート共用約480席）」と書く。ホットペッパーの飲み放題・Wi-Fi・ソファー、ぐるなびのA5口も直す。</span></li>
+    <li><span class="stitle">今週の新規口コミに食べログで返信する</span><span class="sdetail">観戦前の利用・本格派という評価へのお礼に、季節のカレーや大盛り＋200円、専用カウンターの案内を添える。10〜11月訪問のほか4件にも順に返信する。</span></li>
+    <li><span class="stitle">期間限定メニューを告知する</span><span class="sdetail">コカ・コーラ企画のコンボ（〜12/25）、安比舞茸カレー（〜12/10）、クロスティーニ8種を、Instagram・食べログ・ホットペッパーのメニューと公式に載せる。</span></li>
+  </ol>
+  <h3>運営・発信面</h3>
+  <ol class="ops">
+    <li>年末年始の特別営業時間（12/31は翌2時まで、元日も営業）を、Googleマップとヒトサラにも12月上旬までに登録する。</li>
+    <li>食べログのPR文の冒頭「【水道橋徒歩１分】」と「誕生！」を見直し、今の強み（観戦前後・専用カウンター・ワイン）を伝える文面にする。</li>
+    <li>ホットペッパーの「最高の生牡蠣」、食べログの「世界初となる…いけす」は、根拠を確認するか、事実で言える表現に変える。</li>
+    <li>保存（393人）を来店後の口コミにつなげる。ホットペッパーは評点が表示されるまで口コミあと3件。カウンターに口コミ・Instagramへの案内（QR）を置く。</li>
+    <li>コスパの指摘への対策として、付け合わせ（アチャール3種・スパイス漬け卵・ハーブサラダ）や大盛り＋200円を、メニュー写真の近くに分かりやすく書く。ディナー予算の表記も、実際の利用金額に合わせて見直す。</li>
+    <li>テイクアウトの待ち時間を注文時に伝える（Googleの2つ星クチコミの具体的な不満で、イベント日に起きやすい）。</li>
+  </ol>
+</section>
+
+<section class="block" id="s12">
+  <h2>取得不可・要確認</h2>
+  <table>
+    <thead><tr><th>対象</th><th>状況と理由</th></tr></thead>
+    <tbody>
+      <tr><td>Googleマップの全クチコミ</td><td>評点・件数・星分布・写真数と、最初に表示される3件は確認。残り20件の本文は、未ログインの画面では表示されず取得不可</td></tr>
+      <tr><td>食べログの口コミの投稿日</td><td>一覧には訪問月しか表示されず、投稿日は未確認。前週の30件との照合で新規を判定</td></tr>
+      <tr><td>食べログの特長ワード</td><td>公開ページに表示されないため取得不可（管理画面での確認が必要）</td></tr>
+      <tr><td>新規口コミのカレー価格</td><td>口コミの「1,000円」は、公式の1種1,400円と合わない。期間限定品か記載違いかは未確認</td></tr>
+      <tr><td>Instagramの一部項目</td><td>投稿総数、写真とリールの区別、ハイライト名、2本目のリンク、画面上のいいね・コメントは取得不可。4件目以降の投稿本文は未取得</td></tr>
+      <tr><td>FOOD STADIUMの11月営業時間変更のお知らせ</td><td>ページを直接取得すると403（アクセス拒否）。ウェブ検索結果の本文で、11/7・8・25・26の10:00開店（MARUGO Sも対象）を確認。いずれも過ぎた日程</td></tr>
+      <tr><td>一休.comレストラン</td><td>サイト内検索がアクセス拒否（403）。ウェブ検索でもこの店舗の掲載は見つからず</td></tr>
+      <tr><td>Retty</td><td>検索ページが「ページが見つかりません」。ウェブ検索でもこの店舗の掲載は見つからず</td></tr>
+      <tr><td>Yahoo!ロコ／PayPayグルメ</td><td>PayPayグルメの検索はアクセス拒否（403）。Yahoo!ロコの検索URLは「サービス終了のお知らせ」のページに転送された。ウェブ検索でも掲載は見つからず</td></tr>
+      <tr><td>TripAdvisor</td><td>「MARUGO S 水道橋」の検索結果は近くの他店だけで、この店舗のページは見つからず</td></tr>
+      <tr><td>OZmall</td><td>検索ページは「File not found」。ウェブ検索でも掲載は見つからず</td></tr>
+    </tbody>
+  </table>
+  <h3>主な出典</h3>
+  <div class="sources">
+    <a href="https://tabelog.com/tokyo/A1310/A131003/13316863/"><span class="site">tabelog.com</span><span class="title">食べログ 店舗ページ</span></a>
+    <a href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlrvwlst/"><span class="site">tabelog.com</span><span class="title">食べログ 口コミ一覧</span></a>
+    <a href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlratings/"><span class="site">tabelog.com</span><span class="title">食べログ 評価平均・分布</span></a>
+    <a href="https://tabelog.com/tokyo/A1310/A131003/13316863/party/"><span class="site">tabelog.com</span><span class="title">食べログ コース一覧</span></a>
+    <a href="https://tabelog.com/tokyo/A1310/A131003/13316863/dtlmenu/"><span class="site">tabelog.com</span><span class="title">食べログ 料理メニュー</span></a>
+    <a href="https://www.google.com/maps/place/?q=place_id:ChIJAd7PM3KNGGARwrTaOC9GO8g"><span class="site">google.com</span><span class="title">Googleマップ 店舗ページ</span></a>
+    <a href="https://www.hotpepper.jp/strJ004536515/"><span class="site">hotpepper.jp</span><span class="title">ホットペッパーグルメ 店舗ページ</span></a>
+    <a href="https://www.hotpepper.jp/strJ004536515/course/"><span class="site">hotpepper.jp</span><span class="title">ホットペッパー コース</span></a>
+    <a href="https://r.gnavi.co.jp/c2y21fn50000/"><span class="site">gnavi.co.jp</span><span class="title">楽天ぐるなび</span></a>
+    <a href="https://hitosara.com/0031753380/"><span class="site">hitosara.com</span><span class="title">ヒトサラ</span></a>
+    <a href="https://marugo-s.com/s/"><span class="site">marugo-s.com</span><span class="title">公式サイト MARUGO S</span></a>
+    <a href="https://www.tokyo-dome.co.jp/gourmet-shops/gourmet/marugo-s"><span class="site">tokyo-dome.co.jp</span><span class="title">東京ドームシティ 店舗案内</span></a>
+    <a href="https://www.tokyo-dome.co.jp/foodstadium/notice/20261118150000"><span class="site">tokyo-dome.co.jp</span><span class="title">FOOD STADIUM TOKYO コカ・コーラ企画（11/27〜12/25）</span></a>
+    <a href="https://www.zaikei.co.jp/releases/3706549/"><span class="site">zaikei.co.jp</span><span class="title">株式会社ワルツ プレスリリース 八幡平フェア（2026/11/10）</span></a>
+    <a href="https://x.com/teruteru07b06r/status/2122588781371109790"><span class="site">x.com</span><span class="title">X 投稿（2026/11/17）</span></a>
+    <a href="https://www.instagram.com/marugo_s.official/"><span class="site">instagram.com</span><span class="title">Instagram 公式アカウント</span></a>
+  </div>
+  <footer class="note">取得日は2026年11月28日（JST）です。食べログの店舗点数3.20・口コミ31人・保存393人・写真117枚は、同日9:09に直接取得したライブの店舗ページの値です。同じ時刻に新しい未ログインのブラウザで開いた店舗ページ、口コミ一覧（31件）、評価平均ページとも照合しています（検索結果の抜粋やキャッシュは使っていません）。Googleマップの4.4・23件・85枚は、同日9:10に未ログインのブラウザで表示したマップ本体の値です。Instagramの値は、同日9:06〜9:12ごろにログインせずに開いたプロフィール画面の値です。口コミや投稿は訪問した時点の主観です。メニューは月替わりのため、掲載価格は必ず最新の公式情報と照らし合わせてください。</footer>
+  <a class="top-link" href="#top">ページ先頭へ戻る</a>
+</section>
+</div>
+</body>
+
+</html>
